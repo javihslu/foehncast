@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (tracked via DVC)
+data/
+*.parquet
+*.csv
+
+# Keys and secrets
+keys/
+*.pem
+*.key
+*.json
+!config.json
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/.terraform.lock.hcl
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Airflow
+airflow/logs/
+airflow/airflow.db
+
+# Misc
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
