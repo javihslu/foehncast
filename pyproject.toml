@@ -1,0 +1,20 @@
+[project]
+name = "foehncast"
+version = "0.1.0"
+description = "Personalized kiteboarding forecast system with FTI pipeline"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+    "pytest>=7.0.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"

@@ -1,0 +1,146 @@
+# FoehnCast Configuration
+
+# Rider profile (home location for drive-time calculations)
+rider:
+  weight_kg: 80
+  home_lat: 47.02
+  home_lon: 8.65
+  home_location: "Schwyz"
+  quiver_m2: [5, 7, 8, 10, 12]
+
+# Weather API settings
+api:
+  open_meteo:
+    forecast_url: "https://api.open-meteo.com/v1/forecast"
+    archive_url: "https://archive-api.open-meteo.com/v1/archive"
+    hourly_params: "wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10m,wind_direction_80m,wind_gusts_10m,temperature_2m,precipitation,relative_humidity_2m,cloud_cover,pressure_msl,cape,lifted_index"
+    forecast_days: 7
+    timezone: "Europe/Zurich"
+  meteoswiss:
+    stations_url: "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min_en.json"
+  osrm:
+    base_url: "https://router.project-osrm.org/route/v1/driving"
+
+# Spot database
+spots:
+  - id: silvaplana
+    name: "Silvaplana"
+    lat: 46.45
+    lon: 9.79
+    altitude_m: 1800
+    shore_orientation_deg: 225
+    ideal_wind_dir_min: 180
+    ideal_wind_dir_max: 270
+    difficulty: intermediate
+    water_type: lake
+    canton: GR
+
+  - id: urnersee
+    name: "Urnersee"
+    lat: 46.93
+    lon: 8.60
+    altitude_m: 434
+    shore_orientation_deg: 180
+    ideal_wind_dir_min: 150
+    ideal_wind_dir_max: 210
+    difficulty: intermediate
+    water_type: lake
+    canton: UR
+
+  - id: neuchatel
+    name: "Lac de Neuchatel"
+    lat: 46.85
+    lon: 6.85
+    altitude_m: 429
+    shore_orientation_deg: 270
+    ideal_wind_dir_min: 200
+    ideal_wind_dir_max: 310
+    difficulty: beginner
+    water_type: lake
+    canton: NE
+
+  - id: bodensee
+    name: "Bodensee"
+    lat: 47.63
+    lon: 9.37
+    altitude_m: 395
+    shore_orientation_deg: 180
+    ideal_wind_dir_min: 180
+    ideal_wind_dir_max: 300
+    difficulty: beginner
+    water_type: lake
+    canton: TG
+
+  - id: walensee
+    name: "Walensee"
+    lat: 47.12
+    lon: 9.22
+    altitude_m: 419
+    shore_orientation_deg: 270
+    ideal_wind_dir_min: 220
+    ideal_wind_dir_max: 320
+    difficulty: intermediate
+    water_type: lake
+    canton: SG
+
+  - id: thunersee
+    name: "Thunersee"
+    lat: 46.72
+    lon: 7.72
+    altitude_m: 558
+    shore_orientation_deg: 270
+    ideal_wind_dir_min: 220
+    ideal_wind_dir_max: 330
+    difficulty: advanced
+    water_type: lake
+    canton: BE
+
+# Storage (default: local Parquet; optional: S3/GCS)
+storage:
+  backend: "local"  # local | s3
+  local_path: "data"  # relative to project root
+  s3_bucket: "foehncast-data"  # used when backend=s3
+  s3_endpoint: "http://localhost:9000"  # MinIO
+
+# GCP settings (optional — cloud deployment)
+gcp:
+  project_id: "your-gcp-project"
+  location: "europe-west6"  # Zurich region
+  bucket_name: "foehncast-data"
+  artifact_registry: "foehncast-docker"
+  cloud_run_service: "foehncast-serve"
+  cloud_run_region: "europe-west6"
+
+# Model training settings
+model:
+  algorithm: "random_forest"
+  target: "quality_index"
+  features:
+    - wind_speed_10m
+    - wind_speed_80m
+    - wind_direction
+    - gusts_10m
+    - temperature_2m
+    - relative_humidity_2m
+  test_size: 0.2
+  random_state: 42
+
+# MLflow settings
+mlflow:
+  tracking_uri: "http://localhost:5001"
+  experiment_name: "foehncast"
+  model_name: "foehncast-quality"
+  champion_alias: "champion"
+
+# Inference settings
+inference:
+  max_horizon_hours: 14
+  ranking_weights:
+    quality_index: 0.6
+    ride_drive_ratio: 0.3
+    duration_forecast: 0.1
+
+# Monitoring settings
+monitoring:
+  drift_threshold: 0.15
+  evaluation_window_days: 30
