@@ -19,7 +19,11 @@ dev = [
     "ruff>=0.1.0",
     "pytest>=7.0.0",
     "pytest-mock>=3.0",
+    "ipykernel>=6.0",
 ]
+
+[tool.uv]
+default-groups = ["dev"]
 
 [tool.ruff]
 line-length = 88

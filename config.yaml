@@ -115,13 +115,35 @@ gcp:
 model:
   algorithm: "random_forest"
   target: "quality_index"
+  raw_features:
+    - wind_speed_10m
+    - wind_speed_80m
+    - wind_speed_120m
+    - wind_direction_10m
+    - wind_direction_80m
+    - wind_gusts_10m
+    - temperature_2m
+    - precipitation
+    - relative_humidity_2m
+    - cloud_cover
+    - pressure_msl
+    - cape
+    - lifted_index
+  engineered_features:
+    - wind_steadiness
+    - gust_factor
+    - shore_alignment
+    - kite_size_optimal
   features:
     - wind_speed_10m
     - wind_speed_80m
-    - wind_direction
-    - gusts_10m
+    - wind_direction_10m
+    - wind_gusts_10m
     - temperature_2m
     - relative_humidity_2m
+    - wind_steadiness
+    - gust_factor
+    - shore_alignment
   test_size: 0.2
   random_state: 42
 
