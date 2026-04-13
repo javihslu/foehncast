@@ -1,1 +1,1 @@
-"""Write features to feature store / BigQuery / GCS."""
+"""Write features to Parquet feature store."""
