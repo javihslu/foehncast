@@ -42,6 +42,11 @@ def get_model_config() -> dict[str, Any]:
     return load_config()["model"]
 
 
+def get_labeling_config() -> dict[str, Any]:
+    """Return the synthetic label settings."""
+    return load_config()["labeling"]
+
+
 def get_storage_config() -> dict[str, Any]:
     """Return the storage settings."""
     return load_config()["storage"]

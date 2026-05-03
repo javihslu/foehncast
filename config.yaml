@@ -6,18 +6,22 @@ rider:
   home_lat: 47.02
   home_lon: 8.65
   home_location: "Schwyz"
-  quiver_m2: [5, 7, 8, 10, 12]
+  quiver_m2: [ 5, 7, 8, 10, 12 ]
 
 # Weather API settings
 api:
   open_meteo:
     forecast_url: "https://api.open-meteo.com/v1/forecast"
     archive_url: "https://archive-api.open-meteo.com/v1/archive"
-    hourly_params: "wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10m,wind_direction_80m,wind_gusts_10m,temperature_2m,precipitation,relative_humidity_2m,cloud_cover,pressure_msl,cape,lifted_index"
+    hourly_params: "wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10\
+      m,wind_direction_80m,wind_gusts_10m,temperature_2m,precipitation,relative\
+      _humidity_2m,cloud_cover,pressure_msl,cape,lifted_index"
     forecast_days: 7
     timezone: "Europe/Zurich"
   meteoswiss:
-    stations_url: "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min_en.json"
+    stations_url: "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwin\
+      digkeit-kmh-10min/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min\
+      _en.json"
   osrm:
     base_url: "https://router.project-osrm.org/route/v1/driving"
 
@@ -97,15 +101,15 @@ spots:
 
 # Storage (default: local Parquet; optional: S3/GCS)
 storage:
-  backend: "local"  # local | s3
-  local_path: "data"  # relative to project root
-  s3_bucket: "foehncast-data"  # used when backend=s3
-  s3_endpoint: "http://localhost:9000"  # MinIO
+  backend: "local" # local | s3
+  local_path: "data" # relative to project root
+  s3_bucket: "foehncast-data" # used when backend=s3
+  s3_endpoint: "http://localhost:9000" # MinIO
 
 # GCP settings (optional — cloud deployment)
 gcp:
   project_id: "your-gcp-project"
-  location: "europe-west6"  # Zurich region
+  location: "europe-west6" # Zurich region
   bucket_name: "foehncast-data"
   artifact_registry: "foehncast-docker"
   cloud_run_service: "foehncast-serve"
@@ -148,6 +152,29 @@ model:
     - shore_alignment
   test_size: 0.2
   random_state: 42
+
+# Synthetic label settings
+labeling:
+  dangerous:
+    max_wind_speed_10m_kts: 40
+    max_wind_gusts_10m_kts: 50
+  minimum_wind_speed_10m:
+    light_rider_max_weight_kg: 75
+    light_rider_min_kts: 12
+    default_min_kts: 15
+  bands:
+    marginal:
+      max_kts: 17
+    good_enough:
+      max_kts: 22
+    fun_day:
+      max_kts: 30
+    perfect_storm:
+      min_kts: 15
+      max_kts: 25
+      max_gust_factor: 1.25
+      min_shore_alignment: 0.7
+      max_wind_steadiness: 0.2
 
 # MLflow settings
 mlflow:
