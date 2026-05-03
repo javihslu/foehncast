@@ -1,0 +1,15 @@
+services:
+  development_env:
+    container_name: development_env
+    build: .
+    working_dir: /workspace
+    environment:
+      - FSSPEC_S3_KEY=${MINIO_ADMIN}
+      - FSSPEC_S3_SECRET=${MINIO_SECRET}
+      - FSSPEC_S3_ENDPOINT_URL=${MINIO_ENDPOINT}
+      - GIT_PYTHON_REFRESH=quiet
+    volumes:
+      - ../../:/workspace
+    networks:
+      - development
+      - production
