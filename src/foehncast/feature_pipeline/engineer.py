@@ -39,9 +39,7 @@ def gust_factor(df: pd.DataFrame) -> pd.Series:
     )
 
 
-def shore_alignment(
-    df: pd.DataFrame, shore_orientation_deg: float
-) -> pd.Series:
+def shore_alignment(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Series:
     """Cosine similarity of wind direction to ideal shore orientation.
 
     Cross-shore flow (perpendicular) scores highest (1.0).
@@ -58,9 +56,7 @@ def shore_alignment(
     return np.cos(angle_diff)
 
 
-def engineer_features(
-    df: pd.DataFrame, shore_orientation_deg: float
-) -> pd.DataFrame:
+def engineer_features(df: pd.DataFrame, shore_orientation_deg: float) -> pd.DataFrame:
     """Add all engineered features to a spot forecast DataFrame.
 
     Args:
