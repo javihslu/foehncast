@@ -99,12 +99,12 @@ spots:
     water_type: lake
     canton: BE
 
-# Storage (default: local Parquet; optional: S3/GCS)
+# Storage (default: local Parquet; optional: S3-compatible object storage)
 storage:
   backend: "local" # local | s3
   local_path: "data" # relative to project root
   s3_bucket: "foehncast-data" # used when backend=s3
-  s3_endpoint: "http://localhost:9000" # MinIO
+  s3_endpoint: "http://localhost:9000" # MinIO on host; containers override via env
 
 # GCP settings (optional — cloud deployment)
 gcp:
