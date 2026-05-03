@@ -21,6 +21,10 @@ dev = [
     "pytest-mock>=3.0",
     "ipykernel>=6.0",
 ]
+docs = [
+    "mkdocs-material>=9.6.0",
+    "mkdocs-mermaid2-plugin>=1.2.1",
+]
 
 [tool.uv]
 default-groups = ["dev"]

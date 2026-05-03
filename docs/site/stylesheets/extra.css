@@ -1,0 +1,57 @@
+:root {
+    --fc-accent: #0f766e;
+    --fc-accent-soft: #e6f4f1;
+    --fc-border: rgba(15, 23, 42, 0.12);
+}
+
+.md-typeset .grid.cards>ul>li,
+.md-typeset .grid.cards>ol>li {
+    border: 1px solid var(--fc-border);
+    border-radius: 0.9rem;
+    box-shadow: none;
+}
+
+.md-typeset .grid.cards>ul>li:hover,
+.md-typeset .grid.cards>ol>li:hover {
+    border-color: rgba(15, 118, 110, 0.35);
+    background: linear-gradient(180deg,
+            rgba(230, 244, 241, 0.65),
+            rgba(255, 255, 255, 0.92));
+}
+
+.fc-pill {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid var(--fc-border);
+    margin-bottom: 0.6rem;
+}
+
+.fc-pill--done {
+    background: #e8f5e9;
+    color: #1b5e20;
+}
+
+.fc-pill--progress {
+    background: #fff8e1;
+    color: #8d6e00;
+}
+
+.fc-pill--planned {
+    background: #eceff1;
+    color: #455a64;
+}
+
+.md-typeset .admonition.note,
+.md-typeset details.note {
+    border-color: rgba(15, 118, 110, 0.35);
+}
+
+.md-typeset .admonition.note>.admonition-title,
+.md-typeset details.note>summary {
+    background-color: rgba(15, 118, 110, 0.08);
+}

@@ -1,0 +1,59 @@
+site_name: FoehnCast
+site_url: https://javihslu.github.io/foehncast/
+site_description: Course project journal and architecture guide for FoehnCast
+repo_url: https://github.com/javihslu/foehncast
+repo_name: javihslu/foehncast
+
+docs_dir: site
+site_dir: ../site
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: teal
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mermaid2
+
+nav:
+  - Home: index.md
+  - Milestones:
+      - Overview: milestones/index.md
+      - MS1 Proposal: milestones/ms1.md
+      - MS2 Coaching: milestones/ms2.md
+      - MS3 Presentation: milestones/ms3.md
+      - MS4 Final Code: milestones/ms4.md
+  - System:
+      - Use Case and Data: system/use-case.md
+      - Architecture: system/architecture.md
+      - Repository: system/repository.md
