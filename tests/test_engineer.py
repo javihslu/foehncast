@@ -1,6 +1,5 @@
 """Tests for feature engineering functions."""
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -48,9 +47,7 @@ class TestGustFactor:
         pd.testing.assert_series_equal(result, expected)
 
     def test_zero_wind_returns_nan(self):
-        df = pd.DataFrame(
-            {"wind_gusts_10m": [5.0], "wind_speed_10m": [0.0]}
-        )
+        df = pd.DataFrame({"wind_gusts_10m": [5.0], "wind_speed_10m": [0.0]})
         result = gust_factor(df)
         assert result.isna().all()
 
