@@ -1,0 +1,7 @@
+include:
+  - docker_includes/networks.yml
+  - containers/development_env/docker-compose.yml
+  - containers/objectstore/docker-compose.yml
+#  - containers/mlflow/docker-compose.yml
+#  - containers/app/docker-compose.yml
+#  - containers/monitoring/docker-compose.yml
