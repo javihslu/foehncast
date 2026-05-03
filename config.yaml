@@ -117,6 +117,50 @@ gcp:
   github_oidc_pool: "github-actions"
   github_oidc_provider: "github-oidc"
 
+# Validation settings
+validation:
+  required_columns:
+    - wind_speed_10m
+    - wind_speed_80m
+    - wind_speed_120m
+    - wind_direction_10m
+    - wind_direction_80m
+    - wind_gusts_10m
+    - temperature_2m
+    - precipitation
+    - relative_humidity_2m
+    - cloud_cover
+    - pressure_msl
+    - cape
+    - lifted_index
+  completeness:
+    max_null_pct: 0.1
+  ranges:
+    wind_speed_10m:
+      min: 0
+      max: 80
+    wind_speed_80m:
+      min: 0
+      max: 80
+    wind_speed_120m:
+      min: 0
+      max: 80
+    wind_gusts_10m:
+      min: 0
+      max: 120
+    wind_direction_10m:
+      min: 0
+      max: 360
+    wind_direction_80m:
+      min: 0
+      max: 360
+    temperature_2m:
+      min: -40
+      max: 50
+    relative_humidity_2m:
+      min: 0
+      max: 100
+
 # Model training settings
 model:
   algorithm: "random_forest"
