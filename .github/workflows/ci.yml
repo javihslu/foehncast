@@ -9,10 +9,24 @@ on:
 jobs:
   compose:
     runs-on: ubuntu-latest
+    env:
+      OBJECTSTORE_ACCESS_KEY: minioadmin
+      OBJECTSTORE_SECRET_KEY: minioadmin123
+      OBJECTSTORE_ENDPOINT: http://objectstore:9000
+      OBJECTSTORE_BUCKET: artifacts
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose --env-file .env.example -f docker-compose.yml config
-      - run: docker compose --env-file .env.example -f docker-compose.yml build model-registry
+      - run: docker compose -f docker-compose.yml config
+      - run: docker compose -f docker-compose.yml build model-registry
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=terraform init -backend=false
+      - run: terraform -chdir=terraform fmt -check
+      - run: terraform -chdir=terraform validate
 
   lint:
     runs-on: ubuntu-latest

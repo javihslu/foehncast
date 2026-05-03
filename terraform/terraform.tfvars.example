@@ -1,0 +1,8 @@
+project_id                     = "your-gcp-project"
+region                         = "europe-west6"
+artifact_registry_repository_id = "foehncast-docker"
+artifact_bucket_name           = "foehncast-artifacts-your-gcp-project"
+github_owner                   = "javihslu"
+github_repository              = "foehncast"
+github_oidc_pool_id            = "github-actions"
+github_oidc_provider_id        = "github-oidc"

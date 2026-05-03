@@ -110,6 +110,8 @@ gcp:
   artifact_registry: "foehncast-docker"
   cloud_run_service: "foehncast-serve"
   cloud_run_region: "europe-west6"
+  github_oidc_pool: "github-actions"
+  github_oidc_provider: "github-oidc"
 
 # Model training settings
 model:
