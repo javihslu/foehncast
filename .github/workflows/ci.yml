@@ -7,6 +7,13 @@ on:
     branches: [ main ]
 
 jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose --env-file .env.example -f docker-compose.yml config
+      - run: docker compose --env-file .env.example -f docker-compose.yml build model-registry
+
   lint:
     runs-on: ubuntu-latest
     steps:

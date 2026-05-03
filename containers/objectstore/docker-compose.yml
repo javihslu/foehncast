@@ -8,8 +8,8 @@ services:
       - 127.0.0.1:9000:9000
       - 127.0.0.1:9001:9001
     environment:
-      - MINIO_ROOT_USER=${MINIO_ADMIN}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET}
+      - MINIO_ROOT_USER=${OBJECTSTORE_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${OBJECTSTORE_SECRET_KEY}
     volumes:
       - objectstore_data:/data
     networks:

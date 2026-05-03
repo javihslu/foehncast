@@ -1,0 +1,24 @@
+services:
+  model-registry:
+    container_name: model-registry
+    build: .
+    image: foehncast-mlflow:local
+    command: mlflow server --host 0.0.0.0 --port 5001 --artifacts-destination s3://${OBJECTSTORE_BUCKET} --backend-store-uri sqlite:///metadata/metadata.sqlite --disable-security-middleware
+    hostname: model-registry
+    ports:
+      - 127.0.0.1:5001:5001
+    depends_on:
+      - objectstore
+    environment:
+      # MLflow uses boto3 for S3-compatible artifact stores, even when the repo targets GCP.
+      - AWS_ACCESS_KEY_ID=${OBJECTSTORE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${OBJECTSTORE_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
+    volumes:
+      - mlflow_metadata:/metadata
+    networks:
+      - development
+      - production
+
+volumes:
+  mlflow_metadata:
