@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import mlflow
@@ -11,16 +10,13 @@ import pandas as pd
 from foehncast.config import (
     get_inference_config,
     get_mlflow_config,
+    get_mlflow_tracking_uri,
     get_model_config,
     get_spots,
 )
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.training_pipeline.register import get_production_model
-
-
-def _tracking_uri(mlflow_config: dict[str, Any]) -> str:
-    return os.getenv("MLFLOW_TRACKING_URI", mlflow_config["tracking_uri"])
 
 
 def _spot_lookup() -> dict[str, dict[str, Any]]:
@@ -51,7 +47,7 @@ def get_serving_model_version(model_name: str | None = None) -> str:
     resolved_model_name = model_name or mlflow_config["model_name"]
     alias = mlflow_config.get("champion_alias", "champion")
 
-    mlflow.set_tracking_uri(_tracking_uri(mlflow_config))
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     client = mlflow.MlflowClient()
     model_version = client.get_model_version_by_alias(resolved_model_name, alias)
     return str(model_version.version)

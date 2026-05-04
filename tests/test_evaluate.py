@@ -123,8 +123,8 @@ def test_compare_models_returns_metrics_dataframe(monkeypatch) -> None:
     monkeypatch.setattr(evaluate, "mlflow", FakeMlflow())
     monkeypatch.setattr(
         evaluate,
-        "get_mlflow_config",
-        lambda: {"tracking_uri": "http://localhost:5001"},
+        "get_mlflow_tracking_uri",
+        lambda: "http://localhost:5001",
     )
 
     result = evaluate.compare_models(["run-1", "run-2"])

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import mlflow
 import pandas as pd
 
-from foehncast.config import get_mlflow_config, get_spots
+from foehncast.config import get_mlflow_tracking_uri, get_spots
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import write_features
@@ -17,11 +16,6 @@ from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-
-
-def _tracking_uri() -> str:
-    mlflow_config = get_mlflow_config()
-    return os.getenv("MLFLOW_TRACKING_URI", mlflow_config["tracking_uri"])
 
 
 def run_feature_pipeline(dataset: str = "train") -> list[str]:
@@ -51,7 +45,7 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
 
 def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
     """Resume a training run, log evaluation metrics, and return the report path."""
-    mlflow.set_tracking_uri(_tracking_uri())
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     run = mlflow.MlflowClient().get_run(training_run_id)
     metrics = dict(run.data.metrics)
     if not metrics:

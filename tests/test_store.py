@@ -277,7 +277,7 @@ def test_write_features_bigquery_uses_load_job(
             Client=FakeClient, LoadJobConfig=FakeLoadJobConfig
         ),
     )
-    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
@@ -369,7 +369,7 @@ def test_read_features_bigquery_restores_time_index(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
@@ -437,7 +437,7 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
@@ -487,7 +487,7 @@ def test_list_datasets_bigquery_returns_sorted_names(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",

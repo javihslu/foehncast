@@ -9,7 +9,7 @@ import mlflow
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from foehncast.config import get_mlflow_config
+from foehncast.config import get_mlflow_tracking_uri
 
 
 def _rounded_predictions(predictions: Any, target_true: pd.Series) -> pd.Series:
@@ -80,8 +80,7 @@ def generate_evaluation_report(metrics: dict[str, float], output_path: str) -> s
 
 def compare_models(run_ids: list[str]) -> pd.DataFrame:
     """Compare MLflow runs by collecting their logged metrics into a dataframe."""
-    mlflow_config = get_mlflow_config()
-    mlflow.set_tracking_uri(mlflow_config["tracking_uri"])
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     client = mlflow.MlflowClient()
     rows: list[dict[str, Any]] = []
 

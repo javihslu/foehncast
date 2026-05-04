@@ -91,6 +91,8 @@ def test_env_overrides_do_not_mutate_cached_yaml_values(
     assert overridden["gcp"]["project_id"] == "env-project"
     assert overridden["gcp"]["location"] == "us-central1"
     assert overridden["mlflow"]["tracking_uri"] == "https://mlflow.example.com"
+    assert config.get_gcp_project_id() == "env-project"
+    assert config.get_mlflow_tracking_uri() == "https://mlflow.example.com"
 
     monkeypatch.delenv("GCP_PROJECT_ID")
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
@@ -101,3 +103,5 @@ def test_env_overrides_do_not_mutate_cached_yaml_values(
     assert reverted["gcp"]["project_id"] == "yaml-project"
     assert reverted["gcp"]["location"] == "europe-west6"
     assert reverted["mlflow"]["tracking_uri"] == "http://localhost:5001"
+    assert config.get_gcp_project_id() == "yaml-project"
+    assert config.get_mlflow_tracking_uri() == "http://localhost:5001"

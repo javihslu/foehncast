@@ -84,6 +84,11 @@ def test_get_serving_model_version_reads_alias(
             "champion_alias": "champion",
         },
     )
+    monkeypatch.setattr(
+        predict,
+        "get_mlflow_tracking_uri",
+        lambda: "http://localhost:5001",
+    )
 
     model_version = predict.get_serving_model_version()
 
