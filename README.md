@@ -34,17 +34,39 @@ Example request:
 
 Use this when a collaborator wants a private FoehnCast environment in their own GCP project.
 
-Prerequisites:
+Install:
 
 - Google Cloud CLI (`gcloud`)
 - Terraform
 - GitHub CLI (`gh`) only if you want GitHub Actions in your own fork to publish and redeploy automatically
 
-Then run:
+Run:
 
 `./scripts/bootstrap-gcp.sh`
 
-That command is now interactive. It uses browser-based `gcloud` authentication, checks the local prerequisites, can guide you through choosing or creating a GCP project, can link billing when your account is allowed to do so, writes `.env` and `terraform/terraform.tfvars` for you, validates Terraform, and provisions the FoehnCast baseline into the selected project.
+What to do in the interactive setup:
+
+1. Sign in in the browser when the script opens `gcloud` login.
+2. Pick an existing GCP project from the list, or type `n` to create a new one.
+   Example: `Project number, project id, or n: n`
+   Example: `New GCP project id: foehncast-jane-dev`
+3. Pick a billing account from the list shown by the script.
+   Example: `Billing account number or id [1]: 1`
+4. Confirm or edit the default values for region, artifact bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
+   Example: `GCP region [europe-west6]:`
+   Example: `Artifact bucket name [foehncast-artifacts-foehncast-jane-dev]:`
+5. Choose whether to provision Cloud Run now.
+   If you answer `yes`, enter the MLflow tracking URL when asked.
+6. Choose whether to configure GitHub Actions for your own fork.
+   If you answer `yes`, enter the fork in `owner/repo` format.
+   Example: `GitHub repository for deployment automation [jane/foehncast]: jane/foehncast`
+7. Wait for Terraform to finish.
+
+The script writes `.env` and `terraform/terraform.tfvars` for you during setup.
+
+If you want to restart from scratch, run:
+
+`rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
 
 If you already know your values and want automation without prompts, use:
 

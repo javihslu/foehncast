@@ -70,7 +70,41 @@ The intended next resources for the cloud-hosted pipeline are:
 - a cloud-hosted MLflow deployment choice
 - CI automation for managed Airflow artifact delivery
 
-## Local Use
+## Interactive Setup
+
+Run this on a fresh clone:
+
+`./scripts/bootstrap-gcp.sh`
+
+Then do the following in order:
+
+1. Sign in in the browser when `gcloud` opens the login flow.
+2. Pick an existing GCP project or type `n` to create a new one.
+3. Pick a billing account from the list shown by the script.
+4. Confirm or edit the values for region, bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
+5. Decide whether to provision Cloud Run now. If yes, enter the MLflow tracking URI.
+6. Decide whether to configure GitHub Actions for your fork. If yes, enter the fork as `owner/repo`.
+7. Let Terraform apply complete.
+
+Examples:
+
+- `Project number, project id, or n: n`
+- `New GCP project id: foehncast-jane-dev`
+- `Billing account number or id [1]: 1`
+- `GCP region [europe-west6]:`
+- `Cloud Run service name [foehncast-serve]:`
+
+The script writes `.env` and `terraform/terraform.tfvars` during setup.
+
+To restart from scratch:
+
+`rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
+
+If you already know all values and want a rerun without prompts:
+
+`./scripts/bootstrap-gcp.sh --non-interactive`
+
+## Local BigQuery Use
 
 1. Bootstrap your local GCP session:
    `./scripts/gcp-auth.sh`
@@ -81,17 +115,11 @@ The intended next resources for the cloud-hosted pipeline are:
 5. Run:
    `cd terraform && terraform init && terraform fmt -check && terraform validate`
 
-For the collaborator quick-start path, the repository now also includes `./scripts/bootstrap-gcp.sh`, which checks the local prerequisites, uses browser-based `gcloud` authentication, can guide the user through project selection or creation and billing linkage, writes `.env` and `terraform.tfvars`, validates Terraform, and runs `terraform apply` against the selected project.
+This Terraform path is aimed at maintainers who are setting up or changing the cloud platform and at collaborators provisioning their own project with the interactive script.
 
-This Terraform path is aimed at maintainers who are setting up or changing the cloud platform. It should not be the default evaluation path for a professor or a new developer who only needs to run the system once.
+If the script does not show a billing account, stop and sign in with a Google account that can see one.
 
-## Bootstrap Notes
-
-- Terraform manages project services after authentication, and the interactive bootstrap can now guide project selection or creation plus billing linkage when the authenticated user is allowed to do so.
-- Some collaborators will still need manual help with project creation or billing attachment, because those steps depend on user-specific billing accounts and, in some environments, folder or organization permissions.
-- Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
-
-The interactive bootstrap now helps with project selection and billing linkage when the authenticated user has permission, but those permissions still vary by collaborator. The script should guide and validate, not pretend those organizational constraints do not exist.
+Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
 
 ## CI/CD Guidance
 
