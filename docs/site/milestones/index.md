@@ -1,13 +1,13 @@
 # Milestones
 
-The site follows the four course milestones. Each page shows what is already fixed, what has been implemented, and what still needs to be built.
+The site still follows the four course milestones, but the project is now past the pure planning stage. The local stack already proves the full pipeline split, so the remaining milestone work is mainly packaging, cloud mapping, and operational polish.
 
 | Milestone | Status | Focus in These Pages |
 |-----------|--------|----------------------|
 | MS1 Proposal | Completed | Problem, data, features, and baseline architecture |
-| MS2 Coaching | In progress | Backend status, remaining gaps, and technical questions |
-| MS3 Presentation | Planned | Demo flow, UI story, and architecture walk-through |
-| MS4 Final Code | Planned | Reproducibility, automation, monitoring, and final structure |
+| MS2 Coaching | Completed locally | Feature, training, and inference paths running together |
+| MS3 Presentation | In preparation | Simple demo story, site walkthrough, and working diagrams |
+| MS4 Final Code | In progress | Cloud mapping, automation, monitoring, and final structure |
 
 <div class="grid cards" markdown>
 
@@ -17,10 +17,10 @@ The site follows the four course milestones. Each page shows what is already fix
 
 - **Then read MS2**
 
-  This page compares the proposal with the code that already runs.
+  This page shows the backend that already runs locally.
 
 - **Keep MS3 and MS4 in view**
 
-  These pages show what still has to be built before the live demo and the final freeze.
+  These pages now focus on the presentation path, cloud direction, and final wrap-up work.
 
 </div>

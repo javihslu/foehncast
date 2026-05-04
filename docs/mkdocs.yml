@@ -43,17 +43,20 @@ markdown_extensions:
 
 plugins:
   - search
-  - mermaid2
+  - mermaid2:
+      javascript: assets/javascripts/mermaid.mjs
 
 nav:
   - Home: index.md
   - Milestones:
       - Overview: milestones/index.md
       - MS1 Proposal: milestones/ms1.md
-      - MS2 Coaching: milestones/ms2.md
+      - MS2 Backend: milestones/ms2.md
       - MS3 Presentation: milestones/ms3.md
       - MS4 Final Code: milestones/ms4.md
   - System:
       - Use Case and Data: system/use-case.md
       - Architecture: system/architecture.md
+      - Cloud Mapping: system/cloud-mapping.md
+      - Seasonality: system/seasonality.md
       - Repository: system/repository.md

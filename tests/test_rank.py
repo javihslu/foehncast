@@ -20,10 +20,16 @@ def test_get_drive_minutes_calls_osrm_route(monkeypatch: pytest.MonkeyPatch) -> 
         def json(self) -> dict[str, Any]:
             return {"routes": [{"duration": 5400.0}]}
 
-    def fake_get(url: str, params: dict[str, str], timeout: int) -> FakeResponse:
+    def fake_get(
+        url: str,
+        params: dict[str, str],
+        timeout: int,
+        verify: str,
+    ) -> FakeResponse:
         logged["url"] = url
         logged["params"] = params
         logged["timeout"] = timeout
+        logged["verify"] = verify
         return FakeResponse()
 
     monkeypatch.setattr(
@@ -41,6 +47,7 @@ def test_get_drive_minutes_calls_osrm_route(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert logged["params"] == {"overview": "false"}
     assert logged["timeout"] == 30
+    assert logged["verify"]
 
 
 def test_compute_ride_drive_ratio_returns_zero_for_non_rideable_sessions() -> None:

@@ -13,12 +13,8 @@ from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import write_features
 from foehncast.feature_pipeline.validate import run_validation
-from foehncast.training_pipeline.evaluate import (
-    evaluate_model,
-    generate_evaluation_report,
-)
+from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
-from foehncast.training_pipeline.train import load_training_data
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -53,22 +49,23 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
     return stored_spots
 
 
-def evaluate_training_run(run_id: str, dataset: str = "train") -> str:
+def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
     """Resume a training run, log evaluation metrics, and return the report path."""
     mlflow.set_tracking_uri(_tracking_uri())
-    features_df, target_series = load_training_data(dataset=dataset)
-    model = mlflow.pyfunc.load_model(f"runs:/{run_id}/model")
+    run = mlflow.MlflowClient().get_run(training_run_id)
+    metrics = dict(run.data.metrics)
+    if not metrics:
+        raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
 
     report_dir = _ROOT / "airflow" / "reports"
-    report_path = report_dir / f"evaluation-{run_id}.md"
+    report_path = report_dir / f"evaluation-{training_run_id}.md"
 
-    with mlflow.start_run(run_id=run_id):
-        metrics = evaluate_model(model, features_df, target_series)
+    with mlflow.start_run(run_id=training_run_id):
         return generate_evaluation_report(metrics, str(report_path))
 
 
-def register_training_run(run_id: str, stage: str = "Production") -> str:
+def register_training_run(training_run_id: str, stage: str = "Production") -> str:
     """Register and promote a training run's model, returning the new version."""
-    model_version = register_model(run_id)
+    model_version = register_model(training_run_id)
     promote_model(None, model_version.version, stage=stage)
     return str(model_version.version)

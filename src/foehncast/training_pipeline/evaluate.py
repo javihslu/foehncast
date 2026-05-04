@@ -36,17 +36,23 @@ def _class_accuracy_metrics(
     return metrics
 
 
+def compute_metrics(target_true: pd.Series, predictions: Any) -> dict[str, float]:
+    """Compute regression and class-bucket metrics from predictions."""
+    metrics = {
+        "mae": float(mean_absolute_error(target_true, predictions)),
+        "rmse": float(mean_squared_error(target_true, predictions) ** 0.5),
+        "r2": float(r2_score(target_true, predictions)),
+    }
+    metrics.update(_class_accuracy_metrics(target_true, predictions))
+    return metrics
+
+
 def evaluate_model(
     model: Any, features_test: pd.DataFrame, target_test: pd.Series
 ) -> dict[str, float]:
     """Compute regression and class-bucket metrics for a trained model."""
     predictions = model.predict(features_test)
-    metrics = {
-        "mae": float(mean_absolute_error(target_test, predictions)),
-        "rmse": float(mean_squared_error(target_test, predictions) ** 0.5),
-        "r2": float(r2_score(target_test, predictions)),
-    }
-    metrics.update(_class_accuracy_metrics(target_test, predictions))
+    metrics = compute_metrics(target_test, predictions)
 
     active_run = getattr(mlflow, "active_run", lambda: None)()
     if active_run is not None:

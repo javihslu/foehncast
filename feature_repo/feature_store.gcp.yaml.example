@@ -1,0 +1,18 @@
+project: foehncast
+registry: gs://your-gcp-bucket/feast/registry.db
+provider: gcp
+offline_store:
+  type: bigquery
+  project_id: your-gcp-project
+  dataset: feast
+  location: EU
+  gcs_staging_location: gs://your-gcp-bucket/feast/staging
+online_store:
+  type: datastore
+  project_id: your-gcp-project
+entity_key_serialization_version: 3
+
+# Set FOEHNCAST_FEAST_SOURCE=bigquery and FOEHNCAST_FEAST_BIGQUERY_TABLE to a
+# BigQuery table or view that exposes curated feature rows with spot_id and
+# forecast_time. A filtered view for the intended dataset split is the simplest
+# cloud hand-off from the current storage layer.

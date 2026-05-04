@@ -12,6 +12,22 @@ from foehncast.feature_pipeline import store
 
 
 @pytest.fixture()
+def isolated_store_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "OBJECTSTORE_ACCESS_KEY",
+        "OBJECTSTORE_SECRET_KEY",
+        "OBJECTSTORE_ENDPOINT",
+        "FSSPEC_S3_KEY",
+        "FSSPEC_S3_SECRET",
+        "FSSPEC_S3_ENDPOINT_URL",
+        "GCP_PROJECT_ID",
+        "GOOGLE_CLOUD_PROJECT",
+        "STORAGE_BIGQUERY_PROJECT_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture()
 def sample_features() -> pd.DataFrame:
     """Small feature dataset for persistence tests."""
     return pd.DataFrame(
@@ -24,7 +40,10 @@ def sample_features() -> pd.DataFrame:
 
 
 def test_write_and_read_features_local(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_features: pd.DataFrame
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    tmp_path: Path,
+    sample_features: pd.DataFrame,
 ):
     monkeypatch.setattr(store, "_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -40,7 +59,10 @@ def test_write_and_read_features_local(
 
 
 def test_list_datasets_local_returns_sorted_names(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sample_features: pd.DataFrame
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    tmp_path: Path,
+    sample_features: pd.DataFrame,
 ):
     monkeypatch.setattr(store, "_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -56,7 +78,9 @@ def test_list_datasets_local_returns_sorted_names(
 
 
 def test_write_features_s3_uses_storage_options(
-    monkeypatch: pytest.MonkeyPatch, sample_features: pd.DataFrame
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
 ):
     captured: dict[str, object] = {}
 
@@ -77,6 +101,7 @@ def test_write_features_s3_uses_storage_options(
     )
     monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
     monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
+    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
 
     store.write_features(sample_features, spot_id="silvaplana", dataset="train")
 
@@ -89,7 +114,9 @@ def test_write_features_s3_uses_storage_options(
 
 
 def test_read_features_s3_uses_storage_options(
-    monkeypatch: pytest.MonkeyPatch, sample_features: pd.DataFrame
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
 ):
     captured: dict[str, object] = {}
 
@@ -110,6 +137,7 @@ def test_read_features_s3_uses_storage_options(
     )
     monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
     monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
+    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
 
     result = store.read_features(spot_id="silvaplana", dataset="train")
 
@@ -158,6 +186,7 @@ def test_list_datasets_s3_uses_filesystem(monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
     monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
+    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
 
     assert store.list_datasets() == ["train", "validation"]
     assert captured["exists_path"] == "foehncast-data"
@@ -170,7 +199,9 @@ def test_list_datasets_s3_uses_filesystem(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_write_features_s3_creates_missing_bucket(
-    monkeypatch: pytest.MonkeyPatch, sample_features: pd.DataFrame
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
 ):
     captured: dict[str, object] = {}
 
@@ -204,6 +235,7 @@ def test_write_features_s3_creates_missing_bucket(
     )
     monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
     monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
+    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
 
     store.write_features(sample_features, spot_id="silvaplana", dataset="train")
 
@@ -211,7 +243,270 @@ def test_write_features_s3_creates_missing_bucket(
     assert captured["mkdir_path"] == "foehncast-data"
 
 
-def test_unsupported_backend_raises_value_error(monkeypatch: pytest.MonkeyPatch):
+def test_write_features_bigquery_uses_load_job(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
+):
+    captured: dict[str, object] = {}
+
+    class FakeLoadJob:
+        def result(self) -> None:
+            captured["job_completed"] = True
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            captured["project"] = project
+
+        def load_table_from_dataframe(
+            self, frame: pd.DataFrame, table_id: str, job_config: object
+        ) -> FakeLoadJob:
+            captured["table_id"] = table_id
+            captured["frame"] = frame.copy()
+            captured["write_disposition"] = job_config.write_disposition
+            return FakeLoadJob()
+
+    class FakeLoadJobConfig:
+        def __init__(self, write_disposition: str) -> None:
+            self.write_disposition = write_disposition
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient, LoadJobConfig=FakeLoadJobConfig
+        ),
+    )
+    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    frame = sample_features.copy()
+    frame.index = pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"])
+    frame.index.name = "time"
+    frame["spot_name"] = ["Silvaplana", "Silvaplana"]
+
+    store.write_features(frame, spot_id="silvaplana", dataset="train")
+
+    written = captured["frame"]
+    assert captured["project"] == "demo-project"
+    assert captured["table_id"] == "demo-project.foehncast.forecast_features"
+    assert captured["write_disposition"] == "WRITE_APPEND"
+    assert captured["job_completed"] is True
+    assert list(written["spot_id"]) == ["silvaplana", "silvaplana"]
+    assert list(written["dataset_name"]) == ["train", "train"]
+    assert "forecast_time" in written.columns
+
+
+def test_read_features_bigquery_restores_time_index(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
+):
+    captured: dict[str, object] = {}
+
+    class FakeRowIterator:
+        def to_dataframe(self) -> pd.DataFrame:
+            return pd.DataFrame(
+                {
+                    "forecast_time": pd.to_datetime(
+                        ["2025-01-01T00:00:00", "2025-01-01T01:00:00"]
+                    ),
+                    "spot_id": ["silvaplana", "silvaplana"],
+                    "spot_name": ["Silvaplana", "Silvaplana"],
+                    "dataset_name": ["train", "train"],
+                    "wind_speed_10m": [10.0, 12.5],
+                    "wind_gusts_10m": [14.0, 16.5],
+                    "wind_steadiness": [0.1, 0.2],
+                }
+            )
+
+    class FakeQueryJob:
+        def result(self) -> FakeRowIterator:
+            return FakeRowIterator()
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            captured["project"] = project
+
+        def get_table(self, table_id: str) -> object:
+            captured["table_id"] = table_id
+            return object()
+
+        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+            captured["query"] = query
+            captured["job_config"] = job_config
+            return FakeQueryJob()
+
+    class FakeScalarQueryParameter:
+        def __init__(self, name: str, param_type: str, value: str) -> None:
+            self.name = name
+            self.param_type = param_type
+            self.value = value
+
+    class FakeQueryJobConfig:
+        def __init__(self, query_parameters: list[object]) -> None:
+            self.query_parameters = query_parameters
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
+        ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    result = store.read_features(spot_id="silvaplana", dataset="train")
+
+    assert captured["project"] == "demo-project"
+    assert captured["table_id"] == "demo-project.foehncast.forecast_features"
+    assert "dataset_name" not in result.columns
+    assert result.index.name == "time"
+    assert list(result["spot_id"]) == ["silvaplana", "silvaplana"]
+
+    parameters = captured["job_config"].query_parameters
+    assert [(param.name, param.value) for param in parameters] == [
+        ("spot_id", "silvaplana"),
+        ("dataset_name", "train"),
+    ]
+
+
+def test_read_features_bigquery_raises_file_not_found_for_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+):
+    class FakeRowIterator:
+        def to_dataframe(self) -> pd.DataFrame:
+            return pd.DataFrame()
+
+    class FakeQueryJob:
+        def result(self) -> FakeRowIterator:
+            return FakeRowIterator()
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            self.project = project
+
+        def get_table(self, table_id: str) -> object:
+            return object()
+
+        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+            return FakeQueryJob()
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient,
+            QueryJobConfig=lambda query_parameters: types.SimpleNamespace(
+                query_parameters=query_parameters
+            ),
+            ScalarQueryParameter=lambda name, param_type, value: types.SimpleNamespace(
+                name=name,
+                param_type=param_type,
+                value=value,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    with pytest.raises(FileNotFoundError, match="No BigQuery feature rows found"):
+        store.read_features(spot_id="silvaplana", dataset="train")
+
+
+def test_list_datasets_bigquery_returns_sorted_names(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+):
+    captured: dict[str, object] = {}
+
+    class FakeQueryJob:
+        def result(self) -> list[dict[str, str]]:
+            return [
+                {"dataset_name": "train"},
+                {"dataset_name": "validation"},
+            ]
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            captured["project"] = project
+
+        def get_table(self, table_id: str) -> object:
+            captured["table_id"] = table_id
+            return object()
+
+        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+            captured["query"] = query
+            return FakeQueryJob()
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(Client=FakeClient),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(store, "get_gcp_config", lambda: {"project_id": "demo-project"})
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    assert store.list_datasets() == ["train", "validation"]
+    assert captured["project"] == "demo-project"
+    assert captured["table_id"] == "demo-project.foehncast.forecast_features"
+
+
+def test_unsupported_backend_raises_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+):
     monkeypatch.setattr(store, "get_storage_config", lambda: {"backend": "sqlite"})
 
     with pytest.raises(ValueError, match="Unsupported storage backend"):

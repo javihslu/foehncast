@@ -33,4 +33,5 @@ fi
 gcloud auth configure-docker "${GCP_LOCATION}-docker.pkg.dev"
 
 echo "Configured gcloud CLI, ADC, and Artifact Registry auth for ${GCP_PROJECT_ID} in ${GCP_LOCATION}."
+echo "For local BigQuery-backed containers, run Docker Compose with -f docker-compose.yml -f docker-compose.gcp.yml so ADC is mounted into the Linux services."
 echo "Use GitHub OIDC for CI/CD and avoid storing service account keys in this repository."

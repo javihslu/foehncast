@@ -9,19 +9,119 @@ This directory manages the first GCP infrastructure baseline for FoehnCast:
 - a Cloud Run runtime service account
 - GitHub OIDC trust via Workload Identity Federation
 
-## Local Use
+It is a bootstrap layer, not the full cloud runtime yet.
+
+## Current Scope
+
+Today Terraform prepares the shared cloud foundation that the validated MS2 stack needs before the full cloud cutover:
+
+- container image publishing
+- artifact storage
+- BigQuery feature-store dataset and curated feature table
+- optional Cloud Run inference service definition
+- deploy identities
+- GitHub to GCP authentication
+
+The Cloud Run service is intentionally gated behind `provision_cloud_run_service` so the baseline can be applied before the release image and MLflow endpoint exist.
+
+## Cloud Run Inputs
+
+When `provision_cloud_run_service = true`, provide:
+
+- a published app image in Artifact Registry
+- `mlflow_tracking_uri` pointing to a reachable MLflow service
+- any extra runtime configuration in `cloud_run_env_vars`
+
+Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
+
+## GitHub Delivery Inputs
+
+The repository includes `.github/workflows/publish-app-image.yml` for `linux/amd64` app image publishing to Artifact Registry and optional Cloud Run rollout. Set these GitHub repository variables:
+
+- `GCP_PROJECT_ID`
+- `GCP_LOCATION`
+- `GCP_ARTIFACT_REPOSITORY`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT_EMAIL`
+- `GCP_CLOUD_RUN_SERVICE` to enable automatic deploys after publish
+
+The easiest way to set them is:
+
+1. authenticate `gh` with `gh auth login`
+2. apply Terraform
+3. run `./scripts/configure-github-actions.sh`
+
+The helper script reads the Terraform outputs, sets the required GitHub Actions variables on the repository remote, and skips `GCP_CLOUD_RUN_SERVICE` until the Cloud Run service has actually been provisioned.
+
+Recommended mappings from Terraform-managed values:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER` = `terraform output -raw github_workload_identity_provider`
+- `GCP_SERVICE_ACCOUNT_EMAIL` = `terraform output -raw github_deployer_service_account`
+- `GCP_ARTIFACT_REPOSITORY` = your `artifact_registry_repository_id` input, for example `foehncast-docker`
+- `GCP_CLOUD_RUN_SERVICE` = `terraform output -raw cloud_run_service_name`
+
+When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag and then updates the existing Cloud Run service to that image. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
+
+## Next Cloud Additions
+
+The intended next resources for the cloud-hosted pipeline are:
+
+- managed Airflow provisioning for feature and training DAGs
+- a cloud-hosted MLflow deployment choice
+- CI automation for managed Airflow artifact delivery
+
+## Interactive Setup
+
+Run this on a fresh clone:
+
+`./scripts/bootstrap-gcp.sh`
+
+Then do the following in order:
+
+1. Sign in in the browser when `gcloud` opens the login flow.
+2. Pick an existing GCP project or type `n` to create a new one.
+3. Pick a billing account from the list shown by the script.
+4. Confirm or edit the values for region, bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
+5. Decide whether to provision Cloud Run now. If yes, enter the MLflow tracking URI.
+6. Decide whether to configure GitHub Actions for your fork. If yes, enter the fork as `owner/repo`.
+7. Let Terraform apply complete.
+
+Examples:
+
+- `Project number, project id, or n: n`
+- `New GCP project id: foehncast-jane-dev`
+- `Billing account number or id [1]: 1`
+- `GCP region [europe-west6]:`
+- `Cloud Run service name [foehncast-serve]:`
+
+The script writes `.env` and `terraform/terraform.tfvars` during setup.
+
+After Terraform apply, the script refreshes `.env` with the managed project ID, bucket, BigQuery dataset and table, and Cloud Run service name. Authentication itself stays in local `gcloud` application default credentials, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
+
+To restart from scratch:
+
+`rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
+
+If you already know all values and want a rerun without prompts:
+
+`./scripts/bootstrap-gcp.sh --non-interactive`
+
+## Local BigQuery Use
 
 1. Bootstrap your local GCP session:
    `./scripts/gcp-auth.sh`
-2. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`.
-3. Fill in the project-specific values.
-4. Run:
+2. If you want local Docker services to read or write BigQuery, start them with the GCP override file so ADC is mounted into the containers:
+   `docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.gcp.yml up -d`
+3. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`.
+4. Fill in the project-specific values.
+5. Run:
    `cd terraform && terraform init && terraform fmt -check && terraform validate`
 
-## Bootstrap Notes
+This Terraform path is aimed at maintainers who are setting up or changing the cloud platform and at collaborators provisioning their own project with the interactive script.
 
-- Terraform manages project services after authentication, but the project still needs a usable GCP project and billing enabled.
-- Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
+If the script does not show a billing account, stop and sign in with a Google account that can see one.
+
+Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
 
 ## CI/CD Guidance
 

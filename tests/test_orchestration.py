@@ -93,6 +93,8 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
 ) -> None:
     logged: dict[str, object] = {}
 
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
     class FakeRun:
         def __enter__(self) -> FakeRun:
             logged["entered"] = True
@@ -101,13 +103,14 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
         def __exit__(self, exc_type, exc, exc_tb) -> None:
             return None
 
-    class FakePyfunc:
-        def load_model(self, model_uri: str) -> object:
-            logged["model_uri"] = model_uri
-            return object()
+    class FakeClient:
+        def get_run(self, run_id: str) -> SimpleNamespace:
+            logged["queried_run_id"] = run_id
+            return SimpleNamespace(data=SimpleNamespace(metrics={"mae": 0.5}))
 
     class FakeMlflow:
-        pyfunc = FakePyfunc()
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
 
         def set_tracking_uri(self, tracking_uri: str) -> None:
             logged["tracking_uri"] = tracking_uri
@@ -124,19 +127,6 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     )
     monkeypatch.setattr(
         orchestration,
-        "load_training_data",
-        lambda dataset="train": (
-            pd.DataFrame({"wind_speed_10m": [10.0]}),
-            pd.Series([3]),
-        ),
-    )
-    monkeypatch.setattr(
-        orchestration,
-        "evaluate_model",
-        lambda model, features_df, target_series: {"mae": 0.5},
-    )
-    monkeypatch.setattr(
-        orchestration,
         "generate_evaluation_report",
         lambda metrics, output_path: str(tmp_path / "evaluation.md"),
     )
@@ -145,7 +135,7 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
 
     assert report_path == str(tmp_path / "evaluation.md")
     assert logged["tracking_uri"] == "http://localhost:5001"
-    assert logged["model_uri"] == "runs:/run-123/model"
+    assert logged["queried_run_id"] == "run-123"
     assert logged["run_id"] == "run-123"
 
 
