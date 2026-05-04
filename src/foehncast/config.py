@@ -62,6 +62,11 @@ def get_mlflow_config() -> dict[str, Any]:
     return load_config()["mlflow"]
 
 
+def get_inference_config() -> dict[str, Any]:
+    """Return the inference settings."""
+    return load_config()["inference"]
+
+
 def get_monitoring_config() -> dict[str, Any]:
     """Return the monitoring settings."""
     return load_config()["monitoring"]
