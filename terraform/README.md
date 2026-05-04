@@ -65,6 +65,8 @@ When `provision_online_compose_host = true`, provide:
 
 Terraform provisions a dedicated network, static public IP, and Compute Engine instance. The instance clones the repo, writes a runtime `.env` file with the Terraform-managed GCP and BigQuery settings, tries to pull the GHCR images, and falls back to local Docker builds on the host if the packages are not available yet.
 
+The host uses a dedicated runtime service account with BigQuery job and dataset edit access, so the Airflow, training, and app containers can rely on Application Default Credentials instead of mounted key files.
+
 On first boot, the host generates an Airflow admin password locally and stores it at `/opt/foehncast/airflow/.admin-password`. Retrieve it over SSH when you need to sign in instead of passing it through Terraform input variables.
 
 The online host starts:

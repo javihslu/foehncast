@@ -277,6 +277,13 @@ resource "google_service_account" "cloud_run_runtime" {
   display_name = "FoehnCast Cloud Run runtime"
 }
 
+resource "google_service_account" "online_compose_runtime" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  account_id   = "foehncast-online-compose"
+  display_name = "FoehnCast online compose runtime"
+}
+
 resource "google_project_iam_member" "github_artifact_registry_writer" {
   project = var.project_id
   role    = "roles/artifactregistry.writer"
@@ -324,6 +331,22 @@ resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
   dataset_id = google_bigquery_dataset.feature_store.dataset_id
   role       = "roles/bigquery.dataViewer"
   member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
+resource "google_project_iam_member" "online_compose_bigquery_job_user" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "online_compose_bigquery_editor" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  dataset_id = google_bigquery_dataset.feature_store.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
 resource "google_cloud_run_v2_service" "app" {
@@ -448,6 +471,11 @@ resource "google_compute_instance" "online_compose" {
     }
   }
 
+  service_account {
+    email  = google_service_account.online_compose_runtime[0].email
+    scopes = ["cloud-platform"]
+  }
+
   metadata_startup_script = templatefile("${path.module}/templates/online-compose-host.sh.tftpl", {
     github_repository_path = local.github_repository_path
     git_ref                = var.online_compose_git_ref
@@ -457,6 +485,8 @@ resource "google_compute_instance" "online_compose" {
   depends_on = [
     google_project_service.required,
     google_compute_firewall.online_compose_public,
+    google_project_iam_member.online_compose_bigquery_job_user,
+    google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
   ]
 }
 
