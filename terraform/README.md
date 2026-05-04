@@ -45,6 +45,14 @@ The repository includes `.github/workflows/publish-app-image.yml` for `linux/amd
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `GCP_CLOUD_RUN_SERVICE` to enable automatic deploys after publish
 
+The easiest way to set them is:
+
+1. authenticate `gh` with `gh auth login`
+2. apply Terraform
+3. run `./scripts/configure-github-actions.sh`
+
+The helper script reads the Terraform outputs, sets the required GitHub Actions variables on the repository remote, and skips `GCP_CLOUD_RUN_SERVICE` until the Cloud Run service has actually been provisioned.
+
 Recommended mappings from Terraform-managed values:
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER` = `terraform output -raw github_workload_identity_provider`

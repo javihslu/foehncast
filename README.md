@@ -36,7 +36,7 @@ Use this only when you are provisioning or updating the shared GCP deployment.
 1. Authenticate locally with `./scripts/gcp-auth.sh`.
 2. Configure Terraform inputs in `terraform/terraform.tfvars`.
 3. Apply Terraform to provision the cloud baseline.
-4. Set the GitHub repository variables required by `.github/workflows/publish-app-image.yml`, including `GCP_CLOUD_RUN_SERVICE` once Terraform has provisioned the service.
+4. Authenticate the GitHub CLI with `gh auth login`, then run `./scripts/configure-github-actions.sh` to push the required GitHub repository variables from the Terraform outputs. It skips `GCP_CLOUD_RUN_SERVICE` until the Cloud Run service exists.
 5. Let GitHub Actions publish the deployable app image and update the existing Cloud Run service on pushes to `main`.
 
 ## Deployment stance

@@ -1,3 +1,18 @@
+output "project_id" {
+  description = "GCP project ID managed by this Terraform configuration."
+  value       = var.project_id
+}
+
+output "region" {
+  description = "Primary GCP region used by this Terraform configuration."
+  value       = var.region
+}
+
+output "artifact_registry_repository_id" {
+  description = "Artifact Registry repository name used for container images."
+  value       = google_artifact_registry_repository.containers.repository_id
+}
+
 output "artifact_registry_repository" {
   description = "Artifact Registry repository path for container images."
   value       = google_artifact_registry_repository.containers.id
