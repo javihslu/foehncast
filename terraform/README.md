@@ -69,6 +69,8 @@ The intended next resources for the cloud-hosted pipeline are:
 5. Run:
    `cd terraform && terraform init && terraform fmt -check && terraform validate`
 
+This Terraform path is aimed at maintainers who are setting up or changing the cloud platform. It should not be the default evaluation path for a professor or a new developer who only needs to run the system once.
+
 ## Bootstrap Notes
 
 - Terraform manages project services after authentication, but the project still needs a usable GCP project and billing enabled.

@@ -34,6 +34,8 @@ This directory holds the files for the local container stack.
 
 ## Local validation
 
+For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the API health endpoint.
+
 Run these checks before deployment work:
 
 1. `docker compose --env-file .env.example up --build -d --remove-orphans`

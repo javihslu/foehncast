@@ -54,6 +54,14 @@ FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal
 | Inference | local app container | Cloud Run |
 | Runtime auth | local env file | service accounts and OIDC |
 
+## Deployment Ownership
+
+- Terraform should provision the GCP resources and deployment identities.
+- GitHub Actions should build, publish, and later deploy the app image.
+- Airflow should run feature and training jobs after the platform already exists.
+
+Airflow is not the right place to create cloud infrastructure or release application services. A fresh-machine clone plus GCP login and deploy script is useful for maintainers as a recovery path, but it is not the best default experience for a professor or first-time developer.
+
 ## Local BigQuery Development Path
 
 For local Docker runs, the shared config can now switch to `storage.backend=bigquery` entirely through environment variables.
