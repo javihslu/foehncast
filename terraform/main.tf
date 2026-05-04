@@ -283,6 +283,18 @@ resource "google_storage_bucket_iam_member" "cloud_run_bucket_reader" {
   member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_project_iam_member" "cloud_run_bigquery_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
+  dataset_id = google_bigquery_dataset.feature_store.dataset_id
+  role       = "roles/bigquery.dataViewer"
+  member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_cloud_run_v2_service" "app" {
   count               = var.provision_cloud_run_service ? 1 : 0
   name                = var.cloud_run_service_name
@@ -332,6 +344,8 @@ resource "google_cloud_run_v2_service" "app" {
     google_project_service.required,
     google_artifact_registry_repository_iam_member.cloud_run_reader,
     google_storage_bucket_iam_member.cloud_run_bucket_reader,
+    google_project_iam_member.cloud_run_bigquery_job_user,
+    google_bigquery_dataset_iam_member.cloud_run_bigquery_reader,
   ]
 }
 

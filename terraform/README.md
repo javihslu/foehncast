@@ -96,6 +96,8 @@ Examples:
 
 The script writes `.env` and `terraform/terraform.tfvars` during setup.
 
+After Terraform apply, the script refreshes `.env` with the managed project ID, bucket, BigQuery dataset and table, and Cloud Run service name. Authentication itself stays in local `gcloud` application default credentials, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
+
 To restart from scratch:
 
 `rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`

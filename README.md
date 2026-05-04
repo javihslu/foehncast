@@ -62,7 +62,7 @@ What to do in the interactive setup:
    Example: `GitHub repository for deployment automation [jane/foehncast]: jane/foehncast`
 7. Wait for Terraform to finish.
 
-The script writes `.env` and `terraform/terraform.tfvars` for you during setup.
+The script writes `.env` and `terraform/terraform.tfvars` for you during setup. After Terraform apply, it refreshes `.env` with the project, bucket, BigQuery, and Cloud Run service values from Terraform outputs.
 
 If you want to restart from scratch, run:
 

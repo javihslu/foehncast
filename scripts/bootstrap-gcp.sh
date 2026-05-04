@@ -157,6 +157,60 @@ load_env_file() {
     replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
   }
 
+  terraform_output() {
+    local output_name="$1"
+
+    terraform -chdir="${ROOT_DIR}/terraform" output -raw "$output_name"
+  }
+
+  optional_terraform_output() {
+    local output_name="$1"
+
+    terraform -chdir="${ROOT_DIR}/terraform" output -raw "$output_name" 2>/dev/null || true
+  }
+
+  sync_env_from_terraform_outputs() {
+    local project_id region bucket dataset table cloud_run_service
+
+    project_id="$(terraform_output project_id)"
+    region="$(terraform_output region)"
+    bucket="$(terraform_output artifact_bucket_name)"
+    dataset="$(terraform_output bigquery_dataset_id)"
+    table="$(terraform_output bigquery_feature_table_id)"
+    cloud_run_service="$(optional_terraform_output cloud_run_service_name)"
+
+    if [[ -z "$cloud_run_service" ]]; then
+      cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
+    fi
+
+    set_env_value GCP_PROJECT_ID "$project_id"
+    set_env_value GCP_LOCATION "$region"
+    set_env_value GCP_BUCKET_NAME "$bucket"
+    set_env_value STORAGE_BIGQUERY_PROJECT_ID "$project_id"
+    set_env_value STORAGE_BIGQUERY_DATASET "$dataset"
+    set_env_value STORAGE_BIGQUERY_TABLE "$table"
+
+    if [[ -n "$cloud_run_service" ]]; then
+      set_env_value CLOUD_RUN_SERVICE_NAME "$cloud_run_service"
+    fi
+  }
+
+  print_auth_summary() {
+    local runtime_service_account github_service_account cloud_run_service
+
+    runtime_service_account="$(terraform_output cloud_run_runtime_service_account)"
+    github_service_account="$(terraform_output github_deployer_service_account)"
+    cloud_run_service="$(optional_terraform_output cloud_run_service_name)"
+
+    echo "Local auth: browser-based gcloud ADC on this machine"
+    echo "Cloud Run runtime service account: ${runtime_service_account}"
+    echo "GitHub deployer service account: ${github_service_account}"
+
+    if [[ -n "$cloud_run_service" ]]; then
+      echo "Cloud Run service: ${cloud_run_service}"
+    fi
+  }
+
   prompt_with_default() {
     local prompt_text="$1"
     local default_value="$2"
@@ -574,6 +628,10 @@ else
 
   echo "Running Terraform apply..."
   terraform -chdir="${ROOT_DIR}/terraform" "${apply_args[@]}"
+
+  echo "Syncing local cloud identifiers into .env..."
+  sync_env_from_terraform_outputs
+  print_auth_summary
 fi
 
 if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
