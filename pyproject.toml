@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Personalized kiteboarding forecast system with FTI pipeline"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.8",
+    "mlflow>=3.0",
     "pandas>=2.0",
     "pyarrow>=14.0",
     "pyyaml>=6.0",
     "requests>=2.31",
+    "scikit-learn>=1.5",
     "s3fs>=2024.0",
 ]
 
