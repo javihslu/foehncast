@@ -57,7 +57,7 @@ FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal
 ## Deployment Ownership
 
 - Terraform should provision the GCP resources and deployment identities.
-- GitHub Actions should build, publish, and later deploy the app image.
+- GitHub Actions should build, publish, and deploy the app image to the existing Cloud Run service.
 - Airflow should run feature and training jobs after the platform already exists.
 
 Airflow is not the right place to create cloud infrastructure or release application services. A fresh-machine clone plus GCP login and deploy script is useful for maintainers as a recovery path, but it is not the best default experience for a professor or first-time developer.
@@ -75,7 +75,6 @@ The optional `docker-compose.gcp.yml` override mounts the host `~/.config/gcloud
 
 ## What Still Needs To Be Added
 
-- A Cloud Run deployment stage that consumes the published `linux/amd64` app image.
 - A cloud-hosted MLflow deployment choice.
 - Managed Airflow provisioning and DAG deployment.
 
@@ -87,11 +86,11 @@ The Terraform baseline now covers the first cloud runtime slice:
 - BigQuery dataset plus curated feature table
 - an optional Cloud Run inference service definition
 
-The repository now also includes a GitHub Actions workflow that publishes the `containers/app/Dockerfile` image to Artifact Registry on `main` when the required OIDC and registry variables are configured.
+The repository now also includes a GitHub Actions workflow that publishes the `containers/app/Dockerfile` image to Artifact Registry on `main` and can update the Terraform-managed Cloud Run service when the required OIDC, registry, and service-name variables are configured.
 
 The application code now also supports a `bigquery` storage backend through the shared feature-store abstraction, so feature writes and training reads can move to BigQuery without changing the pipeline modules themselves. Local container runs can mount ADC via `docker-compose.gcp.yml`, while Cloud Run keeps using its runtime service account.
 
-The Cloud Run service stays opt-in until a real release image and MLflow endpoint are available.
+The Cloud Run service still stays opt-in at the Terraform layer, but once it exists the delivery path is now direct: publish an immutable app image and roll the Cloud Run service forward to that image from GitHub Actions.
 
 ## Why This Fits The Project Brief
 

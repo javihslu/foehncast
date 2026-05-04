@@ -34,21 +34,25 @@ When `provision_cloud_run_service = true`, provide:
 
 Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
 
-## GitHub Image Publishing Inputs
+## GitHub Delivery Inputs
 
-The repository includes `.github/workflows/publish-app-image.yml` for `linux/amd64` app image publishing to Artifact Registry. Set these GitHub repository variables:
+The repository includes `.github/workflows/publish-app-image.yml` for `linux/amd64` app image publishing to Artifact Registry and optional Cloud Run rollout. Set these GitHub repository variables:
 
 - `GCP_PROJECT_ID`
 - `GCP_LOCATION`
 - `GCP_ARTIFACT_REPOSITORY`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT_EMAIL`
+- `GCP_CLOUD_RUN_SERVICE` to enable automatic deploys after publish
 
 Recommended mappings from Terraform-managed values:
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER` = `terraform output -raw github_workload_identity_provider`
 - `GCP_SERVICE_ACCOUNT_EMAIL` = `terraform output -raw github_deployer_service_account`
 - `GCP_ARTIFACT_REPOSITORY` = your `artifact_registry_repository_id` input, for example `foehncast-docker`
+- `GCP_CLOUD_RUN_SERVICE` = `terraform output -raw cloud_run_service_name`
+
+When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag and then updates the existing Cloud Run service to that image. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
 
 ## Next Cloud Additions
 
@@ -56,7 +60,7 @@ The intended next resources for the cloud-hosted pipeline are:
 
 - managed Airflow provisioning for feature and training DAGs
 - a cloud-hosted MLflow deployment choice
-- CI automation that builds and publishes the `linux/amd64` app image before Cloud Run rollout
+- CI automation for managed Airflow artifact delivery
 
 ## Local Use
 

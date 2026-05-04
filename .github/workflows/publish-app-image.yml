@@ -20,13 +20,21 @@ jobs:
   publish:
     if: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_LOCATION != '' && vars.GCP_ARTIFACT_REPOSITORY != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT_EMAIL != '' }}
     runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.image.outputs.immutable_tag }}
     env:
       REGISTRY_HOST: ${{ vars.GCP_LOCATION }}-docker.pkg.dev
       IMAGE_NAME: foehncast-app
+      IMAGE_REPOSITORY: ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPOSITORY }}/foehncast-app
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
+
+      - id: image
+        run: |
+          echo "immutable_tag=${IMAGE_REPOSITORY}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${IMAGE_REPOSITORY}:latest" >> "$GITHUB_OUTPUT"
 
       - uses: google-github-actions/auth@v2
         with:
@@ -40,9 +48,9 @@ jobs:
       - id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_HOST }}/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPOSITORY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.IMAGE_REPOSITORY }}
           tags: |
-            type=sha,format=long
+            type=raw,value=sha-${{ github.sha }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - uses: docker/build-push-action@v6
@@ -61,7 +69,66 @@ jobs:
           {
             echo "## Published app image"
             echo
-            echo '${{ steps.metadata.outputs.tags }}'
+            echo "- Immutable: ${{ steps.image.outputs.immutable_tag }}"
+            echo "- Floating: ${{ steps.image.outputs.latest_tag }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: publish
+    if: ${{ needs.publish.result == 'success' && vars.GCP_CLOUD_RUN_SERVICE != '' }}
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_LOCATION: ${{ vars.GCP_LOCATION }}
+      CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      IMAGE_URI: ${{ needs.publish.outputs.image_uri }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Confirm Cloud Run service exists
+        run: |
+          gcloud run services describe "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_LOCATION" \
+            --format='value(metadata.name)' >/dev/null
+
+      - id: deploy
+        name: Deploy published image to Cloud Run
+        run: |
+          gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --project "$GCP_PROJECT_ID" \
+            --region "$GCP_LOCATION" \
+            --image "$IMAGE_URI" \
+            --quiet
+
+          echo "service_url=$(gcloud run services describe \"$CLOUD_RUN_SERVICE\" --project \"$GCP_PROJECT_ID\" --region \"$GCP_LOCATION\" --format='value(status.url)')" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize Cloud Run deployment
+        run: |
+          {
+            echo "## Cloud Run deployment"
+            echo
+            echo "- Service: $CLOUD_RUN_SERVICE"
+            echo "- Image: $IMAGE_URI"
+            echo "- URL: ${{ steps.deploy.outputs.service_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy_skipped:
+    needs: publish
+    if: ${{ needs.publish.result == 'success' && vars.GCP_CLOUD_RUN_SERVICE == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skipped Cloud Run deploy
+        run: |
+          {
+            echo "## Cloud Run deploy skipped"
+            echo
+            echo "Set GCP_CLOUD_RUN_SERVICE to the Terraform-managed Cloud Run service name to enable automatic deploys after image publish."
           } >> "$GITHUB_STEP_SUMMARY"
 
   skipped:
@@ -79,4 +146,7 @@ jobs:
             echo "- GCP_ARTIFACT_REPOSITORY"
             echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
             echo "- GCP_SERVICE_ACCOUNT_EMAIL"
+            echo
+            echo "Optional for automatic Cloud Run deploys after publish:"
+            echo "- GCP_CLOUD_RUN_SERVICE"
           } >> "$GITHUB_STEP_SUMMARY"
