@@ -5,6 +5,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DATASET="${1:-train}"
 OUTPUT_PATH="$ROOT_DIR/data/feast/${DATASET}.parquet"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/cli-common.sh"
+
+require_command uv
 
 cd "$ROOT_DIR"
 

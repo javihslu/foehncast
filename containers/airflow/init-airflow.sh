@@ -12,8 +12,13 @@ admin_firstname="${AIRFLOW_ADMIN_FIRSTNAME:-Admin}"
 admin_lastname="${AIRFLOW_ADMIN_LASTNAME:-User}"
 admin_role="${AIRFLOW_ADMIN_ROLE:-Admin}"
 admin_email="${AIRFLOW_ADMIN_EMAIL:-admin@example.com}"
+admin_password_file="${AIRFLOW_ADMIN_PASSWORD_FILE:-}"
 admin_password="${AIRFLOW_ADMIN_PASSWORD:-admin}"
 create_admin_user="${AIRFLOW_CREATE_ADMIN_USER:-false}"
+
+if [ -n "$admin_password_file" ] && [ -f "$admin_password_file" ]; then
+  admin_password="$(cat "$admin_password_file")"
+fi
 
 rm -f "$marker_file"
 mkdir -p "$airflow_home/logs" "$airflow_home/reports"

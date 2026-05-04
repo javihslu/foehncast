@@ -3,25 +3,27 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${1:-$ROOT_DIR/.env.example}"
+DEFAULT_ENV_FILE="${ROOT_DIR}/.env"
+EXAMPLE_ENV_FILE="${ROOT_DIR}/.env.example"
+ENV_FILE="${1:-$DEFAULT_ENV_FILE}"
 FEATURE_DATE="${FEATURE_DATE:-2024-01-01}"
 TRAINING_DATE="${TRAINING_DATE:-2024-01-02}"
 AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/health}"
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/cli-common.sh"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required but not installed." >&2
-  exit 1
-fi
-
-if ! docker compose version >/dev/null 2>&1; then
-  echo "docker compose is required but not available." >&2
-  exit 1
-fi
+require_docker_compose
+require_command curl
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "Env file not found: $ENV_FILE" >&2
-  exit 1
+  if [[ "$ENV_FILE" == "$DEFAULT_ENV_FILE" && $# -eq 0 && -f "$EXAMPLE_ENV_FILE" ]]; then
+    cp "$EXAMPLE_ENV_FILE" "$ENV_FILE"
+    echo "Created $ENV_FILE from $EXAMPLE_ENV_FILE"
+  else
+    echo "Env file not found: $ENV_FILE" >&2
+    exit 1
+  fi
 fi
 
 cd "$ROOT_DIR"
@@ -49,6 +51,7 @@ echo "Waiting for app health..."
 curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_HEALTH_URL" >/dev/null
 
 echo "Local stack is ready."
+echo "Runtime env: $ENV_FILE"
 echo "App:      http://127.0.0.1:8000"
 echo "Airflow:  http://127.0.0.1:8080"
 echo "MLflow:   http://127.0.0.1:5001"
