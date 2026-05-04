@@ -16,5 +16,27 @@ services:
       - development
       - production
 
+  objectstore-init:
+    container_name: objectstore-init
+    image: minio/mc
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/init-objectstore.sh
+    depends_on:
+      - objectstore
+    environment:
+      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
+      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
+      - OBJECTSTORE_BUCKET=${OBJECTSTORE_BUCKET}
+    volumes:
+      - ./init-objectstore.sh:/bootstrap/init-objectstore.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/objectstore-init-complete"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - development
+
 volumes:
   objectstore_data:

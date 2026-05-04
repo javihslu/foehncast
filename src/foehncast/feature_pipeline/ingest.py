@@ -9,6 +9,7 @@ import pandas as pd
 import requests
 
 from foehncast.config import get_api_config, get_spots
+from foehncast.http_client import ca_bundle
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ _TIMEOUT = 30  # seconds
 
 def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
     """GET request with error handling."""
-    resp = requests.get(url, params=params, timeout=_TIMEOUT)
+    resp = requests.get(url, params=params, timeout=_TIMEOUT, verify=ca_bundle())
     resp.raise_for_status()
     return resp.json()
 

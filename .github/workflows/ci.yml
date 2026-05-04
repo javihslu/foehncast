@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f docker-compose.yml config
-      - run: docker compose -f docker-compose.yml build model-registry
+      - run: docker compose -f docker-compose.yml build model-registry app
 
   terraform:
     runs-on: ubuntu-latest

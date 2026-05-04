@@ -14,12 +14,14 @@ from foehncast.feature_pipeline.engineer import (
 @pytest.fixture()
 def sample_df():
     """Minimal hourly forecast DataFrame for testing."""
+    index = pd.date_range("2025-01-01T00:00:00", periods=5, freq="h")
     return pd.DataFrame(
         {
             "wind_speed_10m": [10.0, 12.0, 14.0, 11.0, 13.0],
             "wind_gusts_10m": [15.0, 18.0, 20.0, 14.0, 19.0],
             "wind_direction_10m": [180.0, 190.0, 200.0, 185.0, 195.0],
-        }
+        },
+        index=index,
     )
 
 
@@ -75,9 +77,21 @@ class TestShoreAlignment:
 class TestEngineerFeatures:
     def test_adds_all_columns(self, sample_df):
         result = engineer_features(sample_df, shore_orientation_deg=225.0)
+        assert "hour_of_day_sin" in result.columns
+        assert "hour_of_day_cos" in result.columns
+        assert "day_of_year_sin" in result.columns
+        assert "day_of_year_cos" in result.columns
         assert "wind_steadiness" in result.columns
         assert "gust_factor" in result.columns
         assert "shore_alignment" in result.columns
+
+    def test_adds_expected_cyclical_values(self, sample_df):
+        result = engineer_features(sample_df, shore_orientation_deg=225.0)
+
+        assert result.iloc[0]["hour_of_day_sin"] == pytest.approx(0.0)
+        assert result.iloc[0]["hour_of_day_cos"] == pytest.approx(1.0)
+        assert result.iloc[0]["day_of_year_sin"] == pytest.approx(0.0)
+        assert result.iloc[0]["day_of_year_cos"] == pytest.approx(1.0)
 
     def test_preserves_original_columns(self, sample_df):
         result = engineer_features(sample_df, shore_orientation_deg=225.0)

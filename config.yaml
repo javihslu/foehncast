@@ -99,14 +99,18 @@ spots:
     water_type: lake
     canton: BE
 
-# Storage (default: local Parquet; optional: S3-compatible object storage)
+# Storage (default: local Parquet; optional: S3-compatible object storage or BigQuery)
+# Environment overrides: STORAGE_BACKEND, STORAGE_S3_*, STORAGE_BIGQUERY_*, GCP_PROJECT_ID
 storage:
-  backend: "local" # local | s3
+  backend: "local" # local | s3 | bigquery
   local_path: "data" # relative to project root
   s3_bucket: "foehncast-data" # used when backend=s3
   s3_endpoint: "http://localhost:9000" # MinIO on host; containers override via env
+  bigquery_dataset: "foehncast" # used when backend=bigquery
+  bigquery_table: "forecast_features" # used when backend=bigquery
 
 # GCP settings (optional — cloud deployment)
+# Environment overrides: GCP_PROJECT_ID, GCP_LOCATION, GCP_BUCKET_NAME, CLOUD_RUN_SERVICE_NAME
 gcp:
   project_id: "your-gcp-project"
   location: "europe-west6" # Zurich region
@@ -180,6 +184,10 @@ model:
     - cape
     - lifted_index
   engineered_features:
+    - hour_of_day_sin
+    - hour_of_day_cos
+    - day_of_year_sin
+    - day_of_year_cos
     - wind_steadiness
     - gust_factor
     - shore_alignment
@@ -191,6 +199,10 @@ model:
     - wind_gusts_10m
     - temperature_2m
     - relative_humidity_2m
+    - hour_of_day_sin
+    - hour_of_day_cos
+    - day_of_year_sin
+    - day_of_year_cos
     - wind_steadiness
     - gust_factor
     - shore_alignment

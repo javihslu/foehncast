@@ -9,6 +9,11 @@ import pytest
 from foehncast.training_pipeline import register
 
 
+@pytest.fixture(autouse=True)
+def _clear_tracking_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+
 @pytest.fixture()
 def mlflow_config() -> dict[str, str]:
     return {

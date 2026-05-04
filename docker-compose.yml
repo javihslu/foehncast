@@ -4,5 +4,5 @@ include:
   - containers/airflow/docker-compose.yml
   - containers/objectstore/docker-compose.yml
   - containers/mlflow/docker-compose.yml
-#  - containers/app/docker-compose.yml
+  - containers/app/docker-compose.yml
 #  - containers/monitoring/docker-compose.yml

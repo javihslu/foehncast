@@ -12,7 +12,6 @@ import mlflow
 import mlflow.sklearn
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
 from foehncast.config import (
@@ -21,7 +20,9 @@ from foehncast.config import (
     get_rider_config,
     get_spots,
 )
+from foehncast.feature_pipeline.engineer import add_time_features
 from foehncast.feature_pipeline.store import read_features
+from foehncast.training_pipeline.evaluate import compute_metrics
 from foehncast.training_pipeline.label import label_dataset
 
 
@@ -41,6 +42,9 @@ def load_training_data(dataset: str = "train") -> tuple[pd.DataFrame, pd.Series]
         if features_df.empty:
             continue
 
+        # Rebuild time features here so training still works with older stored
+        # datasets after the feature schema grows.
+        features_df = add_time_features(features_df)
         labeled_frames.append(label_dataset(features_df, rider_config))
 
     if not labeled_frames:
@@ -82,14 +86,6 @@ def train_model(
 
 def _tracking_uri(mlflow_config: dict[str, Any]) -> str:
     return os.getenv("MLFLOW_TRACKING_URI", mlflow_config["tracking_uri"])
-
-
-def _compute_metrics(target_true: pd.Series, target_pred: Any) -> dict[str, float]:
-    return {
-        "mae": float(mean_absolute_error(target_true, target_pred)),
-        "rmse": float(mean_squared_error(target_true, target_pred) ** 0.5),
-        "r2": float(r2_score(target_true, target_pred)),
-    }
 
 
 def _log_feature_importance_plot(model: Any, feature_columns: list[str]) -> None:
@@ -136,7 +132,7 @@ def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
     )
     model = train_model(features_train, target_train, resolved_model_config)
     target_pred = model.predict(features_test)
-    metrics = _compute_metrics(target_test, target_pred)
+    metrics = compute_metrics(target_test, target_pred)
 
     with mlflow.start_run(
         run_name=f"{resolved_model_config['algorithm']}-train"

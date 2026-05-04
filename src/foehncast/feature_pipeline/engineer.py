@@ -1,9 +1,65 @@
-"""Compute derived features (wind scores, gust ratios, consistency metrics)."""
+"""Compute derived forecast features for the model."""
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+
+def _timestamp_index(df: pd.DataFrame) -> pd.DatetimeIndex:
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df.index
+    if "time" in df.columns:
+        return pd.DatetimeIndex(pd.to_datetime(df["time"]))
+    raise KeyError("Feature engineering requires a DatetimeIndex or 'time' column")
+
+
+def hour_of_day_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the forecast hour."""
+    timestamps = _timestamp_index(df)
+    hour_of_day = (
+        timestamps.hour + timestamps.minute / 60.0 + timestamps.second / 3600.0
+    )
+    values = np.sin(2 * np.pi * hour_of_day / 24.0)
+    return pd.Series(values, index=df.index, name="hour_of_day_sin")
+
+
+def hour_of_day_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the forecast hour."""
+    timestamps = _timestamp_index(df)
+    hour_of_day = (
+        timestamps.hour + timestamps.minute / 60.0 + timestamps.second / 3600.0
+    )
+    values = np.cos(2 * np.pi * hour_of_day / 24.0)
+    return pd.Series(values, index=df.index, name="hour_of_day_cos")
+
+
+def day_of_year_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the day of year."""
+    timestamps = _timestamp_index(df)
+    day_of_year = timestamps.dayofyear - 1
+    days_in_year = np.where(timestamps.is_leap_year, 366.0, 365.0)
+    values = np.sin(2 * np.pi * day_of_year / days_in_year)
+    return pd.Series(values, index=df.index, name="day_of_year_sin")
+
+
+def day_of_year_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the day of year."""
+    timestamps = _timestamp_index(df)
+    day_of_year = timestamps.dayofyear - 1
+    days_in_year = np.where(timestamps.is_leap_year, 366.0, 365.0)
+    values = np.cos(2 * np.pi * day_of_year / days_in_year)
+    return pd.Series(values, index=df.index, name="day_of_year_cos")
+
+
+def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add simple cyclical time features from each forecast timestamp."""
+    out = df.copy()
+    out["hour_of_day_sin"] = hour_of_day_sin(df)
+    out["hour_of_day_cos"] = hour_of_day_cos(df)
+    out["day_of_year_sin"] = day_of_year_sin(df)
+    out["day_of_year_cos"] = day_of_year_cos(df)
+    return out
 
 
 def wind_steadiness(df: pd.DataFrame, window: int = 3) -> pd.Series:
@@ -65,10 +121,10 @@ def engineer_features(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Data
         shore_orientation_deg: Shore orientation for the spot.
 
     Returns:
-        DataFrame with added columns: ``wind_steadiness``,
-        ``gust_factor``, ``shore_alignment``.
+        DataFrame with added columns for cyclical time, wind steadiness,
+        gust factor, and shore alignment.
     """
-    out = df.copy()
+    out = add_time_features(df)
     out["wind_steadiness"] = wind_steadiness(df)
     out["gust_factor"] = gust_factor(df)
     out["shore_alignment"] = shore_alignment(df, shore_orientation_deg)

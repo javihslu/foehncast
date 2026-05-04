@@ -1,18 +1,24 @@
 services:
-  development_env:
-    container_name: development_env
-    build: .
-    working_dir: /workspace
+  app:
+    container_name: app
+    build:
+      context: ../..
+      dockerfile: containers/app/Dockerfile
+    image: foehncast-app:local
+    command: ["/usr/local/bin/start-app.sh"]
     depends_on:
-      - objectstore
-      - model-registry
+      objectstore:
+        condition: service_started
+      objectstore-init:
+        condition: service_healthy
+      model-registry:
+        condition: service_started
     environment:
-      - FSSPEC_S3_KEY=${OBJECTSTORE_ACCESS_KEY}
-      - FSSPEC_S3_SECRET=${OBJECTSTORE_SECRET_KEY}
-      - FSSPEC_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
-      - OBJECTSTORE_ENDPOINT=${OBJECTSTORE_ENDPOINT}
-      # Use the Compose service name inside the Docker network.
       - MLFLOW_TRACKING_URI=http://model-registry:5001
+      - AWS_ACCESS_KEY_ID=${OBJECTSTORE_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${OBJECTSTORE_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
+      - OBJECTSTORE_ENDPOINT=${OBJECTSTORE_ENDPOINT}
       - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
       - STORAGE_LOCAL_PATH=${STORAGE_LOCAL_PATH:-data}
       - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-foehncast-data}
@@ -24,9 +30,9 @@ services:
       - GCP_LOCATION=${GCP_LOCATION:-}
       - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
       - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
-      - GIT_PYTHON_REFRESH=quiet
-    volumes:
-      - ../../:/workspace
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8000
+    ports:
+      - 127.0.0.1:8000:8000
     networks:
-      - development
       - production

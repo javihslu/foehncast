@@ -44,6 +44,12 @@ mlartifacts/
 # Airflow
 airflow/logs/
 airflow/airflow.db
+airflow/.init-complete
+airflow/*.pid
+airflow/airflow.cfg
+airflow/webserver_config.py
+airflow/reports/
+airflow/standalone_admin_password.txt
 
 # Misc
 *.log

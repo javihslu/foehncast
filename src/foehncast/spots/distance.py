@@ -7,6 +7,7 @@ from typing import Any
 import requests
 
 from foehncast.config import get_api_config
+from foehncast.http_client import ca_bundle
 
 _TIMEOUT = 30
 
@@ -20,7 +21,12 @@ def get_drive_minutes(
     """Return the OSRM drive time in minutes between two coordinates."""
     base_url = get_api_config()["osrm"]["base_url"].rstrip("/")
     url = f"{base_url}/{origin_lon},{origin_lat};{destination_lon},{destination_lat}"
-    response = requests.get(url, params={"overview": "false"}, timeout=_TIMEOUT)
+    response = requests.get(
+        url,
+        params={"overview": "false"},
+        timeout=_TIMEOUT,
+        verify=ca_bundle(),
+    )
     response.raise_for_status()
 
     routes = response.json().get("routes", [])

@@ -1,0 +1,25 @@
+services:
+  app:
+    platform: linux/amd64
+    volumes:
+      - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro
+
+  development_env:
+    volumes:
+      - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro
+
+  airflow-init:
+    volumes:
+      - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
+
+  airflow-webserver:
+    volumes:
+      - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
+
+  airflow-scheduler:
+    volumes:
+      - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
+
+  airflow-triggerer:
+    volumes:
+      - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro

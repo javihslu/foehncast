@@ -20,6 +20,97 @@ variable "artifact_bucket_name" {
   type        = string
 }
 
+variable "bigquery_dataset_id" {
+  description = "BigQuery dataset ID for curated feature data."
+  type        = string
+  default     = "foehncast"
+}
+
+variable "bigquery_location" {
+  description = "BigQuery location for the feature dataset."
+  type        = string
+  default     = "europe-west6"
+}
+
+variable "bigquery_feature_table_id" {
+  description = "BigQuery table ID for curated feature rows."
+  type        = string
+  default     = "forecast_features"
+}
+
+variable "provision_cloud_run_service" {
+  description = "Whether Terraform should create the Cloud Run inference service."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_run_service_name" {
+  description = "Cloud Run service name for the inference API."
+  type        = string
+  default     = "foehncast-serve"
+}
+
+variable "cloud_run_image" {
+  description = "Container image URI for the Cloud Run inference service. Leave empty to use the default Artifact Registry path."
+  type        = string
+  default     = ""
+}
+
+variable "cloud_run_container_port" {
+  description = "Container port exposed by the Cloud Run service."
+  type        = number
+  default     = 8080
+}
+
+variable "cloud_run_allow_unauthenticated" {
+  description = "Whether the Cloud Run service should allow unauthenticated requests."
+  type        = bool
+  default     = true
+}
+
+variable "cloud_run_min_instance_count" {
+  description = "Minimum number of Cloud Run instances kept warm."
+  type        = number
+  default     = 0
+}
+
+variable "cloud_run_max_instance_count" {
+  description = "Maximum number of Cloud Run instances."
+  type        = number
+  default     = 2
+}
+
+variable "cloud_run_cpu" {
+  description = "CPU limit for the Cloud Run container."
+  type        = string
+  default     = "1"
+}
+
+variable "cloud_run_memory" {
+  description = "Memory limit for the Cloud Run container."
+  type        = string
+  default     = "512Mi"
+}
+
+variable "mlflow_tracking_uri" {
+  description = "Reachable MLflow tracking URI for the Cloud Run inference service."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      !var.provision_cloud_run_service || trimspace(var.mlflow_tracking_uri) != ""
+    )
+    error_message = "Set mlflow_tracking_uri when provision_cloud_run_service is true."
+  }
+}
+
+variable "cloud_run_env_vars" {
+  description = "Additional environment variables for the Cloud Run inference service."
+  type        = map(string)
+  default     = {}
+}
+
 variable "github_owner" {
   description = "GitHub organization or user that owns the repository."
   type        = string

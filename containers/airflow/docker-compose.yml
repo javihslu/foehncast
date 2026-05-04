@@ -1,28 +1,82 @@
+x-airflow-common: &airflow-common
+  build:
+    context: ../..
+    dockerfile: containers/airflow/Dockerfile
+  image: foehncast-airflow:local
+  working_dir: /workspace
+  depends_on:
+    - objectstore
+    - model-registry
+  environment:
+    - AIRFLOW_HOME=/workspace/airflow
+    - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+    - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
+    - AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////workspace/airflow/airflow.db
+    - MLFLOW_TRACKING_URI=http://model-registry:5001
+    - AWS_ACCESS_KEY_ID=${OBJECTSTORE_ACCESS_KEY}
+    - AWS_SECRET_ACCESS_KEY=${OBJECTSTORE_SECRET_KEY}
+    - MLFLOW_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
+    - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
+    - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
+    - OBJECTSTORE_ENDPOINT=http://objectstore:9000
+    - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+    - STORAGE_LOCAL_PATH=${STORAGE_LOCAL_PATH:-data}
+    - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-foehncast-data}
+    - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-http://objectstore:9000}
+    - STORAGE_BIGQUERY_PROJECT_ID=${STORAGE_BIGQUERY_PROJECT_ID:-}
+    - STORAGE_BIGQUERY_DATASET=${STORAGE_BIGQUERY_DATASET:-foehncast}
+    - STORAGE_BIGQUERY_TABLE=${STORAGE_BIGQUERY_TABLE:-forecast_features}
+    - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+    - GCP_LOCATION=${GCP_LOCATION:-}
+    - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
+    - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+    - PYTHONPATH=/workspace/src
+  volumes:
+    - ../../:/workspace
+  networks:
+    - development
+
 services:
-  airflow:
-    container_name: airflow
-    build:
-      context: ../..
-      dockerfile: containers/airflow/Dockerfile
-    image: foehncast-airflow:local
-    working_dir: /workspace
-    command: bash -lc "cd /workspace && uv pip install --system -e . && airflow standalone"
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    environment:
+      - AIRFLOW_ADMIN_USERNAME=admin
+      - AIRFLOW_ADMIN_FIRSTNAME=Admin
+      - AIRFLOW_ADMIN_LASTNAME=User
+      - AIRFLOW_ADMIN_ROLE=Admin
+      - AIRFLOW_ADMIN_EMAIL=admin@example.com
+      - AIRFLOW_ADMIN_PASSWORD=admin
+    command: ["/usr/local/bin/init-airflow.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /workspace/airflow/.init-complete"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+    command: ["/usr/local/bin/start-airflow-webserver.sh"]
     ports:
       - 127.0.0.1:8080:8080
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
     depends_on:
-      - objectstore
-      - model-registry
-    environment:
-      - AIRFLOW_HOME=${AIRFLOW_HOME}
-      - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
-      - AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////workspace/airflow/airflow.db
-      - MLFLOW_TRACKING_URI=http://model-registry:5001
-      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
-      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
-      - OBJECTSTORE_ENDPOINT=http://objectstore:9000
-      - PYTHONPATH=/workspace/src
-    volumes:
-      - ../../:/workspace
-    networks:
-      - development
+      airflow-init:
+        condition: service_healthy
+    command: ["/usr/local/bin/start-airflow-scheduler.sh"]
+
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow-triggerer
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+    command: ["/usr/local/bin/start-airflow-triggerer.sh"]
