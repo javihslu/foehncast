@@ -1,5 +1,26 @@
 # Terraform Baseline
 
+This directory defines the shared GCP baseline plus the two hosted deployment paths already described in the public docs.
+
+## Terraform In One View
+
+| Surface | Purpose | Current role |
+|---------|---------|--------------|
+| Shared GCP baseline | APIs, storage, identities, and registries | common foundation for both hosted paths |
+| Online compose host | full Airflow, MLflow, and API stack | simplest way to keep the whole project online |
+| Optional Cloud Run path | inference-only FastAPI service | separate hosted surface for the app |
+| GitHub OIDC delivery | remote Terraform and image-based deploys | repeatable automation path |
+
+```mermaid
+flowchart LR
+   TF[Terraform] --> BASE[Shared GCP baseline]
+   BASE --> HOST[Online compose host]
+   BASE --> RUN[Optional Cloud Run service]
+   BASE --> GH[GitHub OIDC delivery]
+```
+
+## What This Directory Covers
+
 This directory covers two cloud paths:
 
 - a shared GCP baseline for datasets, registries, identities, and optional Cloud Run inference
@@ -18,6 +39,12 @@ Terraform can provision:
 - an optional Compute Engine host for the full online container stack
 
 The Cloud Run service remains inference-only. The full online stack is the compose-host path.
+
+## Which Path To Use
+
+- Use the online compose host when you want Airflow, MLflow, and the API online together.
+- Use Cloud Run when you only need the inference API as a hosted service.
+- Use the shared GCP baseline even if you are still validating locally, because it provides the storage and identity pieces reused by both hosted paths.
 
 ## Cloud Run Inputs
 
@@ -49,6 +76,13 @@ The online host starts:
 By default, `online_compose_public_ports = [8000]`, so only the app is internet-reachable. If you want public admin UIs, add `8080` or `5001` deliberately.
 
 The compose-host path is the simplest way to keep the whole course stack online without forcing Airflow into Cloud Run.
+
+## What The Hosted Paths Expose
+
+| Path | Public surface by default | Notes |
+|------|---------------------------|-------|
+| Online compose host | app on port `8000` | Airflow and MLflow stay private unless explicitly exposed |
+| Cloud Run | inference API URL | app-only deployment |
 
 ## Teardown
 
@@ -131,6 +165,12 @@ For a personal deployment:
 - fork the repository and configure the same GitHub Actions variables and secrets in that fork
 
 That keeps billing, package ownership, and cloud credentials aligned with the person or team operating the environment. Compute, storage, and network costs stay with that operator.
+
+## Recommended Reading Order
+
+1. Read the root `README.md` for the runtime overview.
+2. Use this file when you need the Terraform-specific deployment inputs and teardown steps.
+3. Use `docs/site/system/cloud-mapping.md` when you want the higher-level architecture explanation.
 
 ## Interactive Setup
 

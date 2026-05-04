@@ -1,13 +1,13 @@
 # Milestones
 
-The site still follows the four course milestones, but the project is now past the pure planning stage. The local stack already proves the full pipeline split, so the remaining milestone work is mainly packaging, cloud mapping, and operational polish.
+The milestone pages mirror the four course checkpoints and are written as stable reference pages. Together they show how the project moves from proposal, to validated local execution, to presentation, to final integration.
 
-| Milestone | Status | Focus in These Pages |
-|-----------|--------|----------------------|
-| MS1 Proposal | Completed | Problem, data, features, and baseline architecture |
-| MS2 Coaching | Completed locally | Feature, training, and inference paths running together |
-| MS3 Presentation | In preparation | Simple demo story, site walkthrough, and working diagrams |
-| MS4 Final Code | In progress | Cloud mapping, automation, monitoring, and final structure |
+| Milestone | Checkpoint state | What the page covers |
+|-----------|------------------|----------------------|
+| MS1 Proposal | Submitted | Problem framing, data, features, and baseline architecture |
+| MS2 Backend | Validated locally | Feature, training, and inference paths running together |
+| MS3 Presentation | Presentation scope | The demonstration story and the system explanation used for the checkpoint |
+| MS4 Final Code | Final integration | Cloud mapping, automation, monitoring, and final packaging |
 
 <div class="grid cards" markdown>
 
@@ -19,8 +19,8 @@ The site still follows the four course milestones, but the project is now past t
 
   This page shows the backend that already runs locally.
 
-- **Keep MS3 and MS4 in view**
+- **Use MS3 and MS4 as the bridge to delivery**
 
-  These pages now focus on the presentation path, cloud direction, and final wrap-up work.
+  These pages connect the validated local backend to the presentation story and the final system handoff.
 
 </div>

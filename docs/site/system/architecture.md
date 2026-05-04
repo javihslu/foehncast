@@ -1,64 +1,99 @@
 # Architecture
 
-FoehnCast keeps a clear Feature-Training-Inference split. The important point now is that these boundaries are no longer only planned: they run together locally and form the base for the cloud roadmap.
+FoehnCast keeps one stable Feature-Training-Inference split across every runtime mode. What changes across milestones is the hosting model around that split, not the application boundaries themselves.
 
-## Working Local Architecture
+!!! note "How to read this page"
 
-```mermaid
+    The validated baseline is the local Compose stack.
+    The hosted paths reuse the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
+
+## Architecture In One View
+
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>Feature pipeline</strong></p>
+<p>Forecast data is ingested, engineered, validated, and stored as curated feature rows.</p>
+</li>
+<li>
+<p><strong>Training pipeline</strong></p>
+<p>Curated rows are labeled, used for training and evaluation, and registered through MLflow.</p>
+</li>
+<li>
+<p><strong>Inference pipeline</strong></p>
+<p>The FastAPI app serves health, predict, rank, and optional online-feature routes.</p>
+</li>
+<li>
+<p><strong>Runtime surfaces</strong></p>
+<p>The same pipeline split can run locally, on a full online compose host, or as an inference-only Cloud Run service.</p>
+</li>
+</ul>
+</div>
+
+## Current Local Architecture
+
+<div class="mermaid">
 flowchart TD
     OME[Open-Meteo] --> FEAT[Feature DAG]
-    FEAT --> PAR[(Curated feature parquet)]
+    FEAT --> PAR[(Curated features)]
     PAR --> TRAIN[Training DAG]
     TRAIN --> MLF[(MLflow registry)]
 
-    OME --> APP[Inference app]
+    OME --> APP[FastAPI app]
     OSRM[OSRM] --> APP
     MLF --> APP
 
-    PAR --> FEXP[Optional Feast export]
-    FEXP --> FEAST[(Feast online store)]
+    PAR --> FEAST[(Optional Feast lookup)]
     FEAST --> APP
-```
+</div>
 
-## Pipeline Responsibilities
+## Stable Pipeline Boundaries
 
-| Layer | Role | Current state |
-|------|------|---------------|
-| Feature pipeline | Collect, transform, validate, and store weather data | implemented and runnable through Airflow |
-| Training pipeline | Label data, train the model, evaluate it, and register it | implemented and runnable through Airflow |
-| Inference pipeline | Produce predictions, rank spots, and expose results | implemented in the app container |
-| Optional feature serving | Surface curated rows through Feast for online lookup | implemented as an optional layer on top of the same local features |
+| Layer | Responsibility | Current runtime surface |
+|------|----------------|-------------------------|
+| Feature pipeline | Collect, engineer, validate, and store weather data | local Airflow DAG plus the configured storage backend |
+| Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
+| Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
+| Optional online features | Surface curated fields through an online lookup route | optional Feast-backed path plus demo page |
 
-## Infrastructure Baseline
+## Current Runtime Surfaces
 
-| Component | Local now | Cloud target |
-|-----------|-----------|--------------|
-| Feature storage | Local Parquet, with optional Feast export on top | BigQuery, optionally surfaced through Feast |
-| Model registry | MLflow with local services | MLflow with cloud-backed artifacts |
-| Serving | FastAPI app container | Cloud Run |
-| Orchestration | Airflow containers | Cloud Composer / managed Airflow |
-| Artifacts | Local MLflow artifact volume | GCS |
-| Monitoring | Minimal local baseline | later MS4 work |
+| Mode | What runs there | Purpose |
+|------|-----------------|---------|
+| Local Compose baseline | Airflow, MLflow, FastAPI, and the development container | default validated path for development and course evaluation |
+| Online compose host | the full Airflow, MLflow, and API stack on one GCP host | simplest way to keep the whole project online |
+| Optional Cloud Run path | the FastAPI inference service only | separate deployable serving surface |
+| GitHub automation | image publishing and Terraform workflows | repeatable delivery for the hosted paths |
 
-## Current Validation
+The online compose host exposes only the app on port `8000` by default. Airflow and MLflow stay private unless their ports are explicitly opened.
 
-- The feature DAG runs successfully in Airflow.
-- The training DAG runs successfully in Airflow.
-- The inference service responds from its own container.
-- The optional Feast path can apply, materialize, and serve online features.
-- The container-side test suite passes.
+## Representative Validation
 
-## Roadmap Shape
+| Check | What it shows |
+|-------|---------------|
+| feature DAG run through Airflow | the feature path executes inside the orchestration layer |
+| training DAG run through Airflow | the training path executes inside the orchestration layer |
+| API health and prediction routes | the app serves a real model-backed inference surface |
+| optional Feast lookup path | the curated features can also be surfaced online without changing the base pipeline split |
+| container-side test suite | the local runtime remains reproducible after stack setup |
 
-```mermaid
+## How The Hosted Paths Relate
+
+<div class="mermaid">
 flowchart LR
-    LOCAL[Local proof<br/>Compose + Airflow + MLflow] --> DATA[Cloud data path<br/>BigQuery + GCS]
-    DATA --> RUNTIME[Cloud runtime<br/>Cloud Run + managed Airflow]
-    RUNTIME --> OPS[Operations<br/>Automation + monitoring]
-```
+    LOCAL[Validated local stack] --> HOST[Online compose host<br/>full stack]
+    LOCAL --> RUN[Optional Cloud Run app<br/>inference only]
+    HOST --> NEXT[More managed cloud mapping]
+    RUN --> NEXT
+</div>
 
-The local stack is now a proof of execution, not the final hosting model. The next step is to map the same pipeline boundaries onto managed GCP services instead of changing the application structure.
+The online compose host is the current full-stack hosted path. Cloud Run remains a useful inference-only path. Both reuse the same application structure instead of creating a second architecture.
 
-An optional Feast repo can now sit on top of the same curated features: local runs can export a single parquet source for Feast, while the cloud path can point the same logical feature view at BigQuery.
+## Why This Architecture Holds Up
 
-See the cloud target in [cloud-mapping.md](cloud-mapping.md).
+- The personalized ranking logic stays in the inference layer.
+- Feature engineering and training remain reusable across local and hosted paths.
+- Hosted changes mostly affect storage, auth, orchestration, and image delivery.
+- Optional components such as Feast layer on top of the same curated features instead of splitting the design.
+
+See [Use Case and Data](use-case.md) for the rider-focused problem framing and [Cloud Mapping](cloud-mapping.md) for the hosted path details.

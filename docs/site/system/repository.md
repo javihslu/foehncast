@@ -1,5 +1,7 @@
 # Repository
 
+The repository keeps runtime code, orchestration, tests, and public documentation separate so the same Feature-Training-Inference split stays visible in both the source tree and the deployment story.
+
 ## Current Layout
 
 ```text
@@ -19,31 +21,17 @@ tests/
 docs/
 ```
 
-## Central Configuration
+## Where To Start
 
-```python
-def load_config(path: Path | None = None) -> dict[str, Any]:
-    global _config
-    if _config is None or path is not None:
-        p = path or _CONFIG_PATH
-        with open(p) as f:
-            _config = yaml.safe_load(f)
-    return _config
-```
+- `src/foehncast/`: the application modules for configuration, feature engineering, training, inference, monitoring, and spot metadata.
+- `dags/`: Airflow entry points for the feature and training workflows.
+- `tests/`: regression coverage for the core pipeline logic and API behavior.
+- `docs/`: the public journal, milestone pages, and system notes used in the course handoff.
 
-The repository uses one YAML configuration file instead of scattering constants across modules.
+## Why The Layout Matters
 
-## Feature Engineering Entry Point
+The runtime code lives under one package, while orchestration, tests, and docs stay beside it instead of being mixed into the same folder tree. That makes it easier to explain which parts define the model pipeline, which parts schedule it, and which parts document it.
 
-```python
-def engineer_features(
-    df: pd.DataFrame, shore_orientation_deg: float
-) -> pd.DataFrame:
-    out = df.copy()
-    out["wind_steadiness"] = wind_steadiness(df)
-    out["gust_factor"] = gust_factor(df)
-    out["shore_alignment"] = shore_alignment(df, shore_orientation_deg)
-    return out
-```
+Central configuration lives in `config.yaml` and `src/foehncast/config.py`, so the feature, training, and inference paths read from the same settings model instead of scattering constants across modules.
 
-This function is the current bridge between raw weather data and the model feature vector.
+Feature engineering starts in `feature_pipeline/engineer.py`, where raw weather inputs are turned into the engineered feature vector shared by training and inference.
