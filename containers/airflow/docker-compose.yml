@@ -5,7 +5,6 @@ x-airflow-common: &airflow-common
   image: foehncast-airflow:local
   working_dir: /workspace
   depends_on:
-    - objectstore
     - model-registry
   environment:
     - AIRFLOW_HOME=/workspace/airflow
@@ -13,17 +12,16 @@ x-airflow-common: &airflow-common
     - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
     - AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags
     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////workspace/airflow/airflow.db
+    - AIRFLOW__WEBSERVER__CONFIG_FILE=/opt/airflow/webserver_config.py
+    - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=false
     - MLFLOW_TRACKING_URI=http://model-registry:5001
-    - AWS_ACCESS_KEY_ID=${OBJECTSTORE_ACCESS_KEY}
-    - AWS_SECRET_ACCESS_KEY=${OBJECTSTORE_SECRET_KEY}
-    - MLFLOW_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
-    - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
-    - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
-    - OBJECTSTORE_ENDPOINT=http://objectstore:9000
+    - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY:-}
+    - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY:-}
+    - OBJECTSTORE_ENDPOINT=${OBJECTSTORE_ENDPOINT:-}
     - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
     - STORAGE_LOCAL_PATH=${STORAGE_LOCAL_PATH:-data}
     - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-foehncast-data}
-    - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-http://objectstore:9000}
+    - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-}
     - STORAGE_BIGQUERY_PROJECT_ID=${STORAGE_BIGQUERY_PROJECT_ID:-}
     - STORAGE_BIGQUERY_DATASET=${STORAGE_BIGQUERY_DATASET:-foehncast}
     - STORAGE_BIGQUERY_TABLE=${STORAGE_BIGQUERY_TABLE:-forecast_features}
@@ -42,12 +40,13 @@ services:
     <<: *airflow-common
     container_name: airflow-init
     environment:
-      - AIRFLOW_ADMIN_USERNAME=admin
-      - AIRFLOW_ADMIN_FIRSTNAME=Admin
-      - AIRFLOW_ADMIN_LASTNAME=User
-      - AIRFLOW_ADMIN_ROLE=Admin
-      - AIRFLOW_ADMIN_EMAIL=admin@example.com
-      - AIRFLOW_ADMIN_PASSWORD=admin
+      - AIRFLOW_CREATE_ADMIN_USER=${AIRFLOW_CREATE_ADMIN_USER:-false}
+      - AIRFLOW_ADMIN_USERNAME=${AIRFLOW_ADMIN_USERNAME:-admin}
+      - AIRFLOW_ADMIN_FIRSTNAME=${AIRFLOW_ADMIN_FIRSTNAME:-Admin}
+      - AIRFLOW_ADMIN_LASTNAME=${AIRFLOW_ADMIN_LASTNAME:-User}
+      - AIRFLOW_ADMIN_ROLE=${AIRFLOW_ADMIN_ROLE:-Admin}
+      - AIRFLOW_ADMIN_EMAIL=${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+      - AIRFLOW_ADMIN_PASSWORD=${AIRFLOW_ADMIN_PASSWORD:-admin}
     command: ["/usr/local/bin/init-airflow.sh"]
     healthcheck:
       test: ["CMD-SHELL", "test -f /workspace/airflow/.init-complete"]

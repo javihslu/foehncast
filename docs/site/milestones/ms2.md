@@ -2,7 +2,21 @@
 
 <span class="fc-pill fc-pill--done">Completed</span>
 
-MS2 turned the proposal into a working back-end. The local container stack now runs the feature, training, and inference paths, and Airflow can execute the feature and training pipelines end to end.
+MS2 is the point where the project stopped being just a proposal. The local stack now runs the feature, training, and inference paths together with real forecast data.
+
+## What Runs End To End
+
+```mermaid
+flowchart LR
+    OME[Open-Meteo] --> FEAT[Feature DAG]
+    FEAT --> PAR[(Curated features)]
+    PAR --> TRAIN[Training DAG]
+    TRAIN --> MLF[(MLflow)]
+    MLF --> APP[FastAPI app]
+    OME --> APP
+    OSRM[OSRM] --> APP
+    APP --> OUT[Predict and rank responses]
+```
 
 ## Current Backend Status
 
@@ -16,7 +30,8 @@ MS2 turned the proposal into a working back-end. The local container stack now r
 | `training_pipeline` | done | Labels data, trains the model, logs metrics, and registers a version in MLflow |
 | `inference_pipeline` | done | Serves `/health`, `/spots`, `/predict`, and `/rank` |
 | `dags/` | done | Airflow runs the feature DAG and the training DAG |
-| Docker stack | done | Airflow, MLflow, MinIO, app, and development container run through Compose |
+| Docker stack | done | Airflow, MLflow, app, and development container run through Compose |
+| Optional Feast path | done | Curated local features can also be exported, materialized, and queried online |
 
 ## What Was Validated
 
@@ -26,27 +41,12 @@ MS2 turned the proposal into a working back-end. The local container stack now r
 - `curl -fsS -X POST http://127.0.0.1:8000/predict ...` returned live predictions from the app container.
 - `docker compose --env-file .env.example exec -T development_env uv run pytest` passed with `72 passed`.
 
-## What MS2 Shows
+## Why MS2 Matters
 
-<div class="grid cards" markdown>
-
-- **Feature path**
-
-    Forecast data can be fetched, engineered, validated, and stored through one runnable pipeline.
-
-- **Training path**
-
-    Airflow can train a model, write an evaluation report, and register a new version in MLflow.
-
-- **Inference path**
-
-    A dedicated app container serves prediction and ranking endpoints from the same stack.
-
-- **Reproducibility**
-
-    The back-end can be started and tested from Docker Compose instead of depending on host-only runs.
-
-</div>
+- The full FTI split now exists in runnable code.
+- Airflow is already exercising the feature and training paths.
+- The app already serves the inference path from the registered model.
+- The local stack is a proof of execution, not a mock-up.
 
 ## Next Step Toward The Cloud
 

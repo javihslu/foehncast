@@ -248,3 +248,115 @@ def test_rank_endpoint_returns_404_for_unknown_spot(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Unknown spot requested: unknown-spot"}
+
+
+def test_online_features_endpoint_returns_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "feature_service": None,
+        "returned_features": ["wind_speed_10m", "gust_factor"],
+        "rows": [
+            {
+                "spot_id": "silvaplana",
+                "wind_speed_10m": 14.0,
+                "gust_factor": 1.5,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        serve,
+        "get_online_spot_features",
+        lambda spot_ids, feature_names: payload,
+    )
+    client = TestClient(serve.app)
+
+    response = client.post(
+        "/features/online",
+        json={
+            "spot_ids": ["silvaplana"],
+            "feature_names": ["wind_speed_10m", "gust_factor"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == payload
+
+
+def test_online_features_endpoint_returns_404_for_unknown_spot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_missing_spot(
+        spot_ids: list[str] | None, feature_names: list[str] | None
+    ) -> dict[str, object]:
+        raise KeyError("Unknown spot requested: unknown-spot")
+
+    monkeypatch.setattr(serve, "get_online_spot_features", raise_missing_spot)
+    client = TestClient(serve.app)
+
+    response = client.post(
+        "/features/online",
+        json={"spot_ids": ["unknown-spot"], "feature_names": ["wind_speed_10m"]},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Unknown spot requested: unknown-spot"}
+
+
+def test_online_features_endpoint_returns_400_for_invalid_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_invalid_features(
+        spot_ids: list[str] | None, feature_names: list[str] | None
+    ) -> dict[str, object]:
+        raise ValueError("At least one non-empty feature name must be provided")
+
+    monkeypatch.setattr(serve, "get_online_spot_features", raise_invalid_features)
+    client = TestClient(serve.app)
+
+    response = client.post(
+        "/features/online",
+        json={"spot_ids": ["silvaplana"], "feature_names": [""]},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "At least one non-empty feature name must be provided"
+    }
+
+
+def test_online_features_endpoint_returns_503_when_feast_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_unavailable(
+        spot_ids: list[str] | None, feature_names: list[str] | None
+    ) -> dict[str, object]:
+        raise RuntimeError("Feast is not installed in this environment")
+
+    monkeypatch.setattr(serve, "get_online_spot_features", raise_unavailable)
+    client = TestClient(serve.app)
+
+    response = client.post(
+        "/features/online",
+        json={"spot_ids": ["silvaplana"], "feature_names": ["wind_speed_10m"]},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Feast is not installed in this environment"}
+
+
+def test_online_features_demo_endpoint_returns_html(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        serve,
+        "render_online_features_demo",
+        lambda: "<html><body>online features demo</body></html>",
+    )
+    client = TestClient(serve.app)
+
+    response = client.get("/features/online/demo")
+
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert response.text == "<html><body>online features demo</body></html>"

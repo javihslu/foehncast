@@ -7,7 +7,7 @@ set -eu
 
 mlflow_host="${MLFLOW_HOST:-0.0.0.0}"
 mlflow_port="${MLFLOW_PORT:-5001}"
-artifact_destination="${MLFLOW_ARTIFACT_DESTINATION:-s3://artifacts}"
+artifact_destination="${MLFLOW_ARTIFACT_DESTINATION:-file:///mlartifacts}"
 backend_store_uri="${MLFLOW_BACKEND_STORE_URI:-sqlite:///metadata/metadata.sqlite}"
 
 exec mlflow server \

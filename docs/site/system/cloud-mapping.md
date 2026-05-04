@@ -1,13 +1,22 @@
 # Cloud Mapping
 
-FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal is not to invent a second architecture, but to move the validated local container stack onto managed GCP services.
+FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal is simple: move the validated local stack onto managed GCP services instead of redesigning the project.
 
 ## Mapping Principle
 
 - Local Docker proves that the pipelines run together.
 - Cloud deployment keeps the same pipeline boundaries.
-- Support services in the cloud replace local-only tools such as MinIO.
+- Cloud services replace the local support services used for evaluation and development.
 - The app remains a deployable container because inference is a service, not a DAG.
+
+## Roadmap Diagram
+
+```mermaid
+flowchart LR
+	LOCAL[Local proof<br/>Compose + Airflow + MLflow] --> DATA[Cloud data<br/>BigQuery + GCS]
+	DATA --> RUN[Cloud runtime<br/>Cloud Run + managed Airflow]
+	RUN --> OPS[Operations<br/>automation + monitoring]
+```
 
 ## Local To Cloud Mapping
 
@@ -15,82 +24,54 @@ FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal
 |----------------|-------------|------|
 | `app` container | Cloud Run service | Serve `/health`, `/spots`, `/predict`, and `/rank` |
 | Airflow containers | Cloud Composer / managed Airflow | Schedule and run feature and training DAGs |
-| MinIO object store | GCS bucket | Store artifacts and other object data |
-| Local feature storage | BigQuery tables | Hold curated feature data for cloud pipelines |
-| MLflow with SQLite + MinIO | MLflow service with GCS-backed artifacts | Track runs, metrics, and registered model versions |
+| Local MLflow artifact volume | GCS bucket | Store model artifacts and other object data |
+| Local feature storage and optional Feast parquet export | BigQuery tables or a Feast-backed BigQuery view | Hold curated feature data for cloud pipelines |
+| MLflow with SQLite + local artifacts | MLflow service with GCS-backed artifacts | Track runs, metrics, and registered model versions |
 | Artifact Registry bootstrap | Artifact Registry | Store deployable container images |
 | `development_env` container | CI jobs and local prototyping only | Keep local workflows reproducible without becoming a cloud runtime |
 
 ## Cloud Pipeline Shape
 
-### Feature pipeline
+```mermaid
+flowchart TD
+	OME[Open-Meteo] --> FEAT[Feature job]
+	FEAT --> BQ[(BigQuery curated features)]
+	BQ --> TRAIN[Training job]
+	TRAIN --> MLF[(MLflow)]
+	MLF --> RUN[Cloud Run app]
+	OME --> RUN
+	OSRM[OSRM] --> RUN
+	BQ --> FEAST[Optional Feast view]
+	FEAST --> RUN
+```
 
-1. Airflow triggers ingestion from Open-Meteo.
-2. Feature engineering and validation run in Python modules.
-3. Curated feature outputs are written to BigQuery.
-4. Optional raw or intermediate artifacts can still be written to GCS.
-
-### Training pipeline
-
-1. Airflow triggers training on the current feature data.
-2. The training job reads from BigQuery.
-3. Metrics and artifacts are logged to MLflow.
-4. The trained model is registered and promoted by alias.
-5. The evaluation report is written from logged metrics, not by reloading the model in a later task.
-
-### Inference pipeline
-
-1. Cloud Run serves the FastAPI container.
-2. The service fetches live forecasts and loads the promoted model version.
-3. Ranking stays inside the service because it is request-driven logic.
+- **Feature pipeline**: write curated rows to BigQuery.
+- **Training pipeline**: read curated rows, train, evaluate, and register through MLflow.
+- **Inference pipeline**: keep serving inside the app container on Cloud Run.
+- **Optional Feast path**: point the same logical feature view at BigQuery instead of local parquet.
 
 ## What Changes In The Cloud
 
 | Area | Local now | Cloud target |
 |------|-----------|--------------|
-| Feature storage | local Parquet or S3-compatible store | BigQuery |
-| Artifacts | MinIO | GCS |
+| Feature storage | local Parquet, optional S3-compatible store, optional Feast parquet export | BigQuery, optionally surfaced through Feast |
+| Artifacts | local MLflow artifact volume | GCS |
 | Orchestration | local Airflow containers | Cloud Composer / managed Airflow |
 | Inference | local app container | Cloud Run |
 | Runtime auth | local env file | service accounts and OIDC |
 
-## Deployment Ownership
+## What Is Already In Place
 
-- Terraform should provision the GCP resources and deployment identities.
-- GitHub Actions should build, publish, and deploy the app image to the existing Cloud Run service.
-- Airflow should run feature and training jobs after the platform already exists.
+- Terraform already covers the first cloud runtime slice.
+- The repo already contains a Cloud Run deployment path and Artifact Registry publishing flow.
+- The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
+- Local container runs can already mount ADC for BigQuery-based checks.
 
-Airflow is not the right place to create cloud infrastructure or release application services. A fresh-machine clone plus GCP login and deploy script is useful for maintainers as a recovery path, but it is not the best default experience for a professor or first-time developer.
+## What Still Needs To Be Finished
 
-## Local BigQuery Development Path
-
-For local Docker runs, the shared config can now switch to `storage.backend=bigquery` entirely through environment variables.
-
-The remaining requirement is credentials inside the Linux containers. Use:
-
-1. `./scripts/gcp-auth.sh`
-2. `docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.gcp.yml up -d`
-
-The optional `docker-compose.gcp.yml` override mounts the host `~/.config/gcloud` directory into the app, Airflow, and development containers, and it pins the deployable app service to `linux/amd64` so local image checks match the GCP target architecture without a second Compose file.
-
-## What Still Needs To Be Added
-
-- A cloud-hosted MLflow deployment choice.
-- Managed Airflow provisioning and DAG deployment.
-
-## Current Terraform Support
-
-The Terraform baseline now covers the first cloud runtime slice:
-
-- Artifact Registry and GCS bootstrap
-- BigQuery dataset plus curated feature table
-- an optional Cloud Run inference service definition
-
-The repository now also includes a GitHub Actions workflow that publishes the `containers/app/Dockerfile` image to Artifact Registry on `main` and can update the Terraform-managed Cloud Run service when the required OIDC, registry, and service-name variables are configured.
-
-The application code now also supports a `bigquery` storage backend through the shared feature-store abstraction, so feature writes and training reads can move to BigQuery without changing the pipeline modules themselves. Local container runs can mount ADC via `docker-compose.gcp.yml`, while Cloud Run keeps using its runtime service account.
-
-The Cloud Run service still stays opt-in at the Terraform layer, but once it exists the delivery path is now direct: publish an immutable app image and roll the Cloud Run service forward to that image from GitHub Actions.
+- Finalize the managed MLflow hosting choice.
+- Finalize managed Airflow provisioning and DAG deployment.
+- Add the remaining automation and monitoring needed for the final submission.
 
 ## Why This Fits The Project Brief
 

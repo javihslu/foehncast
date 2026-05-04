@@ -24,11 +24,36 @@ After it finishes, the main endpoints are:
 - App: `http://127.0.0.1:8000`
 - Airflow: `http://127.0.0.1:8080`
 - MLflow: `http://127.0.0.1:5001`
-- MinIO: `http://127.0.0.1:9001`
+
+Airflow and MLflow open directly in the local stack without a login.
+The local bootstrap script resets Docker volumes before starting so the evaluator path always begins from a clean local state.
+Feature data defaults to local files, while MLflow stores artifacts through the local tracking server instead of a separate object-store UI.
 
 Example request:
 
 `curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{"spot_ids":["silvaplana","urnersee"]}'`
+
+### Optional Feast path
+
+Feast is now available as an optional layer on top of the same curated features.
+
+For local use:
+
+1. Install the optional group: `uv sync --group feast`
+2. Export and register the local Feast repo: `./scripts/prepare-feast-local.sh`
+3. Materialize the latest rows into Feast's local online store:
+   `cd feature_repo && uv run --group feast feast materialize-incremental "$(date -u +"%Y-%m-%dT%H:%M:%S")"`
+4. Fetch values through the application-side helper:
+   `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_factor']))"`
+5. Or query the optional HTTP endpoint after starting the app:
+   `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_factor"]}'`
+6. Or open the built-in demo page in the running app:
+   `http://127.0.0.1:8000/features/online/demo`
+
+This does not change the default local bootstrap. The existing Airflow and MLflow path remains the default evaluator workflow.
+See `feature_repo/README.md` for the repo-specific local and cloud Feast commands.
+
+For cloud use, the same Feast definitions can point at BigQuery by using `feature_repo/feature_store.gcp.yaml.example`, setting `FOEHNCAST_FEAST_SOURCE=bigquery`, and pointing `FOEHNCAST_FEAST_BIGQUERY_TABLE` at a curated BigQuery table or view.
 
 ### Personal GCP quick start
 
@@ -120,4 +145,5 @@ The least invasive default is therefore: local browser auth plus Terraform for p
 
 - Local stack notes: `containers/README.md`
 - Cloud mapping: `docs/site/system/cloud-mapping.md`
+- Optional Feast repo: `feature_repo/README.md`
 - Terraform baseline: `terraform/README.md`

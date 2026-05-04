@@ -30,6 +30,9 @@ compose() {
   docker compose --env-file "$ENV_FILE" "$@"
 }
 
+echo "Resetting local stack state for a clean run..."
+compose down -v --remove-orphans >/dev/null 2>&1 || true
+
 echo "Starting local stack..."
 compose up --build -d --remove-orphans
 
@@ -49,7 +52,9 @@ echo "Local stack is ready."
 echo "App:      http://127.0.0.1:8000"
 echo "Airflow:  http://127.0.0.1:8080"
 echo "MLflow:   http://127.0.0.1:5001"
-echo "MinIO:    http://127.0.0.1:9001"
+echo "Airflow and MLflow open directly in local mode."
+echo "This bootstrap path resets local Docker volumes so MLflow and Airflow start from a clean state."
+echo "Feature storage defaults to local files; optional S3-compatible settings are only needed for non-default experiments."
 echo
 echo "Sample check:"
 echo "curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{\"spot_ids\":[\"silvaplana\",\"urnersee\"]}'"

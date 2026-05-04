@@ -7,25 +7,18 @@ services:
     hostname: model-registry
     ports:
       - 127.0.0.1:5001:5001
-    depends_on:
-      objectstore:
-        condition: service_started
-      objectstore-init:
-        condition: service_healthy
     environment:
-      # MLflow uses boto3 to talk to MinIO through its S3-compatible API.
-      - AWS_ACCESS_KEY_ID=${OBJECTSTORE_ACCESS_KEY}
-      - AWS_SECRET_ACCESS_KEY=${OBJECTSTORE_SECRET_KEY}
-      - MLFLOW_S3_ENDPOINT_URL=${OBJECTSTORE_ENDPOINT}
       - MLFLOW_HOST=0.0.0.0
       - MLFLOW_PORT=5001
-      - MLFLOW_ARTIFACT_DESTINATION=s3://${OBJECTSTORE_BUCKET}
+      - MLFLOW_ARTIFACT_DESTINATION=${MLFLOW_ARTIFACT_DESTINATION:-file:///mlartifacts}
       - MLFLOW_BACKEND_STORE_URI=sqlite:///metadata/metadata.sqlite
     volumes:
       - mlflow_metadata:/metadata
+      - mlflow_artifacts:/mlartifacts
     networks:
       - development
       - production
 
 volumes:
+  mlflow_artifacts:
   mlflow_metadata:

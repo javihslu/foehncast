@@ -8,18 +8,13 @@ This directory holds the files for the local container stack.
 
 ## Main components
 
-### `objectstore/`
-
-- `objectstore`: runs MinIO for local object storage.
-- `objectstore-init`: creates the artifact bucket that MLflow needs before the registry starts.
-
 ### `mlflow/`
 
-- `model-registry`: runs the MLflow tracking and model registry server with SQLite metadata and the MinIO artifact bucket.
+- `model-registry`: runs the MLflow tracking and model registry server with SQLite metadata and a local artifact volume served through MLflow.
 
 ### `airflow/`
 
-- `airflow-init`: sets up the metadata database, admin user, log directories, and health marker.
+- `airflow-init`: sets up the metadata database, log directories, and health marker, and can create an admin user when local auth is enabled.
 - `airflow-webserver`: serves the UI and API.
 - `airflow-scheduler`: schedules DAG runs.
 - `airflow-triggerer`: handles deferred task triggers.
@@ -35,6 +30,9 @@ This directory holds the files for the local container stack.
 ## Local validation
 
 For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the API health endpoint.
+
+The default local path keeps feature data on local files, starts Airflow and MLflow without a login, and resets local Docker volumes for a clean run each time.
+Optional S3-compatible settings can still be injected through the environment for experiments, but they are no longer part of the default local stack.
 
 Run these checks before deployment work:
 

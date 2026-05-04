@@ -7,6 +7,7 @@ COPY containers/airflow/init-airflow.sh /usr/local/bin/init-airflow.sh
 COPY containers/airflow/start-airflow-webserver.sh /usr/local/bin/start-airflow-webserver.sh
 COPY containers/airflow/start-airflow-scheduler.sh /usr/local/bin/start-airflow-scheduler.sh
 COPY containers/airflow/start-airflow-triggerer.sh /usr/local/bin/start-airflow-triggerer.sh
+COPY containers/airflow/webserver_config.py /opt/airflow/webserver_config.py
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git tini \
