@@ -1,0 +1,28 @@
+services:
+  airflow:
+    container_name: airflow
+    build:
+      context: ../..
+      dockerfile: containers/airflow/Dockerfile
+    image: foehncast-airflow:local
+    working_dir: /workspace
+    command: bash -lc "cd /workspace && uv pip install --system -e . && airflow standalone"
+    ports:
+      - 127.0.0.1:8080:8080
+    depends_on:
+      - objectstore
+      - model-registry
+    environment:
+      - AIRFLOW_HOME=${AIRFLOW_HOME}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
+      - AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////workspace/airflow/airflow.db
+      - MLFLOW_TRACKING_URI=http://model-registry:5001
+      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
+      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
+      - OBJECTSTORE_ENDPOINT=http://objectstore:9000
+      - PYTHONPATH=/workspace/src
+    volumes:
+      - ../../:/workspace
+    networks:
+      - development
