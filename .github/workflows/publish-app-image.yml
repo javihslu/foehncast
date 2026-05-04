@@ -17,15 +17,94 @@ permissions:
   id-token: write
 
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+      project_id: ${{ steps.repo_config.outputs.project_id }}
+      location: ${{ steps.repo_config.outputs.location }}
+      artifact_repository: ${{ steps.repo_config.outputs.artifact_repository }}
+      workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
+      service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
+      cloud_run_service: ${{ steps.repo_config.outputs.cloud_run_service }}
+      registry_host: ${{ steps.derived.outputs.registry_host }}
+      image_repository: ${{ steps.derived.outputs.image_repository }}
+      publish_ready: ${{ steps.derived.outputs.publish_ready }}
+      deploy_ready: ${{ steps.derived.outputs.deploy_ready }}
+    env:
+      IMAGE_NAME: foehncast-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: flags
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          owner_allowed=false
+          if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
+            owner_allowed=true
+          fi
+
+          echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
+
+      - id: repo_config
+        uses: ./.github/actions/load-gcp-repo-config
+        with:
+          repo-vars-json: ${{ toJson(vars) }}
+
+      - id: derived
+        env:
+          PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          LOCATION: ${{ steps.repo_config.outputs.location }}
+          ARTIFACT_REPOSITORY: ${{ steps.repo_config.outputs.artifact_repository }}
+          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+          CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+
+          registry_host=""
+          if [[ -n "$LOCATION" ]]; then
+            registry_host="${LOCATION}-docker.pkg.dev"
+          fi
+
+          image_repository=""
+          if [[ -n "$registry_host" && -n "$PROJECT_ID" && -n "$ARTIFACT_REPOSITORY" ]]; then
+            image_repository="${registry_host}/${PROJECT_ID}/${ARTIFACT_REPOSITORY}/${IMAGE_NAME}"
+          fi
+
+          publish_ready=false
+          if [[ -n "$image_repository" && -n "$WORKLOAD_IDENTITY_PROVIDER" && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            publish_ready=true
+          fi
+
+          deploy_ready=false
+          if [[ "$publish_ready" == 'true' && -n "$CLOUD_RUN_SERVICE" ]]; then
+            deploy_ready=true
+          fi
+
+          {
+            echo "registry_host=$registry_host"
+            echo "image_repository=$image_repository"
+            echo "publish_ready=$publish_ready"
+            echo "deploy_ready=$deploy_ready"
+          } >> "$GITHUB_OUTPUT"
+
   publish:
-    if: ${{ vars.GCP_PROJECT_ID != '' && vars.GCP_LOCATION != '' && vars.GCP_ARTIFACT_REPOSITORY != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT_EMAIL != '' }}
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       image_uri: ${{ steps.image.outputs.immutable_tag }}
     env:
-      REGISTRY_HOST: ${{ vars.GCP_LOCATION }}-docker.pkg.dev
+      REGISTRY_HOST: ${{ needs.config.outputs.registry_host }}
       IMAGE_NAME: foehncast-app
-      IMAGE_REPOSITORY: ${{ vars.GCP_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.GCP_ARTIFACT_REPOSITORY }}/foehncast-app
+      IMAGE_REPOSITORY: ${{ needs.config.outputs.image_repository }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,8 +117,8 @@ jobs:
 
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
+          service_account: ${{ needs.config.outputs.service_account_email }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
@@ -74,19 +153,20 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    needs: publish
-    if: ${{ needs.publish.result == 'success' && vars.GCP_CLOUD_RUN_SERVICE != '' }}
+    needs: [config, publish]
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.publish.result == 'success' && needs.config.outputs.deploy_ready == 'true' }}
     runs-on: ubuntu-latest
+    environment: cloud-run-production
     env:
-      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      GCP_LOCATION: ${{ vars.GCP_LOCATION }}
-      CLOUD_RUN_SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      GCP_PROJECT_ID: ${{ needs.config.outputs.project_id }}
+      GCP_LOCATION: ${{ needs.config.outputs.location }}
+      CLOUD_RUN_SERVICE: ${{ needs.config.outputs.cloud_run_service }}
       IMAGE_URI: ${{ needs.publish.outputs.image_uri }}
     steps:
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
+          service_account: ${{ needs.config.outputs.service_account_email }}
 
       - uses: google-github-actions/setup-gcloud@v2
 
@@ -119,8 +199,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy_skipped:
-    needs: publish
-    if: ${{ needs.publish.result == 'success' && vars.GCP_CLOUD_RUN_SERVICE == '' }}
+    needs: [config, publish]
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.publish.result == 'success' && needs.config.outputs.deploy_ready != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Explain skipped Cloud Run deploy
@@ -132,7 +212,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   skipped:
-    if: ${{ !(vars.GCP_PROJECT_ID != '' && vars.GCP_LOCATION != '' && vars.GCP_ARTIFACT_REPOSITORY != '' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_SERVICE_ACCOUNT_EMAIL != '') }}
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Explain skipped publish

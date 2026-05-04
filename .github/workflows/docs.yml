@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
     build:
+        if: ${{ github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -32,6 +33,7 @@ jobs:
 
     deploy:
         needs: build
+        if: ${{ github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
         runs-on: ubuntu-latest
         permissions:
             pages: write
