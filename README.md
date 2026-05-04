@@ -2,7 +2,7 @@
 
 FoehnCast ranks Swiss kiteboarding options for one rider profile. It combines forecast weather, engineered wind features, drive-time information, and a trained quality model to answer one practical question: which spot is worth the trip next?
 
-The project keeps one stable Feature-Training-Inference split across all runtime modes. What changes is the hosting model around that split, not the application structure.
+The project keeps one stable Feature-Training-Inference split across all runtime modes. What changes is the hosting model around that split, not the application structure. In practice, the repo supports three operator paths: a local evaluation baseline, collaborator-owned GCP provisioning, and maintainer-managed shared deployment automation.
 
 ## System Shape
 
@@ -60,14 +60,21 @@ flowchart TB
 
 ## Local Quick Start
 
-1. Install Docker.
-2. Run `./scripts/bootstrap-local.sh`.
-3. Open:
-   - App: `http://127.0.0.1:8000`
-   - Airflow: `http://127.0.0.1:8080`
-   - MLflow: `http://127.0.0.1:5001`
+This is the default path for a fresh machine.
 
-The local runtime reads shared settings from `.env`, which the bootstrap script initializes from `.env.example` if needed.
+1. Install Docker.
+2. Clone the repository.
+3. Run `./scripts/bootstrap-local.sh`.
+
+The script initializes `.env` from `.env.example` when needed, builds the local stack, runs the feature and training DAGs, and waits for the API to become healthy.
+
+After it finishes, the main endpoints are:
+
+- App: `http://127.0.0.1:8000`
+- Airflow: `http://127.0.0.1:8080`
+- MLflow: `http://127.0.0.1:5001`
+
+Airflow and MLflow open directly in local mode. The bootstrap path resets Docker volumes before starting so the evaluator workflow begins from a clean state. Feature storage defaults to local files, and optional S3-compatible settings are only needed for non-default experiments.
 
 Example check:
 
@@ -76,6 +83,30 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -H 'content-type: application/json' \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
+
+## Personal GCP Quick Start
+
+Use this when a collaborator wants a private FoehnCast environment in their own GCP project.
+
+Install:
+
+- Google Cloud CLI (`gcloud`)
+- Terraform
+- GitHub CLI (`gh`) only if you want GitHub Actions in your own fork to publish and redeploy automatically
+
+Run:
+
+```bash
+./scripts/bootstrap-gcp.sh
+```
+
+The interactive setup signs you into GCP, lets you pick or create a project, confirms region and storage defaults, optionally provisions Cloud Run, and can align GitHub Actions variables for your own fork. During setup it writes `.env` and `terraform/terraform.tfvars`, then refreshes them from Terraform outputs after apply.
+
+Useful variants:
+
+- Restart from scratch: `rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
+- Skip prompts when you already know the values: `./scripts/bootstrap-gcp.sh --non-interactive`
+- Configure fork automation during bootstrap: `./scripts/bootstrap-gcp.sh --configure-github-actions --repo <your-github-user>/foehncast`
 
 ## Hosted Paths
 
@@ -88,11 +119,11 @@ Use the online compose-host path when you want Airflow, MLflow, and the API runn
 3. Provide at least:
    - `project_id`
    - `artifact_bucket_name`
-    - the repository OIDC variables from `./scripts/configure-github-actions.sh`
+   - the repository OIDC variables from `./scripts/configure-github-actions.sh`
 4. Read the Terraform output for the public app URL:
    - `online_compose_app_url`
 5. Retrieve the generated Airflow admin password from the host when you need UI access:
-    - `gcloud compute ssh <host> --zone <zone> --project <project> --command 'sudo cat /opt/foehncast/airflow/.admin-password'`
+   - `gcloud compute ssh <host> --zone <zone> --project <project> --command 'sudo cat /opt/foehncast/airflow/.admin-password'`
 
 The online host clones the repo, writes a runtime `.env` file with the Terraform-managed GCP and BigQuery settings, pulls the GHCR images when available, and falls back to local Docker builds on the host if needed.
 
@@ -123,16 +154,6 @@ When you finish a disposable cloud test, run `./scripts/teardown-gcp.sh --plan-o
 - `.github/workflows/publish-app-image.yml`: keeps the optional Artifact Registry plus Cloud Run path for the inference API.
 
 `./scripts/configure-github-actions.sh` syncs the GCP deploy variables plus the Terraform state bucket defaults back into the repository. When Cloud Run is not provisioned yet, it leaves `GCP_CLOUD_RUN_SERVICE` unset so the guarded workflow stays skipped without carrying stale values.
-
-## Who Uses Which Setup
-
-- **Public upstream repository**: the GitHub Actions workflows are for the shared project environment and should be treated as maintainer automation.
-- **Personal deployment**: use `./scripts/bootstrap-gcp.sh` locally or run the same workflows in your own fork after configuring your own GCP variables and secrets.
-- **Fork-based automation**: if you want GitHub-hosted deployment for a personal environment, fork the repo and configure the workflows in that fork.
-
-Public users cannot simply use the upstream repository workers for their own deployments. The upstream workflows rely on repository-scoped variables, secrets, package publishing, and cloud identities that belong to the shared environment.
-
-For the current public-repository setup, the maintainers can publish public GHCR images as reusable artifacts. Online runtime costs remain outside GitHub and belong to the operator who starts the cloud resources.
 
 ## Optional Feast
 
