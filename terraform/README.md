@@ -81,11 +81,14 @@ The intended next resources for the cloud-hosted pipeline are:
 5. Run:
    `cd terraform && terraform init && terraform fmt -check && terraform validate`
 
+For the collaborator quick-start path, the repository now also includes `./scripts/bootstrap-gcp.sh`, which checks the local prerequisites, uses browser-based `gcloud` authentication, validates Terraform, and runs `terraform apply` against the selected project.
+
 This Terraform path is aimed at maintainers who are setting up or changing the cloud platform. It should not be the default evaluation path for a professor or a new developer who only needs to run the system once.
 
 ## Bootstrap Notes
 
-- Terraform manages project services after authentication, but the project still needs a usable GCP project and billing enabled.
+- Terraform manages project services after authentication, but the default bootstrap still expects a usable GCP project with billing enabled.
+- Project creation and billing attachment are intentionally not hidden inside the default repo scripts, because they depend on user-specific billing accounts and, in some environments, folder or organization permissions.
 - Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
 
 ## CI/CD Guidance

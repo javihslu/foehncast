@@ -1,8 +1,9 @@
 # FoehnCast
 
-FoehnCast predicts kiteboarding conditions with a Feature-Training-Inference pipeline. The repo supports two distinct ways of working:
+FoehnCast predicts kiteboarding conditions with a Feature-Training-Inference pipeline. The repo supports three distinct ways of working:
 
 - Local evaluation for a new developer, reviewer, or professor.
+- Personal GCP provisioning for a collaborator using their own cloud project.
 - Cloud provisioning and deployment for the maintainer of the GCP environment.
 
 ## Recommended Paths
@@ -29,9 +30,38 @@ Example request:
 
 `curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{"spot_ids":["silvaplana","urnersee"]}'`
 
-### Cloud maintainer path
+### Personal GCP quick start
 
-Use this only when you are provisioning or updating the shared GCP deployment.
+Use this when a collaborator wants a private FoehnCast environment in their own GCP project.
+
+Prerequisites:
+
+- Google Cloud CLI (`gcloud`)
+- Terraform
+- GitHub CLI (`gh`) only if you want GitHub Actions in your own fork to publish and redeploy automatically
+
+Before running the repo scripts:
+
+1. Create or pick a GCP project you control.
+2. Enable billing for that project.
+3. Copy `.env.example` to `.env` and set at least `GCP_PROJECT_ID` and `GCP_LOCATION`.
+4. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and fill the project-specific values.
+
+Then run:
+
+`./scripts/bootstrap-gcp.sh`
+
+That path uses browser-based `gcloud` authentication, checks the local prerequisites, validates Terraform, and provisions the FoehnCast baseline into the project you selected.
+
+Optional fork-based automation:
+
+`./scripts/bootstrap-gcp.sh --configure-github-actions --repo <your-github-user>/foehncast`
+
+Use that only if you want GitHub Actions in your fork to publish images and redeploy into your own project after the initial bootstrap.
+
+### Shared GCP maintainer path
+
+Use this only when you are provisioning or updating the shared GCP deployment for the main repository.
 
 1. Authenticate locally with `./scripts/gcp-auth.sh`.
 2. Configure Terraform inputs in `terraform/terraform.tfvars`.
@@ -41,16 +71,29 @@ Use this only when you are provisioning or updating the shared GCP deployment.
 
 ## Deployment stance
 
-A single script that clones the repo, logs into GCP, provisions infrastructure, builds images, and deploys everything is possible, but it is not the best primary interface for this project.
+A single script that clones the repo, logs into GCP, creates projects, provisions infrastructure, builds images, and deploys everything is possible, but it is not the best default interface for this project.
 
 The better split is:
 
 - Local Docker bootstrap for evaluators and first-time developers.
-- Terraform for infrastructure.
-- GitHub Actions for build and deployment automation.
+- Browser-authenticated local bootstrap for collaborators provisioning their own GCP project.
+- Terraform for infrastructure inside an existing GCP project with billing already enabled.
+- GitHub Actions for CI on the shared repo and for shared or fork-specific deployment automation after bootstrap.
 - Airflow for feature and training workflows after the platform exists.
 
-That keeps the evaluation path simple and the cloud path reproducible.
+That keeps the evaluation path simple, avoids hiding billing and project-ownership assumptions inside a script, and still leaves GitHub Actions with a clear role.
+
+## Why GitHub Actions Still Matters
+
+GitHub Actions should not be the only bootstrap path for collaborator-owned projects. Repo-level cloud credentials and variables are a poor fit when several people each want their own GCP environment.
+
+GitHub Actions still matters for three reasons:
+
+- CI stays centralized for lint, tests, docs, and image build checks.
+- The shared main-branch environment can keep using GitHub Actions for publish and deploy.
+- A collaborator who wants repo-driven redeploys can wire GitHub Actions into their own fork after local bootstrap instead of doing that setup up front.
+
+The least invasive default is therefore: local browser auth plus Terraform for personal environments, GitHub Actions for shared automation and optional fork automation.
 
 ## More detail
 
