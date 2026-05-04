@@ -40,24 +40,21 @@ Prerequisites:
 - Terraform
 - GitHub CLI (`gh`) only if you want GitHub Actions in your own fork to publish and redeploy automatically
 
-Before running the repo scripts:
-
-1. Create or pick a GCP project you control.
-2. Enable billing for that project.
-3. Copy `.env.example` to `.env` and set at least `GCP_PROJECT_ID` and `GCP_LOCATION`.
-4. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars` and fill the project-specific values.
-
 Then run:
 
 `./scripts/bootstrap-gcp.sh`
 
-That path uses browser-based `gcloud` authentication, checks the local prerequisites, validates Terraform, and provisions the FoehnCast baseline into the project you selected.
+That command is now interactive. It uses browser-based `gcloud` authentication, checks the local prerequisites, can guide you through choosing or creating a GCP project, can link billing when your account is allowed to do so, writes `.env` and `terraform/terraform.tfvars` for you, validates Terraform, and provisions the FoehnCast baseline into the selected project.
+
+If you already know your values and want automation without prompts, use:
+
+`./scripts/bootstrap-gcp.sh --non-interactive`
 
 Optional fork-based automation:
 
 `./scripts/bootstrap-gcp.sh --configure-github-actions --repo <your-github-user>/foehncast`
 
-Use that only if you want GitHub Actions in your fork to publish images and redeploy into your own project after the initial bootstrap.
+Use that only if you want GitHub Actions in your fork to publish images and redeploy into your own project after the initial bootstrap. The script will also align Terraform's GitHub OIDC settings to that fork.
 
 ### Shared GCP maintainer path
 
@@ -92,6 +89,8 @@ GitHub Actions still matters for three reasons:
 - CI stays centralized for lint, tests, docs, and image build checks.
 - The shared main-branch environment can keep using GitHub Actions for publish and deploy.
 - A collaborator who wants repo-driven redeploys can wire GitHub Actions into their own fork after local bootstrap instead of doing that setup up front.
+
+If startup speed becomes an issue later, the next optimization is not to make GitHub mandatory. It is to let GitHub Actions publish a reusable app image that collaborator-owned projects can consume, so the bootstrap path provisions infrastructure quickly without forcing each user to rebuild everything locally.
 
 The least invasive default is therefore: local browser auth plus Terraform for personal environments, GitHub Actions for shared automation and optional fork automation.
 

@@ -81,15 +81,17 @@ The intended next resources for the cloud-hosted pipeline are:
 5. Run:
    `cd terraform && terraform init && terraform fmt -check && terraform validate`
 
-For the collaborator quick-start path, the repository now also includes `./scripts/bootstrap-gcp.sh`, which checks the local prerequisites, uses browser-based `gcloud` authentication, validates Terraform, and runs `terraform apply` against the selected project.
+For the collaborator quick-start path, the repository now also includes `./scripts/bootstrap-gcp.sh`, which checks the local prerequisites, uses browser-based `gcloud` authentication, can guide the user through project selection or creation and billing linkage, writes `.env` and `terraform.tfvars`, validates Terraform, and runs `terraform apply` against the selected project.
 
 This Terraform path is aimed at maintainers who are setting up or changing the cloud platform. It should not be the default evaluation path for a professor or a new developer who only needs to run the system once.
 
 ## Bootstrap Notes
 
-- Terraform manages project services after authentication, but the default bootstrap still expects a usable GCP project with billing enabled.
-- Project creation and billing attachment are intentionally not hidden inside the default repo scripts, because they depend on user-specific billing accounts and, in some environments, folder or organization permissions.
+- Terraform manages project services after authentication, and the interactive bootstrap can now guide project selection or creation plus billing linkage when the authenticated user is allowed to do so.
+- Some collaborators will still need manual help with project creation or billing attachment, because those steps depend on user-specific billing accounts and, in some environments, folder or organization permissions.
 - Commit `terraform/.terraform.lock.hcl` so provider resolution stays reproducible across local runs and CI.
+
+The interactive bootstrap now helps with project selection and billing linkage when the authenticated user has permission, but those permissions still vary by collaborator. The script should guide and validate, not pretend those organizational constraints do not exist.
 
 ## CI/CD Guidance
 
