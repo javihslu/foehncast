@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y ca-certificates curl git gnupg lsb-release
+
+install -m 0755 -d /etc/apt/keyrings
+if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
+  curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+fi
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" \
+  > /etc/apt/sources.list.d/docker.list
+
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable docker --now
+
+install -d -m 0755 /opt/foehncast
+
+if [[ ! -d /opt/foehncast/.git ]]; then
+  git clone "https://github.com/${github_repository_path}.git" /opt/foehncast
+fi
+
+git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"
+git -C /opt/foehncast checkout --force FETCH_HEAD
+
+install -d -m 0700 /opt/foehncast/airflow
+if [[ ! -s /opt/foehncast/airflow/.admin-password ]]; then
+  head -c 32 /dev/urandom | base64 | tr -d '\n' > /opt/foehncast/airflow/.admin-password
+  printf '\n' >> /opt/foehncast/airflow/.admin-password
+  chmod 600 /opt/foehncast/airflow/.admin-password
+fi
+
+cat > /opt/foehncast/.env <<'EOF'
+%{ for key, value in stack_env ~}
+${key}=${value}
+%{ endfor ~}
+EOF
+
+if docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull model-registry app airflow-init airflow-webserver airflow-scheduler airflow-triggerer; then
+  docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build
+else
+  docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --build
+fi
