@@ -52,6 +52,11 @@ def get_storage_config() -> dict[str, Any]:
     return load_config()["storage"]
 
 
+def get_validation_config() -> dict[str, Any]:
+    """Return the validation settings."""
+    return load_config()["validation"]
+
+
 def get_mlflow_config() -> dict[str, Any]:
     """Return the MLflow settings."""
     return load_config()["mlflow"]
