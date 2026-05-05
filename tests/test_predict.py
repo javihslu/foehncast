@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from foehncast.inference_pipeline import predict, serve
 from foehncast.inference_pipeline.rank import RankedSpot
@@ -365,3 +366,24 @@ def test_online_features_demo_endpoint_returns_html(
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert response.text == "<html><body>online features demo</body></html>"
+
+
+def test_metrics_endpoint_returns_prometheus_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = (
+        b"# HELP foehncast_feature_pipeline_summary_count example\n"
+        b"foehncast_feature_pipeline_summary_count 1\n"
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_feature_pipeline_prometheus_metrics",
+        lambda: payload,
+    )
+    client = TestClient(serve.app)
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.content == payload
+    assert response.headers["content-type"] == CONTENT_TYPE_LATEST
