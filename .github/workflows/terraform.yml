@@ -1,0 +1,305 @@
+name: Terraform
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - terraform/**
+      - docker-compose.cloud.yml
+      - .github/workflows/terraform.yml
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Terraform command to run
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+      project_id:
+        description: GCP project id
+        required: false
+        type: string
+      region:
+        description: GCP region
+        required: false
+        default: europe-west6
+        type: string
+      artifact_bucket_name:
+        description: GCS bucket for artifacts
+        required: false
+        type: string
+      artifact_registry_repository_id:
+        description: Artifact Registry repository id
+        required: false
+        default: foehncast-docker
+        type: string
+      bigquery_dataset_id:
+        description: BigQuery dataset id
+        required: false
+        default: foehncast
+        type: string
+      bigquery_location:
+        description: BigQuery location
+        required: false
+        default: europe-west6
+        type: string
+      bigquery_feature_table_id:
+        description: BigQuery feature table id
+        required: false
+        default: forecast_features
+        type: string
+      provision_cloud_run_service:
+        description: Provision Cloud Run app service
+        required: false
+        default: false
+        type: boolean
+      mlflow_tracking_uri:
+        description: Reachable MLflow URL for the Cloud Run app
+        required: false
+        type: string
+      provision_online_compose_host:
+        description: Provision the full online compose host
+        required: false
+        default: false
+        type: boolean
+      online_compose_host_name:
+        description: Compute Engine host name
+        required: false
+        default: foehncast-online
+        type: string
+      online_compose_host_zone:
+        description: Compute Engine zone
+        required: false
+        default: europe-west6-b
+        type: string
+      online_compose_machine_type:
+        description: Compute Engine machine type
+        required: false
+        default: e2-standard-4
+        type: string
+      online_compose_disk_size_gb:
+        description: Boot disk size in GB
+        required: false
+        default: "40"
+        type: string
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: ${{ github.actor == github.repository_owner && github.triggering_actor ==
+      github.repository_owner }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=terraform init -backend=false
+      - run: terraform -chdir=terraform fmt -check
+      - run: terraform -chdir=terraform validate
+
+  remote:
+    if: ${{ github.actor == github.repository_owner && github.triggering_actor ==
+      github.repository_owner && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    environment: terraform-admin
+    permissions:
+      contents: read
+      actions: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Load repository configuration
+        id: repo_config
+        uses: ./.github/actions/load-gcp-repo-config
+        with:
+          repo-vars-json: ${{ toJson(vars) }}
+
+      - name: Validate OIDC configuration
+        env:
+          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$WORKLOAD_IDENTITY_PROVIDER" || -z "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            echo 'Configure GCP_WORKLOAD_IDENTITY_PROVIDER and GCP_SERVICE_ACCOUNT_EMAIL before running remote Terraform.' >&2
+            exit 1
+          fi
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          service_account: ${{ steps.repo_config.outputs.service_account_email }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Resolve Terraform inputs
+        env:
+          REPO_GCP_PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          REPO_GCP_LOCATION: ${{ steps.repo_config.outputs.location }}
+          REPO_GCP_ARTIFACT_BUCKET_NAME: ${{ steps.repo_config.outputs.artifact_bucket_name }}
+          REPO_GCP_TERRAFORM_STATE_BUCKET: ${{ steps.repo_config.outputs.state_bucket }}
+          REPO_GCP_TERRAFORM_STATE_PREFIX: ${{ steps.repo_config.outputs.state_prefix }}
+          REPO_GCP_ARTIFACT_REPOSITORY: ${{ steps.repo_config.outputs.artifact_repository }}
+          REPO_GCP_BIGQUERY_DATASET: ${{ steps.repo_config.outputs.bigquery_dataset }}
+          REPO_GCP_BIGQUERY_TABLE: ${{ steps.repo_config.outputs.bigquery_table }}
+        run: |
+          set -euo pipefail
+
+          project_id="${{ inputs.project_id }}"
+          if [[ -z "$project_id" ]]; then
+            project_id="$REPO_GCP_PROJECT_ID"
+          fi
+
+          if [[ -z "$project_id" ]]; then
+            echo "Set project_id in the workflow input or repository variable GCP_PROJECT_ID." >&2
+            exit 1
+          fi
+
+          region="${{ inputs.region }}"
+          if [[ -z "$region" ]]; then
+            region="$REPO_GCP_LOCATION"
+          fi
+          if [[ -z "$region" ]]; then
+            region='europe-west6'
+          fi
+
+          artifact_bucket_name="${{ inputs.artifact_bucket_name }}"
+          if [[ -z "$artifact_bucket_name" ]]; then
+            artifact_bucket_name="$REPO_GCP_ARTIFACT_BUCKET_NAME"
+          fi
+          if [[ -z "$artifact_bucket_name" ]]; then
+            artifact_bucket_name="foehncast-artifacts-${project_id}"
+          fi
+
+          state_bucket="$REPO_GCP_TERRAFORM_STATE_BUCKET"
+          if [[ -z "$state_bucket" ]]; then
+            state_bucket="${project_id}-foehncast-tfstate"
+          fi
+
+          state_prefix="$REPO_GCP_TERRAFORM_STATE_PREFIX"
+          if [[ -z "$state_prefix" ]]; then
+            state_prefix='terraform/state'
+          fi
+
+          artifact_registry_repository_id="${{ inputs.artifact_registry_repository_id }}"
+          if [[ -z "$artifact_registry_repository_id" ]]; then
+            artifact_registry_repository_id="$REPO_GCP_ARTIFACT_REPOSITORY"
+          fi
+          if [[ -z "$artifact_registry_repository_id" ]]; then
+            artifact_registry_repository_id='foehncast-docker'
+          fi
+
+          bigquery_dataset_id="${{ inputs.bigquery_dataset_id }}"
+          if [[ -z "$bigquery_dataset_id" ]]; then
+            bigquery_dataset_id="$REPO_GCP_BIGQUERY_DATASET"
+          fi
+          if [[ -z "$bigquery_dataset_id" ]]; then
+            bigquery_dataset_id='foehncast'
+          fi
+
+          bigquery_location="${{ inputs.bigquery_location }}"
+          if [[ -z "$bigquery_location" ]]; then
+            bigquery_location="$region"
+          fi
+
+          bigquery_feature_table_id="${{ inputs.bigquery_feature_table_id }}"
+          if [[ -z "$bigquery_feature_table_id" ]]; then
+            bigquery_feature_table_id="$REPO_GCP_BIGQUERY_TABLE"
+          fi
+          if [[ -z "$bigquery_feature_table_id" ]]; then
+            bigquery_feature_table_id='forecast_features'
+          fi
+
+          provision_cloud_run_service="${{ inputs.provision_cloud_run_service }}"
+          mlflow_tracking_uri="${{ inputs.mlflow_tracking_uri }}"
+          provision_online_compose_host="${{ inputs.provision_online_compose_host }}"
+          online_compose_host_name="${{ inputs.online_compose_host_name }}"
+          online_compose_host_zone="${{ inputs.online_compose_host_zone }}"
+          online_compose_machine_type="${{ inputs.online_compose_machine_type }}"
+          online_compose_disk_size_gb="${{ inputs.online_compose_disk_size_gb }}"
+          github_owner="${{ github.repository_owner }}"
+          github_repository="${{ github.event.repository.name }}"
+
+          {
+            echo "TF_VAR_project_id=${project_id}"
+            echo "TF_VAR_region=${region}"
+            echo "TF_VAR_artifact_bucket_name=${artifact_bucket_name}"
+            echo "TF_VAR_artifact_registry_repository_id=${artifact_registry_repository_id}"
+            echo "TF_VAR_bigquery_dataset_id=${bigquery_dataset_id}"
+            echo "TF_VAR_bigquery_location=${bigquery_location}"
+            echo "TF_VAR_bigquery_feature_table_id=${bigquery_feature_table_id}"
+            echo "TF_VAR_provision_cloud_run_service=${provision_cloud_run_service}"
+            echo "TF_VAR_mlflow_tracking_uri=${mlflow_tracking_uri}"
+            echo "TF_VAR_provision_online_compose_host=${provision_online_compose_host}"
+            echo "TF_VAR_online_compose_host_name=${online_compose_host_name}"
+            echo "TF_VAR_online_compose_host_zone=${online_compose_host_zone}"
+            echo "TF_VAR_online_compose_machine_type=${online_compose_machine_type}"
+            echo "TF_VAR_online_compose_disk_size_gb=${online_compose_disk_size_gb}"
+            echo "TF_VAR_github_owner=${github_owner}"
+            echo "TF_VAR_github_repository=${github_repository}"
+            echo "TF_STATE_BUCKET=${state_bucket}"
+            echo "TF_STATE_PREFIX=${state_prefix}"
+          } >> "$GITHUB_ENV"
+
+      - name: Ensure Terraform state bucket exists
+        run: |
+          set -euo pipefail
+          if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" >/dev/null 2>&1; then
+            gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
+              --project "${TF_VAR_project_id}" \
+              --location "${TF_VAR_region}" \
+              --uniform-bucket-level-access
+          fi
+
+      - name: Terraform init
+        run: |
+          terraform -chdir=terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${TF_STATE_PREFIX}"
+
+      - name: Terraform plan
+        run: terraform -chdir=terraform plan -out=tfplan
+
+      - name: Terraform apply
+        if: ${{ inputs.command == 'apply' }}
+        run: terraform -chdir=terraform apply -auto-approve tfplan
+
+      - name: Sync repository variables
+        if: ${{ inputs.command == 'apply' }}
+        run: ./scripts/configure-github-actions.sh --repo "${{ github.repository }}"
+
+      - name: Summarize outputs
+        if: ${{ inputs.command == 'apply' }}
+        run: |
+          set -euo pipefail
+
+          render_output() {
+            local output_name="$1"
+            local fallback="$2"
+            local value
+
+            value="$(terraform -chdir=terraform output -raw "$output_name" 2>/dev/null || true)"
+            if [[ -n "$value" ]]; then
+              printf '%s\n' "$value"
+              return
+            fi
+
+            printf '%s\n' "$fallback"
+          }
+
+          {
+            echo "## Terraform apply"
+            echo
+            echo "- App URL: $(render_output online_compose_app_url not-exposed-or-not-provisioned)"
+            echo "- Airflow URL: $(render_output online_compose_airflow_url host-local-by-default)"
+            echo "- MLflow URL: $(render_output online_compose_mlflow_url host-local-by-default)"
+            echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
+          } >> "$GITHUB_STEP_SUMMARY"

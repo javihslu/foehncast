@@ -57,3 +57,23 @@ output "cloud_run_service_url" {
   description = "Cloud Run service URL for the inference API, if provisioned."
   value       = try(google_cloud_run_v2_service.app[0].uri, null)
 }
+
+output "online_compose_host_ip" {
+  description = "Public IP address of the online Docker host, if provisioned."
+  value       = try(google_compute_address.online_compose[0].address, null)
+}
+
+output "online_compose_app_url" {
+  description = "Public URL for the online inference API, if provisioned."
+  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 8000) ? "http://${google_compute_address.online_compose[0].address}:8000" : null
+}
+
+output "online_compose_airflow_url" {
+  description = "Public URL for the online Airflow UI, if provisioned and explicitly exposed."
+  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 8080) ? "http://${google_compute_address.online_compose[0].address}:8080" : null
+}
+
+output "online_compose_mlflow_url" {
+  description = "Public URL for the online MLflow UI, if provisioned and explicitly exposed."
+  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 5001) ? "http://${google_compute_address.online_compose[0].address}:5001" : null
+}

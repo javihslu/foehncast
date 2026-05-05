@@ -1,35 +1,30 @@
+x-airflow-runtime-env: &airflow-runtime-env
+  AIRFLOW_HOME: /workspace/airflow
+  AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+  AIRFLOW__CORE__LOAD_EXAMPLES: ${AIRFLOW__CORE__LOAD_EXAMPLES:-false}
+  AIRFLOW__CORE__DAGS_FOLDER: /workspace/dags
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////workspace/airflow/airflow.db
+  AIRFLOW__WEBSERVER__CONFIG_FILE: ${AIRFLOW__WEBSERVER__CONFIG_FILE:-/opt/airflow/webserver_config.py}
+  AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE: false
+  MLFLOW_TRACKING_URI: http://model-registry:5001
+  GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
+  PYTHONPATH: /workspace/src
+
 x-airflow-common: &airflow-common
   build:
     context: ../..
     dockerfile: containers/airflow/Dockerfile
-  image: foehncast-airflow:local
+  image: ${FOEHNCAST_AIRFLOW_IMAGE:-foehncast-airflow:local}
   working_dir: /workspace
   depends_on:
     - model-registry
+  env_file:
+    - path: ../../.env.example
+      required: false
+    - path: ../../.env
+      required: false
   environment:
-    - AIRFLOW_HOME=/workspace/airflow
-    - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-    - AIRFLOW__CORE__LOAD_EXAMPLES=${AIRFLOW__CORE__LOAD_EXAMPLES}
-    - AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags
-    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////workspace/airflow/airflow.db
-    - AIRFLOW__WEBSERVER__CONFIG_FILE=/opt/airflow/webserver_config.py
-    - AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE=false
-    - MLFLOW_TRACKING_URI=http://model-registry:5001
-    - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY:-}
-    - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY:-}
-    - OBJECTSTORE_ENDPOINT=${OBJECTSTORE_ENDPOINT:-}
-    - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
-    - STORAGE_LOCAL_PATH=${STORAGE_LOCAL_PATH:-data}
-    - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-foehncast-data}
-    - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-}
-    - STORAGE_BIGQUERY_PROJECT_ID=${STORAGE_BIGQUERY_PROJECT_ID:-}
-    - STORAGE_BIGQUERY_DATASET=${STORAGE_BIGQUERY_DATASET:-foehncast}
-    - STORAGE_BIGQUERY_TABLE=${STORAGE_BIGQUERY_TABLE:-forecast_features}
-    - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
-    - GCP_LOCATION=${GCP_LOCATION:-}
-    - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
-    - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
-    - PYTHONPATH=/workspace/src
+    <<: *airflow-runtime-env
   volumes:
     - ../../:/workspace
   networks:
@@ -40,13 +35,14 @@ services:
     <<: *airflow-common
     container_name: airflow-init
     environment:
-      - AIRFLOW_CREATE_ADMIN_USER=${AIRFLOW_CREATE_ADMIN_USER:-false}
-      - AIRFLOW_ADMIN_USERNAME=${AIRFLOW_ADMIN_USERNAME:-admin}
-      - AIRFLOW_ADMIN_FIRSTNAME=${AIRFLOW_ADMIN_FIRSTNAME:-Admin}
-      - AIRFLOW_ADMIN_LASTNAME=${AIRFLOW_ADMIN_LASTNAME:-User}
-      - AIRFLOW_ADMIN_ROLE=${AIRFLOW_ADMIN_ROLE:-Admin}
-      - AIRFLOW_ADMIN_EMAIL=${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
-      - AIRFLOW_ADMIN_PASSWORD=${AIRFLOW_ADMIN_PASSWORD:-admin}
+      <<: *airflow-runtime-env
+      AIRFLOW_CREATE_ADMIN_USER: ${AIRFLOW_CREATE_ADMIN_USER:-false}
+      AIRFLOW_ADMIN_USERNAME: ${AIRFLOW_ADMIN_USERNAME:-admin}
+      AIRFLOW_ADMIN_FIRSTNAME: ${AIRFLOW_ADMIN_FIRSTNAME:-Admin}
+      AIRFLOW_ADMIN_LASTNAME: ${AIRFLOW_ADMIN_LASTNAME:-User}
+      AIRFLOW_ADMIN_ROLE: ${AIRFLOW_ADMIN_ROLE:-Admin}
+      AIRFLOW_ADMIN_EMAIL: ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
     command: ["/usr/local/bin/init-airflow.sh"]
     healthcheck:
       test: ["CMD-SHELL", "test -f /workspace/airflow/.init-complete"]
@@ -62,7 +58,7 @@ services:
         condition: service_healthy
     command: ["/usr/local/bin/start-airflow-webserver.sh"]
     ports:
-      - 127.0.0.1:8080:8080
+      - ${AIRFLOW_BIND_HOST:-127.0.0.1}:8080:8080
 
   airflow-scheduler:
     <<: *airflow-common

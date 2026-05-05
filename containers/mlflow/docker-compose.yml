@@ -2,11 +2,11 @@ services:
   model-registry:
     container_name: model-registry
     build: .
-    image: foehncast-mlflow:local
+    image: ${FOEHNCAST_MLFLOW_IMAGE:-foehncast-mlflow:local}
     command: ["/usr/local/bin/start-model-registry.sh"]
     hostname: model-registry
     ports:
-      - 127.0.0.1:5001:5001
+      - ${MLFLOW_BIND_HOST:-127.0.0.1}:5001:5001
     environment:
       - MLFLOW_HOST=0.0.0.0
       - MLFLOW_PORT=5001

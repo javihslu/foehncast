@@ -4,31 +4,20 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${1:-$ROOT_DIR/.env}"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/cli-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/gcp-common.sh"
 
-if ! command -v gcloud >/dev/null 2>&1; then
-  echo "gcloud is required but not installed." >&2
-  exit 1
-fi
+require_command gcloud
 
-if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+load_env_file "$ENV_FILE"
 
-: "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in .env or the environment.}"
-: "${GCP_LOCATION:?Set GCP_LOCATION in .env or the environment.}"
+require_gcp_project_and_location
 
 gcloud config set project "$GCP_PROJECT_ID"
 
-if ! gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .; then
-  gcloud auth login
-fi
-
-if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
-  gcloud auth application-default login
-fi
+ensure_gcloud_auth
 
 gcloud auth configure-docker "${GCP_LOCATION}-docker.pkg.dev"
 

@@ -1,6 +1,34 @@
 # Cloud Mapping
 
-FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal is simple: move the validated local stack onto managed GCP services instead of redesigning the project.
+FoehnCast already has two hosted directions: a full online compose host and an optional Cloud Run inference service. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
+
+!!! note "What this page does and does not claim"
+
+    The shared GCP baseline and the hosted entry points exist today.
+    Not every longer-term managed service is finished yet, so this page distinguishes between what is implemented now and what remains a transition target.
+
+## Cloud Paths In One View
+
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>Shared GCP baseline</strong></p>
+<p>Terraform can provision APIs, Artifact Registry, a GCS artifact bucket, BigQuery storage, and GitHub OIDC identities.</p>
+</li>
+<li>
+<p><strong>Online compose host</strong></p>
+<p>A single Compute Engine host can run Airflow, MLflow, and the API from the same repository.</p>
+</li>
+<li>
+<p><strong>Optional Cloud Run path</strong></p>
+<p>The FastAPI inference service can also be deployed as an inference-only Cloud Run surface.</p>
+</li>
+<li>
+<p><strong>Managed direction</strong></p>
+<p>Later milestones can replace parts of the host-based path with more managed orchestration and monitoring services.</p>
+</li>
+</ul>
+</div>
 
 ## Mapping Principle
 
@@ -9,56 +37,71 @@ FoehnCast keeps the same Feature-Training-Inference split in the cloud. The goal
 - Cloud services replace the local support services used for evaluation and development.
 - The app remains a deployable container because inference is a service, not a DAG.
 
-## Roadmap Diagram
+## Current Hosted Topology
 
-```mermaid
+<div class="mermaid">
 flowchart LR
-	LOCAL[Local proof<br/>Compose + Airflow + MLflow] --> DATA[Cloud data<br/>BigQuery + GCS]
-	DATA --> RUN[Cloud runtime<br/>Cloud Run + managed Airflow]
-	RUN --> OPS[Operations<br/>automation + monitoring]
-```
+    TF[Terraform baseline] --> GCP[Shared GCP resources]
+    GCP --> HOST[Online compose host]
+    GCP --> RUN[Optional Cloud Run service]
+    GCP --> GH[GitHub OIDC delivery]
+    HOST --> STACK[Airflow + MLflow + API]
+    RUN --> API[Inference API only]
+</div>
 
-## Local To Cloud Mapping
+## What Exists Today
 
-| Local component | Cloud target | Role |
-|----------------|-------------|------|
-| `app` container | Cloud Run service | Serve `/health`, `/spots`, `/predict`, and `/rank` |
-| Airflow containers | Cloud Composer / managed Airflow | Schedule and run feature and training DAGs |
-| Local MLflow artifact volume | GCS bucket | Store model artifacts and other object data |
-| Local feature storage and optional Feast parquet export | BigQuery tables or a Feast-backed BigQuery view | Hold curated feature data for cloud pipelines |
-| MLflow with SQLite + local artifacts | MLflow service with GCS-backed artifacts | Track runs, metrics, and registered model versions |
-| Artifact Registry bootstrap | Artifact Registry | Store deployable container images |
-| `development_env` container | CI jobs and local prototyping only | Keep local workflows reproducible without becoming a cloud runtime |
+| Surface | Current state | Notes |
+|--------|---------------|-------|
+| Shared GCP baseline | implemented as Terraform inputs and resources | APIs, Artifact Registry, GCS, BigQuery, and OIDC identities |
+| Online compose host | implemented as an optional Terraform path | clones the repo, writes `.env`, and runs the full stack |
+| Cloud Run service | implemented as an optional Terraform path | serves the inference API only |
+| GitHub delivery | implemented | publishes runtime images and can run Terraform remotely |
+| BigQuery backend support | implemented in the application | local and hosted runtimes can point the storage backend at BigQuery |
+
+## Honest Mapping From Local To Cloud
+
+| Local component | Current hosted path | Longer-term managed direction |
+|----------------|---------------------|-------------------------------|
+| `app` container | online compose host or optional Cloud Run service | keep inference as a deployable service |
+| Airflow containers | online compose host today | managed Airflow / Cloud Composer later |
+| MLflow local service | online compose host today | possibly a separate hosted MLflow service later |
+| Local feature storage | BigQuery backend already available | BigQuery remains the cloud data target |
+| Local MLflow artifact volume | GCS bucket in the shared baseline | GCS-backed artifacts stay the direction |
+| `development_env` container | local and CI only | not intended as a cloud runtime |
+| Optional Feast path | can sit on top of the same curated data | can later point the feature view at BigQuery |
 
 ## Cloud Pipeline Shape
 
-```mermaid
+<div class="mermaid">
 flowchart TD
-	OME[Open-Meteo] --> FEAT[Feature job]
-	FEAT --> BQ[(BigQuery curated features)]
-	BQ --> TRAIN[Training job]
-	TRAIN --> MLF[(MLflow)]
-	MLF --> RUN[Cloud Run app]
-	OME --> RUN
-	OSRM[OSRM] --> RUN
-	BQ --> FEAST[Optional Feast view]
-	FEAST --> RUN
-```
+    OME[Open-Meteo] --> FEAT[Feature job]
+    FEAT --> BQ[(BigQuery curated features)]
+    BQ --> TRAIN[Training job]
+    TRAIN --> MLF[(MLflow)]
+    MLF --> RUN[Cloud Run app]
+    OME --> RUN
+    OSRM[OSRM] --> RUN
+    BQ --> FEAST[Optional Feast view]
+    FEAST --> RUN
+</div>
 
-- **Feature pipeline**: write curated rows to BigQuery.
-- **Training pipeline**: read curated rows, train, evaluate, and register through MLflow.
-- **Inference pipeline**: keep serving inside the app container on Cloud Run.
-- **Optional Feast path**: point the same logical feature view at BigQuery instead of local parquet.
+| Layer | Cloud direction |
+|------|-----------------|
+| Feature pipeline | write curated rows to BigQuery |
+| Training pipeline | read curated rows, train, evaluate, and register through MLflow |
+| Inference pipeline | serve the API on the compose host or through Cloud Run |
+| Optional Feast path | point the same logical feature view at BigQuery instead of local parquet |
 
-## What Changes In The Cloud
+## Runtime Differences That Matter
 
-| Area | Local now | Cloud target |
-|------|-----------|--------------|
-| Feature storage | local Parquet, optional S3-compatible store, optional Feast parquet export | BigQuery, optionally surfaced through Feast |
-| Artifacts | local MLflow artifact volume | GCS |
-| Orchestration | local Airflow containers | Cloud Composer / managed Airflow |
-| Inference | local app container | Cloud Run |
-| Runtime auth | local env file | service accounts and OIDC |
+| Area | Local baseline | Hosted path |
+|------|----------------|-------------|
+| Storage | local parquet by default | BigQuery becomes the shared cloud data surface |
+| Artifacts | local MLflow artifact volume | GCS bucket |
+| Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
+| Image source | local builds | GHCR runtime images or Artifact Registry app image |
+| Public exposure | local ports on the developer machine | compose host exposes only the app by default; Cloud Run exposes only the inference service |
 
 ## What Is Already In Place
 
@@ -67,12 +110,15 @@ flowchart TD
 - The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
 - Local container runs can already mount ADC for BigQuery-based checks.
 
-## What Still Needs To Be Finished
+## Current Gaps
 
-- Finalize the managed MLflow hosting choice.
-- Finalize managed Airflow provisioning and DAG deployment.
-- Add the remaining automation and monitoring needed for the final submission.
+- The current online path still keeps MLflow on the compose host rather than a separate managed service.
+- Managed Airflow provisioning and DAG deployment are not yet fully automated in the same way as the local stack.
+- Monitoring is still lighter than the final MS4 target.
+- The two hosted paths solve different needs today: one keeps the full stack online, the other isolates inference as a service.
 
 ## Why This Fits The Project Brief
 
 The project brief asks for cloud-ready pipelines and cloud orchestration. This mapping keeps the backend already validated in MS2, but replaces the local support stack with cloud services that can run autonomously after deployment.
+
+See [Architecture](architecture.md) for the current runtime view. The repository root also includes a Terraform README with the deployment details.

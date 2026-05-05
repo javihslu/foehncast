@@ -1,0 +1,71 @@
+name: Load GCP Repository Config
+description: Load normalized GCP-related repository variables from toJson(vars)
+
+inputs:
+  repo-vars-json:
+    description: JSON-encoded repository variables from toJson(vars)
+    required: true
+
+outputs:
+  project_id:
+    description: GCP project ID repository variable
+    value: ${{ steps.repo_config.outputs.project_id }}
+  location:
+    description: GCP region repository variable
+    value: ${{ steps.repo_config.outputs.location }}
+  artifact_bucket_name:
+    description: Artifact bucket repository variable
+    value: ${{ steps.repo_config.outputs.artifact_bucket_name }}
+  artifact_repository:
+    description: Artifact Registry repository variable
+    value: ${{ steps.repo_config.outputs.artifact_repository }}
+  bigquery_dataset:
+    description: BigQuery dataset repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_dataset }}
+  bigquery_table:
+    description: BigQuery table repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_table }}
+  workload_identity_provider:
+    description: Workload Identity Provider repository variable
+    value: ${{ steps.repo_config.outputs.workload_identity_provider }}
+  service_account_email:
+    description: Service account email repository variable
+    value: ${{ steps.repo_config.outputs.service_account_email }}
+  state_bucket:
+    description: Terraform state bucket repository variable
+    value: ${{ steps.repo_config.outputs.state_bucket }}
+  state_prefix:
+    description: Terraform state prefix repository variable
+    value: ${{ steps.repo_config.outputs.state_prefix }}
+  cloud_run_service:
+    description: Cloud Run service repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_service }}
+
+runs:
+  using: composite
+  steps:
+    - id: repo_config
+      shell: bash
+      env:
+        REPO_VARS_JSON: ${{ inputs.repo-vars-json }}
+      run: |
+        set -euo pipefail
+
+        read_repo_var() {
+          local name="$1"
+          jq -r --arg name "$name" '.[ $name ] // ""' <<<"$REPO_VARS_JSON"
+        }
+
+        {
+          echo "project_id=$(read_repo_var GCP_PROJECT_ID)"
+          echo "location=$(read_repo_var GCP_LOCATION)"
+          echo "artifact_bucket_name=$(read_repo_var GCP_ARTIFACT_BUCKET_NAME)"
+          echo "artifact_repository=$(read_repo_var GCP_ARTIFACT_REPOSITORY)"
+          echo "bigquery_dataset=$(read_repo_var GCP_BIGQUERY_DATASET)"
+          echo "bigquery_table=$(read_repo_var GCP_BIGQUERY_TABLE)"
+          echo "workload_identity_provider=$(read_repo_var GCP_WORKLOAD_IDENTITY_PROVIDER)"
+          echo "service_account_email=$(read_repo_var GCP_SERVICE_ACCOUNT_EMAIL)"
+          echo "state_bucket=$(read_repo_var GCP_TERRAFORM_STATE_BUCKET)"
+          echo "state_prefix=$(read_repo_var GCP_TERRAFORM_STATE_PREFIX)"
+          echo "cloud_run_service=$(read_repo_var GCP_CLOUD_RUN_SERVICE)"
+        } >> "$GITHUB_OUTPUT"

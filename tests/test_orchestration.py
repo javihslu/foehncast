@@ -122,8 +122,8 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
     monkeypatch.setattr(
         orchestration,
-        "get_mlflow_config",
-        lambda: {"tracking_uri": "http://localhost:5001"},
+        "get_mlflow_tracking_uri",
+        lambda: "http://localhost:5001",
     )
     monkeypatch.setattr(
         orchestration,

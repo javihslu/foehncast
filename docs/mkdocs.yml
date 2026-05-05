@@ -1,4 +1,4 @@
-site_name: FoehnCast
+site_name: FoehnCast Journal
 site_url: https://javihslu.github.io/foehncast/
 site_description: Course project journal and architecture guide for FoehnCast
 repo_url: https://github.com/javihslu/foehncast
@@ -26,6 +26,8 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+extra_javascript:
+  - assets/javascripts/mermaid.js
 
 markdown_extensions:
   - admonition
@@ -43,11 +45,9 @@ markdown_extensions:
 
 plugins:
   - search
-  - mermaid2:
-      javascript: assets/javascripts/mermaid.mjs
 
 nav:
-  - Home: index.md
+  - Journal: index.md
   - Milestones:
       - Overview: milestones/index.md
       - MS1 Proposal: milestones/ms1.md

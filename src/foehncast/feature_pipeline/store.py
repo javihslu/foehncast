@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from foehncast.config import get_gcp_config, get_storage_config
+from foehncast.config import get_gcp_project_id, get_storage_config
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _BQ_TIME_COLUMN = "forecast_time"
@@ -85,12 +85,7 @@ def _s3_filesystem(storage_config: dict[str, Any]) -> Any:
 
 
 def _bigquery_project_id(storage_config: dict[str, Any]) -> str:
-    project_id = (
-        os.getenv("GOOGLE_CLOUD_PROJECT")
-        or os.getenv("GCP_PROJECT_ID")
-        or storage_config.get("bigquery_project_id")
-        or get_gcp_config().get("project_id")
-    )
+    project_id = storage_config.get("bigquery_project_id") or get_gcp_project_id()
     if not project_id:
         raise ValueError("BigQuery storage requires a GCP project ID")
     return project_id

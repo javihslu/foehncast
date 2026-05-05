@@ -1,55 +1,49 @@
 # Seasonality
 
-FoehnCast should account for seasonality, but in a simple way.
+Seasonality is already handled in FoehnCast through cyclical time features derived from the forecast timestamp. The project does not split the model by season; it encodes repeating daily and yearly patterns directly in the feature table.
 
 ## Why It Matters
 
 Swiss kite spots do not behave the same way all year.
 Summer thermals, winter pressure systems, daylight, and temperature patterns all affect when a spot becomes rideable. If the model only sees raw weather values, it may miss some of that structure.
 
-## What We Should Add First
+## Current Implementation
 
-The first version should use a small set of time features derived from the forecast timestamp:
+The feature pipeline currently engineers four timestamp-derived fields:
 
 - `hour_of_day_sin`
 - `hour_of_day_cos`
 - `day_of_year_sin`
 - `day_of_year_cos`
 
-These features are simple and work well for repeating patterns. They let the model learn that 14:00 is close to 15:00, and that late June is close to early July.
-
-## What We Should Not Add Yet
-
-We should avoid a more complex seasonal design for now.
-
-- No separate model per season.
-- No long list of month dummy columns unless the simple features are not enough.
-- No extra architecture just for seasonality.
-
-The goal is to improve the model with the smallest clear change.
+These features let the model learn that 14:00 is close to 15:00, and that late June is close to early July, without introducing a discontinuity at midnight or year-end.
 
 ## Where It Fits In FTI
 
-Seasonality belongs in the feature layer.
+- The feature pipeline creates the cyclical time fields from each forecast timestamp.
+- The training pipeline consumes those fields as part of the model feature vector.
+- The inference pipeline builds the same fields from live forecast timestamps.
 
-- The feature pipeline should create the time features from each forecast timestamp.
-- The training pipeline should train on those features.
-- The inference pipeline should build the same features from the live forecast timestamps.
+This keeps training and inference aligned around the same time encoding.
 
-This keeps training and inference consistent.
+## Why The Current Scope Stays Simple
 
-## How We Should Validate It
+The current implementation favors the smallest feature set that can still capture recurring patterns.
 
-We should compare a baseline model against a seasonal-feature model in MLflow.
+- No separate seasonal model families.
+- No wide month-dummy design.
+- No extra architecture dedicated only to seasonal logic.
 
-We should only keep the new features if they improve at least one of these:
+That keeps the project within course scope while still giving the model useful time context.
 
-- overall error metrics
-- ranking quality
-- stability across different months
+## How It Can Be Evaluated
 
-## Recommendation
+Seasonality changes can be evaluated through the same training and MLflow workflow used for the rest of the model.
 
-Yes, FoehnCast should account for seasonality.
+- compare training runs with and without additional seasonal features
+- inspect error metrics and ranking quality across different parts of the year
+- keep only changes that improve the model enough to justify the added complexity
 
-The first implementation should stay simple: add cyclical time features, retrain, and compare results before making the design more complex.
+## Summary
+
+FoehnCast already accounts for seasonality in a lightweight way. The current design is to keep cyclical time features in the shared feature layer and only add more seasonal complexity if model evidence makes that worthwhile.

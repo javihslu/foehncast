@@ -5,21 +5,36 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   compose:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
-    env:
-      OBJECTSTORE_ACCESS_KEY: minioadmin
-      OBJECTSTORE_SECRET_KEY: minioadmin123
-      OBJECTSTORE_ENDPOINT: http://objectstore:9000
-      OBJECTSTORE_BUCKET: artifacts
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f docker-compose.yml config
+      - run: docker compose -f docker-compose.yml -f docker-compose.cloud.yml config
       - run: docker compose -f docker-compose.yml build model-registry app
+          airflow-webserver
+
+  shell:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n scripts/*.sh
+      - run: bash scripts/teardown-gcp.sh --help >/dev/null
+      - run: bash scripts/teardown-gcp.sh --plan-only >/dev/null
 
   terraform:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +44,8 @@ jobs:
       - run: terraform -chdir=terraform validate
 
   lint:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +55,8 @@ jobs:
       - run: uv run ruff format --check .
 
   test:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +65,8 @@ jobs:
       - run: uv run pytest tests/ -v
 
   docs:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

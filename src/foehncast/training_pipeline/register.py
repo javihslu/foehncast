@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 import mlflow
 
-from foehncast.config import get_mlflow_config
+from foehncast.config import get_mlflow_config, get_mlflow_tracking_uri
 
 if TYPE_CHECKING:
     from mlflow.entities.model_registry import ModelVersion
-
-
-def _tracking_uri(mlflow_config: dict[str, Any]) -> str:
-    return os.getenv("MLFLOW_TRACKING_URI", mlflow_config["tracking_uri"])
 
 
 def _resolved_model_name(model_name: str | None, mlflow_config: dict[str, Any]) -> str:
@@ -33,7 +28,7 @@ def register_model(run_id: str, model_name: str | None = None) -> "ModelVersion"
     """Register the trained model artifact from a run and return its version."""
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
-    mlflow.set_tracking_uri(_tracking_uri(mlflow_config))
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     return mlflow.register_model(f"runs:/{run_id}/model", resolved_model_name)
 
 
@@ -43,7 +38,7 @@ def promote_model(
     """Promote a registered model version by assigning the configured alias."""
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
-    mlflow.set_tracking_uri(_tracking_uri(mlflow_config))
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
 
     client = mlflow.MlflowClient()
     client.set_registered_model_alias(
@@ -58,5 +53,5 @@ def get_production_model(model_name: str | None = None) -> Any:
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
     alias = _registry_alias("Production", mlflow_config)
-    mlflow.set_tracking_uri(_tracking_uri(mlflow_config))
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     return mlflow.pyfunc.load_model(f"models:/{resolved_model_name}@{alias}")

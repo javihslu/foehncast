@@ -4,30 +4,22 @@ services:
     build:
       context: ../..
       dockerfile: containers/app/Dockerfile
-    image: foehncast-app:local
+    image: ${FOEHNCAST_APP_IMAGE:-foehncast-app:local}
     command: ["/usr/local/bin/start-app.sh"]
     depends_on:
       model-registry:
         condition: service_started
+    env_file:
+      - path: ../../.env.example
+        required: false
+      - path: ../../.env
+        required: false
     environment:
-      - MLFLOW_TRACKING_URI=http://model-registry:5001
-      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY:-}
-      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY:-}
-      - OBJECTSTORE_ENDPOINT=${OBJECTSTORE_ENDPOINT:-}
-      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
-      - STORAGE_LOCAL_PATH=${STORAGE_LOCAL_PATH:-data}
-      - STORAGE_S3_BUCKET=${STORAGE_S3_BUCKET:-foehncast-data}
-      - STORAGE_S3_ENDPOINT=${STORAGE_S3_ENDPOINT:-}
-      - STORAGE_BIGQUERY_PROJECT_ID=${STORAGE_BIGQUERY_PROJECT_ID:-}
-      - STORAGE_BIGQUERY_DATASET=${STORAGE_BIGQUERY_DATASET:-foehncast}
-      - STORAGE_BIGQUERY_TABLE=${STORAGE_BIGQUERY_TABLE:-forecast_features}
-      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
-      - GCP_LOCATION=${GCP_LOCATION:-}
-      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
-      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
-      - UVICORN_HOST=0.0.0.0
-      - UVICORN_PORT=8000
+      MLFLOW_TRACKING_URI: http://model-registry:5001
+      GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: 8000
     ports:
-      - 127.0.0.1:8000:8000
+      - ${APP_BIND_HOST:-127.0.0.1}:8000:8000
     networks:
       - production

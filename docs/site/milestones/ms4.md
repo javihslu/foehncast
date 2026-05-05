@@ -1,30 +1,30 @@
 # MS4 Final Code
 
-<span class="fc-pill fc-pill--planned">In progress</span>
+<span class="fc-pill fc-pill--progress">Final integration</span>
 
-MS4 is now the wrap-up milestone. The core local stack already runs end to end with real forecast data, so the remaining work is to keep the public story simple and move the same architecture toward its cloud and operations targets.
+MS4 is the wrap-up milestone. The local stack already runs end to end with real forecast data, so the final focus is integration: turn the validated backend into a clearer public handoff, strengthen the hosted path, and document the final operating model.
 
-## Current Position
+## MS4 Focus
 
-| Area | Current position | Remaining work |
-|------|------------------|----------------|
-| Architecture | Feature, training, and inference modules run together locally | Keep the same split in the cloud |
-| Reproducibility | Docker Compose and `bootstrap-local.sh` provide a clean local path | Keep cloud setup aligned with Terraform and docs |
-| Automation | Airflow DAGs run locally and deployment scaffolding exists | Finish the repeatable cloud execution path |
-| Monitoring | Minimal baseline | Add service and model monitoring for the final submission |
+| Area | Current baseline | MS4 objective |
+|------|------------------|---------------|
+| Architecture | Feature, training, and inference modules run together locally | Preserve the same split in the hosted path |
+| Reproducibility | Docker Compose and `bootstrap-local.sh` provide a clean local path | Keep the cloud setup aligned with Terraform and the docs |
+| Automation | Airflow DAGs run locally and deployment scaffolding exists | Tighten the repeatable online deployment flow |
+| Monitoring | Minimal baseline | Add enough service and model visibility for the final handoff |
 
 ## Wrap-Up Roadmap
 
-```mermaid
+<div class="mermaid">
 flowchart LR
-	LOCAL[Local real-data execution] --> DOCS[Simple public docs and demo path]
-	DOCS --> CLOUD[Cloud data and runtime mapping]
-	CLOUD --> AUTO[Automation and repeatable delivery]
-	AUTO --> MON[Monitoring and final freeze]
-```
+    LOCAL[Local real-data execution] --> DOCS[Simple public docs and demo path]
+    DOCS --> CLOUD[Cloud data and runtime mapping]
+    CLOUD --> AUTO[Automation and repeatable delivery]
+    AUTO --> MON[Monitoring and final freeze]
+</div>
 
-## What MS4 Should Show Clearly
+## What MS4 Should Demonstrate
 
 - The local stack is not a mock-up. It already executes the real pipeline split.
 - The cloud plan reuses the validated modules instead of inventing a new architecture.
-- The remaining gap is operational maturity: scheduled runs, monitoring, and final packaging.
+- The last step is operational maturity: repeatable delivery, monitoring, and final packaging.

@@ -108,6 +108,11 @@ def get_gcp_config() -> dict[str, Any]:
     return load_config()["gcp"]
 
 
+def get_gcp_project_id() -> str | None:
+    """Return the resolved GCP project ID."""
+    return get_gcp_config().get("project_id")
+
+
 def get_validation_config() -> dict[str, Any]:
     """Return the validation settings."""
     return load_config()["validation"]
@@ -116,6 +121,11 @@ def get_validation_config() -> dict[str, Any]:
 def get_mlflow_config() -> dict[str, Any]:
     """Return the MLflow settings."""
     return load_config()["mlflow"]
+
+
+def get_mlflow_tracking_uri() -> str:
+    """Return the resolved MLflow tracking URI."""
+    return get_mlflow_config()["tracking_uri"]
 
 
 def get_inference_config() -> dict[str, Any]:

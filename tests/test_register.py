@@ -39,6 +39,9 @@ def test_register_model_registers_run_artifact(
 
     monkeypatch.setattr(register, "mlflow", FakeMlflow())
     monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
 
     model_version = register.register_model("run-123")
 
@@ -65,6 +68,9 @@ def test_register_model_allows_model_name_override(
 
     monkeypatch.setattr(register, "mlflow", FakeMlflow())
     monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
 
     register.register_model("run-456", model_name="foehncast-experiment")
 
@@ -94,6 +100,9 @@ def test_promote_model_assigns_champion_alias_for_production(
 
     monkeypatch.setattr(register, "mlflow", FakeMlflow())
     monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
 
     register.promote_model(None, 7)
 
@@ -120,6 +129,9 @@ def test_get_production_model_loads_model_from_champion_alias(
 
     monkeypatch.setattr(register, "mlflow", FakeMlflow())
     monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
 
     model = register.get_production_model()
 

@@ -55,3 +55,14 @@
 .md-typeset details.note>summary {
     background-color: rgba(15, 118, 110, 0.08);
 }
+
+.md-typeset .mermaid {
+    overflow-x: auto;
+    padding: 1rem 0;
+    text-align: center;
+}
+
+.md-typeset .mermaid svg {
+    height: auto;
+    max-width: 100%;
+}

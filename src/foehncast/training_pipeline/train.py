@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,7 @@ from sklearn.model_selection import train_test_split
 
 from foehncast.config import (
     get_mlflow_config,
+    get_mlflow_tracking_uri,
     get_model_config,
     get_rider_config,
     get_spots,
@@ -84,10 +84,6 @@ def train_model(
     return model
 
 
-def _tracking_uri(mlflow_config: dict[str, Any]) -> str:
-    return os.getenv("MLFLOW_TRACKING_URI", mlflow_config["tracking_uri"])
-
-
 def _log_feature_importance_plot(model: Any, feature_columns: list[str]) -> None:
     if not hasattr(model, "feature_importances_"):
         return
@@ -115,7 +111,7 @@ def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
     """Train the configured model, log the run to MLflow, and return the run id."""
     resolved_model_config = model_config or get_model_config()
     mlflow_config = get_mlflow_config()
-    mlflow.set_tracking_uri(_tracking_uri(mlflow_config))
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     mlflow.set_experiment(mlflow_config["experiment_name"])
 
     features_df, target_series = load_training_data()

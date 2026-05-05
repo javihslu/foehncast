@@ -251,6 +251,7 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         "get_mlflow_config",
         lambda: {"tracking_uri": "http://mlflow", "experiment_name": "foehncast"},
     )
+    monkeypatch.setattr(train, "get_mlflow_tracking_uri", lambda: "http://mlflow")
     monkeypatch.setattr(
         train,
         "load_training_data",

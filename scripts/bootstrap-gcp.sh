@@ -5,6 +5,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ROOT_DIR}/.env"
 TFVARS_FILE="${ROOT_DIR}/terraform/terraform.tfvars"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/cli-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/terraform-platform-state.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/gcp-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/github-common.sh"
 CONFIGURE_GITHUB=false
 TARGET_REPO=""
 PLAN_ONLY=false
@@ -13,32 +21,6 @@ INTERACTIVE=true
 
 usage() {
   echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
-}
-
-install_hint() {
-  local command_name="$1"
-
-  case "$command_name" in
-    gcloud)
-      echo "Install Google Cloud CLI first. On macOS with Homebrew: brew install --cask google-cloud-sdk" >&2
-      ;;
-    terraform)
-      echo "Install Terraform first. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
-      ;;
-    gh)
-      echo "Install GitHub CLI first. On macOS with Homebrew: brew install gh" >&2
-      ;;
-  esac
-}
-
-require_command() {
-  local command_name="$1"
-
-  if ! command -v "$command_name" >/dev/null 2>&1; then
-    echo "$command_name is required but not installed." >&2
-    install_hint "$command_name"
-    exit 1
-  fi
 }
 
 require_file() {
@@ -50,58 +32,48 @@ require_file() {
     exit 1
   fi
 }
-  copy_example_if_missing() {
-    local template_path="$1"
-    local destination_path="$2"
 
-    if [[ ! -f "$destination_path" ]]; then
-      cp "$template_path" "$destination_path"
-    fi
-  }
+copy_example_if_missing() {
+  local template_path="$1"
+  local destination_path="$2"
 
+  if [[ ! -f "$destination_path" ]]; then
+    cp "$template_path" "$destination_path"
+  fi
+}
 
-load_env_file() {
-  local file_path="$1"
-    if [[ -f "$file_path" ]]; then
-      set -a
-      # shellcheck disable=SC1090
-      source "$file_path"
-      set +a
-    fi
-  }
+trim_whitespace() {
+  local value="$1"
 
-  trim_whitespace() {
-    local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
 
-    value="${value#"${value%%[![:space:]]*}"}"
-    value="${value%"${value##*[![:space:]]}"}"
-    printf '%s' "$value"
-  }
+read_tfvars_value() {
+  local key="$1"
+  local line value
 
-  read_tfvars_value() {
-    local key="$1"
-    local line value
+  if [[ ! -f "$TFVARS_FILE" ]]; then
+    return
+  fi
 
-    if [[ ! -f "$TFVARS_FILE" ]]; then
-      return
-    fi
+  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TFVARS_FILE" | tail -n 1 || true)"
 
-    line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TFVARS_FILE" | tail -n 1 || true)"
+  if [[ -z "$line" ]]; then
+    return
+  fi
 
-    if [[ -z "$line" ]]; then
-      return
-    fi
+  value="${line#*=}"
+  value="$(trim_whitespace "$value")"
 
-    value="${line#*=}"
-    value="$(trim_whitespace "$value")"
+  if [[ "$value" == \"*\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
 
-    if [[ "$value" == \"*\" ]]; then
-      value="${value#\"}"
-      value="${value%\"}"
-    fi
-
-    printf '%s\n' "$value"
-  }
+  printf '%s\n' "$value"
+}
 
   replace_or_append_line() {
     local file_path="$1"
@@ -157,38 +129,22 @@ load_env_file() {
     replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
   }
 
-  terraform_output() {
-    local output_name="$1"
-
-    terraform -chdir="${ROOT_DIR}/terraform" output -raw "$output_name"
-  }
-
-  optional_terraform_output() {
-    local output_name="$1"
-
-    terraform -chdir="${ROOT_DIR}/terraform" output -raw "$output_name" 2>/dev/null || true
-  }
-
   sync_env_from_terraform_outputs() {
-    local project_id region bucket dataset table cloud_run_service
+    local cloud_run_service
 
-    project_id="$(terraform_output project_id)"
-    region="$(terraform_output region)"
-    bucket="$(terraform_output artifact_bucket_name)"
-    dataset="$(terraform_output bigquery_dataset_id)"
-    table="$(terraform_output bigquery_feature_table_id)"
-    cloud_run_service="$(optional_terraform_output cloud_run_service_name)"
+    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    cloud_run_service="${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
 
     if [[ -z "$cloud_run_service" ]]; then
       cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
     fi
 
-    set_env_value GCP_PROJECT_ID "$project_id"
-    set_env_value GCP_LOCATION "$region"
-    set_env_value GCP_BUCKET_NAME "$bucket"
-    set_env_value STORAGE_BIGQUERY_PROJECT_ID "$project_id"
-    set_env_value STORAGE_BIGQUERY_DATASET "$dataset"
-    set_env_value STORAGE_BIGQUERY_TABLE "$table"
+    set_env_value GCP_PROJECT_ID "$FOEHNCAST_TF_PROJECT_ID"
+    set_env_value GCP_LOCATION "$FOEHNCAST_TF_LOCATION"
+    set_env_value GCP_BUCKET_NAME "$FOEHNCAST_TF_ARTIFACT_BUCKET_NAME"
+    set_env_value STORAGE_BIGQUERY_PROJECT_ID "$FOEHNCAST_TF_PROJECT_ID"
+    set_env_value STORAGE_BIGQUERY_DATASET "$FOEHNCAST_TF_BIGQUERY_DATASET"
+    set_env_value STORAGE_BIGQUERY_TABLE "$FOEHNCAST_TF_BIGQUERY_TABLE"
 
     if [[ -n "$cloud_run_service" ]]; then
       set_env_value CLOUD_RUN_SERVICE_NAME "$cloud_run_service"
@@ -196,18 +152,14 @@ load_env_file() {
   }
 
   print_auth_summary() {
-    local runtime_service_account github_service_account cloud_run_service
-
-    runtime_service_account="$(terraform_output cloud_run_runtime_service_account)"
-    github_service_account="$(terraform_output github_deployer_service_account)"
-    cloud_run_service="$(optional_terraform_output cloud_run_service_name)"
+    load_terraform_platform_state "${ROOT_DIR}/terraform"
 
     echo "Local auth: browser-based gcloud ADC on this machine"
-    echo "Cloud Run runtime service account: ${runtime_service_account}"
-    echo "GitHub deployer service account: ${github_service_account}"
+    echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"
+    echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
 
-    if [[ -n "$cloud_run_service" ]]; then
-      echo "Cloud Run service: ${cloud_run_service}"
+    if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
+      echo "Cloud Run service: ${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
     fi
   }
 
@@ -266,34 +218,6 @@ load_env_file() {
     done
   }
 
-  ensure_gcloud_auth() {
-    if ! gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .; then
-      echo "Opening browser-based gcloud login..."
-      gcloud auth login
-    fi
-
-    if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
-      echo "Opening browser-based application default credential login..."
-      gcloud auth application-default login
-    fi
-  }
-
-  resolve_repo_from_remote() {
-    local origin_url
-
-    origin_url="$(git -C "$ROOT_DIR" config --get remote.origin.url || true)"
-
-    if [[ "$origin_url" =~ ^git@github\.com:([^/]+)/([^.]+)(\.git)?$ ]]; then
-      printf '%s/%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-      return
-    fi
-
-    if [[ "$origin_url" =~ ^https://github\.com/([^/]+)/([^.]+)(\.git)?$ ]]; then
-      printf '%s/%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-      return
-    fi
-  }
-
   ensure_project_exists() {
     local project_id="$1"
     local project_name
@@ -333,12 +257,12 @@ load_env_file() {
       fi
     done < <(gcloud projects list --format='value(projectId)')
 
-    echo "Choose a GCP project for FoehnCast:"
+    echo "Choose a GCP project for FoehnCast:" >&2
     for project_id in "${projects[@]}"; do
-      echo "  ${index}) ${project_id}"
+      echo "  ${index}) ${project_id}" >&2
       index=$((index + 1))
     done
-    echo "  n) Create a new project"
+    echo "  n) Create a new project" >&2
 
     while true; do
       choice="$(prompt_with_default "Project number, project id, or n" "$default_project")"
@@ -386,7 +310,7 @@ load_env_file() {
         billing_accounts+=("${entry##*/}")
         billing_labels+=("$label")
       fi
-    done < <(gcloud billing accounts list --filter='OPEN=true' --format='tsv(name,displayName)')
+    done < <(gcloud billing accounts list --filter='OPEN=true' --format='value(name,displayName)')
 
     if [[ ${#billing_accounts[@]} -eq 0 ]]; then
       echo "No open billing accounts are visible to the current gcloud user. Link billing manually and rerun." >&2
@@ -443,7 +367,7 @@ load_env_file() {
 
     current_region="$(prompt_with_default "GCP region" "$current_region")"
     artifact_bucket="${GCP_BUCKET_NAME:-$(read_tfvars_value artifact_bucket_name)}"
-    if [[ -z "$artifact_bucket" ]]; then
+    if [[ -z "$artifact_bucket" || "$artifact_bucket" == "foehncast-data" || "$artifact_bucket" == "foehncast-artifacts-your-gcp-project" ]]; then
       artifact_bucket="foehncast-artifacts-${current_project}"
     fi
     artifact_bucket="$(prompt_with_default "Artifact bucket name" "$artifact_bucket")"
@@ -504,7 +428,7 @@ load_env_file() {
       fi
     fi
 
-    repo_default="$(resolve_repo_from_remote)"
+    repo_default="$(resolve_repo_from_remote "$ROOT_DIR")"
     if [[ "$CONFIGURE_GITHUB" == "true" ]]; then
       require_command gh
       TARGET_REPO="$(prompt_with_default "GitHub repository for deployment automation" "${TARGET_REPO:-$repo_default}")"
@@ -600,8 +524,7 @@ fi
 
 load_env_file "$ENV_FILE"
 
-: "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID in .env or the environment.}"
-: "${GCP_LOCATION:?Set GCP_LOCATION in .env or the environment.}"
+require_gcp_project_and_location
 
 echo "Authenticating with Google Cloud via browser if needed..."
 "${ROOT_DIR}/scripts/gcp-auth.sh" "$ENV_FILE"
@@ -611,6 +534,9 @@ gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
 
 echo "Initializing Terraform..."
 terraform -chdir="${ROOT_DIR}/terraform" init
+
+echo "Formatting generated Terraform variable files..."
+terraform fmt "$TFVARS_FILE" >/dev/null
 
 echo "Checking Terraform formatting and validation..."
 terraform -chdir="${ROOT_DIR}/terraform" fmt -check
