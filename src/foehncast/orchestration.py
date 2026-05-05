@@ -1,13 +1,19 @@
-"""High-level orchestration helpers for local Airflow DAGs."""
+"""High-level orchestration helpers for Airflow-managed ML jobs."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import mlflow
 import pandas as pd
 
-from foehncast.config import get_mlflow_tracking_uri, get_spots
+from foehncast.config import (
+    get_mlflow_config,
+    get_mlflow_tracking_uri,
+    get_spots,
+    get_storage_config,
+)
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import write_features
@@ -16,6 +22,24 @@ from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def resolve_airflow_schedule(
+    schedule: str | None, *, default: str | None = None
+) -> str | None:
+    """Normalize an Airflow schedule string, allowing explicit opt-out values."""
+    candidate = default if schedule is None else schedule
+    if candidate is None:
+        return None
+
+    normalized = candidate.strip()
+    if not normalized:
+        return None
+
+    if normalized.lower() in {"none", "off", "false", "manual"}:
+        return None
+
+    return normalized
 
 
 def run_feature_pipeline(dataset: str = "train") -> list[str]:
@@ -41,6 +65,33 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
         raise ValueError("No feature data was generated for any configured spot")
 
     return stored_spots
+
+
+def _scheduled_mlflow_tracking_uri() -> str | None:
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()
+    return tracking_uri or None
+
+
+def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
+    """Run the feature pipeline and optionally log a refresh run to MLflow."""
+    tracking_uri = _scheduled_mlflow_tracking_uri()
+    if tracking_uri is None:
+        return run_feature_pipeline(dataset=dataset)
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(get_mlflow_config()["experiment_name"])
+
+    with mlflow.start_run(run_name=f"feature-{dataset}-refresh"):
+        stored_spots = run_feature_pipeline(dataset=dataset)
+        mlflow.log_params(
+            {
+                "dataset": dataset,
+                "storage_backend": get_storage_config()["backend"],
+                "stored_spots": ",".join(stored_spots),
+            }
+        )
+        mlflow.log_metric("stored_spot_count", len(stored_spots))
+        return stored_spots
 
 
 def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:

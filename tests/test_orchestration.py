@@ -88,6 +88,109 @@ def test_run_feature_pipeline_raises_on_validation_failure(
         orchestration.run_feature_pipeline()
 
 
+def test_run_feature_pipeline_job_without_mlflow_env_delegates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+    def fake_run_feature_pipeline(dataset: str = "train") -> list[str]:
+        captured["dataset"] = dataset
+        return ["silvaplana"]
+
+    monkeypatch.setattr(
+        orchestration,
+        "run_feature_pipeline",
+        fake_run_feature_pipeline,
+    )
+
+    stored_spots = orchestration.run_feature_pipeline_job(dataset="validation")
+
+    assert stored_spots == ["silvaplana"]
+    assert captured["dataset"] == "validation"
+
+
+def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: dict[str, object] = {}
+
+    class FakeRun:
+        def __enter__(self) -> FakeRun:
+            logged["entered"] = True
+            return self
+
+        def __exit__(self, exc_type, exc, exc_tb) -> None:
+            return None
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+        def set_experiment(self, experiment_name: str) -> None:
+            logged["experiment_name"] = experiment_name
+
+        def start_run(self, run_name: str) -> FakeRun:
+            logged["run_name"] = run_name
+            return FakeRun()
+
+        def log_params(self, params: dict[str, object]) -> None:
+            logged["params"] = params
+
+        def log_metric(self, name: str, value: float) -> None:
+            logged.setdefault("metrics", {})[name] = value
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
+    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(
+        orchestration,
+        "get_mlflow_config",
+        lambda: {"experiment_name": "foehncast"},
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "get_storage_config",
+        lambda: {"backend": "bigquery"},
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "run_feature_pipeline",
+        lambda dataset="train": ["silvaplana", "urnersee"],
+    )
+
+    stored_spots = orchestration.run_feature_pipeline_job(dataset="train")
+
+    assert stored_spots == ["silvaplana", "urnersee"]
+    assert logged["tracking_uri"] == "https://mlflow.example.com"
+    assert logged["experiment_name"] == "foehncast"
+    assert logged["run_name"] == "feature-train-refresh"
+    assert logged["params"] == {
+        "dataset": "train",
+        "storage_backend": "bigquery",
+        "stored_spots": "silvaplana,urnersee",
+    }
+    assert logged["metrics"] == {"stored_spot_count": 2}
+
+
+def test_resolve_airflow_schedule_uses_default_when_env_is_missing() -> None:
+    assert (
+        orchestration.resolve_airflow_schedule(None, default="0 */6 * * *")
+        == "0 */6 * * *"
+    )
+
+
+@pytest.mark.parametrize("schedule", ["", " none ", "manual", "OFF", "false"])
+def test_resolve_airflow_schedule_supports_explicit_opt_out(schedule: str) -> None:
+    assert (
+        orchestration.resolve_airflow_schedule(schedule, default="0 */6 * * *") is None
+    )
+
+
+def test_resolve_airflow_schedule_preserves_explicit_cron() -> None:
+    assert orchestration.resolve_airflow_schedule("15 * * * *") == "15 * * * *"
+
+
 def test_evaluate_training_run_logs_to_existing_mlflow_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

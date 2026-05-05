@@ -26,7 +26,7 @@ flowchart LR
 | Local Compose baseline | Airflow, MLflow, FastAPI, and the development container | default development and evaluation path |
 | Online compose host | the full Airflow, MLflow, and API stack on one GCP host | simplest way to keep the whole project online |
 | Optional Cloud Run path | the FastAPI inference service only | inference-only deployment surface |
-| GitHub automation | image publishing and Terraform workflows | repeatable delivery for the hosted paths |
+| GitHub automation | image publishing and Terraform workflows | GitOps for the hosted paths, not ML pipeline orchestration |
 
 ```mermaid
 flowchart TB
@@ -75,6 +75,7 @@ After it finishes, the main endpoints are:
 - MLflow: `http://127.0.0.1:5001`
 
 Airflow and MLflow open directly in local mode. The bootstrap path resets Docker volumes before starting so the evaluator workflow begins from a clean state. Feature storage defaults to local files, and optional S3-compatible settings are only needed for non-default experiments.
+Feature refresh scheduling stays inside Airflow. `AIRFLOW_FEATURE_SCHEDULE` defaults to `0 */6 * * *`; set it to an empty value, `manual`, or `off` when you want a purely manual local stack.
 
 Example check:
 
@@ -149,6 +150,7 @@ When you finish a disposable cloud test, run `./scripts/teardown-gcp.sh --plan-o
 
 ## GitHub Automation
 
+- Airflow owns feature and training pipeline execution inside the ML stack. GitHub Actions is reserved for GitOps concerns such as image publishing, Terraform, and deployment automation.
 - `.github/workflows/publish-runtime-images.yml`: publishes app, Airflow, MLflow, and development images to GHCR.
 - `.github/workflows/terraform.yml`: runs Terraform validate on changes and supports manual remote plan or apply with a GCS backend.
 - `.github/workflows/publish-app-image.yml`: keeps the optional Artifact Registry plus Cloud Run path for the inference API.
