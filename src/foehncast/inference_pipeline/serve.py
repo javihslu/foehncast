@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -18,6 +18,10 @@ from foehncast.inference_pipeline.predict import (
     predict_spots,
 )
 from foehncast.inference_pipeline.rank import rank_spots
+from foehncast.monitoring.pipeline_prometheus import (
+    CONTENT_TYPE_LATEST,
+    render_feature_pipeline_prometheus_metrics,
+)
 
 
 class PredictionRequest(BaseModel):
@@ -89,6 +93,13 @@ def create_app() -> FastAPI:
     @app.get("/features/online/demo", response_class=HTMLResponse)
     def online_features_demo() -> str:
         return render_online_features_demo()
+
+    @app.get("/metrics")
+    def metrics() -> Response:
+        return Response(
+            content=render_feature_pipeline_prometheus_metrics(),
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
+        )
 
     return app
 
