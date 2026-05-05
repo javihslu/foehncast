@@ -1,0 +1,9 @@
+*
+!.dockerignore
+!config.yaml
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+!containers/
+!containers/**

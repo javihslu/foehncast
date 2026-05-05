@@ -77,6 +77,8 @@ After it finishes, the main endpoints are:
 Airflow and MLflow open directly in local mode. The bootstrap path resets Docker volumes before starting so the evaluator workflow begins from a clean state. Feature storage defaults to local files, and optional S3-compatible settings are only needed for non-default experiments.
 Feature refresh scheduling stays inside Airflow. `AIRFLOW_FEATURE_SCHEDULE` defaults to `0 */6 * * *`; set it to an empty value, `manual`, or `off` when you want a purely manual local stack.
 
+For stepwise debugging, use notebooks against the `development_env` container rather than embedding notebook logic into the pipelines themselves. The development container keeps its own Linux virtual environment and masks the host `.venv`; the image now installs the locked Python environment at build time, and startup only registers the `FoehnCast (development_env)` Jupyter kernel. In VS Code attached to `development_env`, select that kernel or `/home/appuser/.venv/bin/python` directly. Rebuild the development image after changing `pyproject.toml` or `uv.lock`.
+
 Example check:
 
 ```bash

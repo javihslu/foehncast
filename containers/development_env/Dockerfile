@@ -11,13 +11,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.8 /uv /uvx /usr/local/bin/
-COPY start-development-env.sh /usr/local/bin/start-development-env.sh
-
 RUN useradd --create-home --shell /bin/bash appuser
-RUN chmod 755 /usr/local/bin/start-development-env.sh
 
 WORKDIR /workspace
+
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+COPY containers/development_env/start-development-env.sh /usr/local/bin/start-development-env.sh
+
+RUN chmod 755 /usr/local/bin/start-development-env.sh \
+    && chown -R appuser:appuser /workspace /home/appuser
+
 USER appuser
+
+RUN uv sync --frozen
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/start-development-env.sh"]

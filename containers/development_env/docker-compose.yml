@@ -1,7 +1,9 @@
 services:
   development_env:
     container_name: development_env
-    build: .
+    build:
+      context: ../..
+      dockerfile: containers/development_env/Dockerfile
     working_dir: /workspace
     depends_on:
       - model-registry
@@ -11,6 +13,9 @@ services:
       - path: ../../.env
         required: false
     environment:
+      UV_PROJECT_ENVIRONMENT: /home/appuser/.venv
+      PATH: /home/appuser/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PYTHONPATH: /workspace/src
       FSSPEC_S3_KEY: ${OBJECTSTORE_ACCESS_KEY:-}
       FSSPEC_S3_SECRET: ${OBJECTSTORE_SECRET_KEY:-}
       FSSPEC_S3_ENDPOINT_URL: ${OBJECTSTORE_ENDPOINT:-}
@@ -20,6 +25,10 @@ services:
       GIT_PYTHON_REFRESH: quiet
     volumes:
       - ../../:/workspace
+      - development_env_workspace_venv:/workspace/.venv
     networks:
       - development
       - production
+
+volumes:
+  development_env_workspace_venv:
