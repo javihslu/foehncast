@@ -5,14 +5,30 @@ import pytest
 
 from foehncast.training_pipeline.label import compute_quality_index, label_dataset
 
+_KMH_PER_KNOT = 1.852
+
 
 @pytest.fixture()
 def labeled_features_df() -> pd.DataFrame:
     """Feature rows that should hit each quality bucket."""
     return pd.DataFrame(
         {
-            "wind_speed_10m": [45.0, 10.0, 16.0, 19.0, 26.0, 20.0],
-            "wind_gusts_10m": [46.0, 12.0, 18.0, 21.0, 28.0, 22.0],
+            "wind_speed_10m": [
+                45.0 * _KMH_PER_KNOT,
+                10.0 * _KMH_PER_KNOT,
+                16.0 * _KMH_PER_KNOT,
+                19.0 * _KMH_PER_KNOT,
+                26.0 * _KMH_PER_KNOT,
+                20.0 * _KMH_PER_KNOT,
+            ],
+            "wind_gusts_10m": [
+                46.0 * _KMH_PER_KNOT,
+                12.0 * _KMH_PER_KNOT,
+                18.0 * _KMH_PER_KNOT,
+                21.0 * _KMH_PER_KNOT,
+                28.0 * _KMH_PER_KNOT,
+                22.0 * _KMH_PER_KNOT,
+            ],
             "wind_steadiness": [0.10, 0.30, 0.25, 0.22, 0.18, 0.15],
             "gust_factor": [1.02, 1.20, 1.12, 1.10, 1.08, 1.10],
             "shore_alignment": [0.90, 0.10, 0.20, 0.30, 0.60, 0.85],
@@ -31,8 +47,8 @@ class TestComputeQualityIndex:
     def test_light_rider_uses_lower_minimum_wind_threshold(self):
         features_df = pd.DataFrame(
             {
-                "wind_speed_10m": [13.0],
-                "wind_gusts_10m": [15.0],
+                "wind_speed_10m": [13.0 * _KMH_PER_KNOT],
+                "wind_gusts_10m": [15.0 * _KMH_PER_KNOT],
                 "wind_steadiness": [0.25],
                 "gust_factor": [1.15],
                 "shore_alignment": [0.20],

@@ -15,6 +15,7 @@ _REQUIRED_COLUMNS = {
     "gust_factor",
     "shore_alignment",
 }
+_KMH_PER_KNOT = 1.852
 
 
 def _require_columns(features_df: pd.DataFrame) -> None:
@@ -32,9 +33,14 @@ def _minimum_rideable_wind(
     return float(minimum_cfg["default_min_kts"])
 
 
+def _kmh_to_kts(value: float) -> float:
+    return float(value) / _KMH_PER_KNOT
+
+
 def _is_perfect_storm(row: pd.Series, perfect_cfg: dict[str, Any]) -> bool:
+    wind_speed_10m_kts = _kmh_to_kts(row["wind_speed_10m"])
     return (
-        perfect_cfg["min_kts"] <= row["wind_speed_10m"] <= perfect_cfg["max_kts"]
+        perfect_cfg["min_kts"] <= wind_speed_10m_kts <= perfect_cfg["max_kts"]
         and row["gust_factor"] <= perfect_cfg["max_gust_factor"]
         and row["shore_alignment"] >= perfect_cfg["min_shore_alignment"]
         and row["wind_steadiness"] <= perfect_cfg["max_wind_steadiness"]
@@ -44,13 +50,14 @@ def _is_perfect_storm(row: pd.Series, perfect_cfg: dict[str, Any]) -> bool:
 def _base_quality(
     wind_speed_10m: float, minimum_wind: float, bands_cfg: dict[str, Any]
 ) -> int:
-    if wind_speed_10m < minimum_wind:
+    wind_speed_10m_kts = _kmh_to_kts(wind_speed_10m)
+    if wind_speed_10m_kts < minimum_wind:
         return 1
-    if wind_speed_10m < bands_cfg["marginal"]["max_kts"]:
+    if wind_speed_10m_kts < bands_cfg["marginal"]["max_kts"]:
         return 2
-    if wind_speed_10m < bands_cfg["good_enough"]["max_kts"]:
+    if wind_speed_10m_kts < bands_cfg["good_enough"]["max_kts"]:
         return 3
-    if wind_speed_10m <= bands_cfg["fun_day"]["max_kts"]:
+    if wind_speed_10m_kts <= bands_cfg["fun_day"]["max_kts"]:
         return 4
     return 3
 
@@ -59,9 +66,11 @@ def _score_row(
     row: pd.Series, labeling_cfg: dict[str, Any], minimum_wind: float
 ) -> int:
     dangerous_cfg = labeling_cfg["dangerous"]
+    wind_speed_10m_kts = _kmh_to_kts(row["wind_speed_10m"])
+    wind_gusts_10m_kts = _kmh_to_kts(row["wind_gusts_10m"])
     if (
-        row["wind_speed_10m"] > dangerous_cfg["max_wind_speed_10m_kts"]
-        or row["wind_gusts_10m"] > dangerous_cfg["max_wind_gusts_10m_kts"]
+        wind_speed_10m_kts > dangerous_cfg["max_wind_speed_10m_kts"]
+        or wind_gusts_10m_kts > dangerous_cfg["max_wind_gusts_10m_kts"]
     ):
         return 0
 
