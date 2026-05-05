@@ -18,6 +18,7 @@ api:
       _humidity_2m,cloud_cover,pressure_msl,cape,lifted_index"
     forecast_days: 7
     timezone: "Europe/Zurich"
+    wind_speed_unit: "kmh"
   meteoswiss:
     stations_url: "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwin\
       digkeit-kmh-10min/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min\
@@ -137,6 +138,13 @@ validation:
     - pressure_msl
     - cape
     - lifted_index
+    - hour_of_day_sin
+    - hour_of_day_cos
+    - day_of_year_sin
+    - day_of_year_cos
+    - wind_steadiness
+    - gust_factor
+    - shore_alignment
   completeness:
     max_null_pct: 0.1
   ranges:
@@ -164,6 +172,25 @@ validation:
     relative_humidity_2m:
       min: 0
       max: 100
+    hour_of_day_sin:
+      min: -1
+      max: 1
+    hour_of_day_cos:
+      min: -1
+      max: 1
+    day_of_year_sin:
+      min: -1
+      max: 1
+    day_of_year_cos:
+      min: -1
+      max: 1
+    wind_steadiness:
+      min: 0
+    gust_factor:
+      min: 0
+    shore_alignment:
+      min: -1
+      max: 1
 
 # Model training settings
 model:

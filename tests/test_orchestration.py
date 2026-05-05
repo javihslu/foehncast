@@ -22,6 +22,7 @@ def test_run_feature_pipeline_fetches_validated_features(
         }
     )
     stored: list[tuple[str, str]] = []
+    emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
         orchestration,
@@ -46,23 +47,44 @@ def test_run_feature_pipeline_fetches_validated_features(
     monkeypatch.setattr(
         orchestration,
         "run_validation",
-        lambda df, spot_id: SimpleNamespace(is_valid=True),
+        lambda df, spot_id: SimpleNamespace(
+            is_valid=True,
+            missing_columns=[],
+            null_fractions={"wind_speed_10m": 0.0},
+            range_violations=pd.DataFrame(),
+        ),
     )
     monkeypatch.setattr(
         orchestration,
         "write_features",
         lambda df, spot_id, dataset: stored.append((spot_id, dataset)),
     )
+    monkeypatch.setattr(
+        orchestration,
+        "read_features",
+        lambda spot_id, dataset: feature_df.assign(gust_factor=1.2),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_feature_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
 
     stored_spots = orchestration.run_feature_pipeline()
 
     assert stored_spots == ["silvaplana"]
     assert stored == [("silvaplana", "train")]
+    assert emitted["summary"]["run_status"] == "succeeded"
+    assert emitted["summary"]["stored_spot_count"] == 1
+    assert emitted["summary"]["spots"][0]["storage"]["stored_rows"] == 1
+    assert emitted["summary"]["spots"][0]["feast"]["projection_ready"] is False
 
 
 def test_run_feature_pipeline_raises_on_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    emitted: dict[str, object] = {}
+
     monkeypatch.setattr(
         orchestration,
         "get_spots",
@@ -81,11 +103,59 @@ def test_run_feature_pipeline_raises_on_validation_failure(
     monkeypatch.setattr(
         orchestration,
         "run_validation",
-        lambda df, spot_id: SimpleNamespace(is_valid=False),
+        lambda df, spot_id: SimpleNamespace(
+            is_valid=False,
+            missing_columns=["gust_factor"],
+            null_fractions={"wind_speed_10m": 0.0},
+            range_violations=pd.DataFrame(),
+        ),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_feature_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
         orchestration.run_feature_pipeline()
+
+    assert emitted["summary"]["run_status"] == "failed"
+    assert emitted["summary"]["failed_spot_count"] == 1
+    assert emitted["summary"]["spots"][0]["validation"]["is_valid"] is False
+
+
+def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "fetch_all_spots",
+        lambda: (_ for _ in ()).throw(
+            ValueError("Unexpected unit for wind_speed_10m: expected km/h, got 'kn'")
+        ),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_feature_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
+
+    with pytest.raises(ValueError, match="Unexpected unit for wind_speed_10m"):
+        orchestration.run_feature_pipeline()
+
+    assert emitted["summary"]["run_status"] == "failed"
+    assert emitted["summary"]["error"] == (
+        "Unexpected unit for wind_speed_10m: expected km/h, got 'kn'"
+    )
+    assert emitted["summary"]["fetched_spot_count"] == 0
+    assert emitted["summary"]["spots"] == []
 
 
 def test_run_feature_pipeline_job_without_mlflow_env_delegates(

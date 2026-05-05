@@ -254,9 +254,17 @@ def test_write_features_bigquery_uses_load_job(
         def result(self) -> None:
             captured["job_completed"] = True
 
+    class FakeDeleteJob:
+        def result(self) -> None:
+            captured["delete_completed"] = True
+
     class FakeClient:
         def __init__(self, project: str) -> None:
             captured["project"] = project
+
+        def get_table(self, table_id: str) -> object:
+            captured["existing_table_id"] = table_id
+            return object()
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
@@ -266,16 +274,39 @@ def test_write_features_bigquery_uses_load_job(
             captured["write_disposition"] = job_config.write_disposition
             return FakeLoadJob()
 
+        def query(self, query: str, job_config: object | None = None) -> FakeDeleteJob:
+            captured["delete_query"] = query
+            captured["delete_job_config"] = job_config
+            return FakeDeleteJob()
+
     class FakeLoadJobConfig:
         def __init__(self, write_disposition: str) -> None:
             self.write_disposition = write_disposition
+
+    class FakeScalarQueryParameter:
+        def __init__(self, name: str, param_type: str, value: str) -> None:
+            self.name = name
+            self.param_type = param_type
+            self.value = value
+
+    class FakeQueryJobConfig:
+        def __init__(self, query_parameters: list[object]) -> None:
+            self.query_parameters = query_parameters
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
-            Client=FakeClient, LoadJobConfig=FakeLoadJobConfig
+            Client=FakeClient,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
     )
     monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
@@ -299,7 +330,17 @@ def test_write_features_bigquery_uses_load_job(
     assert captured["project"] == "demo-project"
     assert captured["table_id"] == "demo-project.foehncast.forecast_features"
     assert captured["write_disposition"] == "WRITE_APPEND"
+    assert captured["delete_completed"] is True
     assert captured["job_completed"] is True
+    assert (
+        "DELETE FROM `demo-project.foehncast.forecast_features`"
+        in captured["delete_query"]
+    )
+    delete_parameters = captured["delete_job_config"].query_parameters
+    assert [(param.name, param.value) for param in delete_parameters] == [
+        ("spot_id", "silvaplana"),
+        ("dataset_name", "train"),
+    ]
     assert list(written["spot_id"]) == ["silvaplana", "silvaplana"]
     assert list(written["dataset_name"]) == ["train", "train"]
     assert "forecast_time" in written.columns
@@ -385,14 +426,260 @@ def test_read_features_bigquery_restores_time_index(
     assert captured["project"] == "demo-project"
     assert captured["table_id"] == "demo-project.foehncast.forecast_features"
     assert "dataset_name" not in result.columns
+    assert "spot_id" not in result.columns
     assert result.index.name == "time"
-    assert list(result["spot_id"]) == ["silvaplana", "silvaplana"]
+    assert list(result["wind_speed_10m"]) == [10.0, 12.5]
 
     parameters = captured["job_config"].query_parameters
     assert [(param.name, param.value) for param in parameters] == [
         ("spot_id", "silvaplana"),
         ("dataset_name", "train"),
     ]
+
+
+def test_bigquery_round_trip_restores_original_feature_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+):
+    written: dict[str, pd.DataFrame] = {}
+
+    class FakeLoadJob:
+        def result(self) -> None:
+            return None
+
+    class FakeDeleteJob:
+        def result(self) -> None:
+            return None
+
+    class FakeRowIterator:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self.frame = frame
+
+        def to_dataframe(self) -> pd.DataFrame:
+            return self.frame.copy()
+
+    class FakeQueryJob:
+        def __init__(self, frame: pd.DataFrame | None = None) -> None:
+            self.frame = frame
+
+        def result(self) -> FakeRowIterator:
+            if self.frame is None:
+                return FakeRowIterator(pd.DataFrame())
+            return FakeRowIterator(self.frame)
+
+    class FakeScalarQueryParameter:
+        def __init__(self, name: str, param_type: str, value: str) -> None:
+            self.name = name
+            self.param_type = param_type
+            self.value = value
+
+    class FakeQueryJobConfig:
+        def __init__(self, query_parameters: list[object]) -> None:
+            self.query_parameters = query_parameters
+
+    class FakeLoadJobConfig:
+        def __init__(self, write_disposition: str) -> None:
+            self.write_disposition = write_disposition
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            self.project = project
+
+        def get_table(self, table_id: str) -> object:
+            if "frame" not in written:
+                raise KeyError(table_id)
+            return object()
+
+        def load_table_from_dataframe(
+            self, frame: pd.DataFrame, table_id: str, job_config: object
+        ) -> FakeLoadJob:
+            written["frame"] = frame.copy()
+            return FakeLoadJob()
+
+        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+            if "DELETE FROM" in query:
+                written["frame"] = written["frame"].iloc[0:0].copy()
+                return FakeDeleteJob()
+            return FakeQueryJob(written["frame"])
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
+        ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    original = pd.DataFrame(
+        {
+            "wind_speed_10m": [10.0, 12.5],
+            "wind_gusts_10m": [14.0, 16.5],
+            "wind_steadiness": [0.1, 0.2],
+        },
+        index=pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"]),
+    )
+    original.index.name = "time"
+
+    store.write_features(original, spot_id="silvaplana", dataset="train")
+    restored = store.read_features(spot_id="silvaplana", dataset="train")
+
+    pd.testing.assert_frame_equal(restored, original)
+
+
+def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+):
+    state: dict[str, object] = {"table": None, "delete_calls": 0}
+
+    class FakeLoadJob:
+        def result(self) -> None:
+            return None
+
+    class FakeDeleteJob:
+        def result(self) -> None:
+            return None
+
+    class FakeRowIterator:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self.frame = frame
+
+        def to_dataframe(self) -> pd.DataFrame:
+            return self.frame.copy()
+
+    class FakeQueryJob:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self.frame = frame
+
+        def result(self) -> FakeRowIterator:
+            return FakeRowIterator(self.frame)
+
+    class FakeScalarQueryParameter:
+        def __init__(self, name: str, param_type: str, value: str) -> None:
+            self.name = name
+            self.param_type = param_type
+            self.value = value
+
+    class FakeQueryJobConfig:
+        def __init__(self, query_parameters: list[object]) -> None:
+            self.query_parameters = query_parameters
+
+    class FakeLoadJobConfig:
+        def __init__(self, write_disposition: str) -> None:
+            self.write_disposition = write_disposition
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            self.project = project
+
+        def get_table(self, table_id: str) -> object:
+            if state["table"] is None:
+                raise KeyError(table_id)
+            return object()
+
+        def load_table_from_dataframe(
+            self, frame: pd.DataFrame, table_id: str, job_config: object
+        ) -> FakeLoadJob:
+            existing = state["table"]
+            if existing is None:
+                state["table"] = frame.copy()
+            else:
+                state["table"] = pd.concat([existing, frame.copy()], ignore_index=True)
+            return FakeLoadJob()
+
+        def query(self, query: str, job_config: object | None = None) -> object:
+            parameters = {
+                param.name: param.value
+                for param in getattr(job_config, "query_parameters", [])
+            }
+            table = state["table"]
+
+            if "DELETE FROM" in query:
+                state["delete_calls"] = int(state["delete_calls"]) + 1
+                if table is not None:
+                    filtered = table.loc[
+                        ~(
+                            (table["spot_id"] == parameters["spot_id"])
+                            & (table["dataset_name"] == parameters["dataset_name"])
+                        )
+                    ].reset_index(drop=True)
+                    state["table"] = filtered
+                return FakeDeleteJob()
+
+            if table is None:
+                return FakeQueryJob(pd.DataFrame())
+
+            filtered = (
+                table.loc[
+                    (table["spot_id"] == parameters["spot_id"])
+                    & (table["dataset_name"] == parameters["dataset_name"])
+                ]
+                .sort_values("forecast_time")
+                .reset_index(drop=True)
+            )
+            return FakeQueryJob(filtered)
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
+        ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    first = pd.DataFrame(
+        {"wind_speed_10m": [10.0, 12.5], "wind_steadiness": [0.1, 0.2]},
+        index=pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"]),
+    )
+    first.index.name = "time"
+    second = pd.DataFrame(
+        {"wind_speed_10m": [20.0, 21.5], "wind_steadiness": [0.3, 0.4]},
+        index=pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"]),
+    )
+    second.index.name = "time"
+
+    store.write_features(first, spot_id="silvaplana", dataset="train")
+    store.write_features(second, spot_id="silvaplana", dataset="train")
+    restored = store.read_features(spot_id="silvaplana", dataset="train")
+
+    assert state["delete_calls"] == 1
+    pd.testing.assert_frame_equal(restored, second)
 
 
 def test_read_features_bigquery_raises_file_not_found_for_empty_result(

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 
 from foehncast.feature_pipeline.ingest import (
     _hourly_to_dataframe,
@@ -22,7 +23,14 @@ MOCK_HOURLY_RESPONSE = {
         "wind_gusts_10m": [22.1, 24.3, 20.0],
         "wind_direction_10m": [220, 225, 215],
         "temperature_2m": [12.0, 11.5, 11.0],
-    }
+    },
+    "hourly_units": {
+        "time": "iso8601",
+        "wind_speed_10m": "km/h",
+        "wind_gusts_10m": "km/h",
+        "wind_direction_10m": "°",
+        "temperature_2m": "°C",
+    },
 }
 
 MOCK_SPOT = {
@@ -38,7 +46,7 @@ MOCK_SPOT = {
 
 class TestHourlyToDataframe:
     def test_converts_valid_response(self) -> None:
-        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE)
+        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE, timezone="Europe/Zurich")
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 3
         assert "wind_speed_10m" in df.columns
@@ -49,8 +57,29 @@ class TestHourlyToDataframe:
         assert df.empty
 
     def test_parses_timestamps(self) -> None:
-        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE)
+        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE, timezone="Europe/Zurich")
         assert pd.api.types.is_datetime64_any_dtype(df.index)
+
+    def test_localizes_timestamps_to_configured_timezone(self) -> None:
+        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE, timezone="Europe/Zurich")
+        assert str(df.index.tz) == "Europe/Zurich"
+
+    def test_preserves_hourly_units_in_dataframe_attrs(self) -> None:
+        df = _hourly_to_dataframe(MOCK_HOURLY_RESPONSE, timezone="Europe/Zurich")
+        assert df.attrs["hourly_units"]["wind_speed_10m"] == "km/h"
+        assert df.attrs["hourly_units"]["wind_gusts_10m"] == "km/h"
+
+    def test_rejects_unexpected_wind_units(self) -> None:
+        response = {
+            **MOCK_HOURLY_RESPONSE,
+            "hourly_units": {
+                **MOCK_HOURLY_RESPONSE["hourly_units"],
+                "wind_speed_10m": "kn",
+            },
+        }
+
+        with pytest.raises(ValueError, match="Unexpected unit for wind_speed_10m"):
+            _hourly_to_dataframe(response, timezone="Europe/Zurich")
 
 
 class TestFetchForecast:
@@ -60,6 +89,7 @@ class TestFetchForecast:
         df = fetch_forecast(46.45, 9.79)
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 3
+        assert str(df.index.tz) == "Europe/Zurich"
         mock_get.assert_called_once()
 
     @patch("foehncast.feature_pipeline.ingest._get")
@@ -70,6 +100,7 @@ class TestFetchForecast:
         params = kwargs["params"] if "params" in kwargs else mock_get.call_args[0][1]
         assert params["latitude"] == 46.45
         assert params["longitude"] == 9.79
+        assert params["wind_speed_unit"] == "kmh"
 
 
 class TestFetchArchive:
@@ -79,6 +110,15 @@ class TestFetchArchive:
         df = fetch_archive(46.45, 9.79, "2024-01-01", "2024-01-31")
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 3
+        assert str(df.index.tz) == "Europe/Zurich"
+
+    @patch("foehncast.feature_pipeline.ingest._get")
+    def test_passes_explicit_wind_speed_unit(self, mock_get) -> None:
+        mock_get.return_value = MOCK_HOURLY_RESPONSE
+        fetch_archive(46.45, 9.79, "2024-01-01", "2024-01-31")
+        _, kwargs = mock_get.call_args
+        params = kwargs["params"] if "params" in kwargs else mock_get.call_args[0][1]
+        assert params["wind_speed_unit"] == "kmh"
 
 
 class TestFetchSpot:

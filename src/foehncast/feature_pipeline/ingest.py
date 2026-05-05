@@ -14,6 +14,12 @@ from foehncast.http_client import ca_bundle
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30  # seconds
+_EXPECTED_HOURLY_UNITS = {
+    "wind_speed_10m": "km/h",
+    "wind_speed_80m": "km/h",
+    "wind_speed_120m": "km/h",
+    "wind_gusts_10m": "km/h",
+}
 
 
 def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -23,14 +29,47 @@ def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
     return resp.json()
 
 
-def _hourly_to_dataframe(data: dict[str, Any]) -> pd.DataFrame:
+def _validate_hourly_units(
+    hourly: dict[str, Any], hourly_units: dict[str, Any]
+) -> dict[str, str]:
+    """Validate the upstream wind-unit contract for the hourly payload."""
+    normalized_units = {key: str(value) for key, value in hourly_units.items()}
+
+    for field, expected_unit in _EXPECTED_HOURLY_UNITS.items():
+        if field not in hourly:
+            continue
+
+        actual_unit = normalized_units.get(field)
+        if actual_unit != expected_unit:
+            raise ValueError(
+                f"Unexpected unit for {field}: expected {expected_unit}, got {actual_unit!r}"
+            )
+
+    return normalized_units
+
+
+def _hourly_to_dataframe(
+    data: dict[str, Any], timezone: str | None = None
+) -> pd.DataFrame:
     """Convert Open-Meteo hourly response to DataFrame."""
     hourly = data.get("hourly", {})
     if not hourly:
         return pd.DataFrame()
+
+    hourly_units = _validate_hourly_units(hourly, data.get("hourly_units", {}))
+
     df = pd.DataFrame(hourly)
-    df["time"] = pd.to_datetime(df["time"])
+
+    timestamps = pd.to_datetime(df["time"])
+    if timezone:
+        if timestamps.dt.tz is None:
+            timestamps = timestamps.dt.tz_localize(timezone)
+        else:
+            timestamps = timestamps.dt.tz_convert(timezone)
+
+    df["time"] = timestamps
     df = df.set_index("time")
+    df.attrs["hourly_units"] = hourly_units
     return df
 
 
@@ -46,9 +85,10 @@ def fetch_forecast(lat: float, lon: float) -> pd.DataFrame:
         "hourly": cfg["hourly_params"],
         "forecast_days": cfg["forecast_days"],
         "timezone": cfg["timezone"],
+        "wind_speed_unit": cfg.get("wind_speed_unit", "kmh"),
     }
     data = _get(cfg["forecast_url"], params)
-    return _hourly_to_dataframe(data)
+    return _hourly_to_dataframe(data, timezone=cfg["timezone"])
 
 
 def fetch_archive(
@@ -70,9 +110,10 @@ def fetch_archive(
         "start_date": start_date,
         "end_date": end_date,
         "timezone": cfg["timezone"],
+        "wind_speed_unit": cfg.get("wind_speed_unit", "kmh"),
     }
     data = _get(cfg["archive_url"], params)
-    return _hourly_to_dataframe(data)
+    return _hourly_to_dataframe(data, timezone=cfg["timezone"])
 
 
 def fetch_spot(spot: dict[str, Any]) -> pd.DataFrame:

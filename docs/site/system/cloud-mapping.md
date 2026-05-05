@@ -75,7 +75,8 @@ flowchart LR
 
 <div class="mermaid">
 flowchart TD
-    OME[Open-Meteo] --> FEAT[Feature job]
+    OME[Open-Meteo] --> RAW[(GCS raw landing)]
+    RAW --> FEAT[Feature job]
     FEAT --> BQ[(BigQuery curated features)]
     BQ --> TRAIN[Training job]
     TRAIN --> MLF[(MLflow)]
@@ -88,16 +89,47 @@ flowchart TD
 
 | Layer | Cloud direction |
 |------|-----------------|
-| Feature pipeline | write curated rows to BigQuery |
+| Raw landing | keep immutable API payloads in GCS when a landing layer is needed |
+| Feature pipeline | transform landed or live inputs and write curated rows to BigQuery |
 | Training pipeline | read curated rows, train, evaluate, and register through MLflow |
 | Inference pipeline | serve the API on the compose host or through Cloud Run |
 | Optional Feast path | point the same logical feature view at BigQuery instead of local parquet |
+
+## Storage Layering In Cloud
+
+The current cloud direction works best when storage is split by role rather than by forcing every layer into one system.
+
+| Data role | Recommended cloud surface | Why |
+|----------|---------------------------|-----|
+| Raw landing and archive | GCS | cheap retention, append-friendly, and flexible when upstream payloads drift |
+| Curated analytical features | BigQuery native tables | query-friendly, partitionable, clusterable, and well suited to training plus Feast offline reads |
+| Feast registry and staging | GCS | metadata and staging artifacts fit object storage better than warehouse tables |
+| Feast offline source | BigQuery table or view | same curated layer used by analytics and training |
+
+External tables still have a place for raw or staging access, but they are not the preferred primary store for repeatedly queried curated features.
+
+## Cloud Storage Control Surface
+
+The cloud path stays coherent because it is driven by explicit application and infrastructure surfaces rather than by a vague translation of the local setup.
+
+| Surface | Cloud-facing implementation | Why it matters |
+|------|-----------------------------|----------------|
+| Backend selection | `storage.backend=bigquery` plus configured project, dataset, and table | switches curated persistence onto BigQuery without changing the upstream pipeline stages |
+| Curated warehouse target | `BigQueryFeatureStoreBackend` | keeps the same feature-store abstraction in place while using a query-friendly cloud store and preserving rerun-safe slice replacement |
+| Raw landing target | Terraform-managed GCS bucket | keeps immutable raw capture separate from curated analytical writes |
+| Feast offline cloud source | BigQuery table or view referenced by `feature_store.gcp.yaml.example` | keeps Feast downstream from curated storage instead of parallel to it |
+| Feast registry and staging | GCS paths from the cloud Feast config | keeps registry metadata and staging artifacts out of warehouse tables |
+| Feast online path | Datastore from the cloud Feast config | keeps optional online feature serving separate from offline analytical storage |
+| Terraform baseline | Terraform-managed GCS plus BigQuery surfaces | supplies the bucket and warehouse baseline without taking ownership of feature semantics |
+| Optional object-store compatibility path | S3-compatible backend remains non-primary | keeps compatibility testing separate from the main cloud target architecture |
+
+In practical terms, GCS owns raw landing and registry-style metadata, BigQuery owns the curated analytical layer, and Feast reads the curated layer instead of redefining it.
 
 ## Runtime Differences That Matter
 
 | Area | Local baseline | Hosted path |
 |------|----------------|-------------|
-| Storage | local parquet by default | BigQuery becomes the shared cloud data surface |
+| Storage | local files and parquet by default | GCS holds raw landing and artifacts; BigQuery becomes the shared curated cloud data surface |
 | Artifacts | local MLflow artifact volume | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
