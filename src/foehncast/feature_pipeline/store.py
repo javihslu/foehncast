@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 import importlib
 import os
 from pathlib import Path
@@ -14,6 +15,92 @@ from foehncast.config import get_gcp_project_id, get_storage_config
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _BQ_TIME_COLUMN = "forecast_time"
 _BQ_DATASET_COLUMN = "dataset_name"
+_BQ_SPOT_COLUMN = "spot_id"
+
+
+class FeatureStoreBackend(ABC):
+    def __init__(self, storage_config: dict[str, Any]) -> None:
+        self.storage_config = storage_config
+
+    @abstractmethod
+    def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_datasets(self) -> list[str]:
+        raise NotImplementedError
+
+
+class LocalFeatureStoreBackend(FeatureStoreBackend):
+    def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
+        path = _local_feature_path(self.storage_config, spot_id, dataset)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(path)
+
+    def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
+        return pd.read_parquet(
+            _local_feature_path(self.storage_config, spot_id, dataset)
+        )
+
+    def list_datasets(self) -> list[str]:
+        root = _ROOT / self.storage_config["local_path"]
+        if not root.exists():
+            return []
+        return sorted(path.name for path in root.iterdir() if path.is_dir())
+
+
+class S3FeatureStoreBackend(FeatureStoreBackend):
+    def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
+        _ensure_s3_bucket(self.storage_config)
+        df.to_parquet(
+            _s3_feature_path(self.storage_config, spot_id, dataset),
+            storage_options=_s3_storage_options(self.storage_config),
+        )
+
+    def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
+        return pd.read_parquet(
+            _s3_feature_path(self.storage_config, spot_id, dataset),
+            storage_options=_s3_storage_options(self.storage_config),
+        )
+
+    def list_datasets(self) -> list[str]:
+        filesystem = _s3_filesystem(self.storage_config)
+        root = _s3_bucket(self.storage_config)
+        if not filesystem.exists(root):
+            return []
+
+        datasets = []
+        for entry in filesystem.ls(root, detail=True):
+            if entry["type"] != "directory":
+                continue
+            name = entry["name"].removeprefix(f"{root}/")
+            if name:
+                datasets.append(name)
+        return sorted(datasets)
+
+
+class BigQueryFeatureStoreBackend(FeatureStoreBackend):
+    def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
+        _write_features_bigquery(
+            self.storage_config,
+            df=df,
+            spot_id=spot_id,
+            dataset=dataset,
+        )
+
+    def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
+        return _read_features_bigquery(
+            self.storage_config,
+            spot_id=spot_id,
+            dataset=dataset,
+        )
+
+    def list_datasets(self) -> list[str]:
+        return _list_datasets_bigquery(self.storage_config)
 
 
 def _storage_backend(storage_config: dict[str, Any]) -> str:
@@ -126,6 +213,33 @@ def _bigquery_not_found(storage_config: dict[str, Any]) -> bool:
     return False
 
 
+def _bigquery_slice_job_config(bigquery: Any, spot_id: str, dataset: str) -> Any:
+    return bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("spot_id", "STRING", spot_id),
+            bigquery.ScalarQueryParameter("dataset_name", "STRING", dataset),
+        ]
+    )
+
+
+def _delete_features_bigquery(
+    storage_config: dict[str, Any], spot_id: str, dataset: str
+) -> None:
+    if _bigquery_not_found(storage_config):
+        return
+
+    bigquery = _bigquery_module()
+    client = _bigquery_client(storage_config)
+    query = f"""
+    DELETE FROM `{_bigquery_table_id(storage_config)}`
+    WHERE spot_id = @spot_id AND dataset_name = @dataset_name
+    """
+    client.query(
+        query,
+        job_config=_bigquery_slice_job_config(bigquery, spot_id, dataset),
+    ).result()
+
+
 def _bigquery_write_frame(df: pd.DataFrame, spot_id: str, dataset: str) -> pd.DataFrame:
     frame = df.copy()
 
@@ -140,7 +254,7 @@ def _bigquery_write_frame(df: pd.DataFrame, spot_id: str, dataset: str) -> pd.Da
         )
 
     frame[_BQ_TIME_COLUMN] = pd.to_datetime(frame[_BQ_TIME_COLUMN])
-    frame["spot_id"] = spot_id
+    frame[_BQ_SPOT_COLUMN] = spot_id
     frame[_BQ_DATASET_COLUMN] = dataset
     return frame
 
@@ -151,6 +265,7 @@ def _write_features_bigquery(
     bigquery = _bigquery_module()
     client = _bigquery_client(storage_config)
     write_frame = _bigquery_write_frame(df, spot_id=spot_id, dataset=dataset)
+    _delete_features_bigquery(storage_config, spot_id=spot_id, dataset=dataset)
     job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
     client.load_table_from_dataframe(
         write_frame,
@@ -175,12 +290,7 @@ def _read_features_bigquery(
     WHERE spot_id = @spot_id AND dataset_name = @dataset_name
     ORDER BY forecast_time
     """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("spot_id", "STRING", spot_id),
-            bigquery.ScalarQueryParameter("dataset_name", "STRING", dataset),
-        ]
-    )
+    job_config = _bigquery_slice_job_config(bigquery, spot_id, dataset)
     result = client.query(query, job_config=job_config).result().to_dataframe()
     if result.empty:
         raise FileNotFoundError(
@@ -188,7 +298,7 @@ def _read_features_bigquery(
         )
 
     result[_BQ_TIME_COLUMN] = pd.to_datetime(result[_BQ_TIME_COLUMN])
-    result = result.drop(columns=[_BQ_DATASET_COLUMN], errors="ignore")
+    result = result.drop(columns=[_BQ_DATASET_COLUMN, _BQ_SPOT_COLUMN], errors="ignore")
     result = result.rename(columns={_BQ_TIME_COLUMN: "time"}).set_index("time")
     result.index.name = "time"
     return result
@@ -216,78 +326,32 @@ def _ensure_s3_bucket(storage_config: dict[str, Any]) -> None:
     filesystem.mkdir(bucket)
 
 
-def write_features(df: pd.DataFrame, spot_id: str, dataset: str) -> None:
-    """Persist feature rows for one spot and dataset."""
-    storage_config = get_storage_config()
+def _feature_store(storage_config: dict[str, Any]) -> FeatureStoreBackend:
     backend = _storage_backend(storage_config)
 
     if backend == "local":
-        path = _local_feature_path(storage_config, spot_id, dataset)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(path)
-        return
+        return LocalFeatureStoreBackend(storage_config)
 
     if backend == "bigquery":
-        _write_features_bigquery(
-            storage_config,
-            df=df,
-            spot_id=spot_id,
-            dataset=dataset,
-        )
-        return
+        return BigQueryFeatureStoreBackend(storage_config)
 
-    _ensure_s3_bucket(storage_config)
-    df.to_parquet(
-        _s3_feature_path(storage_config, spot_id, dataset),
-        storage_options=_s3_storage_options(storage_config),
+    return S3FeatureStoreBackend(storage_config)
+
+
+def write_features(df: pd.DataFrame, spot_id: str, dataset: str) -> None:
+    """Persist feature rows for one spot and dataset."""
+    _feature_store(get_storage_config()).write_features(
+        df, spot_id=spot_id, dataset=dataset
     )
 
 
 def read_features(spot_id: str, dataset: str) -> pd.DataFrame:
     """Load feature rows for one spot and dataset."""
-    storage_config = get_storage_config()
-    backend = _storage_backend(storage_config)
-
-    if backend == "local":
-        return pd.read_parquet(_local_feature_path(storage_config, spot_id, dataset))
-
-    if backend == "bigquery":
-        return _read_features_bigquery(
-            storage_config,
-            spot_id=spot_id,
-            dataset=dataset,
-        )
-
-    return pd.read_parquet(
-        _s3_feature_path(storage_config, spot_id, dataset),
-        storage_options=_s3_storage_options(storage_config),
+    return _feature_store(get_storage_config()).read_features(
+        spot_id=spot_id, dataset=dataset
     )
 
 
 def list_datasets() -> list[str]:
     """List available datasets in the configured feature store."""
-    storage_config = get_storage_config()
-    backend = _storage_backend(storage_config)
-
-    if backend == "local":
-        root = _ROOT / storage_config["local_path"]
-        if not root.exists():
-            return []
-        return sorted(path.name for path in root.iterdir() if path.is_dir())
-
-    if backend == "bigquery":
-        return _list_datasets_bigquery(storage_config)
-
-    filesystem = _s3_filesystem(storage_config)
-    root = _s3_bucket(storage_config)
-    if not filesystem.exists(root):
-        return []
-
-    datasets = []
-    for entry in filesystem.ls(root, detail=True):
-        if entry["type"] != "directory":
-            continue
-        name = entry["name"].removeprefix(f"{root}/")
-        if name:
-            datasets.append(name)
-    return sorted(datasets)
+    return _feature_store(get_storage_config()).list_datasets()

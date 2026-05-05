@@ -57,6 +57,7 @@ nav:
   - System:
       - Use Case and Data: system/use-case.md
       - Architecture: system/architecture.md
+      - Feature Pipeline: system/feature-pipeline.md
       - Cloud Mapping: system/cloud-mapping.md
       - Seasonality: system/seasonality.md
       - Repository: system/repository.md

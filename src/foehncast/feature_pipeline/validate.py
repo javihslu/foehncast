@@ -1,4 +1,4 @@
-"""Data quality checks on ingested data."""
+"""Data quality checks on curated feature rows."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def validate_completeness(df: pd.DataFrame, max_null_pct: float = 0.1) -> bool:
 
 
 def run_validation(df: pd.DataFrame, spot_id: str) -> ValidationResult:
-    """Run schema, completeness, and range validation for one spot dataset."""
+    """Run schema, completeness, and range validation for one curated spot dataset."""
     validation_config = get_validation_config()
     expected_columns = validation_config["required_columns"]
     missing_columns = _missing_columns(df, expected_columns)

@@ -34,7 +34,8 @@ FoehnCast keeps one stable Feature-Training-Inference split across every runtime
 
 <div class="mermaid">
 flowchart TD
-    OME[Open-Meteo] --> FEAT[Feature DAG]
+    OME[Open-Meteo] --> LAND[Optional raw landing]
+    LAND --> FEAT[Feature DAG]
     FEAT --> PAR[(Curated features)]
     PAR --> TRAIN[Training DAG]
     TRAIN --> MLF[(MLflow registry)]
@@ -51,7 +52,7 @@ flowchart TD
 
 | Layer | Responsibility | Current runtime surface |
 |------|----------------|-------------------------|
-| Feature pipeline | Collect, engineer, validate, and store weather data | local Airflow DAG plus the configured storage backend |
+| Feature pipeline | Collect data, optionally retain raw inputs, engineer curated rows, validate them, and store the curated result | local Airflow DAG plus the configured storage backend |
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
 | Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
 | Optional online features | Surface curated fields through an online lookup route | optional Feast-backed path plus demo page |
@@ -95,5 +96,12 @@ The online compose host is the current full-stack hosted path. Cloud Run remains
 - Feature engineering and training remain reusable across local and hosted paths.
 - Hosted changes mostly affect storage, auth, orchestration, and image delivery.
 - Optional components such as Feast layer on top of the same curated features instead of splitting the design.
+
+## Storage Contract
+
+- Raw landing is optional and stays separate from the curated feature store.
+- The local default remains simple: files for raw capture if needed, parquet for curated features, and local Feast file-plus-SQLite state.
+- In the cloud, raw landing fits object storage, while curated features fit native BigQuery tables.
+- Feast stays attached to the curated layer rather than becoming the primary ingestion or archive system.
 
 See [Use Case and Data](use-case.md) for the rider-focused problem framing and [Cloud Mapping](cloud-mapping.md) for the hosted path details.

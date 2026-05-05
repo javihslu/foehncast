@@ -39,6 +39,8 @@ flowchart LR
 The local repo keeps using the default local stack. It does not replace the existing feature pipeline or the local bootstrap path.
 The online read should return a dictionary with `rows`, `returned_features`, and the requested spot values when materialization has already run.
 
+Local Feast does not require MinIO or a local S3-compatible object store. The offline source is an exported parquet file built from the curated feature rows already written by the main pipeline.
+
 ## What The Local Path Assumes
 
 - the main feature pipeline has already produced curated local features
@@ -52,6 +54,13 @@ The online read should return a dictionary with `rows`, `returned_features`, and
 3. Set `FOEHNCAST_FEAST_BIGQUERY_TABLE` to a BigQuery table or view that exposes curated rows with `spot_id`, `forecast_time`, and the same curated feature columns defined in `features.py`.
 
 The simplest cloud hand-off from the current storage layer is a BigQuery view that filters the curated feature table to the split or dataset you want Feast to read.
+
+Keep the storage roles separate:
+
+- raw landing belongs in GCS or another object storage layer
+- curated analytical features belong in native BigQuery tables
+- Feast reads the curated layer, not the raw landing layer
+- GCS still matters for Feast registry and staging paths in the cloud config
 
 ## Why Feast Stays Optional
 
