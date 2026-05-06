@@ -130,6 +130,13 @@ The interactive setup signs you into GCP, lets you pick or create a project, con
 
 After the first bootstrap, prefer the remote Terraform workflow for day-2 plan, apply, destroy, and cleanup operations.
 
+Common remote operator commands:
+
+- Review the current remote plan: `./scripts/terraform-remote.sh plan`
+- Apply the current remote configuration: `./scripts/terraform-remote.sh apply`
+- Retire a remote environment: `./scripts/terraform-remote.sh destroy`
+- Follow destroy with post-destroy cleanup: `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions`
+
 Useful variants:
 
 - Restart from scratch: `rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
@@ -143,7 +150,7 @@ Useful variants:
 Use the online compose-host path when you want Airflow, MLflow, and the API running together in the cloud.
 
 1. Publish the runtime images with the `Publish Runtime Images` workflow, or let the host build once from the repo if the images are not published yet.
-2. Run the `Terraform` workflow with `apply` and set `provision_online_compose_host=true`.
+2. Run `./scripts/terraform-remote.sh apply --input provision_online_compose_host=true`, or trigger the `Terraform` workflow manually with the same input.
 3. Provide at least:
    - `project_id`
    - `artifact_bucket_name`
@@ -165,7 +172,9 @@ Cloud Run stays available as an inference-only path for the app service.
 - Provide `mlflow_tracking_uri` so the service can reach the registry.
 - Publish the app image through the Artifact Registry plus Cloud Run workflow path.
 
-When you finish a disposable cloud test, run `./scripts/teardown-gcp.sh --plan-only` first to preview the destroy, then rerun without `--plan-only` when you are ready to remove the Terraform-managed resources created from your local `.env` and `terraform/terraform.tfvars`. In a fresh clone with no local Terraform state, the helper skips the Terraform destroy path cleanly. `--clear-github-actions`, `--delete-state-bucket`, and `--delete-project` still work as explicit cleanup actions when you request them. `--delete-project` is intended for disposable smoke environments where you also want the bootstrap-created GCP project queued for deletion, and it prompts for the exact project id unless you also pass `--auto-approve`.
+When you finish a disposable cloud test created from the local bootstrap path, run `./scripts/teardown-gcp.sh --plan-only` first to preview the destroy, then rerun without `--plan-only` when you are ready to remove the Terraform-managed resources created from your local `.env` and `terraform/terraform.tfvars`. In a fresh clone with no local Terraform state, the helper skips the Terraform destroy path cleanly. `--clear-github-actions`, `--delete-state-bucket`, and `--delete-project` still work as explicit cleanup actions when you request them. `--delete-project` is intended for disposable smoke environments where you also want the bootstrap-created GCP project queued for deletion, and it prompts for the exact project id unless you also pass `--auto-approve`.
+
+For environments managed through the remote backend, use `./scripts/terraform-remote.sh destroy` and then `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions` instead of local Terraform.
 
 ## Deployment Ownership
 
@@ -182,7 +191,7 @@ When you finish a disposable cloud test, run `./scripts/teardown-gcp.sh --plan-o
 - `.github/workflows/terraform.yml`: runs Terraform validate on changes and supports manual remote plan or apply with a GCS backend.
 - `.github/workflows/publish-app-image.yml`: keeps the optional Artifact Registry plus Cloud Run path for the inference API.
 
-`./scripts/configure-github-actions.sh` syncs the GCP deploy variables plus the Terraform state bucket defaults back into the repository. When Cloud Run is not provisioned yet, it leaves `GCP_CLOUD_RUN_SERVICE` unset so the guarded workflow stays skipped without carrying stale values.
+`./scripts/configure-github-actions.sh` syncs the GCP deploy variables plus the Terraform state bucket defaults back into the repository. When Cloud Run is not provisioned yet, it leaves `GCP_CLOUD_RUN_SERVICE` unset so the guarded workflow stays skipped without carrying stale values. After that initial sync, use `./scripts/terraform-remote.sh` for common remote Terraform commands instead of keeping local Terraform in the loop.
 
 ## Optional Feast
 

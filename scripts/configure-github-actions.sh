@@ -148,3 +148,4 @@ else
 fi
 
 echo "GitHub Actions variables are configured for ${REPOSITORY_PATH}."
+echo "Use ./scripts/terraform-remote.sh for common remote Terraform plan, apply, destroy, and cleanup commands."
