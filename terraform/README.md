@@ -44,7 +44,7 @@ The Cloud Run service remains inference-only. The full online stack is the compo
 
 - Use the online compose host when you want Airflow, MLflow, and the API online together.
 - Use Cloud Run when you only need the inference API as a hosted service.
-- Use the shared GCP baseline even if you are still validating locally, because it provides the storage and identity pieces reused by both hosted paths.
+- Use the shared GCP baseline when you are provisioning a hosted or BigQuery-backed path. Pure local validation does not need the shared GCP baseline.
 
 ## Cloud Run Inputs
 
@@ -98,7 +98,7 @@ Review the destroy preview, then rerun `./scripts/teardown-gcp.sh` without `--pl
 - `--delete-state-bucket` deletes `${project_id}-foehncast-tfstate` if you also want to remove the extra bucket created for the remote workflow path
 - `--delete-project` queues the bootstrap-created GCP project itself for deletion after the Terraform-managed resources are gone; use this only for disposable smoke environments. The script prompts for the exact project id unless you also pass `--auto-approve`.
 
-This teardown utility is intended for the local bootstrap-and-test path. It destroys Terraform-managed resources from the local state in your working copy.
+This teardown utility is intended for the local bootstrap-and-test path. It destroys Terraform-managed resources from the local state in your working copy. A smoother long-term operator path is to run destroy remotely against the same remote state backend that created the environment, so teardown does not depend on a contributor laptop.
 
 ## GitHub Delivery Inputs
 

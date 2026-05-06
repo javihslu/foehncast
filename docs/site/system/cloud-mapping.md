@@ -33,6 +33,7 @@ FoehnCast already has two hosted directions: a full online compose host and an o
 ## Mapping Principle
 
 - Local Docker proves that the pipelines run together.
+- Local and cloud are parallel deployment targets, not upstream and downstream environments.
 - Cloud deployment keeps the same pipeline boundaries.
 - Cloud services replace the local support services used for evaluation and development.
 - The app remains a deployable container because inference is a service, not a DAG.
@@ -123,7 +124,7 @@ The cloud path stays coherent because it is driven by explicit application and i
 | Terraform baseline | Terraform-managed GCS plus BigQuery surfaces | supplies the bucket and warehouse baseline without taking ownership of feature semantics |
 | Optional object-store compatibility path | S3-compatible backend remains non-primary | keeps compatibility testing separate from the main cloud target architecture |
 
-In practical terms, GCS owns raw landing and registry-style metadata, BigQuery owns the curated analytical layer, and Feast reads the curated layer instead of redefining it.
+In practical terms, GCS owns raw landing and registry-style metadata for the cloud path, BigQuery owns the curated analytical layer for the cloud path, and Feast reads the curated layer instead of redefining it. The local path stays self-sufficient with its own local storage surfaces unless an operator explicitly chooses a cloud-backed runtime mode.
 
 ## Runtime Differences That Matter
 
