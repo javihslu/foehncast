@@ -100,6 +100,10 @@ Review the destroy preview, then rerun `./scripts/teardown-gcp.sh` without `--pl
 
 This teardown utility is intended for the local bootstrap-and-test path. It destroys Terraform-managed resources from the local state in your working copy.
 
+For environments managed through the remote backend, use the manual GitHub Actions Terraform workflow with `command=destroy`. The remote path uses the same OIDC-authenticated backend as remote apply and requires `destroy_confirmation` to exactly match the resolved GCP project id before it will continue.
+
+Remote destroy intentionally stops at Terraform-managed resources tracked in the remote backend. GitHub repository variables, the Terraform state bucket, and optional project deletion remain deliberate follow-up cleanup steps.
+
 ## GitHub Delivery Inputs
 
 The repository uses two delivery workflows:
@@ -139,7 +143,9 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 
 ## GitHub Actions Terraform Path
 
-Use `.github/workflows/terraform.yml` to run validate, plan, or apply from GitHub Actions without requiring local Terraform. The manual workflow bootstraps the GCS backend bucket if needed, runs Terraform against that backend, and can sync the GitHub repository variables after a successful apply.
+Use `.github/workflows/terraform.yml` to run validate, plan, apply, or destroy from GitHub Actions without requiring local Terraform. The manual workflow bootstraps the GCS backend bucket if needed for remote plan or apply, runs Terraform against that backend, and can sync the GitHub repository variables after a successful apply.
+
+For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 
 Authentication options:
 
