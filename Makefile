@@ -39,10 +39,10 @@ docs-build:  ## Build the documentation site
 docs-serve:  ## Serve the documentation site locally
 	cd $(ROOT_DIR) && uv sync --group docs && uv run mkdocs serve -f docs/mkdocs.yml
 
-bootstrap-local:  ## Rebuild and validate the local stack from scratch
+bootstrap-local:  ## Rebuild and validate the GCP-free local evaluator stack from scratch
 	cd $(ROOT_DIR) && ./scripts/bootstrap-local.sh
 
-bootstrap-gcp:  ## Run the interactive GCP bootstrap
+bootstrap-gcp:  ## Run the cloud-operator GCP bootstrap (prefer Cloud Shell)
 	cd $(ROOT_DIR) && ./scripts/bootstrap-gcp.sh
 
 compose-up:  ## Start the local compose stack

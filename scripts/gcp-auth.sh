@@ -21,6 +21,11 @@ ensure_gcloud_auth
 
 gcloud auth configure-docker "${GCP_LOCATION}-docker.pkg.dev"
 
-echo "Configured gcloud CLI, ADC, and Artifact Registry auth for ${GCP_PROJECT_ID} in ${GCP_LOCATION}."
+if [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]; then
+	echo "Configured Cloud Shell gcloud, ADC, and Artifact Registry auth for ${GCP_PROJECT_ID} in ${GCP_LOCATION}."
+else
+	echo "Configured local gcloud, ADC, and Artifact Registry auth for ${GCP_PROJECT_ID} in ${GCP_LOCATION}."
+	echo "Prefer Google Cloud Shell for first-time cloud bootstrap. Use this local helper when Docker services need GCP access."
+fi
 echo "For local BigQuery-backed containers, run Docker Compose with -f docker-compose.yml -f docker-compose.gcp.yml so ADC is mounted into the Linux services."
 echo "Use GitHub OIDC for CI/CD and avoid storing service account keys in this repository."

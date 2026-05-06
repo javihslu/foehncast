@@ -12,12 +12,14 @@ install_hint() {
       ;;
     gcloud)
       echo "Install Google Cloud CLI first. On macOS with Homebrew: brew install --cask google-cloud-sdk" >&2
+      echo "Alternative: run the cloud bootstrap from Google Cloud Shell instead of installing it locally." >&2
       ;;
     gh)
       echo "Install GitHub CLI first. On macOS with Homebrew: brew install gh" >&2
       ;;
     terraform)
       echo "Install Terraform first. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
+      echo "Alternative: run the cloud bootstrap from Google Cloud Shell instead of installing it locally." >&2
       ;;
     uv)
       echo "Install uv first. On macOS with Homebrew: brew install uv" >&2

@@ -21,6 +21,24 @@ INTERACTIVE=true
 
 usage() {
   echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
+  echo "Use ./scripts/bootstrap-local.sh for the default local evaluator path." >&2
+  echo "Prefer running this cloud bootstrap from Google Cloud Shell when possible." >&2
+}
+
+in_cloud_shell() {
+  [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]
+}
+
+print_bootstrap_context() {
+  echo "Cloud bootstrap provisions a hosted GCP environment."
+  echo "For the default local evaluator path, use ./scripts/bootstrap-local.sh instead."
+
+  if in_cloud_shell; then
+    echo "Execution context: Google Cloud Shell (preferred for first-time cloud bootstrap)."
+  else
+    echo "Execution context: local admin shell."
+    echo "Tip: run this script from Google Cloud Shell if you want to avoid installing gcloud and Terraform on your local machine."
+  fi
 }
 
 require_file() {
@@ -507,6 +525,8 @@ if [[ -n "$TARGET_REPO" ]]; then
   CONFIGURE_GITHUB=true
 fi
 
+print_bootstrap_context
+
 require_command gcloud
 require_command terraform
 
@@ -573,9 +593,12 @@ fi
 
 echo "Bootstrap complete for ${GCP_PROJECT_ID}."
 echo "The interactive path can create or reuse a project and link billing when your gcloud account has permission to do so."
+echo "For local evaluation, keep using ./scripts/bootstrap-local.sh."
 
 if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
   echo "GitHub Actions variables were synchronized for repo-driven deployment automation."
+  echo "Prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
 else
   echo "GitHub Actions were not changed. That is fine for personal one-off environments."
+  echo "When you later configure GitHub OIDC variables, prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
 fi
