@@ -1,14 +1,14 @@
 # Feature Pipeline
 
-FoehnCast treats the feature pipeline as a contract, not just a sequence of helper calls. Forecast data is ingested, transformed into curated features, validated against explicit bounds, stored through a backend abstraction, and then reshaped for optional Feast use without changing the meaning of the feature set.
+FoehnCast keeps the feature pipeline as a clear set of boundaries. Forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for optional Feast use without changing the meaning of the feature set.
 
-This page captures the stable design that has been validated in the local stack and in the stepwise review workflow. It focuses on what each stage is responsible for, what data boundary it owns, and what should remain outside its scope.
+This page records the current design that has been validated in the local stack and in the review notebook. It focuses on what each stage owns today and what stays outside its scope.
 
-!!! note "What this page does and does not claim"
+!!! note "Scope"
 
-    This page describes the validated feature-path contract.
-    It does not claim that every future feature is already final.
-    The current design is stable enough for local operation, Airflow orchestration, and public documentation, while still leaving room for future feature additions and cloud refinements.
+    This page describes the current validated feature-path contract.
+    It is not a roadmap.
+    Future changes should be documented after they are chosen and implemented.
 
 ## Pipeline Shape
 
@@ -22,7 +22,7 @@ flowchart LR
     OFF --> EXP[Export Feast-ready parquet]
 </div>
 
-The important design choice is that each stage has one clear job:
+The key point is that each stage has one clear job:
 
 - ingest proves the upstream weather contract
 - engineering creates the curated feature frame
@@ -161,7 +161,7 @@ That means:
 
 This keeps the same conceptual split available in both local and cloud directions: curated features first, Feast second.
 
-## Why This Holds Up
+## Why This Structure Works
 
 - it keeps pipeline boundaries explicit enough for Airflow orchestration
 - it keeps local-first development simple without blocking a BigQuery-backed cloud path
