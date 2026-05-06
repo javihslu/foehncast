@@ -66,6 +66,8 @@ This is the default path for a fresh machine.
 2. Clone the repository.
 3. Run `./scripts/bootstrap-local.sh`.
 
+`make` is optional in this repository. The committed `Makefile` only provides shortcut targets for the same `uv`, Docker Compose, and helper-script commands documented here. Contributors who do not use `make` can run the underlying commands directly, and Windows users may prefer WSL for the shell-based shortcuts.
+
 The script initializes `.env` from `.env.example` when needed, builds the local stack, runs the feature and training DAGs, and waits for the API to become healthy.
 
 After it finishes, the main endpoints are:
@@ -74,10 +76,21 @@ After it finishes, the main endpoints are:
 - Airflow: `http://127.0.0.1:8080`
 - MLflow: `http://127.0.0.1:5001`
 
-Airflow and MLflow open directly in local mode. The bootstrap path resets Docker volumes before starting so the evaluator workflow begins from a clean state. Feature storage defaults to local files, and optional S3-compatible settings are only needed for non-default experiments.
+Airflow and MLflow open directly in local mode. The bootstrap path resets Docker volumes before starting so the evaluator workflow begins from a clean state. Raw landing, if retained locally, can stay file-based; curated feature storage defaults to local parquet files, and optional S3-compatible settings are only needed for non-default experiments.
 Feature refresh scheduling stays inside Airflow. `AIRFLOW_FEATURE_SCHEDULE` defaults to `0 */6 * * *`; set it to an empty value, `manual`, or `off` when you want a purely manual local stack.
 
 For stepwise debugging, use notebooks against the `development_env` container rather than embedding notebook logic into the pipelines themselves. The development container keeps its own Linux virtual environment and masks the host `.venv`; the image now installs the locked Python environment at build time, and startup only registers the `FoehnCast (development_env)` Jupyter kernel. In VS Code attached to `development_env`, select that kernel or `/home/appuser/.venv/bin/python` directly. Rebuild the development image after changing `pyproject.toml` or `uv.lock`.
+
+If you want to keep editing locally but run notebooks in the container, start the container-backed Jupyter server and connect VS Code to it as an existing Jupyter server:
+
+```bash
+docker compose up -d development_env
+docker compose exec -d development_env start-jupyter-server.sh
+```
+
+Equivalent optional shortcut: `make notebook-server`
+
+Then point VS Code Jupyter at `http://127.0.0.1:8888/?token=foehncast-local`. The port is bound to localhost only so it is not exposed on your LAN.
 
 Example check:
 
@@ -164,15 +177,27 @@ When you finish a disposable cloud test, run `./scripts/teardown-gcp.sh --plan-o
 Feast stays optional and layered on the same curated features.
 
 1. Install: `uv sync --group feast`
-2. Prepare local Feast state: `./scripts/prepare-feast-local.sh`
+2. Prepare local Feast state: `./scripts/prepare-feast-local.sh` or `make feast-prepare`
 3. Materialize: `cd feature_repo && uv run --group feast feast materialize-incremental "$(date -u +"%Y-%m-%dT%H:%M:%S")"`
 4. Query the helper or HTTP route:
    - `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_factor']))"`
    - `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_factor"]}'`
 
+The local Feast path keeps using an exported parquet file plus a local SQLite online store. It does not require MinIO or a local S3-compatible object store.
+
+In the cloud, the intended split is different by data role rather than by one storage system doing everything:
+
+- raw landing and archive live in GCS
+- curated feature rows live in native BigQuery tables
+- Feast offline reads from a curated BigQuery table or view
+- Feast registry and staging artifacts live in GCS
+
+Feast is not the raw landing layer. It sits on top of curated features only.
+
 ## More Detail
 
 - `containers/README.md`
 - `terraform/README.md`
+- `docs/site/system/feature-pipeline.md`
 - `docs/site/system/cloud-mapping.md`
 - `feature_repo/README.md`
