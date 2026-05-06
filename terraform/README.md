@@ -128,6 +128,8 @@ The easiest way to set them is:
 2. apply Terraform
 3. run `./scripts/configure-github-actions.sh`
 
+After that first sync, use `./scripts/terraform-remote.sh` for common remote Terraform plan, apply, destroy, and cleanup commands.
+
 The helper script reads the Terraform outputs, sets the required GitHub Actions variables on the repository remote, and leaves `GCP_CLOUD_RUN_SERVICE` unset until the Cloud Run service has actually been provisioned. It also writes the Terraform state bucket defaults used by the GitHub Actions Terraform workflow.
 
 Recommended mappings from Terraform-managed values:
@@ -144,6 +146,15 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 ## GitHub Actions Terraform Path
 
 Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. The manual workflow bootstraps the GCS backend bucket if needed for remote plan or apply, runs Terraform against that backend, and can sync the GitHub repository variables after a successful apply.
+
+For the common operator path, trigger that workflow with `./scripts/terraform-remote.sh` instead of opening the Actions UI manually.
+
+Examples:
+
+- `./scripts/terraform-remote.sh plan`
+- `./scripts/terraform-remote.sh apply`
+- `./scripts/terraform-remote.sh destroy`
+- `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions`
 
 For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 
@@ -165,7 +176,7 @@ Authentication options:
 
 Remote Terraform is OIDC-only. Missing repository variables should fail fast instead of falling back to a separate secret-based auth path.
 
-After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, prefer the remote workflow for day-2 plan, apply, destroy, and cleanup work.
+After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, prefer the remote workflow for day-2 plan, apply, destroy, and cleanup work through `./scripts/terraform-remote.sh` or the manual GitHub Actions UI.
 
 ## Shared Repo vs Personal Deployments
 

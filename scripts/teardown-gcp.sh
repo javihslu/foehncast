@@ -167,7 +167,7 @@ fi
 if [[ "$PLAN_ONLY" == "true" ]]; then
   if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "false" ]]; then
     echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to preview in this working copy."
-    echo "If this environment was provisioned through the remote Terraform backend, use the GitHub Actions Terraform workflow with command=destroy instead."
+    echo "If this environment was provisioned through the remote Terraform backend, use ./scripts/terraform-remote.sh destroy instead."
   else
     require_command terraform
     require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
@@ -201,7 +201,7 @@ fi
 
 if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "false" && "$CLEAR_GITHUB_ACTIONS" != "true" && "$DELETE_STATE_BUCKET" != "true" && "$DELETE_PROJECT" != "true" ]]; then
   echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to destroy in this working copy."
-  echo "If the environment was created from the remote backend, run the GitHub Actions Terraform workflow with command=destroy and the matching destroy_confirmation value."
+  echo "If the environment was created from the remote backend, run ./scripts/terraform-remote.sh destroy."
   exit 0
 fi
 
@@ -226,7 +226,7 @@ if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "true" ]]; then
   TERRAFORM_DESTROYED=true
 else
   echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Skipping Terraform destroy path."
-  echo "Use the remote GitHub Actions Terraform workflow if the active environment is managed through the remote backend."
+  echo "Use ./scripts/terraform-remote.sh when the active environment is managed through the remote backend."
 fi
 
 if [[ "$CLEAR_GITHUB_ACTIONS" == "true" ]]; then

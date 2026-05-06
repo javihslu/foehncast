@@ -598,7 +598,9 @@ echo "For local evaluation, keep using ./scripts/bootstrap-local.sh."
 if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
   echo "GitHub Actions variables were synchronized for repo-driven deployment automation."
   echo "Prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
+  echo "Common remote command: ./scripts/terraform-remote.sh plan"
 else
   echo "GitHub Actions were not changed. That is fine for personal one-off environments."
   echo "When you later configure GitHub OIDC variables, prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
+  echo "After syncing GitHub Actions variables, use ./scripts/terraform-remote.sh for common remote Terraform commands."
 fi
