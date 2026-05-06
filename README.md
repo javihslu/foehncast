@@ -130,6 +130,8 @@ The interactive setup signs you into GCP, lets you pick or create a project, con
 
 After the first bootstrap, prefer the remote Terraform workflow for day-2 plan, apply, destroy, and cleanup operations.
 
+If you want the smallest first-time local step, run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`. That path creates only the remote-control-plane prerequisites, stores that bootstrap state in the remote backend, and leaves the broader platform apply for `./scripts/terraform-remote.sh apply`.
+
 Common remote operator commands:
 
 - Review the current remote plan: `./scripts/terraform-remote.sh plan`
@@ -140,6 +142,7 @@ Common remote operator commands:
 Useful variants:
 
 - Restart from scratch: `rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
+- Bootstrap only the remote-control-plane prerequisites: `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`
 - Skip prompts when you already know the values: `./scripts/bootstrap-gcp.sh --non-interactive`
 - Configure fork automation during bootstrap: `./scripts/bootstrap-gcp.sh --configure-github-actions --repo <your-github-user>/foehncast`
 
