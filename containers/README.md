@@ -50,6 +50,8 @@ flowchart LR
 
 For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the API health endpoint.
 
+This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it.
+
 The default local path keeps feature data on local files, starts Airflow and MLflow without a login, and resets local Docker volumes for a clean run each time.
 Optional S3-compatible settings can be injected through the environment for experiments, but they are not part of the default local stack.
 

@@ -22,6 +22,8 @@ Public GHCR images are convenience artifacts for reuse. They do not provide shar
 
 The repository keeps local evaluation and maintainer-managed automation separate, so forks can reuse the same deployment shape with their own approvals and cloud accounts.
 
+Default onboarding follows that same split: use `./scripts/bootstrap-local.sh` for a GCP-free local evaluator path, and use `./scripts/bootstrap-gcp.sh` only for cloud operator bootstrap, preferably from Google Cloud Shell.
+
 ## What Works
 
 | Area | Current state | What it means |

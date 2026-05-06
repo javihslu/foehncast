@@ -58,13 +58,15 @@ flowchart TB
 | CI/CD path | Working | GitHub Actions publishes runtime images and can drive Terraform remotely |
 | Local reproducibility | Working | `./scripts/bootstrap-local.sh` builds the local stack from a clean state and validates it |
 
-## Local Quick Start
+## Local Evaluator Quick Start
 
-This is the default path for a fresh machine.
+This is the default path for a fresh machine, and it is intentionally GCP-free.
 
 1. Install Docker.
 2. Clone the repository.
 3. Run `./scripts/bootstrap-local.sh`.
+
+You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
 `make` is optional in this repository. The committed `Makefile` only provides shortcut targets for the same `uv`, Docker Compose, and helper-script commands documented here. Contributors who do not use `make` can run the underlying commands directly, and Windows users may prefer WSL for the shell-based shortcuts.
 
@@ -100,11 +102,19 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-## Personal GCP Quick Start
+## Cloud Operator Quick Start
 
-Use this when a collaborator wants a private FoehnCast environment in their own GCP project.
+Use this only when you want to provision a hosted FoehnCast environment in a GCP project you control. This is a separate operator path from the default local evaluator setup.
 
-Install:
+Preferred environment:
+
+1. Open Google Cloud Shell.
+2. Clone the repository there.
+3. Run `./scripts/bootstrap-gcp.sh`.
+
+This keeps `gcloud`, Terraform, project creation, billing linkage, and Terraform state handling in an admin shell instead of on the evaluator machine.
+
+Alternative local admin shell:
 
 - Google Cloud CLI (`gcloud`)
 - Terraform
@@ -117,6 +127,8 @@ Run:
 ```
 
 The interactive setup signs you into GCP, lets you pick or create a project, confirms region and storage defaults, optionally provisions Cloud Run, and can align GitHub Actions variables for your own fork. During setup it writes `.env` and `terraform/terraform.tfvars`, then refreshes them from Terraform outputs after apply.
+
+After the first bootstrap, prefer the remote Terraform workflow for day-2 plan, apply, destroy, and cleanup operations.
 
 Useful variants:
 

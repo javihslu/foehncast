@@ -161,9 +161,11 @@ The recommended remote retirement sequence is:
 Authentication options:
 
 - remote workflow path: GitHub OIDC variables already exist from a previous apply
-- initial bootstrap path: run `./scripts/bootstrap-gcp.sh` locally, then `./scripts/configure-github-actions.sh` before using the remote workflow
+- initial bootstrap path: run `./scripts/bootstrap-gcp.sh` in Google Cloud Shell or another admin shell, then `./scripts/configure-github-actions.sh` before using the remote workflow
 
 Remote Terraform is OIDC-only. Missing repository variables should fail fast instead of falling back to a separate secret-based auth path.
+
+After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, prefer the remote workflow for day-2 plan, apply, destroy, and cleanup work.
 
 ## Shared Repo vs Personal Deployments
 
@@ -180,7 +182,7 @@ State-changing upstream jobs should also use protected GitHub environments:
 
 For a personal deployment:
 
-- run `./scripts/bootstrap-gcp.sh` locally, or
+- run `./scripts/bootstrap-gcp.sh` in Google Cloud Shell or another admin shell, or
 - fork the repository and configure the same GitHub Actions variables and secrets in that fork
 
 That keeps billing, package ownership, and cloud credentials aligned with the person or team operating the environment. Compute, storage, and network costs stay with that operator.
@@ -191,9 +193,13 @@ That keeps billing, package ownership, and cloud credentials aligned with the pe
 2. Use this file when you need the Terraform-specific deployment inputs and teardown steps.
 3. Use `docs/site/system/cloud-mapping.md` when you want the higher-level architecture explanation.
 
-## Interactive Setup
+## Cloud Operator Bootstrap
 
-Run this on a fresh clone if you want the browser-authenticated local bootstrap:
+Use this only for the initial hosted-environment bootstrap, or when you intentionally need direct admin access to the cloud project.
+
+Preferred environment: Google Cloud Shell. That keeps the admin toolchain off the default evaluator machine and matches the intended operator path.
+
+Run this in Cloud Shell or another admin shell:
 
 `./scripts/bootstrap-gcp.sh`
 
@@ -217,7 +223,7 @@ Examples:
 
 The script writes `.env` and `terraform/terraform.tfvars` during setup.
 
-After Terraform apply, the script refreshes `.env` with the managed project ID, bucket, BigQuery dataset and table, and Cloud Run service name. Authentication itself stays in local `gcloud` application default credentials, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
+After Terraform apply, the script refreshes `.env` with the managed project ID, bucket, BigQuery dataset and table, and Cloud Run service name. Authentication itself stays in the active `gcloud` application default credentials for the admin shell you used, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
 
 To restart from scratch:
 
@@ -228,6 +234,8 @@ If you already know all values and want a rerun without prompts:
 `./scripts/bootstrap-gcp.sh --non-interactive`
 
 ## Local BigQuery Use
+
+This section is separate from the default local evaluator path and from the Cloud Shell bootstrap path. Use it only when your local Docker services need direct BigQuery access.
 
 1. Bootstrap your local GCP session:
    `./scripts/gcp-auth.sh`
