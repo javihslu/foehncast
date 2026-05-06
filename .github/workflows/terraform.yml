@@ -17,6 +17,12 @@ on:
         options:
           - plan
           - apply
+          - destroy
+      destroy_confirmation:
+        description: For destroy only, type the resolved GCP project id to confirm
+          remote teardown
+        required: false
+        type: string
       project_id:
         description: GCP project id
         required: false
@@ -218,6 +224,8 @@ jobs:
             bigquery_feature_table_id='forecast_features'
           fi
 
+          terraform_command="${{ inputs.command }}"
+          destroy_confirmation="${{ inputs.destroy_confirmation }}"
           provision_cloud_run_service="${{ inputs.provision_cloud_run_service }}"
           mlflow_tracking_uri="${{ inputs.mlflow_tracking_uri }}"
           provision_online_compose_host="${{ inputs.provision_online_compose_host }}"
@@ -229,6 +237,8 @@ jobs:
           github_repository="${{ github.event.repository.name }}"
 
           {
+            echo "TF_COMMAND=${terraform_command}"
+            echo "TF_DESTROY_CONFIRMATION=${destroy_confirmation}"
             echo "TF_VAR_project_id=${project_id}"
             echo "TF_VAR_region=${region}"
             echo "TF_VAR_artifact_bucket_name=${artifact_bucket_name}"
@@ -249,10 +259,35 @@ jobs:
             echo "TF_STATE_PREFIX=${state_prefix}"
           } >> "$GITHUB_ENV"
 
-      - name: Ensure Terraform state bucket exists
+      - name: Validate destroy confirmation
+        if: ${{ inputs.command == 'destroy' }}
         run: |
           set -euo pipefail
-          if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" >/dev/null 2>&1; then
+
+          if [[ -z "$TF_DESTROY_CONFIRMATION" ]]; then
+            echo "Set destroy_confirmation to the resolved GCP project id before running remote destroy." >&2
+            exit 1
+          fi
+
+          if [[ "$TF_DESTROY_CONFIRMATION" != "$TF_VAR_project_id" ]]; then
+            echo "destroy_confirmation must exactly match the resolved GCP project id (${TF_VAR_project_id})." >&2
+            exit 1
+          fi
+
+      - name: Ensure Terraform state backend is ready
+        run: |
+          set -euo pipefail
+
+          if gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          if [[ "$TF_COMMAND" == 'destroy' ]]; then
+            echo "Remote state bucket gs://${TF_STATE_BUCKET} was not found. Remote destroy needs the existing backend state." >&2
+            exit 1
+          fi
+
+          if [[ "$TF_COMMAND" == 'plan' || "$TF_COMMAND" == 'apply' ]]; then
             gcloud storage buckets create "gs://${TF_STATE_BUCKET}" \
               --project "${TF_VAR_project_id}" \
               --location "${TF_VAR_region}" \
@@ -266,10 +301,17 @@ jobs:
             -backend-config="prefix=${TF_STATE_PREFIX}"
 
       - name: Terraform plan
-        run: terraform -chdir=terraform plan -out=tfplan
+        run: |
+          set -euo pipefail
 
-      - name: Terraform apply
-        if: ${{ inputs.command == 'apply' }}
+          if [[ "$TF_COMMAND" == 'destroy' ]]; then
+            terraform -chdir=terraform plan -destroy -out=tfplan
+          else
+            terraform -chdir=terraform plan -out=tfplan
+          fi
+
+      - name: Terraform apply chosen plan
+        if: ${{ inputs.command == 'apply' || inputs.command == 'destroy' }}
         run: terraform -chdir=terraform apply -auto-approve tfplan
 
       - name: Sync repository variables
@@ -302,4 +344,18 @@ jobs:
             echo "- Airflow URL: $(render_output online_compose_airflow_url host-local-by-default)"
             echo "- MLflow URL: $(render_output online_compose_mlflow_url host-local-by-default)"
             echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize destroy
+        if: ${{ inputs.command == 'destroy' }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Terraform destroy"
+            echo
+            echo "- Project: ${TF_VAR_project_id}"
+            echo "- State bucket: gs://${TF_STATE_BUCKET}"
+            echo "- Terraform-managed resources in the remote backend were targeted for destroy."
+            echo "- GitHub repository variables and the state bucket remain for deliberate follow-up cleanup."
           } >> "$GITHUB_STEP_SUMMARY"
