@@ -18,11 +18,27 @@ on:
           - plan
           - apply
           - destroy
+          - cleanup
       destroy_confirmation:
         description: For destroy only, type the resolved GCP project id to confirm
           remote teardown
         required: false
         type: string
+      cleanup_confirmation:
+        description: For cleanup only, type the resolved GCP project id to confirm
+          remote cleanup
+        required: false
+        type: string
+      cleanup_clear_github_actions:
+        description: Clear the synced GitHub Actions repository variables during cleanup
+        required: false
+        default: false
+        type: boolean
+      cleanup_delete_state_bucket:
+        description: Delete the Terraform remote state bucket during cleanup
+        required: false
+        default: false
+        type: boolean
       project_id:
         description: GCP project id
         required: false
@@ -226,6 +242,9 @@ jobs:
 
           terraform_command="${{ inputs.command }}"
           destroy_confirmation="${{ inputs.destroy_confirmation }}"
+          cleanup_confirmation="${{ inputs.cleanup_confirmation }}"
+          cleanup_clear_github_actions="${{ inputs.cleanup_clear_github_actions }}"
+          cleanup_delete_state_bucket="${{ inputs.cleanup_delete_state_bucket }}"
           provision_cloud_run_service="${{ inputs.provision_cloud_run_service }}"
           mlflow_tracking_uri="${{ inputs.mlflow_tracking_uri }}"
           provision_online_compose_host="${{ inputs.provision_online_compose_host }}"
@@ -239,6 +258,9 @@ jobs:
           {
             echo "TF_COMMAND=${terraform_command}"
             echo "TF_DESTROY_CONFIRMATION=${destroy_confirmation}"
+            echo "TF_CLEANUP_CONFIRMATION=${cleanup_confirmation}"
+            echo "TF_CLEANUP_CLEAR_GITHUB_ACTIONS=${cleanup_clear_github_actions}"
+            echo "TF_CLEANUP_DELETE_STATE_BUCKET=${cleanup_delete_state_bucket}"
             echo "TF_VAR_project_id=${project_id}"
             echo "TF_VAR_region=${region}"
             echo "TF_VAR_artifact_bucket_name=${artifact_bucket_name}"
@@ -274,7 +296,28 @@ jobs:
             exit 1
           fi
 
+      - name: Validate cleanup request
+        if: ${{ inputs.command == 'cleanup' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$TF_CLEANUP_CONFIRMATION" ]]; then
+            echo "Set cleanup_confirmation to the resolved GCP project id before running remote cleanup." >&2
+            exit 1
+          fi
+
+          if [[ "$TF_CLEANUP_CONFIRMATION" != "$TF_VAR_project_id" ]]; then
+            echo "cleanup_confirmation must exactly match the resolved GCP project id (${TF_VAR_project_id})." >&2
+            exit 1
+          fi
+
+          if [[ "$TF_CLEANUP_CLEAR_GITHUB_ACTIONS" != 'true' && "$TF_CLEANUP_DELETE_STATE_BUCKET" != 'true' ]]; then
+            echo "Set at least one cleanup action: cleanup_clear_github_actions=true or cleanup_delete_state_bucket=true." >&2
+            exit 1
+          fi
+
       - name: Ensure Terraform state backend is ready
+        if: ${{ inputs.command != 'cleanup' }}
         run: |
           set -euo pipefail
 
@@ -295,12 +338,14 @@ jobs:
           fi
 
       - name: Terraform init
+        if: ${{ inputs.command != 'cleanup' }}
         run: |
           terraform -chdir=terraform init \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="prefix=${TF_STATE_PREFIX}"
 
       - name: Terraform plan
+        if: ${{ inputs.command != 'cleanup' }}
         run: |
           set -euo pipefail
 
@@ -313,6 +358,26 @@ jobs:
       - name: Terraform apply chosen plan
         if: ${{ inputs.command == 'apply' || inputs.command == 'destroy' }}
         run: terraform -chdir=terraform apply -auto-approve tfplan
+
+      - name: Remote cleanup delete state bucket
+        if: ${{ inputs.command == 'cleanup' && inputs.cleanup_delete_state_bucket ==
+          true }}
+        run: |
+          set -euo pipefail
+
+          if ! gcloud storage buckets describe "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" >/dev/null 2>&1; then
+            echo "Remote state bucket gs://${TF_STATE_BUCKET} was not found. Skipping delete."
+            exit 0
+          fi
+
+          gcloud storage rm --recursive "gs://${TF_STATE_BUCKET}/**" >/dev/null 2>&1 || true
+          gcloud storage buckets delete "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" --quiet
+
+      - name: Remote cleanup clear repository variables
+        if: ${{ inputs.command == 'cleanup' && inputs.cleanup_clear_github_actions ==
+          true }}
+        run: ./scripts/configure-github-actions.sh --clear --repo "${{ github.repository
+          }}"
 
       - name: Sync repository variables
         if: ${{ inputs.command == 'apply' }}
@@ -358,4 +423,18 @@ jobs:
             echo "- State bucket: gs://${TF_STATE_BUCKET}"
             echo "- Terraform-managed resources in the remote backend were targeted for destroy."
             echo "- GitHub repository variables and the state bucket remain for deliberate follow-up cleanup."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize cleanup
+        if: ${{ inputs.command == 'cleanup' }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Terraform cleanup"
+            echo
+            echo "- Project: ${TF_VAR_project_id}"
+            echo "- State bucket cleanup requested: ${TF_CLEANUP_DELETE_STATE_BUCKET}"
+            echo "- GitHub variable cleanup requested: ${TF_CLEANUP_CLEAR_GITHUB_ACTIONS}"
+            echo "- Cleanup runs after destroy and does not execute Terraform plan or apply."
           } >> "$GITHUB_STEP_SUMMARY"
