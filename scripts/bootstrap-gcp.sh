@@ -17,10 +17,11 @@ CONFIGURE_GITHUB=false
 TARGET_REPO=""
 PLAN_ONLY=false
 AUTO_APPROVE=false
+BOOTSTRAP_ONLY=false
 INTERACTIVE=true
 
 usage() {
-  echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
+  echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--bootstrap-only] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
   echo "Use ./scripts/bootstrap-local.sh for the default local evaluator path." >&2
   echo "Prefer running this cloud bootstrap from Google Cloud Shell when possible." >&2
 }
@@ -32,6 +33,10 @@ in_cloud_shell() {
 print_bootstrap_context() {
   echo "Cloud bootstrap provisions a hosted GCP environment."
   echo "For the default local evaluator path, use ./scripts/bootstrap-local.sh instead."
+
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    echo "Mode: bootstrap-only. This prepares the remote Terraform control plane and leaves the broader platform apply for the remote workflow."
+  fi
 
   if in_cloud_shell; then
     echo "Execution context: Google Cloud Shell (preferred for first-time cloud bootstrap)."
@@ -147,6 +152,43 @@ read_tfvars_value() {
     replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
   }
 
+  terraform_remote_state_bucket() {
+    printf '%s\n' "${GCP_PROJECT_ID}-foehncast-tfstate"
+  }
+
+  terraform_remote_state_prefix() {
+    printf '%s\n' "terraform/state"
+  }
+
+  ensure_remote_state_bucket() {
+    local state_bucket
+
+    state_bucket="$(terraform_remote_state_bucket)"
+
+    if gcloud storage buckets describe "gs://${state_bucket}" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+      return
+    fi
+
+    echo "Creating remote Terraform state bucket gs://${state_bucket}..."
+    gcloud storage buckets create "gs://${state_bucket}" \
+      --project "$GCP_PROJECT_ID" \
+      --location "$GCP_LOCATION" \
+      --uniform-bucket-level-access
+  }
+
+  bootstrap_target_args() {
+    printf '%s\n' \
+      "-target=google_project_service.required" \
+      "-target=google_service_account.github_deployer" \
+      "-target=google_project_iam_member.github_project_admin" \
+      "-target=google_project_iam_member.github_artifact_registry_writer" \
+      "-target=google_project_iam_member.github_cloud_run_admin" \
+      "-target=google_project_iam_member.github_service_account_user" \
+      "-target=google_iam_workload_identity_pool.github" \
+      "-target=google_iam_workload_identity_pool_provider.github" \
+      "-target=google_service_account_iam_member.github_workload_identity_user"
+  }
+
   sync_env_from_terraform_outputs() {
     local cloud_run_service
 
@@ -179,6 +221,20 @@ read_tfvars_value() {
     if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
       echo "Cloud Run service: ${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
     fi
+  }
+
+  print_bootstrap_only_summary() {
+    local state_bucket state_prefix
+
+    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    state_bucket="$(terraform_remote_state_bucket)"
+    state_prefix="$(terraform_remote_state_prefix)"
+
+    echo "Bootstrap-only remote state bucket: gs://${state_bucket}"
+    echo "Bootstrap-only remote state prefix: ${state_prefix}"
+    echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
+    echo "GitHub workload identity provider: ${FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER}"
+    echo "Next step: run ./scripts/terraform-remote.sh apply to provision the broader platform through the remote backend."
   }
 
   prompt_with_default() {
@@ -441,7 +497,13 @@ read_tfvars_value() {
     fi
 
     if [[ "$CONFIGURE_GITHUB" != "true" && "$INTERACTIVE" == "true" ]]; then
-      if prompt_yes_no "Configure GitHub Actions variables for shared or fork-based redeploys after bootstrap?" n; then
+      local github_default_answer="n"
+
+      if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+        github_default_answer="y"
+      fi
+
+      if prompt_yes_no "Configure GitHub Actions variables for shared or fork-based redeploys after bootstrap?" "$github_default_answer"; then
         CONFIGURE_GITHUB=true
       fi
     fi
@@ -505,6 +567,9 @@ while [[ $# -gt 0 ]]; do
     --auto-approve)
       AUTO_APPROVE=true
       ;;
+    --bootstrap-only)
+      BOOTSTRAP_ONLY=true
+      ;;
     --non-interactive)
       INTERACTIVE=false
       ;;
@@ -553,7 +618,17 @@ echo "Checking access to GCP project ${GCP_PROJECT_ID}..."
 gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
 
 echo "Initializing Terraform..."
-terraform -chdir="${ROOT_DIR}/terraform" init
+terraform_init_args=(init -reconfigure)
+
+if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
+  ensure_remote_state_bucket
+  terraform_init_args+=(
+    -backend-config="bucket=$(terraform_remote_state_bucket)"
+    -backend-config="prefix=$(terraform_remote_state_prefix)"
+  )
+fi
+
+terraform -chdir="${ROOT_DIR}/terraform" "${terraform_init_args[@]}"
 
 echo "Formatting generated Terraform variable files..."
 terraform fmt "$TFVARS_FILE" >/dev/null
@@ -562,22 +637,45 @@ echo "Checking Terraform formatting and validation..."
 terraform -chdir="${ROOT_DIR}/terraform" fmt -check
 terraform -chdir="${ROOT_DIR}/terraform" validate
 
+target_args=()
+if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+  while IFS= read -r target_arg; do
+    target_args+=("$target_arg")
+  done < <(bootstrap_target_args)
+fi
+
 if [[ "$PLAN_ONLY" == "true" ]]; then
-  echo "Running Terraform plan..."
-  terraform -chdir="${ROOT_DIR}/terraform" plan -var-file="$TFVARS_FILE"
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    echo "Running bootstrap-only Terraform plan..."
+  else
+    echo "Running Terraform plan..."
+  fi
+
+  terraform -chdir="${ROOT_DIR}/terraform" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
 else
   apply_args=(apply -var-file="$TFVARS_FILE")
+
+  apply_args+=("${target_args[@]}")
 
   if [[ "$AUTO_APPROVE" == "true" ]]; then
     apply_args+=( -auto-approve )
   fi
 
-  echo "Running Terraform apply..."
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    echo "Running bootstrap-only Terraform apply against the remote backend..."
+  else
+    echo "Running Terraform apply..."
+  fi
+
   terraform -chdir="${ROOT_DIR}/terraform" "${apply_args[@]}"
 
-  echo "Syncing local cloud identifiers into .env..."
-  sync_env_from_terraform_outputs
-  print_auth_summary
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    print_bootstrap_only_summary
+  else
+    echo "Syncing local cloud identifiers into .env..."
+    sync_env_from_terraform_outputs
+    print_auth_summary
+  fi
 fi
 
 if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
@@ -591,16 +689,30 @@ if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
   "${ROOT_DIR}/scripts/configure-github-actions.sh" "${github_args[@]}"
 fi
 
-echo "Bootstrap complete for ${GCP_PROJECT_ID}."
-echo "The interactive path can create or reuse a project and link billing when your gcloud account has permission to do so."
+if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+  echo "Bootstrap-only setup complete for ${GCP_PROJECT_ID}."
+  echo "The initial bootstrap resources now live in the same remote backend used by the GitHub Actions Terraform workflow."
+else
+  echo "Bootstrap complete for ${GCP_PROJECT_ID}."
+  echo "The interactive path can create or reuse a project and link billing when your gcloud account has permission to do so."
+fi
+
 echo "For local evaluation, keep using ./scripts/bootstrap-local.sh."
 
 if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
   echo "GitHub Actions variables were synchronized for repo-driven deployment automation."
-  echo "Prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
-  echo "Common remote command: ./scripts/terraform-remote.sh plan"
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    echo "Run ./scripts/terraform-remote.sh apply to provision the broader platform through the remote backend."
+  else
+    echo "Prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
+    echo "Common remote command: ./scripts/terraform-remote.sh plan"
+  fi
 else
   echo "GitHub Actions were not changed. That is fine for personal one-off environments."
-  echo "When you later configure GitHub OIDC variables, prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
-  echo "After syncing GitHub Actions variables, use ./scripts/terraform-remote.sh for common remote Terraform commands."
+  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    echo "Sync GitHub Actions variables before handing off to ./scripts/terraform-remote.sh apply."
+  else
+    echo "When you later configure GitHub OIDC variables, prefer the remote GitHub Actions Terraform workflow for day-2 plan, apply, destroy, and cleanup."
+    echo "After syncing GitHub Actions variables, use ./scripts/terraform-remote.sh for common remote Terraform commands."
+  fi
 fi

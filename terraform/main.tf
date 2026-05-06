@@ -272,6 +272,23 @@ resource "google_service_account" "github_deployer" {
   display_name = "GitHub Actions deployer"
 }
 
+resource "google_project_iam_member" "github_project_admin" {
+  for_each = toset([
+    "roles/artifactregistry.admin",
+    "roles/bigquery.admin",
+    "roles/compute.admin",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.workloadIdentityPoolAdmin",
+    "roles/resourcemanager.projectIamAdmin",
+    "roles/serviceusage.serviceUsageAdmin",
+    "roles/storage.admin",
+  ])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
 resource "google_service_account" "cloud_run_runtime" {
   account_id   = "foehncast-cloud-run"
   display_name = "FoehnCast Cloud Run runtime"

@@ -130,6 +130,8 @@ The easiest way to set them is:
 
 After that first sync, use `./scripts/terraform-remote.sh` for common remote Terraform plan, apply, destroy, and cleanup commands.
 
+If you want the smallest local-first setup, run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`. That path creates only the GitHub OIDC bootstrap resources locally, stores that state in the same remote backend used by the GitHub Actions Terraform workflow, and leaves the broader platform apply for the remote workflow.
+
 The helper script reads the Terraform outputs, sets the required GitHub Actions variables on the repository remote, and leaves `GCP_CLOUD_RUN_SERVICE` unset until the Cloud Run service has actually been provisioned. It also writes the Terraform state bucket defaults used by the GitHub Actions Terraform workflow.
 
 Recommended mappings from Terraform-managed values:
@@ -178,6 +180,8 @@ Remote Terraform is OIDC-only. Missing repository variables should fail fast ins
 
 After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, prefer the remote workflow for day-2 plan, apply, destroy, and cleanup work through `./scripts/terraform-remote.sh` or the manual GitHub Actions UI.
 
+The `--bootstrap-only` variant of `./scripts/bootstrap-gcp.sh` is the narrowest first-time setup path: it prepares the remote-control-plane resources and remote backend state, then hands the broader platform provisioning to `./scripts/terraform-remote.sh apply`.
+
 ## Shared Repo vs Personal Deployments
 
 The upstream repository workflows are intended for the shared project environment. They use repository-scoped variables, package publishing, and cloud identities that belong to that shared environment.
@@ -213,6 +217,10 @@ Preferred environment: Google Cloud Shell. That keeps the admin toolchain off th
 Run this in Cloud Shell or another admin shell:
 
 `./scripts/bootstrap-gcp.sh`
+
+Optional narrower first-time setup:
+
+`./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`
 
 Then do the following in order:
 

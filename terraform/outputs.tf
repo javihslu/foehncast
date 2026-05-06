@@ -10,32 +10,32 @@ output "region" {
 
 output "artifact_registry_repository_id" {
   description = "Artifact Registry repository name used for container images."
-  value       = google_artifact_registry_repository.containers.repository_id
+  value       = try(google_artifact_registry_repository.containers.repository_id, var.artifact_registry_repository_id)
 }
 
 output "artifact_registry_repository" {
   description = "Artifact Registry repository path for container images."
-  value       = google_artifact_registry_repository.containers.id
+  value       = try(google_artifact_registry_repository.containers.id, "projects/${var.project_id}/locations/${var.region}/repositories/${var.artifact_registry_repository_id}")
 }
 
 output "artifact_bucket_name" {
   description = "GCS bucket managed by Terraform for artifacts."
-  value       = google_storage_bucket.artifacts.name
+  value       = try(google_storage_bucket.artifacts.name, var.artifact_bucket_name)
 }
 
 output "bigquery_dataset_id" {
   description = "BigQuery dataset for curated feature data."
-  value       = google_bigquery_dataset.feature_store.dataset_id
+  value       = try(google_bigquery_dataset.feature_store.dataset_id, var.bigquery_dataset_id)
 }
 
 output "bigquery_feature_table_id" {
   description = "BigQuery table for curated feature rows."
-  value       = google_bigquery_table.forecast_features.table_id
+  value       = try(google_bigquery_table.forecast_features.table_id, var.bigquery_feature_table_id)
 }
 
 output "github_deployer_service_account" {
   description = "Service account used by GitHub Actions via Workload Identity Federation."
-  value       = google_service_account.github_deployer.email
+  value       = try(google_service_account.github_deployer.email, "github-actions-deployer@${var.project_id}.iam.gserviceaccount.com")
 }
 
 output "github_workload_identity_provider" {
@@ -45,7 +45,7 @@ output "github_workload_identity_provider" {
 
 output "cloud_run_runtime_service_account" {
   description = "Service account intended for Cloud Run runtime execution."
-  value       = google_service_account.cloud_run_runtime.email
+  value       = try(google_service_account.cloud_run_runtime.email, "foehncast-cloud-run@${var.project_id}.iam.gserviceaccount.com")
 }
 
 output "cloud_run_service_name" {
