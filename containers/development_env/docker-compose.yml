@@ -26,6 +26,8 @@ services:
     volumes:
       - ../../:/workspace
       - development_env_workspace_venv:/workspace/.venv
+    ports:
+      - 127.0.0.1:8888:8888
     networks:
       - development
       - production

@@ -30,6 +30,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-mock>=3.0",
     "ipykernel>=6.0",
+    "jupyterlab>=4.2.0",
 ]
 docs = [
     "mkdocs-material>=9.6.0",

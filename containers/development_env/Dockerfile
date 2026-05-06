@@ -18,8 +18,9 @@ WORKDIR /workspace
 COPY pyproject.toml uv.lock ./
 COPY src ./src
 COPY containers/development_env/start-development-env.sh /usr/local/bin/start-development-env.sh
+COPY containers/development_env/start-jupyter-server.sh /usr/local/bin/start-jupyter-server.sh
 
-RUN chmod 755 /usr/local/bin/start-development-env.sh \
+RUN chmod 755 /usr/local/bin/start-development-env.sh /usr/local/bin/start-jupyter-server.sh \
     && chown -R appuser:appuser /workspace /home/appuser
 
 USER appuser
