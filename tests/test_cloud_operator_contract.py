@@ -219,6 +219,19 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
     )
 
 
+def test_publish_runtime_images_excludes_local_only_development_env() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
+    push_paths = workflow["on"]["push"]["paths"]
+    image_targets = workflow["jobs"]["publish"]["strategy"]["matrix"]["include"]
+
+    assert "containers/development_env/**" not in push_paths
+    assert {target["image_name"] for target in image_targets} == {
+        "foehncast-app",
+        "foehncast-airflow",
+        "foehncast-mlflow",
+    }
+
+
 def test_terraform_declares_gcs_backend_for_remote_state() -> None:
     providers = _read_text("terraform/providers.tf")
 

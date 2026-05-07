@@ -8,7 +8,6 @@ on:
       - containers/app/**
       - containers/airflow/**
       - containers/mlflow/**
-      - containers/development_env/**
       - src/**
       - pyproject.toml
       - uv.lock
@@ -36,9 +35,6 @@ jobs:
           - image_name: foehncast-mlflow
             context: containers/mlflow
             dockerfile: containers/mlflow/Dockerfile
-          - image_name: foehncast-development-env
-            context: containers/development_env
-            dockerfile: containers/development_env/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
