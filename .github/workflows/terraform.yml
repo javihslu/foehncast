@@ -116,9 +116,9 @@ jobs:
 
   remote:
     if: ${{ github.actor == github.repository_owner && github.triggering_actor ==
-      github.repository_owner && github.event_name == 'workflow_dispatch' }}
+      github.repository_owner && (github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push') }}
     runs-on: ubuntu-latest
-    environment: terraform-admin
     permissions:
       contents: read
       actions: write
@@ -136,7 +136,52 @@ jobs:
         with:
           repo-vars-json: ${{ toJson(vars) }}
 
+      - name: Resolve execution flags
+        id: flags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+        run: |
+          set -euo pipefail
+
+          command='${{ inputs.command }}'
+          if [[ "$EVENT_NAME" == 'push' ]]; then
+            command='apply'
+          elif [[ -z "$command" ]]; then
+            command='plan'
+          fi
+
+          bootstrap_ready=false
+          if [[ -n "$PROJECT_ID" && -n "$WORKLOAD_IDENTITY_PROVIDER" && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            bootstrap_ready=true
+          fi
+
+          {
+            echo "command=$command"
+            echo "bootstrap_ready=$bootstrap_ready"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Explain skipped automatic apply before bootstrap
+        if: ${{ github.event_name == 'push' && steps.flags.outputs.bootstrap_ready != 'true' }}
+        run: |
+          {
+            echo "## Terraform apply skipped"
+            echo
+            echo "Automatic remote apply is not active yet because the shared cloud bootstrap has not populated the required repository variables."
+            echo "Run the one-time maintainer bootstrap from Google Cloud Shell, then pushes to main can drive the shared cloud path automatically."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail manual run before bootstrap
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.flags.outputs.bootstrap_ready != 'true' }}
+        run: |
+          set -euo pipefail
+          echo 'Remote Terraform is not bootstrapped yet. Run the one-time maintainer bootstrap from Google Cloud Shell first.' >&2
+          exit 1
+
       - name: Validate OIDC configuration
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' }}
         env:
           WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
           SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
@@ -149,13 +194,16 @@ jobs:
           fi
 
       - uses: google-github-actions/auth@v2
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' }}
         with:
           workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
           service_account: ${{ steps.repo_config.outputs.service_account_email }}
 
       - uses: google-github-actions/setup-gcloud@v2
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' }}
 
       - name: Resolve Terraform inputs
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' }}
         env:
           REPO_GCP_PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
           REPO_GCP_LOCATION: ${{ steps.repo_config.outputs.location }}
@@ -261,7 +309,7 @@ jobs:
             bigquery_feature_table_id='forecast_features'
           fi
 
-          terraform_command="${{ inputs.command }}"
+          terraform_command="${{ steps.flags.outputs.command }}"
           destroy_confirmation="${{ inputs.destroy_confirmation }}"
           cleanup_confirmation="${{ inputs.cleanup_confirmation }}"
           cleanup_clear_github_actions="${{ inputs.cleanup_clear_github_actions }}"
@@ -359,7 +407,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Validate destroy confirmation
-        if: ${{ inputs.command == 'destroy' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'destroy' }}
         run: |
           set -euo pipefail
 
@@ -374,7 +422,7 @@ jobs:
           fi
 
       - name: Validate cleanup request
-        if: ${{ inputs.command == 'cleanup' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' }}
         run: |
           set -euo pipefail
 
@@ -394,7 +442,7 @@ jobs:
           fi
 
       - name: Ensure Terraform state backend is ready
-        if: ${{ inputs.command != 'cleanup' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command != 'cleanup' }}
         run: |
           set -euo pipefail
 
@@ -415,14 +463,14 @@ jobs:
           fi
 
       - name: Terraform init
-        if: ${{ inputs.command != 'cleanup' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command != 'cleanup' }}
         run: |
           terraform -chdir=terraform init \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="prefix=${TF_STATE_PREFIX}"
 
       - name: Terraform plan
-        if: ${{ inputs.command != 'cleanup' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command != 'cleanup' }}
         run: |
           set -euo pipefail
 
@@ -433,12 +481,11 @@ jobs:
           fi
 
       - name: Terraform apply chosen plan
-        if: ${{ inputs.command == 'apply' || inputs.command == 'destroy' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && (steps.flags.outputs.command == 'apply' || steps.flags.outputs.command == 'destroy') }}
         run: terraform -chdir=terraform apply -auto-approve tfplan
 
       - name: Remote cleanup delete state bucket
-        if: ${{ inputs.command == 'cleanup' && inputs.cleanup_delete_state_bucket ==
-          true }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' && inputs.cleanup_delete_state_bucket == true }}
         run: |
           set -euo pipefail
 
@@ -451,17 +498,16 @@ jobs:
           gcloud storage buckets delete "gs://${TF_STATE_BUCKET}" --project "${TF_VAR_project_id}" --quiet
 
       - name: Remote cleanup clear repository variables
-        if: ${{ inputs.command == 'cleanup' && inputs.cleanup_clear_github_actions ==
-          true }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' && inputs.cleanup_clear_github_actions == true }}
         run: ./scripts/configure-github-actions.sh --clear --repo "${{ github.repository
           }}"
 
       - name: Sync repository variables
-        if: ${{ inputs.command == 'apply' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
         run: ./scripts/configure-github-actions.sh --repo "${{ github.repository }}"
 
       - name: Summarize outputs
-        if: ${{ inputs.command == 'apply' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
         run: |
           set -euo pipefail
 
@@ -489,7 +535,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize destroy
-        if: ${{ inputs.command == 'destroy' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'destroy' }}
         run: |
           set -euo pipefail
 
@@ -503,7 +549,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize cleanup
-        if: ${{ inputs.command == 'cleanup' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' }}
         run: |
           set -euo pipefail
 

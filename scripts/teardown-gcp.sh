@@ -169,15 +169,15 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
     echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to preview in this working copy."
     echo "If this environment was provisioned through the remote Terraform backend, use ./scripts/terraform-remote.sh destroy instead."
   else
-    require_command terraform
+    ensure_terraform_command
     require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
     ensure_gcp_context true
 
     echo "Initializing Terraform..."
-    terraform -chdir="${ROOT_DIR}/terraform" init
+    run_terraform -chdir="${ROOT_DIR}/terraform" init
 
     echo "Previewing Terraform destroy plan..."
-    terraform -chdir="${ROOT_DIR}/terraform" plan -destroy -var-file="$TFVARS_FILE"
+    run_terraform -chdir="${ROOT_DIR}/terraform" plan -destroy -var-file="$TFVARS_FILE"
 
     echo "Teardown preview complete for ${GCP_PROJECT_ID}."
   fi
@@ -209,12 +209,12 @@ TERRAFORM_DESTROYED=false
 PROJECT_DELETED=false
 
 if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "true" ]]; then
-  require_command terraform
+  ensure_terraform_command
   require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
   ensure_gcp_context true
 
   echo "Initializing Terraform..."
-  terraform -chdir="${ROOT_DIR}/terraform" init
+  run_terraform -chdir="${ROOT_DIR}/terraform" init
 
   destroy_args=(destroy -var-file="$TFVARS_FILE")
   if [[ "$AUTO_APPROVE" == "true" ]]; then
@@ -222,7 +222,7 @@ if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "true" ]]; then
   fi
 
   echo "Destroying Terraform-managed resources..."
-  terraform -chdir="${ROOT_DIR}/terraform" "${destroy_args[@]}"
+  run_terraform -chdir="${ROOT_DIR}/terraform" "${destroy_args[@]}"
   TERRAFORM_DESTROYED=true
 else
   echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Skipping Terraform destroy path."

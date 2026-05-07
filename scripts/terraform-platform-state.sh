@@ -4,7 +4,7 @@ terraform_outputs_available() {
   local terraform_dir="$1"
   local outputs_json
 
-  outputs_json="$(terraform -chdir="$terraform_dir" output -json 2>/dev/null || true)"
+  outputs_json="$(run_terraform -chdir="$terraform_dir" output -json 2>/dev/null || true)"
   [[ -n "$outputs_json" && "$outputs_json" != "{}" ]]
 }
 
@@ -12,14 +12,77 @@ terraform_output_value() {
   local terraform_dir="$1"
   local output_name="$2"
 
-  terraform -chdir="$terraform_dir" output -raw "$output_name"
+  run_terraform -chdir="$terraform_dir" output -raw "$output_name"
 }
 
 optional_terraform_output_value() {
   local terraform_dir="$1"
   local output_name="$2"
 
-  terraform -chdir="$terraform_dir" output -raw "$output_name" 2>/dev/null || true
+  run_terraform -chdir="$terraform_dir" output -raw "$output_name" 2>/dev/null || true
+}
+
+trim_terraform_platform_value() {
+  local value="$1"
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+terraform_platform_tfvars_file() {
+  local terraform_dir="$1"
+
+  if [[ -n "${FOEHNCAST_TERRAFORM_TFVARS_FILE:-}" ]]; then
+    printf '%s\n' "$FOEHNCAST_TERRAFORM_TFVARS_FILE"
+    return
+  fi
+
+  printf '%s/terraform.tfvars\n' "$terraform_dir"
+}
+
+read_tfvars_value_from_file() {
+  local tfvars_file="$1"
+  local key="$2"
+  local line value
+
+  if [[ ! -f "$tfvars_file" ]]; then
+    return
+  fi
+
+  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$tfvars_file" | tail -n 1 || true)"
+
+  if [[ -z "$line" ]]; then
+    return
+  fi
+
+  value="${line#*=}"
+  value="$(trim_terraform_platform_value "$value")"
+
+  if [[ "$value" == \"*\" ]]; then
+    value="${value#\"}"
+    value="${value%\"}"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+terraform_output_or_tfvars_value() {
+  local terraform_dir="$1"
+  local output_name="$2"
+  local tfvars_key="$3"
+  local output_value tfvars_file
+
+  output_value="$(optional_terraform_output_value "$terraform_dir" "$output_name")"
+  output_value="$(trim_terraform_platform_value "$output_value")"
+
+  if [[ -n "$output_value" && "$output_value" != "null" ]]; then
+    printf '%s\n' "$output_value"
+    return
+  fi
+
+  tfvars_file="$(terraform_platform_tfvars_file "$terraform_dir")"
+  read_tfvars_value_from_file "$tfvars_file" "$tfvars_key"
 }
 
 foehncast_default_cloud_run_image() {
@@ -122,27 +185,27 @@ apply_foehncast_cloud_tfvars_values() {
 load_terraform_platform_state() {
   local terraform_dir="$1"
 
-  FOEHNCAST_TF_PROJECT_ID="$(terraform_output_value "$terraform_dir" project_id)"
-  FOEHNCAST_TF_LOCATION="$(terraform_output_value "$terraform_dir" region)"
-  FOEHNCAST_TF_ARTIFACT_REPOSITORY="$(terraform_output_value "$terraform_dir" artifact_registry_repository_id)"
-  FOEHNCAST_TF_ARTIFACT_BUCKET_NAME="$(terraform_output_value "$terraform_dir" artifact_bucket_name)"
-  FOEHNCAST_TF_BIGQUERY_DATASET="$(terraform_output_value "$terraform_dir" bigquery_dataset_id)"
-  FOEHNCAST_TF_BIGQUERY_LOCATION="$(terraform_output_value "$terraform_dir" bigquery_location)"
-  FOEHNCAST_TF_BIGQUERY_TABLE="$(terraform_output_value "$terraform_dir" bigquery_feature_table_id)"
-  FOEHNCAST_TF_FEAST_ONLINE_STORE_LOCATION="$(terraform_output_value "$terraform_dir" feast_online_store_location)"
-  FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE="$(terraform_output_value "$terraform_dir" feast_online_store_database_name)"
-  FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER="$(terraform_output_value "$terraform_dir" github_workload_identity_provider)"
-  FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL="$(terraform_output_value "$terraform_dir" github_deployer_service_account)"
-  FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
-  FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_value "$terraform_dir" provision_cloud_run_service)"
-  FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_value "$terraform_dir" configured_cloud_run_service_name)"
-  FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(optional_terraform_output_value "$terraform_dir" mlflow_tracking_uri)"
+  FOEHNCAST_TF_PROJECT_ID="$(terraform_output_or_tfvars_value "$terraform_dir" project_id project_id)"
+  FOEHNCAST_TF_LOCATION="$(terraform_output_or_tfvars_value "$terraform_dir" region region)"
+  FOEHNCAST_TF_ARTIFACT_REPOSITORY="$(terraform_output_or_tfvars_value "$terraform_dir" artifact_registry_repository_id artifact_registry_repository_id)"
+  FOEHNCAST_TF_ARTIFACT_BUCKET_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" artifact_bucket_name artifact_bucket_name)"
+  FOEHNCAST_TF_BIGQUERY_DATASET="$(terraform_output_or_tfvars_value "$terraform_dir" bigquery_dataset_id bigquery_dataset_id)"
+  FOEHNCAST_TF_BIGQUERY_LOCATION="$(terraform_output_or_tfvars_value "$terraform_dir" bigquery_location bigquery_location)"
+  FOEHNCAST_TF_BIGQUERY_TABLE="$(terraform_output_or_tfvars_value "$terraform_dir" bigquery_feature_table_id bigquery_feature_table_id)"
+  FOEHNCAST_TF_FEAST_ONLINE_STORE_LOCATION="$(terraform_output_or_tfvars_value "$terraform_dir" feast_online_store_location feast_online_store_location)"
+  FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE="$(terraform_output_or_tfvars_value "$terraform_dir" feast_online_store_database_name feast_online_store_database_name)"
+  FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER="$(optional_terraform_output_value "$terraform_dir" github_workload_identity_provider)"
+  FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL="$(optional_terraform_output_value "$terraform_dir" github_deployer_service_account)"
+  FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
+  FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
+  FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"
+  FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
-  FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_value "$terraform_dir" provision_online_compose_host)"
-  FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME="$(terraform_output_value "$terraform_dir" online_compose_host_name)"
-  FOEHNCAST_TF_ONLINE_COMPOSE_HOST_ZONE="$(terraform_output_value "$terraform_dir" online_compose_host_zone)"
-  FOEHNCAST_TF_ONLINE_COMPOSE_MACHINE_TYPE="$(terraform_output_value "$terraform_dir" online_compose_machine_type)"
-  FOEHNCAST_TF_ONLINE_COMPOSE_DISK_SIZE_GB="$(terraform_output_value "$terraform_dir" online_compose_disk_size_gb)"
+  FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
+  FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_host_name online_compose_host_name)"
+  FOEHNCAST_TF_ONLINE_COMPOSE_HOST_ZONE="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_host_zone online_compose_host_zone)"
+  FOEHNCAST_TF_ONLINE_COMPOSE_MACHINE_TYPE="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_machine_type online_compose_machine_type)"
+  FOEHNCAST_TF_ONLINE_COMPOSE_DISK_SIZE_GB="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_disk_size_gb online_compose_disk_size_gb)"
   FOEHNCAST_TF_STATE_BUCKET="${FOEHNCAST_TF_PROJECT_ID}-foehncast-tfstate"
   FOEHNCAST_TF_STATE_PREFIX="terraform/state"
 }

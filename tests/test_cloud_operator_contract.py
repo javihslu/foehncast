@@ -145,6 +145,11 @@ def test_load_gcp_repo_config_matches_repo_variable_contract() -> None:
 def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     workflow = _workflow_yaml(".github/workflows/terraform.yml")
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    remote_job = workflow["jobs"]["remote"]
+
+    assert "github.event_name == 'workflow_dispatch' ||" in remote_job["if"]
+    assert "github.event_name == 'push'" in remote_job["if"]
+    assert "environment" not in remote_job
 
     for input_name in REPO_BACKED_WORKFLOW_INPUTS:
         assert input_name in inputs
@@ -173,6 +178,24 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     )
 
 
+def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> None:
+    workflow = _workflow_yaml(".github/workflows/terraform.yml")
+
+    flags_step = _workflow_step(workflow, "remote", "Resolve execution flags")
+    flags_script = flags_step["run"]
+    assert "if [[ \"$EVENT_NAME\" == 'push' ]]; then" in flags_script
+    assert "command='apply'" in flags_script
+    assert 'echo "bootstrap_ready=$bootstrap_ready"' in flags_script
+
+    apply_step = _workflow_step(workflow, "remote", "Terraform apply chosen plan")
+    assert "steps.flags.outputs.command == 'apply'" in apply_step["if"]
+
+    skipped_step = _workflow_step(
+        workflow, "remote", "Explain skipped automatic apply before bootstrap"
+    )
+    assert "github.event_name == 'push'" in skipped_step["if"]
+
+
 def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
     config_job = workflow["jobs"]["config"]
@@ -194,3 +217,31 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
         deploy_job["env"]["CLOUD_RUN_SERVICE"]
         == "${{ needs.config.outputs.cloud_run_service }}"
     )
+
+
+def test_terraform_declares_gcs_backend_for_remote_state() -> None:
+    providers = _read_text("terraform/providers.tf")
+
+    assert 'backend "gcs" {}' in providers
+
+
+def test_cloud_scripts_use_shared_terraform_runner() -> None:
+    cli_common = _read_text("scripts/cli-common.sh")
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+    configure = _read_text("scripts/configure-github-actions.sh")
+    teardown = _read_text("scripts/teardown-gcp.sh")
+    state_helper = _read_text("scripts/terraform-platform-state.sh")
+
+    assert "run_terraform()" in cli_common
+    assert "ensure_terraform_command()" in cli_common
+    assert "require_command terraform" in cli_common
+    assert "hashicorp/terraform:" not in cli_common
+
+    assert "require_command terraform" not in bootstrap
+    assert 'run_terraform -chdir="$TERRAFORM_DIR"' in bootstrap
+
+    assert "ensure_terraform_command" in configure
+    assert 'run_terraform -chdir="$terraform_dir" output -json' in state_helper
+
+    assert "require_command terraform" not in teardown
+    assert 'run_terraform -chdir="${ROOT_DIR}/terraform" init' in teardown

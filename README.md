@@ -29,20 +29,14 @@ flowchart LR
 | Hosted runtime | Working | Terraform can provision either a hosted full-stack target on one GCP host or an inference-only Cloud Run service |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 
-## Choose Your Path
+## Default Setup
 
-| Path | Use it when | Start here |
-|------|-------------|------------|
-| Local evaluator | You want the default development and evaluation path with no GCP setup | `./scripts/bootstrap-local.sh` |
-| Cloud operator | You want to provision a hosted environment in your own GCP project | `./scripts/bootstrap-gcp.sh` |
-| Remote day-2 operations | You already bootstrapped cloud prerequisites and want repeatable plan, apply, destroy, and cleanup commands | `./scripts/terraform-remote.sh` |
+FoehnCast has one supported contributor setup path: run everything locally with Docker.
 
 ```mermaid
 flowchart TB
-    Local[Local evaluator path] --> Compose[Airflow + MLflow + FastAPI]
-    Cloud[Cloud operator bootstrap] --> Remote[Remote Terraform workflow]
-  Remote --> Host[Hosted full-stack target]
-  Remote --> Run[Cloud Run inference service]
+    Local[Local setup] --> Compose[Airflow + MLflow + FastAPI]
+    Main[Push to main] --> Cloud[GitHub-managed shared cloud automation]
 ```
 
 ## Quick Start
@@ -76,18 +70,15 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-### Cloud operator
+## Shared Cloud Automation
 
-Use this only when you want to run FoehnCast in a GCP project you control. Prefer Google Cloud Shell for the first bootstrap.
+The shared hosted environment is not part of normal contributor setup.
 
-1. Open Google Cloud Shell.
-2. Clone the repository.
-3. Run `./scripts/bootstrap-gcp.sh`.
-4. After bootstrap, use `./scripts/terraform-remote.sh plan|apply|destroy|cleanup` for day-2 operations.
+- Contributors only need Docker and the local bootstrap path.
+- The shared cloud environment is maintained through GitHub Actions after a one-time maintainer bootstrap.
+- Contributors do not need local Terraform, `gcloud`, or `gh` for normal work.
 
-The hosted baseline writes the Feast cloud env contract and provisions the cloud-side bucket, curated BigQuery surfaces, and a named Datastore-mode database for Feast online serving.
-During setup, the bootstrap writes `.env` and `terraform/terraform.tfvars` and asks explicitly whether the next apply should enable the inference-only Cloud Run target and/or the full online compose host target.
-After curated feature rows exist in BigQuery, run `./scripts/prepare-feast-cloud.sh` from a shell with ADC or host service-account access to apply the Feast repo and materialize the hosted online store.
+Maintainer-only cloud bootstrap and operator details live in `terraform/README.md`.
 
 Hosted deployment keeps its scope narrow. The cloud targets deploy runtime services only; `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
 
@@ -95,8 +86,8 @@ Hosted deployment keeps its scope narrow. The cloud targets deploy runtime servi
 
 - `src/foehncast/`: application code for configuration, feature engineering, training, inference, monitoring, and spot metadata
 - `dags/`: Airflow entry points for the feature and training workflows
-- `scripts/`: local bootstrap, cloud bootstrap, remote Terraform, and operator helpers
-- `terraform/`: hosted infrastructure definition and operator notes
+- `scripts/`: local bootstrap plus maintainer utilities
+- `terraform/`: maintainer cloud infrastructure definition and reference
 - `feature_repo/`: Feast integration surface and config repo
 - `tests/`: regression coverage for pipeline logic and API behavior
 - `docs/`: GitHub Pages source for the public project documentation

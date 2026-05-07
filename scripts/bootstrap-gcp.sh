@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TERRAFORM_DIR="${ROOT_DIR}/terraform"
 ENV_FILE="${ROOT_DIR}/.env"
 TFVARS_FILE="${ROOT_DIR}/terraform/terraform.tfvars"
 # shellcheck disable=SC1091
@@ -19,30 +20,56 @@ PLAN_ONLY=false
 AUTO_APPROVE=false
 BOOTSTRAP_ONLY=false
 INTERACTIVE=true
+TEMP_TERRAFORM_DIR=""
 
 usage() {
   echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--bootstrap-only] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
   echo "Use ./scripts/bootstrap-local.sh for the default local evaluator path." >&2
-  echo "Prefer running this cloud bootstrap from Google Cloud Shell when possible." >&2
+  echo "Maintainer-only cloud bootstrap. Supported no-local-install path: run this from Google Cloud Shell." >&2
 }
 
 in_cloud_shell() {
   [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]
 }
 
+cleanup_bootstrap_terraform_dir() {
+  if [[ -n "$TEMP_TERRAFORM_DIR" && -d "$TEMP_TERRAFORM_DIR" ]]; then
+    rm -rf "$TEMP_TERRAFORM_DIR"
+  fi
+}
+
+prepare_bootstrap_terraform_dir() {
+  if [[ "$BOOTSTRAP_ONLY" != "true" || -n "$TEMP_TERRAFORM_DIR" ]]; then
+    return
+  fi
+
+  TEMP_TERRAFORM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/foehncast-terraform.XXXXXX")"
+  cp -R "${ROOT_DIR}/terraform/." "$TEMP_TERRAFORM_DIR/"
+  rm -rf "$TEMP_TERRAFORM_DIR/.terraform"
+  rm -f "$TEMP_TERRAFORM_DIR/terraform.tfstate" "$TEMP_TERRAFORM_DIR/terraform.tfstate.backup"
+  TERRAFORM_DIR="$TEMP_TERRAFORM_DIR"
+
+  if [[ -f "${ROOT_DIR}/terraform/terraform.tfstate" || -d "${ROOT_DIR}/terraform/.terraform" ]]; then
+    echo "Using an isolated Terraform working directory for bootstrap-only so local state files do not interfere with remote backend initialization."
+  fi
+}
+
+trap cleanup_bootstrap_terraform_dir EXIT
+
 print_bootstrap_context() {
   echo "Cloud bootstrap provisions a hosted GCP environment."
   echo "For the default local evaluator path, use ./scripts/bootstrap-local.sh instead."
+  echo "This script is for the rare maintainer bootstrap case, not normal contributor onboarding."
 
   if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
     echo "Mode: bootstrap-only. This prepares the remote Terraform control plane and leaves the broader platform apply for the remote workflow."
   fi
 
   if in_cloud_shell; then
-    echo "Execution context: Google Cloud Shell (preferred for first-time cloud bootstrap)."
+    echo "Execution context: Google Cloud Shell (supported first-time cloud bootstrap environment)."
   else
     echo "Execution context: local admin shell."
-    echo "Tip: run this script from Google Cloud Shell if you want to avoid installing gcloud and Terraform on your local machine."
+    echo "Tip: if you do not want local gcloud and Terraform installs, rerun this script from Google Cloud Shell."
   fi
 }
 
@@ -106,7 +133,7 @@ read_tfvars_value() {
     local file_path="$1"
 
     if terraform_fmt_supports_file "$file_path"; then
-      terraform fmt "$file_path" >/dev/null
+      run_terraform fmt "$file_path" >/dev/null
       return
     fi
 
@@ -153,7 +180,7 @@ read_tfvars_value() {
   sync_env_from_terraform_outputs() {
     local cloud_run_service
 
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
     cloud_run_service="${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
 
     if [[ -z "$cloud_run_service" ]]; then
@@ -172,7 +199,7 @@ read_tfvars_value() {
   }
 
   print_auth_summary() {
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
 
     echo "Local auth: browser-based gcloud ADC on this machine"
     echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"
@@ -186,7 +213,7 @@ read_tfvars_value() {
   print_bootstrap_only_summary() {
     local state_bucket state_prefix
 
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
     state_bucket="$(terraform_remote_state_bucket)"
     state_prefix="$(terraform_remote_state_prefix)"
 
@@ -626,7 +653,7 @@ fi
 print_bootstrap_context
 
 require_command gcloud
-require_command terraform
+ensure_terraform_command
 
 if [[ "$CONFIGURE_GITHUB" == "true" ]]; then
   require_command gh
@@ -643,6 +670,7 @@ fi
 load_env_file "$ENV_FILE"
 
 require_gcp_project_and_location
+prepare_bootstrap_terraform_dir
 
 echo "Authenticating with Google Cloud via browser if needed..."
 "${ROOT_DIR}/scripts/gcp-auth.sh" "$ENV_FILE"
@@ -661,14 +689,14 @@ if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
   )
 fi
 
-terraform -chdir="${ROOT_DIR}/terraform" "${terraform_init_args[@]}"
+run_terraform -chdir="$TERRAFORM_DIR" "${terraform_init_args[@]}"
 
 echo "Formatting generated Terraform variable files..."
 format_generated_tfvars_file "$TFVARS_FILE"
 
 echo "Checking Terraform formatting and validation..."
-terraform -chdir="${ROOT_DIR}/terraform" fmt -check
-terraform -chdir="${ROOT_DIR}/terraform" validate
+run_terraform -chdir="$TERRAFORM_DIR" fmt -check
+run_terraform -chdir="$TERRAFORM_DIR" validate
 
 target_args=()
 if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
@@ -684,7 +712,7 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
     echo "Running Terraform plan..."
   fi
 
-  terraform -chdir="${ROOT_DIR}/terraform" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
+  run_terraform -chdir="$TERRAFORM_DIR" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
 else
   apply_args=(apply -var-file="$TFVARS_FILE")
 
@@ -700,7 +728,7 @@ else
     echo "Running Terraform apply..."
   fi
 
-  terraform -chdir="${ROOT_DIR}/terraform" "${apply_args[@]}"
+  run_terraform -chdir="$TERRAFORM_DIR" "${apply_args[@]}"
 
   if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
     print_bootstrap_only_summary
@@ -718,8 +746,10 @@ if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
     github_args+=( --repo "$TARGET_REPO" )
   fi
 
+  github_args+=( --terraform-dir "$TERRAFORM_DIR" )
+
   echo "Configuring GitHub Actions repository variables..."
-  "${ROOT_DIR}/scripts/configure-github-actions.sh" "${github_args[@]}"
+  FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" "${ROOT_DIR}/scripts/configure-github-actions.sh" "${github_args[@]}"
 fi
 
 if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then

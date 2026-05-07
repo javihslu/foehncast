@@ -106,10 +106,10 @@ if [[ "$CLEAR" == "true" ]]; then
   exit 0
 fi
 
-require_command terraform
+ensure_terraform_command
 
 if ! terraform_outputs_available "$TERRAFORM_DIR"; then
-  echo "Terraform outputs are not available in ${TERRAFORM_DIR}. Run 'terraform apply' first." >&2
+  echo "Terraform outputs are not available in ${TERRAFORM_DIR}. Run the bootstrap or apply path first." >&2
   exit 1
 fi
 

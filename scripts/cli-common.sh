@@ -18,8 +18,8 @@ install_hint() {
       echo "Install GitHub CLI first. On macOS with Homebrew: brew install gh" >&2
       ;;
     terraform)
-      echo "Install Terraform first. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
-      echo "Alternative: run the cloud bootstrap from Google Cloud Shell instead of installing it locally." >&2
+      echo "Install Terraform first if you want a local admin shell. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
+      echo "Supported no-local-install path: run the cloud bootstrap from Google Cloud Shell, then use the remote GitHub Actions Terraform workflow for day-2 operations." >&2
       ;;
     uv)
       echo "Install uv first. On macOS with Homebrew: brew install uv" >&2
@@ -54,6 +54,15 @@ require_file_variable() {
     echo "${variable_name} must be set before calling this helper." >&2
     exit 1
   fi
+}
+
+ensure_terraform_command() {
+  require_command terraform
+}
+
+run_terraform() {
+  ensure_terraform_command
+  terraform "$@"
 }
 
 replace_or_append_line() {
