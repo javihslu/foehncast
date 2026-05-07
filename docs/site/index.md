@@ -1,47 +1,33 @@
-# FoehnCast Journal
+# FoehnCast Docs
 
-FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. This journal explains how the project is designed, how it is set up, and how it is operated across local, online, and CI/CD paths.
+FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for the setup details, architecture notes, and milestone-level documentation.
 
-## What This Site Covers
+## Start Here
 
-- the working local stack for feature, training, and inference
-- the operating modes used for local evaluation, online hosting, and CI/CD
-- the milestone-by-milestone story behind the course submission
-- the cloud mapping that keeps the same application boundaries in a hosted environment
+| Need | Read this |
+|------|-----------|
+| Run the project locally with the default evaluator workflow | [Getting Started](getting-started.md) |
+| Understand the Feature-Training-Inference split | [Architecture](system/architecture.md) |
+| See how the hosted path maps onto GCP | [Cloud Mapping](system/cloud-mapping.md) |
+| Understand the main code and folder layout | [Repository](system/repository.md) |
+| Review the course delivery story | [Milestones](milestones/index.md) |
 
 ## Operating Model
 
-| Mode | Who operates it | Who pays for it | Purpose |
-|------|-----------------|-----------------|---------|
-| Local stack | Any reader or contributor | The person running Docker locally | Development, evaluation, and reproducible local validation |
-| Online stack | The operator of a fork or a local cloud setup | The operator's own cloud account | A full online deployment of Airflow, MLflow, and the API |
-| Upstream CI/CD | Repository maintainer | The upstream repository account | Validation, docs publishing, and reference image publishing |
-| Fork CI/CD | Fork owner | The fork owner's GitHub and cloud accounts | Personal or team-specific automation without using the upstream environment |
+| Mode | Who runs it | Purpose |
+|------|-------------|---------|
+| Local stack | Any reader or contributor | Development, evaluation, and reproducible validation |
+| Online stack | The operator of a fork or a personal cloud setup | Full hosted deployment of Airflow, MLflow, and the API |
+| GitHub automation | Repository maintainer or fork owner | Image publishing, Terraform workflows, and docs publishing |
 
-Public GHCR images are convenience artifacts for reuse. They do not provide shared hosting, and deployment costs still belong to the operator running the stack.
+Public images are convenience artifacts, not a shared hosting promise. If you want a running online environment, deploy it in infrastructure you control.
 
-The repository keeps local evaluation and maintainer-managed automation separate, so forks can reuse the same deployment shape with their own approvals and cloud accounts.
-
-Default onboarding follows that same split: use `./scripts/bootstrap-local.sh` for a GCP-free local evaluator path, and use `./scripts/bootstrap-gcp.sh` only for cloud operator bootstrap, preferably from Google Cloud Shell.
-
-## What Works
-
-| Area | Current state | What it means |
-|------|---------------|---------------|
-| Feature pipeline | Working | Airflow can ingest, engineer, validate, and store curated weather features for the configured spots |
-| Training pipeline | Working | Airflow can label data, train the model, evaluate it, and register a version in MLflow |
-| Inference pipeline | Working | The app serves `/health`, `/spots`, `/predict`, and `/rank` from the registered model |
-| Optional Feast path | Working | Curated local features can be exported, materialized, and queried through Feast, the helper, the API, and the demo page |
-| Online runtime | Working | `docker-compose.cloud.yml` plus Terraform can run Airflow, MLflow, and the API on a single online host |
-| CI/CD path | Working | GitHub Actions can publish images, validate infrastructure, and drive the online deployment path |
-| Local reproducibility | Working | `bootstrap-local.sh` brings the stack up from a clean state and validates the local path |
-
-## End-to-End Local Flow
+## System In One View
 
 <div class="mermaid">
 flowchart LR
     OME[Open-Meteo forecast] --> FEAT[Feature DAG]
-    FEAT --> PAR[(Curated feature parquet)]
+    FEAT --> PAR[(Curated features)]
     PAR --> TRAIN[Training DAG]
     TRAIN --> MLF[(MLflow registry)]
 
@@ -50,30 +36,25 @@ flowchart LR
     MLF --> APP
     APP --> API[Predict and rank endpoints]
 
-    PAR --> FEXP[Optional Feast export]
-    FEXP --> FEAST[(Feast online store)]
+    PAR --> FEAST[(Optional Feast lookup)]
     FEAST --> APP
-    APP --> FEATAPI[Online feature endpoint and demo]
 </div>
 
-## Short Roadmap
+## Current Status
 
-The core idea is fixed: keep the same Feature-Training-Inference split and change the infrastructure in small steps instead of redesigning the code.
+| Area | Status | Meaning |
+|------|--------|---------|
+| Feature pipeline | Working | The feature DAG ingests, engineers, validates, and stores curated weather features |
+| Training pipeline | Working | The training DAG labels data, trains the model, evaluates it, and registers versions in MLflow |
+| Inference pipeline | Working | The app serves the model-backed API routes used for health, prediction, and ranking |
+| Hosted runtime | Working | Terraform plus the online compose stack can run Airflow, MLflow, and the API on GCP |
+| CI/CD | Working | GitHub Actions validates docs and infrastructure and supports remote Terraform operations |
 
-<div class="mermaid">
-flowchart LR
-    LOCAL[Local stack<br/>runs with real data] --> DATA[Cloud data path<br/>BigQuery and GCS-backed services]
-    DATA --> DEPLOY[Managed runtime<br/>same app and DAG split]
-    DEPLOY --> FINAL[Operations<br/>monitoring and final wrap-up]
-</div>
+## Documentation Map
 
-- **Local stack**: the proof that the pipelines run together.
-- **Cloud data path**: reuse the same boundaries with BigQuery for curated data and GCS-backed artifacts.
-- **Managed runtime**: move orchestration and serving to managed GCP services or an online compose host instead of changing the application shape.
-- **Operations**: finish automation, monitoring, and final delivery material.
-
-## Reading Guide
-
-- **Journal**: operating model, design framing, and roadmap.
-- **Milestones**: course-facing progress by submission checkpoint.
-- **System**: the working architecture, cloud target, and repository layout.
+- [Getting Started](getting-started.md): choose the right operator path and run the first commands.
+- [Architecture](system/architecture.md): the stable Feature-Training-Inference split and runtime surfaces.
+- [Feature Pipeline](system/feature-pipeline.md): how data moves from forecast ingestion to curated features.
+- [Cloud Mapping](system/cloud-mapping.md): how local boundaries map onto hosted storage and runtime choices.
+- [Repository](system/repository.md): where the code, orchestration, tests, docs, and demo live.
+- [Milestones](milestones/index.md): the course-facing delivery narrative.

@@ -1,6 +1,6 @@
-site_name: FoehnCast Journal
+site_name: FoehnCast Docs
 site_url: https://javihslu.github.io/foehncast/
-site_description: Course project journal and architecture guide for FoehnCast
+site_description: Setup, architecture, and milestone guide for FoehnCast
 repo_url: https://github.com/javihslu/foehncast
 repo_name: javihslu/foehncast
 
@@ -47,17 +47,18 @@ plugins:
   - search
 
 nav:
-  - Journal: index.md
-  - Milestones:
-      - Overview: milestones/index.md
-      - MS1 Proposal: milestones/ms1.md
-      - MS2 Backend: milestones/ms2.md
-      - MS3 Presentation: milestones/ms3.md
-      - MS4 Final Code: milestones/ms4.md
+  - Home: index.md
+  - Getting Started: getting-started.md
   - System:
-      - Use Case and Data: system/use-case.md
-      - Architecture: system/architecture.md
-      - Feature Pipeline: system/feature-pipeline.md
-      - Cloud Mapping: system/cloud-mapping.md
-      - Seasonality: system/seasonality.md
-      - Repository: system/repository.md
+    - Architecture: system/architecture.md
+    - Feature Pipeline: system/feature-pipeline.md
+    - Cloud Mapping: system/cloud-mapping.md
+    - Repository: system/repository.md
+    - Use Case and Data: system/use-case.md
+    - Seasonality: system/seasonality.md
+  - Milestones:
+    - Overview: milestones/index.md
+    - MS1 Proposal: milestones/ms1.md
+    - MS2 Backend: milestones/ms2.md
+    - MS3 Presentation: milestones/ms3.md
+    - MS4 Final Code: milestones/ms4.md

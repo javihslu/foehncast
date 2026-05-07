@@ -1,26 +1,19 @@
 # Milestones
 
-The milestone pages mirror the four course checkpoints and are written as stable reference pages. Together they show how the project moves from proposal, to validated local execution, to presentation, to final integration.
+These pages track the four course checkpoints. Read them as a delivery narrative: proposal first, working backend second, presentation framing third, and final integration last.
 
-| Milestone | Checkpoint state | What the page covers |
-|-----------|------------------|----------------------|
-| MS1 Proposal | Submitted | Problem framing, data, features, and baseline architecture |
-| MS2 Backend | Validated locally | Feature, training, and inference paths running together |
-| MS3 Presentation | Presentation scope | The demonstration story and the system explanation used for the checkpoint |
-| MS4 Final Code | Final integration | Cloud mapping, automation, monitoring, and final packaging |
+| Milestone | Role in the project | Read it for |
+|-----------|---------------------|-------------|
+| MS1 Proposal | Project baseline | Problem framing, rider profile, data sources, and the first FTI architecture |
+| MS2 Backend | First working system | What runs locally today and how the proposal became runnable code |
+| MS3 Presentation | Demo checkpoint | The story, flow, and reviewer takeaways for the presentation |
+| MS4 Final Code | Final handoff | Integration priorities for cloud mapping, automation, monitoring, and documentation |
 
-<div class="grid cards" markdown>
+## Reading Order
 
-- **Start with MS1**
+1. Start with [MS1 Proposal](ms1.md) for the original scope and design baseline.
+2. Continue with [MS2 Backend](ms2.md) for the validated local system.
+3. Use [MS3 Presentation](ms3.md) for the demo narrative built on top of that backend.
+4. Finish with [MS4 Final Code](ms4.md) for the integration path to the final submission.
 
-  This page expands the design choices behind the submitted proposal.
-
-- **Then read MS2**
-
-  This page shows the backend that already runs locally.
-
-- **Use MS3 and MS4 as the bridge to delivery**
-
-  These pages connect the validated local backend to the presentation story and the final system handoff.
-
-</div>
+The milestone pages are intentionally lighter than the system pages. For the detailed current design, use [Architecture](../system/architecture.md) and [Cloud Mapping](../system/cloud-mapping.md).
