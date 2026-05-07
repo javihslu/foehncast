@@ -13,6 +13,7 @@ DRY_RUN=false
 KEEP_ENVIRONMENT=false
 KEEP_TEMP_FILES=false
 ALLOW_SHARED_REPO=false
+TEMP_WORK_DIR=""
 CREATED_ENV_FILE=false
 CREATED_TFVARS_FILE=false
 
@@ -94,6 +95,14 @@ prepare_file_from_template() {
   fi
 }
 
+ensure_temp_workspace() {
+  if [[ -n "$TEMP_WORK_DIR" ]]; then
+    return
+  fi
+
+  TEMP_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/foehncast-smoke.XXXXXX")"
+}
+
 ensure_safe_repo() {
   if [[ -z "$TARGET_REPO" ]]; then
     echo "--repo owner/repo is required. Use a fork or disposable repository for this smoke pass." >&2
@@ -129,12 +138,14 @@ prepare_local_inputs() {
   cloud_run_service="foehncast-serve"
 
   if [[ -z "$ENV_FILE" ]]; then
-    ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/foehncast-smoke.env.XXXXXX")"
+    ensure_temp_workspace
+    ENV_FILE="${TEMP_WORK_DIR}/foehncast-smoke.env"
     CREATED_ENV_FILE=true
   fi
 
   if [[ -z "$TFVARS_FILE" ]]; then
-    TFVARS_FILE="$(mktemp "${TMPDIR:-/tmp}/foehncast-smoke.tfvars.XXXXXX")"
+    ensure_temp_workspace
+    TFVARS_FILE="${TEMP_WORK_DIR}/foehncast-smoke.tfvars"
     CREATED_TFVARS_FILE=true
   fi
 
@@ -205,6 +216,9 @@ cleanup_temp_files() {
   fi
   if [[ "$CREATED_TFVARS_FILE" == "true" ]]; then
     rm -f "$TFVARS_FILE"
+  fi
+  if [[ -n "$TEMP_WORK_DIR" ]]; then
+    rmdir "$TEMP_WORK_DIR" 2>/dev/null || true
   fi
 }
 
