@@ -132,6 +132,8 @@ After the first bootstrap, prefer the remote Terraform workflow for day-2 plan, 
 
 If you want the smallest first-time local step, run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`. That path creates only the remote-control-plane prerequisites, stores that bootstrap state in the remote backend, and leaves the broader platform apply for `./scripts/terraform-remote.sh apply`.
 
+Add `--wait` to `./scripts/terraform-remote.sh` when you want the helper to watch the dispatched GitHub Actions run to completion.
+
 Common remote operator commands:
 
 - Review the current remote plan: `./scripts/terraform-remote.sh plan`
@@ -143,6 +145,7 @@ Useful variants:
 
 - Restart from scratch: `rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
 - Bootstrap only the remote-control-plane prerequisites: `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`
+- Run a disposable fork-based bootstrap-only smoke pass: `./scripts/smoke-bootstrap-only.sh --repo <your-github-user>/foehncast`
 - Skip prompts when you already know the values: `./scripts/bootstrap-gcp.sh --non-interactive`
 - Configure fork automation during bootstrap: `./scripts/bootstrap-gcp.sh --configure-github-actions --repo <your-github-user>/foehncast`
 
@@ -178,6 +181,8 @@ Cloud Run stays available as an inference-only path for the app service.
 When you finish a disposable cloud test created from the local bootstrap path, run `./scripts/teardown-gcp.sh --plan-only` first to preview the destroy, then rerun without `--plan-only` when you are ready to remove the Terraform-managed resources created from your local `.env` and `terraform/terraform.tfvars`. In a fresh clone with no local Terraform state, the helper skips the Terraform destroy path cleanly. `--clear-github-actions`, `--delete-state-bucket`, and `--delete-project` still work as explicit cleanup actions when you request them. `--delete-project` is intended for disposable smoke environments where you also want the bootstrap-created GCP project queued for deletion, and it prompts for the exact project id unless you also pass `--auto-approve`.
 
 For environments managed through the remote backend, use `./scripts/terraform-remote.sh destroy` and then `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions` instead of local Terraform.
+
+`./scripts/smoke-bootstrap-only.sh` is intended for a fork or disposable repository because it rewrites and later clears that repository's deployment variables as part of the smoke lifecycle.
 
 ## Deployment Ownership
 

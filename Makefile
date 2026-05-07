@@ -1,9 +1,10 @@
-.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local bootstrap-gcp terraform-remote compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare
+.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
 JUPYTER_TOKEN ?= foehncast-local
 TF_REMOTE_ARGS ?= plan
+SMOKE_BOOTSTRAP_ARGS ?=
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-24s %s\n", $$1, $$2}'
@@ -48,6 +49,9 @@ bootstrap-gcp:  ## Run the cloud-operator GCP bootstrap (prefer Cloud Shell)
 
 terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS='<command> [flags]'
 	cd $(ROOT_DIR) && ./scripts/terraform-remote.sh $(TF_REMOTE_ARGS)
+
+smoke-bootstrap-only:  ## Run the disposable bootstrap-only smoke driver with SMOKE_BOOTSTRAP_ARGS='--repo owner/repo'
+	cd $(ROOT_DIR) && ./scripts/smoke-bootstrap-only.sh $(SMOKE_BOOTSTRAP_ARGS)
 
 compose-up:  ## Start the local compose stack
 	cd $(ROOT_DIR) && docker compose up -d

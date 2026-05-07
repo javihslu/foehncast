@@ -151,12 +151,16 @@ Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or 
 
 For the common operator path, trigger that workflow with `./scripts/terraform-remote.sh` instead of opening the Actions UI manually.
 
+Add `--wait` when you want the helper to watch the dispatched workflow run until it completes.
+
 Examples:
 
 - `./scripts/terraform-remote.sh plan`
-- `./scripts/terraform-remote.sh apply`
+- `./scripts/terraform-remote.sh apply --wait`
 - `./scripts/terraform-remote.sh destroy`
 - `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions`
+
+For a disposable manual validation of the bootstrap-only path in a fork or other disposable repository, use `./scripts/smoke-bootstrap-only.sh --repo <your-github-user>/foehncast`. The smoke driver prepares temporary local inputs, runs `bootstrap-gcp.sh --bootstrap-only`, waits on the remote apply, then destroys the remote resources, clears the target repository variables, and queues the disposable GCP project for deletion.
 
 For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 
