@@ -152,6 +152,30 @@ read_tfvars_value() {
     replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
   }
 
+  terraform_fmt_supports_file() {
+    local file_path="$1"
+
+    case "$file_path" in
+      *.tf|*.tfvars|*.tftest.hcl)
+        return 0
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  }
+
+  format_generated_tfvars_file() {
+    local file_path="$1"
+
+    if terraform_fmt_supports_file "$file_path"; then
+      terraform fmt "$file_path" >/dev/null
+      return
+    fi
+
+    echo "Skipping terraform fmt for ${file_path} because the filename does not end with .tf, .tfvars, or .tftest.hcl."
+  }
+
   terraform_remote_state_bucket() {
     printf '%s\n' "${GCP_PROJECT_ID}-foehncast-tfstate"
   }
@@ -631,7 +655,7 @@ fi
 terraform -chdir="${ROOT_DIR}/terraform" "${terraform_init_args[@]}"
 
 echo "Formatting generated Terraform variable files..."
-terraform fmt "$TFVARS_FILE" >/dev/null
+format_generated_tfvars_file "$TFVARS_FILE"
 
 echo "Checking Terraform formatting and validation..."
 terraform -chdir="${ROOT_DIR}/terraform" fmt -check
