@@ -29,6 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash -n scripts/*.sh
+      - run: bash scripts/terraform-remote.sh --help >/dev/null
+      - run: bash scripts/smoke-bootstrap-only.sh --help >/dev/null
       - run: bash scripts/teardown-gcp.sh --help >/dev/null
       - run: bash scripts/teardown-gcp.sh --plan-only >/dev/null
 

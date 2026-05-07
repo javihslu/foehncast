@@ -11,6 +11,8 @@ COMMAND=""
 PROJECT_ID=""
 REGION=""
 DRY_RUN=false
+WAIT_FOR_COMPLETION=false
+WATCH_INTERVAL=3
 CLEANUP_CLEAR_GITHUB_ACTIONS=false
 CLEANUP_DELETE_STATE_BUCKET=false
 EXTRA_INPUTS=()
@@ -23,7 +25,69 @@ source "${ROOT_DIR}/scripts/github-common.sh"
 source "${ROOT_DIR}/scripts/gcp-common.sh"
 
 usage() {
-  echo "Usage: $0 <plan|apply|destroy|cleanup> [--repo owner/repo] [--ref branch] [--env-file path] [--project-id id] [--region region] [--input key=value] [--cleanup-clear-github-actions] [--cleanup-delete-state-bucket] [--dry-run]" >&2
+  echo "Usage: $0 <plan|apply|destroy|cleanup> [--repo owner/repo] [--ref branch] [--env-file path] [--project-id id] [--region region] [--input key=value] [--cleanup-clear-github-actions] [--cleanup-delete-state-bucket] [--wait] [--watch-interval seconds] [--dry-run]" >&2
+}
+
+resolve_watch_ref() {
+  local repository_path="$1"
+
+  if [[ -n "$REF" ]]; then
+    printf '%s\n' "$REF"
+    return
+  fi
+
+  gh repo view "$repository_path" --json defaultBranchRef --jq '.defaultBranchRef.name'
+}
+
+latest_workflow_run_id() {
+  local repository_path="$1"
+  local branch_ref="$2"
+  local triggering_user="${3:-}"
+  local args
+
+  args=(run list --repo "$repository_path" --workflow "$WORKFLOW_FILE" --event workflow_dispatch --limit 1 --json databaseId)
+  if [[ -n "$branch_ref" ]]; then
+    args+=(--branch "$branch_ref")
+  fi
+  if [[ -n "$triggering_user" ]]; then
+    args+=(--user "$triggering_user")
+  fi
+
+  gh "${args[@]}" --jq '.[0].databaseId // ""' 2>/dev/null || true
+}
+
+wait_for_dispatched_run() {
+  local repository_path="$1"
+  local branch_ref="$2"
+  local previous_run_id="$3"
+  local triggering_user="$4"
+  local run_id=""
+  local attempt=0
+  local run_url=""
+
+  while (( attempt < 20 )); do
+    run_id="$(latest_workflow_run_id "$repository_path" "$branch_ref" "$triggering_user")"
+    if [[ -n "$run_id" && "$run_id" != "$previous_run_id" ]]; then
+      break
+    fi
+
+    attempt=$((attempt + 1))
+    sleep "$WATCH_INTERVAL"
+  done
+
+  if [[ -z "$run_id" || "$run_id" == "$previous_run_id" ]]; then
+    echo "Unable to resolve the newly triggered Terraform workflow run on ${repository_path}." >&2
+    exit 1
+  fi
+
+  run_url="$(gh run view "$run_id" --repo "$repository_path" --json url --jq '.url' 2>/dev/null || true)"
+  if [[ -n "$run_url" ]]; then
+    echo "Watching workflow run: ${run_url}"
+  else
+    echo "Watching workflow run id: ${run_id}"
+  fi
+
+  gh run watch "$run_id" --repo "$repository_path" --interval "$WATCH_INTERVAL" --exit-status
 }
 
 normalize_bool() {
@@ -154,6 +218,17 @@ while [[ $# -gt 0 ]]; do
     --dry-run)
       DRY_RUN=true
       ;;
+    --wait)
+      WAIT_FOR_COMPLETION=true
+      ;;
+    --watch-interval)
+      shift
+      WATCH_INTERVAL="${1:-}"
+      if [[ -z "$WATCH_INTERVAL" || ! "$WATCH_INTERVAL" =~ ^[0-9]+$ || "$WATCH_INTERVAL" -lt 1 ]]; then
+        echo "--watch-interval expects a positive integer number of seconds." >&2
+        exit 1
+      fi
+      ;;
     --help|-h)
       usage
       exit 0
@@ -217,6 +292,15 @@ if [[ "$COMMAND" == "cleanup" && "$CLEANUP_CLEAR_GITHUB_ACTIONS" != "true" && "$
   exit 1
 fi
 
+WATCH_REF=""
+PREVIOUS_RUN_ID=""
+TRIGGERING_USER=""
+if [[ "$WAIT_FOR_COMPLETION" == "true" ]]; then
+  WATCH_REF="$(resolve_watch_ref "$REPOSITORY_PATH")"
+  TRIGGERING_USER="$(gh api user --jq '.login' 2>/dev/null || true)"
+  PREVIOUS_RUN_ID="$(latest_workflow_run_id "$REPOSITORY_PATH" "$WATCH_REF" "$TRIGGERING_USER")"
+fi
+
 run_args=(gh workflow run "$WORKFLOW_FILE" --repo "$REPOSITORY_PATH")
 if [[ -n "$REF" ]]; then
   run_args+=(--ref "$REF")
@@ -244,9 +328,11 @@ if [[ "$COMMAND" == "cleanup" ]]; then
   run_args+=( -f "cleanup_delete_state_bucket=${CLEANUP_DELETE_STATE_BUCKET}" )
 fi
 
-for input in "${EXTRA_INPUTS[@]}"; do
-  run_args+=( -f "$input" )
-done
+if (( ${#EXTRA_INPUTS[@]} > 0 )); then
+  for input in "${EXTRA_INPUTS[@]}"; do
+    run_args+=( -f "$input" )
+  done
+fi
 
 echo "Triggering remote Terraform workflow on ${REPOSITORY_PATH}"
 echo "- command: ${COMMAND}"
@@ -261,6 +347,9 @@ fi
 if [[ -n "$REGION" ]]; then
   echo "- region: ${REGION}"
 fi
+if [[ "$WAIT_FOR_COMPLETION" == "true" ]]; then
+  echo "- wait: true"
+fi
 if [[ "$COMMAND" == "cleanup" ]]; then
   echo "- cleanup_clear_github_actions: ${CLEANUP_CLEAR_GITHUB_ACTIONS}"
   echo "- cleanup_delete_state_bucket: ${CLEANUP_DELETE_STATE_BUCKET}"
@@ -274,3 +363,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
 fi
 
 "${run_args[@]}"
+
+if [[ "$WAIT_FOR_COMPLETION" == "true" ]]; then
+  wait_for_dispatched_run "$REPOSITORY_PATH" "$WATCH_REF" "$PREVIOUS_RUN_ID" "$TRIGGERING_USER"
+fi
