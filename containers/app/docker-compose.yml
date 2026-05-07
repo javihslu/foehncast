@@ -19,6 +19,9 @@ services:
       GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: 8000
+    volumes:
+      - ../../data:/workspace/data
+      - ../../.state:/workspace/.state
     ports:
       - ${APP_BIND_HOST:-127.0.0.1}:8000:8000
     networks:

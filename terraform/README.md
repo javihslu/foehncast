@@ -1,21 +1,23 @@
 # Terraform Baseline
 
-This directory defines the shared GCP baseline plus the two hosted deployment paths already described in the public docs.
+This directory defines one shared GCP baseline and two hosted runtime targets.
+
+This is maintainer/operator reference material. Default contributor setup stays local with Docker and does not require Terraform, `gcloud`, or `gh`.
 
 ## Terraform In One View
 
-| Surface | Purpose | Current role |
-|---------|---------|--------------|
-| Shared GCP baseline | APIs, storage, identities, and registries | common foundation for both hosted paths |
-| Online compose host | full Airflow, MLflow, and API stack | simplest way to keep the whole project online |
-| Optional Cloud Run path | inference-only FastAPI service | separate hosted surface for the app |
-| GitHub OIDC delivery | remote Terraform and image-based deploys | repeatable automation path |
+| Surface | Purpose | Deploys |
+|---------|---------|---------|
+| Shared GCP baseline | APIs, storage, identities, and registries | no app containers |
+| Hosted full-stack target | keep Airflow, MLflow, and the API online together | runtime services only |
+| Hosted inference target | publish the inference API as a smaller hosted surface | FastAPI only |
+| GitHub OIDC delivery | remote Terraform and image-based deploys | no runtime services |
 
 ```mermaid
 flowchart LR
    TF[Terraform] --> BASE[Shared GCP baseline]
-   BASE --> HOST[Online compose host]
-   BASE --> RUN[Optional Cloud Run service]
+   BASE --> HOST[Hosted full-stack target]
+   BASE --> RUN[Hosted inference target]
    BASE --> GH[GitHub OIDC delivery]
 ```
 
@@ -23,8 +25,8 @@ flowchart LR
 
 This directory covers two cloud paths:
 
-- a shared GCP baseline for datasets, registries, identities, and optional Cloud Run inference
-- an optional single online Docker host that runs the full Airflow, MLflow, and API stack from the same repo
+- a shared GCP baseline for datasets, registries, identities, and the hosted runtime targets
+- a single online Docker host target that runs the full Airflow, MLflow, and API stack from the same repo
 
 ## Current Scope
 
@@ -35,18 +37,28 @@ Terraform can provision:
 - a GCS bucket for shared artifacts
 - a BigQuery dataset and feature table
 - GitHub OIDC trust and deploy identities
-- an optional Cloud Run inference service
+- an inference-only Cloud Run service
 - an optional Compute Engine host for the full online container stack
 
 The Cloud Run service remains inference-only. The full online stack is the compose-host path.
 
+## Deployment Scope Rule
+
+Deploy only runtime surfaces in cloud environments.
+
+- The hosted full-stack target deploys Airflow, MLflow, and the API.
+- The hosted inference target deploys the FastAPI service only.
+- `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
+
 ## Which Path To Use
 
-- Use the online compose host when you want Airflow, MLflow, and the API online together.
-- Use Cloud Run when you only need the inference API as a hosted service.
-- Use the shared GCP baseline when you are provisioning a hosted or BigQuery-backed path. Pure local validation does not need the shared GCP baseline.
+| Target | Use it when | What deploys |
+|--------|-------------|--------------|
+| Shared GCP baseline | you need the cloud data and identity foundation | no containers |
+| Hosted full-stack target | you want Airflow, MLflow, and the API online together | runtime services only |
+| Hosted inference target | you only need the inference API | FastAPI only |
 
-## Cloud Run Inputs
+## Hosted Inference Target Inputs
 
 When `provision_cloud_run_service = true`, provide:
 
@@ -55,8 +67,9 @@ When `provision_cloud_run_service = true`, provide:
 - any extra runtime configuration in `cloud_run_env_vars`
 
 Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
+Terraform also injects the Feast runtime env contract for the hosted app path: the service gets `FOEHNCAST_FEAST_SOURCE=bigquery`, the managed bucket-backed registry and staging paths, the fully-qualified curated BigQuery table reference used by the rendered Feast runtime config, and the named Datastore-mode database used for Feast online serving.
 
-## Online Compose Host Inputs
+## Hosted Full-Stack Target Inputs
 
 When `provision_online_compose_host = true`, provide:
 
@@ -64,8 +77,14 @@ When `provision_online_compose_host = true`, provide:
 - any extra stack environment in `online_compose_env_vars`
 
 Terraform provisions a dedicated network, static public IP, and Compute Engine instance. The instance clones the repo, writes a runtime `.env` file with the Terraform-managed GCP and BigQuery settings, tries to pull the GHCR images, and falls back to local Docker builds on the host if the packages are not available yet.
+That generated `.env` now includes the same Feast runtime env contract as the Cloud Run path, so the online host and the inference-only service render the same logical Feast config with different runtime surfaces.
+The same generated `.env` also points the hosted MLflow service at `gs://<artifact-bucket>/mlflow/artifacts`, so artifact storage uses the shared cloud object plane instead of a host-local volume.
 
-The host uses a dedicated runtime service account with BigQuery job and dataset edit access, so the Airflow, training, and app containers can rely on Application Default Credentials instead of mounted key files.
+The hosted baseline also provisions a Firestore Datastore-mode database dedicated to Feast online serving. Using a named database avoids coupling the repo to whatever default Firestore state a reused GCP project may already have.
+
+The host uses a dedicated runtime service account with BigQuery job access, BigQuery dataset edit access, and Datastore user access, so the Airflow, training, Feast, app, and MLflow containers can rely on Application Default Credentials instead of mounted key files.
+
+After curated BigQuery rows are available, run `./scripts/prepare-feast-cloud.sh` on the host or from another shell with ADC to apply the Feast repo and materialize the hosted online store.
 
 On first boot, the host generates an Airflow admin password locally and stores it at `/opt/foehncast/airflow/.admin-password`. Retrieve it over SSH when you need to sign in instead of passing it through Terraform input variables.
 
@@ -83,7 +102,7 @@ The compose-host path is the simplest way to keep the whole course stack online 
 
 | Path | Public surface by default | Notes |
 |------|---------------------------|-------|
-| Online compose host | app on port `8000` | Airflow and MLflow stay private unless explicitly exposed |
+| Hosted full-stack target | app on port `8000` | Airflow and MLflow stay private unless explicitly exposed |
 | Cloud Run | inference API URL | app-only deployment |
 
 ## Teardown
@@ -109,58 +128,48 @@ Remote destroy intentionally stops at Terraform-managed resources tracked in the
 The repository uses two delivery workflows:
 
 - `.github/workflows/publish-runtime-images.yml` publishes the runtime images to GHCR
-- `.github/workflows/publish-app-image.yml` keeps the optional Artifact Registry plus Cloud Run path for the inference service
+- `.github/workflows/publish-app-image.yml` supports the Artifact Registry plus Cloud Run path for the inference service
 
 Set these GitHub repository variables:
 
 - `GCP_PROJECT_ID`
 - `GCP_LOCATION`
 - `GCP_ARTIFACT_REPOSITORY`
+- `GCP_ARTIFACT_BUCKET_NAME`
+- `GCP_BIGQUERY_DATASET`
+- `GCP_BIGQUERY_LOCATION`
+- `GCP_BIGQUERY_TABLE`
+- `GCP_PROVISION_CLOUD_RUN_SERVICE`
+- `GCP_CLOUD_RUN_SERVICE_NAME`
+- `GCP_MLFLOW_TRACKING_URI` when Cloud Run is enabled
+- `GCP_PROVISION_ONLINE_COMPOSE_HOST`
+- `GCP_ONLINE_COMPOSE_HOST_NAME`
+- `GCP_ONLINE_COMPOSE_HOST_ZONE`
+- `GCP_ONLINE_COMPOSE_MACHINE_TYPE`
+- `GCP_ONLINE_COMPOSE_DISK_SIZE_GB`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `GCP_TERRAFORM_STATE_BUCKET`
 - `GCP_TERRAFORM_STATE_PREFIX`
 - `GCP_CLOUD_RUN_SERVICE` to enable automatic deploys after publish
 
-The easiest way to set them is:
+The normal shared-environment path is:
 
-1. authenticate `gh` with `gh auth login`
-2. apply Terraform
-3. run `./scripts/configure-github-actions.sh`
+1. one-time maintainer bootstrap from Google Cloud Shell
+2. GitHub Actions remote apply
+3. automatic repository-variable resync after each successful apply
 
-After that first sync, use `./scripts/terraform-remote.sh` for common remote Terraform plan, apply, destroy, and cleanup commands.
+In normal operation you should not edit these variables by hand. The bootstrap path and each successful remote apply keep the shared contract synchronized automatically.
 
-If you want the smallest local-first setup, run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`. That path creates only the GitHub OIDC bootstrap resources locally, stores that state in the same remote backend used by the GitHub Actions Terraform workflow, and leaves the broader platform apply for the remote workflow.
-
-The helper script reads the Terraform outputs, sets the required GitHub Actions variables on the repository remote, and leaves `GCP_CLOUD_RUN_SERVICE` unset until the Cloud Run service has actually been provisioned. It also writes the Terraform state bucket defaults used by the GitHub Actions Terraform workflow.
-
-Recommended mappings from Terraform-managed values:
-
-- `GCP_WORKLOAD_IDENTITY_PROVIDER` = `terraform output -raw github_workload_identity_provider`
-- `GCP_SERVICE_ACCOUNT_EMAIL` = `terraform output -raw github_deployer_service_account`
-- `GCP_ARTIFACT_REPOSITORY` = your `artifact_registry_repository_id` input, for example `foehncast-docker`
-- `GCP_TERRAFORM_STATE_BUCKET` = `${project_id}-foehncast-tfstate`
-- `GCP_TERRAFORM_STATE_PREFIX` = `terraform/state`
-- `GCP_CLOUD_RUN_SERVICE` = `terraform output -raw cloud_run_service_name`
+`GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
 When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag and then updates the existing Cloud Run service to that image. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
 
 ## GitHub Actions Terraform Path
 
-Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. The manual workflow bootstraps the GCS backend bucket if needed for remote plan or apply, runs Terraform against that backend, and can sync the GitHub repository variables after a successful apply.
+Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies resync the repository variables automatically.
 
-For the common operator path, trigger that workflow with `./scripts/terraform-remote.sh` instead of opening the Actions UI manually.
-
-Add `--wait` when you want the helper to watch the dispatched workflow run until it completes.
-
-Examples:
-
-- `./scripts/terraform-remote.sh plan`
-- `./scripts/terraform-remote.sh apply --wait`
-- `./scripts/terraform-remote.sh destroy`
-- `./scripts/terraform-remote.sh cleanup --cleanup-delete-state-bucket --cleanup-clear-github-actions`
-
-For a disposable manual validation of the bootstrap-only path in a fork or other disposable repository, use `./scripts/smoke-bootstrap-only.sh --repo <your-github-user>/foehncast`. The smoke driver prepares temporary local inputs, runs `bootstrap-gcp.sh --bootstrap-only`, waits on the remote apply, then destroys the remote resources, clears the target repository variables, and queues the disposable GCP project for deletion.
+Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
 
 For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 
@@ -175,18 +184,11 @@ The recommended remote retirement sequence is:
 2. verify the destroy result
 3. run `command=cleanup` with the specific cleanup flags you want
 
-Authentication options:
-
-- remote workflow path: GitHub OIDC variables already exist from a previous apply
-- initial bootstrap path: run `./scripts/bootstrap-gcp.sh` in Google Cloud Shell or another admin shell, then `./scripts/configure-github-actions.sh` before using the remote workflow
-
 Remote Terraform is OIDC-only. Missing repository variables should fail fast instead of falling back to a separate secret-based auth path.
 
-After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, prefer the remote workflow for day-2 plan, apply, destroy, and cleanup work through `./scripts/terraform-remote.sh` or the manual GitHub Actions UI.
+After the first bootstrap has created the workload identity provider, deployer service account, and repository variables, the shared environment should normally be advanced by GitHub Actions automatically on `main`. Use manual workflow dispatch only for plan, destroy, cleanup, or deliberate overrides.
 
-The `--bootstrap-only` variant of `./scripts/bootstrap-gcp.sh` is the narrowest first-time setup path: it prepares the remote-control-plane resources and remote backend state, then hands the broader platform provisioning to `./scripts/terraform-remote.sh apply`.
-
-## Shared Repo vs Personal Deployments
+## Shared Repo Environment
 
 The upstream repository workflows are intended for the shared project environment. They use repository-scoped variables, package publishing, and cloud identities that belong to that shared environment.
 
@@ -194,17 +196,14 @@ The upstream repository may also publish public GHCR images as convenience artif
 
 The upstream workflows are guarded so jobs run only when both the original actor and the triggering actor are the repository owner.
 
-State-changing upstream jobs should also use protected GitHub environments:
+State-changing upstream jobs should use safeguards that match their risk:
 
-- `terraform-admin` for the remote Terraform workflow
-- `cloud-run-production` for Cloud Run updates after image publish
+- the remote Terraform workflow uses owner-only execution plus exact project-id confirmations for destroy and cleanup
+- `cloud-run-production` remains the protected environment for Cloud Run updates after image publish
 
-For a personal deployment:
+Personal cloud deployments are out of scope for the default repo documentation. The documented path here is the shared project environment plus the local Docker setup for contributors.
 
-- run `./scripts/bootstrap-gcp.sh` in Google Cloud Shell or another admin shell, or
-- fork the repository and configure the same GitHub Actions variables and secrets in that fork
-
-That keeps billing, package ownership, and cloud credentials aligned with the person or team operating the environment. Compute, storage, and network costs stay with that operator.
+Automatic Terraform apply on `main` is no longer paused behind a GitHub environment approval. The workflow now relies on owner-only execution plus explicit destroy and cleanup confirmations instead of a per-run reviewer gate.
 
 ## Recommended Reading Order
 
@@ -218,43 +217,26 @@ Use this only for the initial hosted-environment bootstrap, or when you intentio
 
 Preferred environment: Google Cloud Shell. That keeps the admin toolchain off the default evaluator machine and matches the intended operator path.
 
-Run this in Cloud Shell or another admin shell:
+If you run from another admin shell, keep `gcloud`, `gh`, and `terraform` available there. The supported no-local-install path remains Google Cloud Shell for bootstrap, followed by GitHub Actions for day-2 work.
 
-`./scripts/bootstrap-gcp.sh`
+Supported first-time maintainer path:
 
-Optional narrower first-time setup:
+`./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions`
 
-`./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions --repo <owner/repo>`
-
-Then do the following in order:
+The bootstrap script will:
 
 1. Sign in in the browser when `gcloud` opens the login flow.
 2. Pick an existing GCP project or type `n` to create a new one.
 3. Pick a billing account from the list shown by the script.
 4. Confirm or edit the values for region, bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
-5. Decide whether to provision Cloud Run during setup. If yes, enter the MLflow tracking URI.
-6. Decide whether to configure GitHub Actions for your fork. If yes, enter the fork as `owner/repo`.
-7. Let Terraform apply complete.
+5. Decide which hosted targets should exist after GitHub Actions takes over.
+6. Sync the repository variables that GitHub Actions needs for the shared cloud path.
 
-Examples:
+After bootstrap, run the Terraform workflow with `apply` once if you want the shared environment provisioned immediately. After that, pushes to `main` keep the shared environment aligned automatically.
 
-- `Project number, project id, or n: n`
-- `New GCP project id: foehncast-jane-dev`
-- `Billing account number or id [1]: 1`
-- `GCP region [europe-west6]:`
-- `Cloud Run service name [foehncast-serve]:`
+The script writes `.env` and `terraform/terraform.tfvars` during setup and asks explicitly whether the next apply should enable the inference-only Cloud Run target and/or the full online compose host target.
 
-The script writes `.env` and `terraform/terraform.tfvars` during setup.
-
-After Terraform apply, the script refreshes `.env` with the managed project ID, bucket, BigQuery dataset and table, and Cloud Run service name. Authentication itself stays in the active `gcloud` application default credentials for the admin shell you used, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
-
-To restart from scratch:
-
-`rm -f .env terraform/terraform.tfvars && ./scripts/bootstrap-gcp.sh`
-
-If you already know all values and want a rerun without prompts:
-
-`./scripts/bootstrap-gcp.sh --non-interactive`
+Authentication stays in the active `gcloud` application default credentials for the admin shell you used, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
 
 ## Local BigQuery Use
 
@@ -267,9 +249,9 @@ This section is separate from the default local evaluator path and from the Clou
 3. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`.
 4. Fill in the project-specific values.
 5. Run:
-   `cd terraform && terraform init && terraform fmt -check && terraform validate`
+   `./scripts/bootstrap-gcp.sh --plan-only`
 
-This Terraform path is aimed at maintainers who are setting up or changing the cloud platform and at collaborators provisioning their own project with the interactive script.
+This Terraform path is aimed at maintainers who are setting up or changing the shared cloud platform.
 
 If the script does not show a billing account, stop and sign in with a Google account that can see one.
 

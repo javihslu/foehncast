@@ -5,42 +5,66 @@ locals {
   online_compose_app_image     = var.online_compose_app_image != "" ? var.online_compose_app_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-app:main"
   online_compose_airflow_image = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-airflow:main"
   online_compose_mlflow_image  = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-mlflow:main"
+  feast_registry_uri           = "gs://${var.artifact_bucket_name}/feast/registry.db"
+  feast_staging_uri            = "gs://${var.artifact_bucket_name}/feast/staging"
+  feast_bigquery_table         = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
   cloud_run_env_vars = merge(
     {
-      GCP_PROJECT_ID              = var.project_id
-      GCP_LOCATION                = var.region
-      GOOGLE_CLOUD_PROJECT        = var.project_id
-      MLFLOW_TRACKING_URI         = var.mlflow_tracking_uri
-      STORAGE_BACKEND             = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID = var.project_id
-      STORAGE_BIGQUERY_DATASET    = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE      = var.bigquery_feature_table_id
+      GCP_PROJECT_ID                       = var.project_id
+      GCP_LOCATION                         = var.region
+      GOOGLE_CLOUD_PROJECT                 = var.project_id
+      MLFLOW_TRACKING_URI                  = var.mlflow_tracking_uri
+      STORAGE_BACKEND                      = "bigquery"
+      STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
+      STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
+      STORAGE_BIGQUERY_TABLE               = var.bigquery_feature_table_id
+      FOEHNCAST_FEAST_SOURCE               = "bigquery"
+      FOEHNCAST_FEAST_PROJECT              = "foehncast"
+      FOEHNCAST_FEAST_PROJECT_ID           = var.project_id
+      FOEHNCAST_FEAST_REGISTRY             = local.feast_registry_uri
+      FOEHNCAST_FEAST_GCS_BUCKET           = var.artifact_bucket_name
+      FOEHNCAST_FEAST_GCS_STAGING_LOCATION = local.feast_staging_uri
+      FOEHNCAST_FEAST_BIGQUERY_DATASET     = var.bigquery_dataset_id
+      FOEHNCAST_FEAST_BIGQUERY_LOCATION    = var.bigquery_location
+      FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
+      FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
     },
     var.cloud_run_env_vars,
   )
   online_compose_env_vars = merge(
     {
-      APP_BIND_HOST                   = contains(var.online_compose_public_ports, 8000) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_BIND_HOST               = contains(var.online_compose_public_ports, 8080) ? "0.0.0.0" : "127.0.0.1"
-      MLFLOW_BIND_HOST                = contains(var.online_compose_public_ports, 5001) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_CREATE_ADMIN_USER       = "true"
-      AIRFLOW_ADMIN_USERNAME          = var.online_compose_airflow_admin_username
-      AIRFLOW_ADMIN_FIRSTNAME         = "FoehnCast"
-      AIRFLOW_ADMIN_LASTNAME          = "Admin"
-      AIRFLOW_ADMIN_ROLE              = "Admin"
-      AIRFLOW_ADMIN_EMAIL             = "admin@example.com"
-      AIRFLOW_ADMIN_PASSWORD_FILE     = "/workspace/airflow/.admin-password"
-      AIRFLOW__WEBSERVER__CONFIG_FILE = "/opt/airflow/webserver_config_cloud.py"
-      GCP_PROJECT_ID                  = var.project_id
-      GCP_LOCATION                    = var.region
-      GCP_BUCKET_NAME                 = var.artifact_bucket_name
-      STORAGE_BACKEND                 = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID     = var.project_id
-      STORAGE_BIGQUERY_DATASET        = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE          = var.bigquery_feature_table_id
-      FOEHNCAST_APP_IMAGE             = local.online_compose_app_image
-      FOEHNCAST_AIRFLOW_IMAGE         = local.online_compose_airflow_image
-      FOEHNCAST_MLFLOW_IMAGE          = local.online_compose_mlflow_image
+      APP_BIND_HOST                        = contains(var.online_compose_public_ports, 8000) ? "0.0.0.0" : "127.0.0.1"
+      AIRFLOW_BIND_HOST                    = contains(var.online_compose_public_ports, 8080) ? "0.0.0.0" : "127.0.0.1"
+      MLFLOW_BIND_HOST                     = contains(var.online_compose_public_ports, 5001) ? "0.0.0.0" : "127.0.0.1"
+      AIRFLOW_CREATE_ADMIN_USER            = "true"
+      AIRFLOW_ADMIN_USERNAME               = var.online_compose_airflow_admin_username
+      AIRFLOW_ADMIN_FIRSTNAME              = "FoehnCast"
+      AIRFLOW_ADMIN_LASTNAME               = "Admin"
+      AIRFLOW_ADMIN_ROLE                   = "Admin"
+      AIRFLOW_ADMIN_EMAIL                  = "admin@example.com"
+      AIRFLOW_ADMIN_PASSWORD_FILE          = "/workspace/airflow/.admin-password"
+      AIRFLOW__WEBSERVER__CONFIG_FILE      = "/opt/airflow/webserver_config_cloud.py"
+      GCP_PROJECT_ID                       = var.project_id
+      GCP_LOCATION                         = var.region
+      GCP_BUCKET_NAME                      = var.artifact_bucket_name
+      MLFLOW_ARTIFACT_DESTINATION          = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
+      STORAGE_BACKEND                      = "bigquery"
+      STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
+      STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
+      STORAGE_BIGQUERY_TABLE               = var.bigquery_feature_table_id
+      FOEHNCAST_FEAST_SOURCE               = "bigquery"
+      FOEHNCAST_FEAST_PROJECT              = "foehncast"
+      FOEHNCAST_FEAST_PROJECT_ID           = var.project_id
+      FOEHNCAST_FEAST_REGISTRY             = local.feast_registry_uri
+      FOEHNCAST_FEAST_GCS_BUCKET           = var.artifact_bucket_name
+      FOEHNCAST_FEAST_GCS_STAGING_LOCATION = local.feast_staging_uri
+      FOEHNCAST_FEAST_BIGQUERY_DATASET     = var.bigquery_dataset_id
+      FOEHNCAST_FEAST_BIGQUERY_LOCATION    = var.bigquery_location
+      FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
+      FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
+      FOEHNCAST_APP_IMAGE                  = local.online_compose_app_image
+      FOEHNCAST_AIRFLOW_IMAGE              = local.online_compose_airflow_image
+      FOEHNCAST_MLFLOW_IMAGE               = local.online_compose_mlflow_image
     },
     var.online_compose_env_vars,
   )
@@ -196,6 +220,7 @@ locals {
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
     "compute.googleapis.com",
+    "firestore.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
@@ -265,6 +290,17 @@ resource "google_bigquery_table" "forecast_features" {
     type  = "DAY"
     field = "forecast_time"
   }
+}
+
+resource "google_firestore_database" "feast_online_store" {
+  project                     = var.project_id
+  name                        = var.feast_online_store_database_name
+  location_id                 = var.feast_online_store_location
+  type                        = "DATASTORE_MODE"
+  app_engine_integration_mode = "DISABLED"
+  deletion_policy             = "DELETE"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_service_account" "github_deployer" {
@@ -344,6 +380,12 @@ resource "google_project_iam_member" "cloud_run_bigquery_job_user" {
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_project_iam_member" "cloud_run_datastore_user" {
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
   dataset_id = google_bigquery_dataset.feature_store.dataset_id
   role       = "roles/bigquery.dataViewer"
@@ -355,6 +397,14 @@ resource "google_project_iam_member" "online_compose_bigquery_job_user" {
 
   project = var.project_id
   role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_project_iam_member" "online_compose_datastore_user" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
@@ -413,9 +463,11 @@ resource "google_cloud_run_v2_service" "app" {
 
   depends_on = [
     google_project_service.required,
+    google_firestore_database.feast_online_store,
     google_artifact_registry_repository_iam_member.cloud_run_reader,
     google_storage_bucket_iam_member.cloud_run_bucket_reader,
     google_project_iam_member.cloud_run_bigquery_job_user,
+    google_project_iam_member.cloud_run_datastore_user,
     google_bigquery_dataset_iam_member.cloud_run_bigquery_reader,
   ]
 }
@@ -501,8 +553,10 @@ resource "google_compute_instance" "online_compose" {
 
   depends_on = [
     google_project_service.required,
+    google_firestore_database.feast_online_store,
     google_compute_firewall.online_compose_public,
     google_project_iam_member.online_compose_bigquery_job_user,
+    google_project_iam_member.online_compose_datastore_user,
     google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
   ]
 }

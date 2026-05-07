@@ -20,6 +20,8 @@ CREATED_TFVARS_FILE=false
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 # shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/terraform-platform-state.sh"
+# shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/github-common.sh"
 
 usage() {
@@ -29,70 +31,6 @@ usage() {
 
 default_project_id() {
   printf 'fcast-smoke-%s-%04x\n' "$(date +%m%d%H%M)" "$((RANDOM % 65536))"
-}
-
-replace_or_append_line() {
-  local file_path="$1"
-  local regex="$2"
-  local replacement="$3"
-  local temp_file line matched=false
-
-  temp_file="$(mktemp)"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ $regex ]]; then
-      printf '%s\n' "$replacement" >> "$temp_file"
-      matched=true
-    else
-      printf '%s\n' "$line" >> "$temp_file"
-    fi
-  done < "$file_path"
-
-  if [[ "$matched" != "true" ]]; then
-    printf '%s\n' "$replacement" >> "$temp_file"
-  fi
-
-  mv "$temp_file" "$file_path"
-}
-
-escape_tfvars_string() {
-  local value="$1"
-
-  value="${value//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  printf '%s' "$value"
-}
-
-set_env_value() {
-  local key="$1"
-  local value="$2"
-
-  replace_or_append_line "$ENV_FILE" "^${key}=" "${key}=${value}"
-}
-
-set_tfvars_string() {
-  local key="$1"
-  local value="$2"
-
-  value="$(escape_tfvars_string "$value")"
-  replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = \"${value}\""
-}
-
-set_tfvars_bool() {
-  local key="$1"
-  local value="$2"
-
-  replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
-}
-
-prepare_file_from_template() {
-  local template_path="$1"
-  local destination_path="$2"
-
-  mkdir -p "$(dirname "$destination_path")"
-  if [[ ! -f "$destination_path" ]]; then
-    cp "$template_path" "$destination_path"
-  fi
 }
 
 ensure_temp_workspace() {
@@ -152,25 +90,30 @@ prepare_local_inputs() {
   prepare_file_from_template "${ROOT_DIR}/.env.example" "$ENV_FILE"
   prepare_file_from_template "${ROOT_DIR}/terraform/terraform.tfvars.example" "$TFVARS_FILE"
 
-  set_env_value GCP_PROJECT_ID "$PROJECT_ID"
-  set_env_value GCP_LOCATION "$REGION"
-  set_env_value GCP_BUCKET_NAME "$artifact_bucket"
-  set_env_value STORAGE_BIGQUERY_PROJECT_ID "$PROJECT_ID"
-  set_env_value STORAGE_BIGQUERY_DATASET "foehncast"
-  set_env_value STORAGE_BIGQUERY_TABLE "forecast_features"
-  set_env_value CLOUD_RUN_SERVICE_NAME "$cloud_run_service"
+  apply_foehncast_cloud_env_values \
+    "$PROJECT_ID" \
+    "$REGION" \
+    "$artifact_bucket" \
+    "foehncast" \
+    "$REGION" \
+    "forecast_features" \
+    "feast-online" \
+    "$cloud_run_service"
 
-  set_tfvars_string project_id "$PROJECT_ID"
-  set_tfvars_string region "$REGION"
-  set_tfvars_string artifact_registry_repository_id "$artifact_repo"
-  set_tfvars_string artifact_bucket_name "$artifact_bucket"
-  set_tfvars_string bigquery_dataset_id "foehncast"
-  set_tfvars_string bigquery_location "$REGION"
-  set_tfvars_string bigquery_feature_table_id "forecast_features"
-  set_tfvars_bool provision_cloud_run_service false
-  set_tfvars_string cloud_run_service_name "$cloud_run_service"
-  set_tfvars_string cloud_run_image "${REGION}-docker.pkg.dev/${PROJECT_ID}/${artifact_repo}/foehncast-app:latest"
-  set_tfvars_bool provision_online_compose_host false
+  apply_foehncast_cloud_tfvars_values \
+    "$PROJECT_ID" \
+    "$REGION" \
+    "$artifact_repo" \
+    "$artifact_bucket" \
+    "foehncast" \
+    "$REGION" \
+    "forecast_features" \
+    "$REGION" \
+    "feast-online" \
+    false \
+    "$cloud_run_service" \
+    "" \
+    false
   set_tfvars_string github_owner "$repo_owner"
   set_tfvars_string github_repository "$repo_name"
 }

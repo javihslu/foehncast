@@ -3,6 +3,8 @@
 !config.yaml
 !pyproject.toml
 !uv.lock
+!feature_repo/
+!feature_repo/**
 !src/
 !src/**
 !containers/

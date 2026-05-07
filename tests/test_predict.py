@@ -331,13 +331,13 @@ def test_online_features_endpoint_returns_400_for_invalid_features(
     }
 
 
-def test_online_features_endpoint_returns_503_when_feast_is_unavailable(
+def test_online_features_endpoint_returns_503_when_feast_runtime_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raise_unavailable(
         spot_ids: list[str] | None, feature_names: list[str] | None
     ) -> dict[str, object]:
-        raise RuntimeError("Feast is not installed in this environment")
+        raise RuntimeError("Feast runtime is unavailable")
 
     monkeypatch.setattr(serve, "get_online_spot_features", raise_unavailable)
     client = TestClient(serve.app)
@@ -348,7 +348,7 @@ def test_online_features_endpoint_returns_503_when_feast_is_unavailable(
     )
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Feast is not installed in this environment"}
+    assert response.json() == {"detail": "Feast runtime is unavailable"}
 
 
 def test_online_features_demo_endpoint_returns_html(

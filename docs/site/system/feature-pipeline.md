@@ -1,6 +1,6 @@
 # Feature Pipeline
 
-FoehnCast keeps the feature pipeline as a clear set of boundaries. Forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for optional Feast use without changing the meaning of the feature set.
+FoehnCast keeps the feature pipeline as a clear set of boundaries. Forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for Feast serving use without changing the meaning of the feature set.
 
 This page records the current design that has been validated in the local stack and in the review notebook. It focuses on what each stage owns today and what stays outside its scope.
 
@@ -115,12 +115,12 @@ This is why raw landing, curated storage, and Feast should remain separate respo
 | Data role | Local baseline | Cloud direction |
 |----------|----------------|-----------------|
 | Raw landing | files if retained at all | GCS |
-| Curated features | parquet | native BigQuery tables |
+| Curated features | MinIO-backed parquet objects | native BigQuery tables |
 | Feast offline source | exported parquet | BigQuery table or view over curated rows |
 | Feast registry and staging | local files | GCS |
-| Feast online store | SQLite | Datastore |
+| Feast online store | Datastore-mode emulator | Datastore |
 
-The local default stays intentionally simple. S3-compatible object storage remains optional for explicit compatibility testing, not the primary developer path.
+The local operator path mirrors the cloud storage roles more closely: MinIO-backed object storage for curated objects and MLflow artifacts, exported parquet for the local Feast offline source, and a Datastore-mode emulator for the local Feast online store.
 
 ## Storage Control Surface
 
@@ -128,16 +128,18 @@ The storage split is not only conceptual. The repository exposes it through expl
 
 | Surface | Current implementation | Why it matters |
 |------|------------------------|----------------|
-| Backend selection | `storage.backend` in `config.yaml` | keeps the active persistence mode explicit instead of hard-coding one storage path |
-| Curated local store | `LocalFeatureStoreBackend` writing `data/<dataset>/<spot>.parquet` | keeps the local baseline inspectable and low-friction |
-| Optional object-store path | `S3FeatureStoreBackend` | supports compatibility testing without becoming the default architecture |
+| Backend selection | `storage.backend` in `config.yaml` with supported values `s3` or `bigquery` | keeps the curated persistence mode explicit without carrying a legacy file-backed path |
+| Curated local store | `S3FeatureStoreBackend` against the bundled MinIO service | keeps the local object-access layer aligned with the hosted architecture and MLflow artifact flow |
 | Curated cloud store | `BigQueryFeatureStoreBackend` writing the configured project, dataset, and table | matches the cloud analytical target and preserves rerun-safe slice replacement |
 | Feast offline local source | `export_offline_store(...)` writing `data/feast/<dataset>.parquet` | keeps Feast downstream from curated persistence |
 | Feast cloud source | BigQuery table or view referenced by the cloud Feast config | avoids duplicating feature logic in a separate serving path |
-| Feast registry and staging | local `registry.db` in development, GCS in the cloud path | keeps registry metadata separate from the curated dataset |
-| Terraform baseline | Terraform-managed GCS plus BigQuery baseline | wires the cloud storage surfaces without changing the feature contract itself |
+| Feast local runtime state | `.state/feast/registry.db` and `.state/feast/feature_store.runtime.yaml` | keeps local integration state separate from the curated dataset while the emulator remains disposable |
+| Feast registry and staging | local state files in development, GCS in the cloud path | keeps registry metadata separate from the curated dataset |
+| Terraform baseline | Terraform-managed GCS, BigQuery, and Datastore-mode Firestore baseline | wires the cloud storage surfaces without changing the feature contract itself |
 
 Terraform is part of the storage boundary because it provisions the cloud-side GCS and BigQuery surfaces that the feature pipeline expects. It should supply the bucket, dataset, and table baseline while leaving ingest, engineering, validation, storage, and Feast preparation responsible for their own stage contracts.
+
+That means storage normalization is role-specific. The local baseline now normalizes the blob-style surfaces onto MinIO, but the cloud target still keeps curated features in BigQuery and the Feast online store in Datastore rather than flattening everything behind one object API.
 
 ## Feast Boundary
 
@@ -157,7 +159,8 @@ That means:
 - `build_offline_store_frame(...)` and `build_entity_rows(...)` stay thin projections over stored curated data
 - `export_offline_store(...)` is a deterministic materialization step, not a second feature-engineering stage
 - the local preparation script is an operator wrapper around those helpers, not the real source of truth for the feature contract
-- local Feast stays lightweight with exported parquet plus SQLite, while the cloud direction stays aligned with curated BigQuery plus Datastore and GCS support
+- local Feast stays lightweight with exported parquet plus the Datastore-mode emulator, while keeping registry and runtime config state outside the workload data root and the curated rows in the local objectstore baseline
+- the cloud direction stays aligned with curated BigQuery plus Datastore and GCS support
 
 This keeps the same conceptual split available in both local and cloud directions: curated features first, Feast second.
 

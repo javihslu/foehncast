@@ -73,3 +73,25 @@ def test_export_offline_store_writes_parquet(
 
     result = pd.read_parquet(destination)
     pd.testing.assert_frame_equal(result, frame)
+
+
+def test_export_offline_store_uses_canonical_default_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"],
+            "event_timestamp": pd.to_datetime(["2025-01-01T00:00:00Z"]),
+            "wind_speed_10m": [12.0],
+        }
+    )
+    expected = tmp_path / "data" / "feast" / "train.parquet"
+
+    monkeypatch.setattr(feast, "build_offline_store_frame", lambda dataset: frame)
+    monkeypatch.setattr(feast, "feast_offline_path", lambda dataset: expected)
+
+    destination = feast.export_offline_store(dataset="train")
+
+    assert destination == expected
+    result = pd.read_parquet(destination)
+    pd.testing.assert_frame_equal(result, frame)

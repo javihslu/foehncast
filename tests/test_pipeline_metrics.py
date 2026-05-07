@@ -52,7 +52,7 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
         def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
             logged["artifact"] = (path, artifact_path)
 
-    monkeypatch.setattr(pipeline_metrics, "_DEFAULT_REPORT_DIR", tmp_path)
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
     monkeypatch.setattr(pipeline_metrics, "mlflow", FakeMlflow())
 
     summary = {

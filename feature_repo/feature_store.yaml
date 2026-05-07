@@ -1,9 +1,9 @@
 project: foehncast
-registry: ../data/feast/registry.db
-provider: local
+registry: ../.state/feast/registry.db
+provider: gcp
 offline_store:
   type: file
 online_store:
-  type: sqlite
-  path: ../data/feast/online_store.db
+  type: datastore
+  project_id: foehncast-local
 entity_key_serialization_version: 3

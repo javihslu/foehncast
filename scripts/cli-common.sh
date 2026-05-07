@@ -18,8 +18,8 @@ install_hint() {
       echo "Install GitHub CLI first. On macOS with Homebrew: brew install gh" >&2
       ;;
     terraform)
-      echo "Install Terraform first. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
-      echo "Alternative: run the cloud bootstrap from Google Cloud Shell instead of installing it locally." >&2
+      echo "Install Terraform first if you want a local admin shell. On macOS with Homebrew: brew tap hashicorp/tap && brew install hashicorp/tap/terraform" >&2
+      echo "Supported no-local-install path: run the cloud bootstrap from Google Cloud Shell, then use the remote GitHub Actions Terraform workflow for day-2 operations." >&2
       ;;
     uv)
       echo "Install uv first. On macOS with Homebrew: brew install uv" >&2
@@ -44,4 +44,98 @@ require_docker_compose() {
     echo "docker compose is required but not available." >&2
     exit 1
   fi
+}
+
+require_file_variable() {
+  local variable_name="$1"
+  local file_path="${!variable_name:-}"
+
+  if [[ -z "$file_path" ]]; then
+    echo "${variable_name} must be set before calling this helper." >&2
+    exit 1
+  fi
+}
+
+ensure_terraform_command() {
+  require_command terraform
+}
+
+run_terraform() {
+  ensure_terraform_command
+  terraform "$@"
+}
+
+replace_or_append_line() {
+  local file_path="$1"
+  local regex="$2"
+  local replacement="$3"
+  local temp_file line matched=false
+
+  temp_file="$(mktemp)"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ $regex ]]; then
+      printf '%s\n' "$replacement" >> "$temp_file"
+      matched=true
+    else
+      printf '%s\n' "$line" >> "$temp_file"
+    fi
+  done < "$file_path"
+
+  if [[ "$matched" != "true" ]]; then
+    printf '%s\n' "$replacement" >> "$temp_file"
+  fi
+
+  mv "$temp_file" "$file_path"
+}
+
+prepare_file_from_template() {
+  local template_path="$1"
+  local destination_path="$2"
+
+  mkdir -p "$(dirname "$destination_path")"
+  if [[ ! -f "$destination_path" ]]; then
+    cp "$template_path" "$destination_path"
+  fi
+}
+
+escape_tfvars_string() {
+  local value="$1"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+
+  require_file_variable ENV_FILE
+  replace_or_append_line "$ENV_FILE" "^${key}=" "${key}=${value}"
+}
+
+set_tfvars_string() {
+  local key="$1"
+  local value="$2"
+
+  require_file_variable TFVARS_FILE
+  value="$(escape_tfvars_string "$value")"
+  replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = \"${value}\""
+}
+
+set_tfvars_bool() {
+  local key="$1"
+  local value="$2"
+
+  require_file_variable TFVARS_FILE
+  replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
+}
+
+set_tfvars_number() {
+  local key="$1"
+  local value="$2"
+
+  require_file_variable TFVARS_FILE
+  replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
 }

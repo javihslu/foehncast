@@ -1,0 +1,51 @@
+include:
+  - containers/objectstore/docker-compose.yml
+  - containers/feast_online_store/docker-compose.yml
+
+x-objectstore-runtime-env: &objectstore-runtime-env
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+  STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-${OBJECTSTORE_BUCKET:-foehncast-data}}
+  STORAGE_S3_ENDPOINT: http://objectstore:9000
+  OBJECTSTORE_ACCESS_KEY: ${OBJECTSTORE_ACCESS_KEY:-minioadmin}
+  OBJECTSTORE_SECRET_KEY: ${OBJECTSTORE_SECRET_KEY:-minioadmin123}
+  OBJECTSTORE_BUCKET: ${OBJECTSTORE_BUCKET:-foehncast-data}
+  OBJECTSTORE_ENDPOINT: http://objectstore:9000
+
+x-feast-runtime-env: &feast-runtime-env
+  FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID:-foehncast-local}
+  FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE:-}
+  FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE:-}
+  DATASTORE_EMULATOR_HOST: feast-online-store:8080
+
+services:
+  app:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  development_env:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  airflow-init:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  airflow-webserver:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  airflow-scheduler:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  airflow-triggerer:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  model-registry:
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-${OBJECTSTORE_ACCESS_KEY:-minioadmin}}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-${OBJECTSTORE_SECRET_KEY:-minioadmin123}}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      MLFLOW_S3_ENDPOINT_URL: http://objectstore:9000
+      MLFLOW_ARTIFACT_DESTINATION: ${MLFLOW_ARTIFACT_DESTINATION:-s3://${OBJECTSTORE_BUCKET:-foehncast-data}/mlflow/artifacts}

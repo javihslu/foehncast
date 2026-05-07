@@ -38,6 +38,18 @@ variable "bigquery_feature_table_id" {
   default     = "forecast_features"
 }
 
+variable "feast_online_store_location" {
+  description = "Location for the Firestore Datastore-mode database backing Feast online serving."
+  type        = string
+  default     = "europe-west6"
+}
+
+variable "feast_online_store_database_name" {
+  description = "Database name for the Firestore Datastore-mode database backing Feast online serving."
+  type        = string
+  default     = "feast-online"
+}
+
 variable "provision_cloud_run_service" {
   description = "Whether Terraform should create the Cloud Run inference service."
   type        = bool

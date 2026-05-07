@@ -118,7 +118,7 @@ flowchart TD
 | MLflow baseline | gave the project an experiment and registry backbone early | stayed stable |
 | Local-first start | reduced early infrastructure risk | still the default execution path |
 | Forecast horizon | the proposal discussed a wider forecast window | the current config uses a 7-day forecast window |
-| Feature store and cloud path | the proposal leaned heavily toward Feast, BigQuery, and Cloud Run | the current repo keeps Feast optional, local storage as the default baseline, and documents both an online compose host and an optional Cloud Run path |
+| Feature store and cloud path | the proposal leaned heavily toward Feast, BigQuery, and Cloud Run | the current repo uses Feast as the serving layer, a MinIO-backed local objectstore baseline, and documents both a hosted full-stack target and an inference-only Cloud Run path |
 
 ## Why MS1 Still Matters
 

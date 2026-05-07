@@ -100,27 +100,14 @@ spots:
     water_type: lake
     canton: BE
 
-# Storage (default: local Parquet; optional: S3-compatible object storage or BigQuery)
-# Environment overrides: STORAGE_BACKEND, STORAGE_S3_*, STORAGE_BIGQUERY_*, GCP_PROJECT_ID
+# Curated feature storage mode only.
+# Runtime resource names, endpoints, and cloud identifiers are injected through
+# .env, bootstrap helpers, or Terraform-managed environment variables.
 storage:
-  backend: "local" # local | s3 | bigquery
-  local_path: "data" # relative to project root
-  s3_bucket: "foehncast-data" # used when backend=s3
-  s3_endpoint: "http://localhost:9000" # MinIO on host; containers override via env
-  bigquery_dataset: "foehncast" # used when backend=bigquery
-  bigquery_table: "forecast_features" # used when backend=bigquery
+  backend: "s3" # s3 local baseline | bigquery cloud
 
-# GCP settings (optional — cloud deployment)
-# Environment overrides: GCP_PROJECT_ID, GCP_LOCATION, GCP_BUCKET_NAME, CLOUD_RUN_SERVICE_NAME
-gcp:
-  project_id: "your-gcp-project"
-  location: "europe-west6" # Zurich region
-  bucket_name: "foehncast-data"
-  artifact_registry: "foehncast-docker"
-  cloud_run_service: "foehncast-serve"
-  cloud_run_region: "europe-west6"
-  github_oidc_pool: "github-actions"
-  github_oidc_provider: "github-oidc"
+# Deployment wiring such as regions, buckets, Cloud Run names, and GitHub OIDC
+# lives outside the package config in .env, Terraform inputs, and CI variables.
 
 # Validation settings
 validation:
@@ -261,7 +248,6 @@ labeling:
 
 # MLflow settings
 mlflow:
-  tracking_uri: "http://localhost:5001"
   experiment_name: "foehncast"
   model_name: "foehncast-quality"
   champion_alias: "champion"

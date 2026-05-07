@@ -36,7 +36,7 @@ flowchart LR
     MLF --> APP
     APP --> API[Predict and rank endpoints]
 
-    PAR --> FEAST[(Optional Feast lookup)]
+    PAR --> FEAST[(Feast serving layer)]
     FEAST --> APP
 </div>
 

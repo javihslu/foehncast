@@ -32,6 +32,7 @@ RUN uv pip install --python /home/airflow/.local/bin/python -e .
 ENV PYTHONUNBUFFERED=1 \
     AIRFLOW_HOME=/workspace/airflow \
     AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags \
+    FOEHNCAST_PROJECT_ROOT=/workspace \
     PYTHONPATH=/workspace/src
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

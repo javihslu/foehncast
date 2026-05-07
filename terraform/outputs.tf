@@ -28,9 +28,24 @@ output "bigquery_dataset_id" {
   value       = try(google_bigquery_dataset.feature_store.dataset_id, var.bigquery_dataset_id)
 }
 
+output "bigquery_location" {
+  description = "BigQuery location for curated feature data."
+  value       = var.bigquery_location
+}
+
 output "bigquery_feature_table_id" {
   description = "BigQuery table for curated feature rows."
   value       = try(google_bigquery_table.forecast_features.table_id, var.bigquery_feature_table_id)
+}
+
+output "feast_online_store_location" {
+  description = "Location of the Firestore Datastore-mode database used by Feast online serving."
+  value       = try(google_firestore_database.feast_online_store.location_id, var.feast_online_store_location)
+}
+
+output "feast_online_store_database_name" {
+  description = "Database name of the Firestore Datastore-mode database used by Feast online serving."
+  value       = try(google_firestore_database.feast_online_store.name, var.feast_online_store_database_name)
 }
 
 output "github_deployer_service_account" {
@@ -48,6 +63,21 @@ output "cloud_run_runtime_service_account" {
   value       = try(google_service_account.cloud_run_runtime.email, "foehncast-cloud-run@${var.project_id}.iam.gserviceaccount.com")
 }
 
+output "provision_cloud_run_service" {
+  description = "Whether Terraform is configured to provision the Cloud Run inference service."
+  value       = var.provision_cloud_run_service
+}
+
+output "configured_cloud_run_service_name" {
+  description = "Configured Cloud Run service name for the inference API."
+  value       = var.cloud_run_service_name
+}
+
+output "mlflow_tracking_uri" {
+  description = "Configured MLflow tracking URI used by the Cloud Run inference service."
+  value       = var.mlflow_tracking_uri
+}
+
 output "cloud_run_service_name" {
   description = "Cloud Run service name for the inference API, if provisioned."
   value       = try(google_cloud_run_v2_service.app[0].name, null)
@@ -61,6 +91,31 @@ output "cloud_run_service_url" {
 output "online_compose_host_ip" {
   description = "Public IP address of the online Docker host, if provisioned."
   value       = try(google_compute_address.online_compose[0].address, null)
+}
+
+output "provision_online_compose_host" {
+  description = "Whether Terraform is configured to provision the online Docker host."
+  value       = var.provision_online_compose_host
+}
+
+output "online_compose_host_name" {
+  description = "Configured name for the online Docker host."
+  value       = var.online_compose_host_name
+}
+
+output "online_compose_host_zone" {
+  description = "Configured zone for the online Docker host."
+  value       = var.online_compose_host_zone
+}
+
+output "online_compose_machine_type" {
+  description = "Configured machine type for the online Docker host."
+  value       = var.online_compose_machine_type
+}
+
+output "online_compose_disk_size_gb" {
+  description = "Configured boot disk size in GB for the online Docker host."
+  value       = var.online_compose_disk_size_gb
 }
 
 output "online_compose_app_url" {

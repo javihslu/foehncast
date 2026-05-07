@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TERRAFORM_DIR="${ROOT_DIR}/terraform"
 ENV_FILE="${ROOT_DIR}/.env"
 TFVARS_FILE="${ROOT_DIR}/terraform/terraform.tfvars"
 # shellcheck disable=SC1091
@@ -19,30 +20,56 @@ PLAN_ONLY=false
 AUTO_APPROVE=false
 BOOTSTRAP_ONLY=false
 INTERACTIVE=true
+TEMP_TERRAFORM_DIR=""
 
 usage() {
   echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--bootstrap-only] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
   echo "Use ./scripts/bootstrap-local.sh for the default local evaluator path." >&2
-  echo "Prefer running this cloud bootstrap from Google Cloud Shell when possible." >&2
+  echo "Maintainer-only cloud bootstrap. Supported no-local-install path: run this from Google Cloud Shell." >&2
 }
 
 in_cloud_shell() {
   [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]
 }
 
+cleanup_bootstrap_terraform_dir() {
+  if [[ -n "$TEMP_TERRAFORM_DIR" && -d "$TEMP_TERRAFORM_DIR" ]]; then
+    rm -rf "$TEMP_TERRAFORM_DIR"
+  fi
+}
+
+prepare_bootstrap_terraform_dir() {
+  if [[ "$BOOTSTRAP_ONLY" != "true" || -n "$TEMP_TERRAFORM_DIR" ]]; then
+    return
+  fi
+
+  TEMP_TERRAFORM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/foehncast-terraform.XXXXXX")"
+  cp -R "${ROOT_DIR}/terraform/." "$TEMP_TERRAFORM_DIR/"
+  rm -rf "$TEMP_TERRAFORM_DIR/.terraform"
+  rm -f "$TEMP_TERRAFORM_DIR/terraform.tfstate" "$TEMP_TERRAFORM_DIR/terraform.tfstate.backup"
+  TERRAFORM_DIR="$TEMP_TERRAFORM_DIR"
+
+  if [[ -f "${ROOT_DIR}/terraform/terraform.tfstate" || -d "${ROOT_DIR}/terraform/.terraform" ]]; then
+    echo "Using an isolated Terraform working directory for bootstrap-only so local state files do not interfere with remote backend initialization."
+  fi
+}
+
+trap cleanup_bootstrap_terraform_dir EXIT
+
 print_bootstrap_context() {
   echo "Cloud bootstrap provisions a hosted GCP environment."
   echo "For the default local evaluator path, use ./scripts/bootstrap-local.sh instead."
+  echo "This script is for the rare maintainer bootstrap case, not normal contributor onboarding."
 
   if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
     echo "Mode: bootstrap-only. This prepares the remote Terraform control plane and leaves the broader platform apply for the remote workflow."
   fi
 
   if in_cloud_shell; then
-    echo "Execution context: Google Cloud Shell (preferred for first-time cloud bootstrap)."
+    echo "Execution context: Google Cloud Shell (supported first-time cloud bootstrap environment)."
   else
     echo "Execution context: local admin shell."
-    echo "Tip: run this script from Google Cloud Shell if you want to avoid installing gcloud and Terraform on your local machine."
+    echo "Tip: if you do not want local gcloud and Terraform installs, rerun this script from Google Cloud Shell."
   fi
 }
 
@@ -53,15 +80,6 @@ require_file() {
   if [[ ! -f "$file_path" ]]; then
     echo "$help_message" >&2
     exit 1
-  fi
-}
-
-copy_example_if_missing() {
-  local template_path="$1"
-  local destination_path="$2"
-
-  if [[ ! -f "$destination_path" ]]; then
-    cp "$template_path" "$destination_path"
   fi
 }
 
@@ -98,60 +116,6 @@ read_tfvars_value() {
   printf '%s\n' "$value"
 }
 
-  replace_or_append_line() {
-    local file_path="$1"
-    local regex="$2"
-    local replacement="$3"
-    local temp_file line matched=false
-
-    temp_file="$(mktemp)"
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" =~ $regex ]]; then
-        printf '%s\n' "$replacement" >> "$temp_file"
-        matched=true
-      else
-        printf '%s\n' "$line" >> "$temp_file"
-      fi
-    done < "$file_path"
-
-    if [[ "$matched" != "true" ]]; then
-      printf '%s\n' "$replacement" >> "$temp_file"
-    fi
-
-    mv "$temp_file" "$file_path"
-  }
-
-  set_env_value() {
-    local key="$1"
-    local value="$2"
-
-    replace_or_append_line "$ENV_FILE" "^${key}=" "${key}=${value}"
-  }
-
-  escape_tfvars_string() {
-    local value="$1"
-
-    value="${value//\\/\\\\}"
-    value="${value//\"/\\\"}"
-    printf '%s' "$value"
-  }
-
-  set_tfvars_string() {
-    local key="$1"
-    local value="$2"
-
-    value="$(escape_tfvars_string "$value")"
-    replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = \"${value}\""
-  }
-
-  set_tfvars_bool() {
-    local key="$1"
-    local value="$2"
-
-    replace_or_append_line "$TFVARS_FILE" "^[[:space:]]*${key}[[:space:]]*=" "${key} = ${value}"
-  }
-
   terraform_fmt_supports_file() {
     local file_path="$1"
 
@@ -169,7 +133,7 @@ read_tfvars_value() {
     local file_path="$1"
 
     if terraform_fmt_supports_file "$file_path"; then
-      terraform fmt "$file_path" >/dev/null
+      run_terraform fmt "$file_path" >/dev/null
       return
     fi
 
@@ -216,27 +180,26 @@ read_tfvars_value() {
   sync_env_from_terraform_outputs() {
     local cloud_run_service
 
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
     cloud_run_service="${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
 
     if [[ -z "$cloud_run_service" ]]; then
       cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
     fi
 
-    set_env_value GCP_PROJECT_ID "$FOEHNCAST_TF_PROJECT_ID"
-    set_env_value GCP_LOCATION "$FOEHNCAST_TF_LOCATION"
-    set_env_value GCP_BUCKET_NAME "$FOEHNCAST_TF_ARTIFACT_BUCKET_NAME"
-    set_env_value STORAGE_BIGQUERY_PROJECT_ID "$FOEHNCAST_TF_PROJECT_ID"
-    set_env_value STORAGE_BIGQUERY_DATASET "$FOEHNCAST_TF_BIGQUERY_DATASET"
-    set_env_value STORAGE_BIGQUERY_TABLE "$FOEHNCAST_TF_BIGQUERY_TABLE"
-
-    if [[ -n "$cloud_run_service" ]]; then
-      set_env_value CLOUD_RUN_SERVICE_NAME "$cloud_run_service"
-    fi
+    apply_foehncast_cloud_env_values \
+      "$FOEHNCAST_TF_PROJECT_ID" \
+      "$FOEHNCAST_TF_LOCATION" \
+      "$FOEHNCAST_TF_ARTIFACT_BUCKET_NAME" \
+      "$FOEHNCAST_TF_BIGQUERY_DATASET" \
+      "$FOEHNCAST_TF_BIGQUERY_LOCATION" \
+      "$FOEHNCAST_TF_BIGQUERY_TABLE" \
+      "$FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE" \
+      "$cloud_run_service"
   }
 
   print_auth_summary() {
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
 
     echo "Local auth: browser-based gcloud ADC on this machine"
     echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"
@@ -250,7 +213,7 @@ read_tfvars_value() {
   print_bootstrap_only_summary() {
     local state_bucket state_prefix
 
-    load_terraform_platform_state "${ROOT_DIR}/terraform"
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
     state_bucket="$(terraform_remote_state_bucket)"
     state_prefix="$(terraform_remote_state_prefix)"
 
@@ -446,10 +409,14 @@ read_tfvars_value() {
 
   configure_local_files() {
     local current_project current_region artifact_bucket artifact_repo dataset_id table_id bigquery_location
-    local provision_cloud_run cloud_run_service mlflow_tracking_uri repo_default target_repo_owner target_repo_name
+    local feast_online_store_location feast_online_store_database_name
+    local provision_cloud_run cloud_run_default cloud_run_service mlflow_tracking_uri
+    local provision_online_compose_host provision_online_compose_host_default
+    local online_compose_host_name online_compose_host_zone online_compose_machine_type online_compose_disk_size_gb
+    local repo_default target_repo_owner target_repo_name
 
-    copy_example_if_missing "${ROOT_DIR}/.env.example" "$ENV_FILE"
-    copy_example_if_missing "${ROOT_DIR}/terraform/terraform.tfvars.example" "$TFVARS_FILE"
+    prepare_file_from_template "${ROOT_DIR}/.env.example" "$ENV_FILE"
+    prepare_file_from_template "${ROOT_DIR}/terraform/terraform.tfvars.example" "$TFVARS_FILE"
     load_env_file "$ENV_FILE"
 
     current_project="${GCP_PROJECT_ID:-$(read_tfvars_value project_id)}"
@@ -494,9 +461,28 @@ read_tfvars_value() {
     fi
     bigquery_location="$(prompt_with_default "BigQuery location" "$bigquery_location")"
 
-    provision_cloud_run=false
-    if prompt_yes_no "Provision Cloud Run service now? This needs a reachable MLflow endpoint." n; then
+    feast_online_store_location="$(read_tfvars_value feast_online_store_location)"
+    if [[ -z "$feast_online_store_location" ]]; then
+      feast_online_store_location="$current_region"
+    fi
+
+    feast_online_store_database_name="$(read_tfvars_value feast_online_store_database_name)"
+    if [[ -z "$feast_online_store_database_name" ]]; then
+      feast_online_store_database_name="feast-online"
+    fi
+
+    provision_cloud_run="$(read_tfvars_value provision_cloud_run_service)"
+    if [[ "$provision_cloud_run" != "true" ]]; then
+      provision_cloud_run=false
+      cloud_run_default=n
+    else
+      cloud_run_default=y
+    fi
+
+    if prompt_yes_no "Provision Cloud Run service now? This needs a reachable MLflow endpoint." "$cloud_run_default"; then
       provision_cloud_run=true
+    else
+      provision_cloud_run=false
     fi
 
     cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
@@ -518,6 +504,47 @@ read_tfvars_value() {
       fi
     else
       mlflow_tracking_uri=""
+    fi
+
+    provision_online_compose_host="$(read_tfvars_value provision_online_compose_host)"
+    if [[ "$provision_online_compose_host" != "true" ]]; then
+      provision_online_compose_host=false
+      provision_online_compose_host_default=n
+    else
+      provision_online_compose_host_default=y
+    fi
+
+    if prompt_yes_no "Provision the full online compose host now? This creates the hosted Airflow, MLflow, and app stack on one VM." "$provision_online_compose_host_default"; then
+      provision_online_compose_host=true
+    else
+      provision_online_compose_host=false
+    fi
+
+    online_compose_host_name="$(read_tfvars_value online_compose_host_name)"
+    if [[ -z "$online_compose_host_name" ]]; then
+      online_compose_host_name="foehncast-online"
+    fi
+
+    online_compose_host_zone="$(read_tfvars_value online_compose_host_zone)"
+    if [[ -z "$online_compose_host_zone" ]]; then
+      online_compose_host_zone="$(foehncast_default_online_compose_host_zone "$current_region")"
+    fi
+
+    online_compose_machine_type="$(read_tfvars_value online_compose_machine_type)"
+    if [[ -z "$online_compose_machine_type" ]]; then
+      online_compose_machine_type="e2-standard-4"
+    fi
+
+    online_compose_disk_size_gb="$(read_tfvars_value online_compose_disk_size_gb)"
+    if [[ -z "$online_compose_disk_size_gb" ]]; then
+      online_compose_disk_size_gb="40"
+    fi
+
+    if [[ "$provision_online_compose_host" == "true" ]]; then
+      online_compose_host_name="$(prompt_with_default "Online compose host name" "$online_compose_host_name")"
+      online_compose_host_zone="$(prompt_with_default "Online compose host zone" "$online_compose_host_zone")"
+      online_compose_machine_type="$(prompt_with_default "Online compose machine type" "$online_compose_machine_type")"
+      online_compose_disk_size_gb="$(prompt_with_default "Online compose disk size in GB" "$online_compose_disk_size_gb")"
     fi
 
     if [[ "$CONFIGURE_GITHUB" != "true" && "$INTERACTIVE" == "true" ]]; then
@@ -548,24 +575,33 @@ read_tfvars_value() {
       set_tfvars_string github_repository "$target_repo_name"
     fi
 
-    set_env_value GCP_PROJECT_ID "$current_project"
-    set_env_value GCP_LOCATION "$current_region"
-    set_env_value GCP_BUCKET_NAME "$artifact_bucket"
-    set_env_value STORAGE_BIGQUERY_PROJECT_ID "$current_project"
-    set_env_value STORAGE_BIGQUERY_DATASET "$dataset_id"
-    set_env_value STORAGE_BIGQUERY_TABLE "$table_id"
+    apply_foehncast_cloud_env_values \
+      "$current_project" \
+      "$current_region" \
+      "$artifact_bucket" \
+      "$dataset_id" \
+      "$bigquery_location" \
+      "$table_id" \
+      "$feast_online_store_database_name"
 
-    set_tfvars_string project_id "$current_project"
-    set_tfvars_string region "$current_region"
-    set_tfvars_string artifact_registry_repository_id "$artifact_repo"
-    set_tfvars_string artifact_bucket_name "$artifact_bucket"
-    set_tfvars_string bigquery_dataset_id "$dataset_id"
-    set_tfvars_string bigquery_location "$bigquery_location"
-    set_tfvars_string bigquery_feature_table_id "$table_id"
-    set_tfvars_bool provision_cloud_run_service "$provision_cloud_run"
-    set_tfvars_string cloud_run_service_name "$cloud_run_service"
-    set_tfvars_string cloud_run_image "${current_region}-docker.pkg.dev/${current_project}/${artifact_repo}/foehncast-app:latest"
-    set_tfvars_string mlflow_tracking_uri "$mlflow_tracking_uri"
+    apply_foehncast_cloud_tfvars_values \
+      "$current_project" \
+      "$current_region" \
+      "$artifact_repo" \
+      "$artifact_bucket" \
+      "$dataset_id" \
+      "$bigquery_location" \
+      "$table_id" \
+      "$feast_online_store_location" \
+      "$feast_online_store_database_name" \
+      "$provision_cloud_run" \
+      "$cloud_run_service" \
+      "$mlflow_tracking_uri" \
+      "$provision_online_compose_host" \
+      "$online_compose_host_name" \
+      "$online_compose_host_zone" \
+      "$online_compose_machine_type" \
+      "$online_compose_disk_size_gb"
   }
 
 while [[ $# -gt 0 ]]; do
@@ -617,7 +653,7 @@ fi
 print_bootstrap_context
 
 require_command gcloud
-require_command terraform
+ensure_terraform_command
 
 if [[ "$CONFIGURE_GITHUB" == "true" ]]; then
   require_command gh
@@ -634,6 +670,7 @@ fi
 load_env_file "$ENV_FILE"
 
 require_gcp_project_and_location
+prepare_bootstrap_terraform_dir
 
 echo "Authenticating with Google Cloud via browser if needed..."
 "${ROOT_DIR}/scripts/gcp-auth.sh" "$ENV_FILE"
@@ -652,14 +689,14 @@ if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
   )
 fi
 
-terraform -chdir="${ROOT_DIR}/terraform" "${terraform_init_args[@]}"
+run_terraform -chdir="$TERRAFORM_DIR" "${terraform_init_args[@]}"
 
 echo "Formatting generated Terraform variable files..."
 format_generated_tfvars_file "$TFVARS_FILE"
 
 echo "Checking Terraform formatting and validation..."
-terraform -chdir="${ROOT_DIR}/terraform" fmt -check
-terraform -chdir="${ROOT_DIR}/terraform" validate
+run_terraform -chdir="$TERRAFORM_DIR" fmt -check
+run_terraform -chdir="$TERRAFORM_DIR" validate
 
 target_args=()
 if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
@@ -675,7 +712,7 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
     echo "Running Terraform plan..."
   fi
 
-  terraform -chdir="${ROOT_DIR}/terraform" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
+  run_terraform -chdir="$TERRAFORM_DIR" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
 else
   apply_args=(apply -var-file="$TFVARS_FILE")
 
@@ -691,7 +728,7 @@ else
     echo "Running Terraform apply..."
   fi
 
-  terraform -chdir="${ROOT_DIR}/terraform" "${apply_args[@]}"
+  run_terraform -chdir="$TERRAFORM_DIR" "${apply_args[@]}"
 
   if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
     print_bootstrap_only_summary
@@ -709,8 +746,10 @@ if [[ "$CONFIGURE_GITHUB" == "true" && "$PLAN_ONLY" != "true" ]]; then
     github_args+=( --repo "$TARGET_REPO" )
   fi
 
+  github_args+=( --terraform-dir "$TERRAFORM_DIR" )
+
   echo "Configuring GitHub Actions repository variables..."
-  "${ROOT_DIR}/scripts/configure-github-actions.sh" "${github_args[@]}"
+  FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" "${ROOT_DIR}/scripts/configure-github-actions.sh" "${github_args[@]}"
 fi
 
 if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
