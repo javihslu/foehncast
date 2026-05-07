@@ -18,7 +18,7 @@ MS2 is where the proposal became runnable software. The important result is simp
 | Training path | curated rows can be labeled, trained on, evaluated, and registered through MLflow |
 | Inference path | the app serves health, predict, rank, and spot-list endpoints from a trained model |
 | Local runtime | Docker Compose runs Airflow, MLflow, the API, and the development container together |
-| Optional online features | curated features can also be surfaced through an optional Feast-backed lookup path |
+| Online features | curated features are surfaced through the Feast-backed lookup path |
 
 ## What Runs End To End
 
@@ -32,7 +32,7 @@ flowchart LR
     OME --> APP
     OSRM[OSRM] --> APP
     APP --> OUT[Health, predict, and rank responses]
-    PAR --> FEAST[Optional Feast lookup]
+    PAR --> FEAST[Feast online lookup]
     FEAST --> APP
 </div>
 
@@ -51,8 +51,8 @@ flowchart LR
 | Proposal expectation | MS2 refinement |
 |----------------------|----------------|
 | first model uses a simple engineered feature set | the implemented engineer step also adds cyclical time features |
-| feature-store language suggests a heavier default stack | the current baseline keeps local storage as the default and Feast as optional |
-| inference is a planned API layer | inference now includes health, list, predict, rank, and optional online-feature routes |
+| feature-store language suggests a heavier default stack | the current baseline keeps local Compose runnable while treating Feast as a first-class serving layer |
+| inference is a planned API layer | inference includes health, list, predict, rank, and the online-feature routes |
 
 ## Why MS2 Matters
 

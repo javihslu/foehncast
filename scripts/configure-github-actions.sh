@@ -14,20 +14,6 @@ TARGET_REPO="${TARGET_REPO:-}"
 DRY_RUN=false
 CLEAR=false
 
-GITHUB_ACTIONS_VARIABLES=(
-  GCP_PROJECT_ID
-  GCP_LOCATION
-  GCP_ARTIFACT_REPOSITORY
-  GCP_ARTIFACT_BUCKET_NAME
-  GCP_BIGQUERY_DATASET
-  GCP_BIGQUERY_TABLE
-  GCP_WORKLOAD_IDENTITY_PROVIDER
-  GCP_SERVICE_ACCOUNT_EMAIL
-  GCP_TERRAFORM_STATE_BUCKET
-  GCP_TERRAFORM_STATE_PREFIX
-  GCP_CLOUD_RUN_SERVICE
-)
-
 usage() {
   echo "Usage: $0 [--dry-run] [--clear] [--repo owner/repo] [--terraform-dir path]" >&2
 }
@@ -112,9 +98,9 @@ fi
 REPOSITORY_PATH="$(resolve_repo)"
 
 if [[ "$CLEAR" == "true" ]]; then
-  for variable_name in "${GITHUB_ACTIONS_VARIABLES[@]}"; do
+  while IFS= read -r variable_name; do
     delete_variable "$REPOSITORY_PATH" "$variable_name"
-  done
+  done < <(terraform_repo_variable_names)
 
   echo "GitHub Actions variables were cleared for ${REPOSITORY_PATH}."
   exit 0
@@ -127,24 +113,28 @@ if ! terraform_outputs_available "$TERRAFORM_DIR"; then
   exit 1
 fi
 
-load_terraform_platform_state "$TERRAFORM_DIR"
+cloud_run_synced=false
+mlflow_tracking_uri_synced=false
+while IFS=$'\t' read -r variable_name variable_value; do
+  set_variable "$REPOSITORY_PATH" "$variable_name" "$variable_value"
 
-set_variable "$REPOSITORY_PATH" GCP_PROJECT_ID "$FOEHNCAST_TF_PROJECT_ID"
-set_variable "$REPOSITORY_PATH" GCP_LOCATION "$FOEHNCAST_TF_LOCATION"
-set_variable "$REPOSITORY_PATH" GCP_ARTIFACT_REPOSITORY "$FOEHNCAST_TF_ARTIFACT_REPOSITORY"
-set_variable "$REPOSITORY_PATH" GCP_ARTIFACT_BUCKET_NAME "$FOEHNCAST_TF_ARTIFACT_BUCKET_NAME"
-set_variable "$REPOSITORY_PATH" GCP_BIGQUERY_DATASET "$FOEHNCAST_TF_BIGQUERY_DATASET"
-set_variable "$REPOSITORY_PATH" GCP_BIGQUERY_TABLE "$FOEHNCAST_TF_BIGQUERY_TABLE"
-set_variable "$REPOSITORY_PATH" GCP_WORKLOAD_IDENTITY_PROVIDER "$FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER"
-set_variable "$REPOSITORY_PATH" GCP_SERVICE_ACCOUNT_EMAIL "$FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL"
-set_variable "$REPOSITORY_PATH" GCP_TERRAFORM_STATE_BUCKET "$FOEHNCAST_TF_STATE_BUCKET"
-set_variable "$REPOSITORY_PATH" GCP_TERRAFORM_STATE_PREFIX "$FOEHNCAST_TF_STATE_PREFIX"
+  if [[ "$variable_name" == "GCP_CLOUD_RUN_SERVICE" ]]; then
+    cloud_run_synced=true
+  fi
 
-if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
-  set_variable "$REPOSITORY_PATH" GCP_CLOUD_RUN_SERVICE "$FOEHNCAST_TF_CLOUD_RUN_SERVICE"
-else
+  if [[ "$variable_name" == "GCP_MLFLOW_TRACKING_URI" ]]; then
+    mlflow_tracking_uri_synced=true
+  fi
+done < <(terraform_repo_variable_pairs "$TERRAFORM_DIR")
+
+if [[ "$cloud_run_synced" != "true" ]]; then
   delete_variable "$REPOSITORY_PATH" GCP_CLOUD_RUN_SERVICE
   echo "Skipping GCP_CLOUD_RUN_SERVICE because Terraform has not provisioned a Cloud Run service yet."
+fi
+
+if [[ "$mlflow_tracking_uri_synced" != "true" ]]; then
+  delete_variable "$REPOSITORY_PATH" GCP_MLFLOW_TRACKING_URI
+  echo "Skipping GCP_MLFLOW_TRACKING_URI because Terraform does not currently define an MLflow tracking URI."
 fi
 
 echo "GitHub Actions variables are configured for ${REPOSITORY_PATH}."

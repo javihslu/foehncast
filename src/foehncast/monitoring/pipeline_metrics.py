@@ -10,8 +10,12 @@ from typing import Any
 import mlflow
 import pandas as pd
 
-_ROOT = Path(__file__).resolve().parents[3]
-_DEFAULT_REPORT_DIR = _ROOT / "airflow" / "reports"
+from foehncast.paths import project_root
+
+
+def _default_report_dir() -> Path:
+    return project_root() / "airflow" / "reports"
+
 
 FEATURE_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
     "run": (
@@ -67,12 +71,12 @@ FEATURE_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
 
 def feature_pipeline_summary_path(dataset: str = "train") -> Path:
     """Return the stable JSON summary path for the latest feature pipeline run."""
-    return _DEFAULT_REPORT_DIR / f"feature-pipeline-{dataset}-latest.json"
+    return _default_report_dir() / f"feature-pipeline-{dataset}-latest.json"
 
 
 def feature_pipeline_summary_paths() -> list[Path]:
     """Return all persisted feature-pipeline summary paths."""
-    return sorted(_DEFAULT_REPORT_DIR.glob("feature-pipeline-*-latest.json"))
+    return sorted(_default_report_dir().glob("feature-pipeline-*-latest.json"))
 
 
 def _safe_float(value: Any) -> float | None:

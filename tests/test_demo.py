@@ -1,4 +1,4 @@
-"""Tests for the optional Feast demo page."""
+"""Tests for the Feast online-features demo page."""
 
 from __future__ import annotations
 

@@ -22,9 +22,36 @@ outputs:
   bigquery_dataset:
     description: BigQuery dataset repository variable
     value: ${{ steps.repo_config.outputs.bigquery_dataset }}
+  bigquery_location:
+    description: BigQuery location repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_location }}
   bigquery_table:
     description: BigQuery table repository variable
     value: ${{ steps.repo_config.outputs.bigquery_table }}
+  provision_cloud_run_service:
+    description: Cloud Run provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_service }}
+  cloud_run_service_name:
+    description: Configured Cloud Run service name repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_service_name }}
+  mlflow_tracking_uri:
+    description: MLflow tracking URI repository variable
+    value: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
+  provision_online_compose_host:
+    description: Online compose host provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_online_compose_host }}
+  online_compose_host_name:
+    description: Online compose host name repository variable
+    value: ${{ steps.repo_config.outputs.online_compose_host_name }}
+  online_compose_host_zone:
+    description: Online compose host zone repository variable
+    value: ${{ steps.repo_config.outputs.online_compose_host_zone }}
+  online_compose_machine_type:
+    description: Online compose machine type repository variable
+    value: ${{ steps.repo_config.outputs.online_compose_machine_type }}
+  online_compose_disk_size_gb:
+    description: Online compose disk size repository variable
+    value: ${{ steps.repo_config.outputs.online_compose_disk_size_gb }}
   workload_identity_provider:
     description: Workload Identity Provider repository variable
     value: ${{ steps.repo_config.outputs.workload_identity_provider }}
@@ -62,7 +89,16 @@ runs:
           echo "artifact_bucket_name=$(read_repo_var GCP_ARTIFACT_BUCKET_NAME)"
           echo "artifact_repository=$(read_repo_var GCP_ARTIFACT_REPOSITORY)"
           echo "bigquery_dataset=$(read_repo_var GCP_BIGQUERY_DATASET)"
+          echo "bigquery_location=$(read_repo_var GCP_BIGQUERY_LOCATION)"
           echo "bigquery_table=$(read_repo_var GCP_BIGQUERY_TABLE)"
+          echo "provision_cloud_run_service=$(read_repo_var GCP_PROVISION_CLOUD_RUN_SERVICE)"
+          echo "cloud_run_service_name=$(read_repo_var GCP_CLOUD_RUN_SERVICE_NAME)"
+          echo "mlflow_tracking_uri=$(read_repo_var GCP_MLFLOW_TRACKING_URI)"
+          echo "provision_online_compose_host=$(read_repo_var GCP_PROVISION_ONLINE_COMPOSE_HOST)"
+          echo "online_compose_host_name=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_NAME)"
+          echo "online_compose_host_zone=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_ZONE)"
+          echo "online_compose_machine_type=$(read_repo_var GCP_ONLINE_COMPOSE_MACHINE_TYPE)"
+          echo "online_compose_disk_size_gb=$(read_repo_var GCP_ONLINE_COMPOSE_DISK_SIZE_GB)"
           echo "workload_identity_provider=$(read_repo_var GCP_WORKLOAD_IDENTITY_PROVIDER)"
           echo "service_account_email=$(read_repo_var GCP_SERVICE_ACCOUNT_EMAIL)"
           echo "state_bucket=$(read_repo_var GCP_TERRAFORM_STATE_BUCKET)"

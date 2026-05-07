@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import types
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -39,42 +38,15 @@ def sample_features() -> pd.DataFrame:
     )
 
 
-def test_write_and_read_features_local(
+def test_write_features_unsupported_backend_raises_value_error(
     monkeypatch: pytest.MonkeyPatch,
     isolated_store_env: None,
-    tmp_path: Path,
     sample_features: pd.DataFrame,
 ):
-    monkeypatch.setattr(store, "_ROOT", tmp_path)
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {"backend": "local", "local_path": "data"},
-    )
+    monkeypatch.setattr(store, "get_storage_config", lambda: {"backend": "sqlite"})
 
-    store.write_features(sample_features, spot_id="silvaplana", dataset="train")
-
-    result = store.read_features(spot_id="silvaplana", dataset="train")
-    pd.testing.assert_frame_equal(result, sample_features)
-
-
-def test_list_datasets_local_returns_sorted_names(
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_store_env: None,
-    tmp_path: Path,
-    sample_features: pd.DataFrame,
-):
-    monkeypatch.setattr(store, "_ROOT", tmp_path)
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {"backend": "local", "local_path": "data"},
-    )
-
-    store.write_features(sample_features, spot_id="silvaplana", dataset="validation")
-    store.write_features(sample_features, spot_id="urnersee", dataset="train")
-
-    assert store.list_datasets() == ["train", "validation"]
+    with pytest.raises(ValueError, match="Unsupported storage backend"):
+        store.write_features(sample_features, spot_id="silvaplana", dataset="train")
 
 
 def test_write_features_s3_uses_storage_options(
@@ -308,12 +280,12 @@ def test_write_features_bigquery_uses_load_job(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },
@@ -410,12 +382,12 @@ def test_read_features_bigquery_restores_time_index(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },
@@ -517,12 +489,12 @@ def test_bigquery_round_trip_restores_original_feature_schema(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },
@@ -652,12 +624,12 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },
@@ -724,12 +696,12 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },
@@ -774,12 +746,12 @@ def test_list_datasets_bigquery_returns_sorted_names(
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
-    monkeypatch.setattr(store, "get_gcp_project_id", lambda: "demo-project")
     monkeypatch.setattr(
         store,
         "get_storage_config",
         lambda: {
             "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
             "bigquery_dataset": "foehncast",
             "bigquery_table": "forecast_features",
         },

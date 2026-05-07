@@ -4,6 +4,10 @@ services:
     volumes:
       - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro
 
+  model-registry:
+    volumes:
+      - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+
   development_env:
     volumes:
       - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro

@@ -1,4 +1,4 @@
-"""Small HTML demo for optional Feast-backed online features."""
+"""Small HTML demo for the Feast-backed online-features surface."""
 
 from __future__ import annotations
 

@@ -3,6 +3,9 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    FOEHNCAST_PROJECT_ROOT=/workspace \
+    FOEHNCAST_FEAST_REPO_PATH=/workspace/feature_repo \
     PATH=/opt/venv/bin:$PATH
 
 RUN apt-get update \
@@ -15,10 +18,11 @@ COPY containers/app/start-app.sh /usr/local/bin/start-app.sh
 WORKDIR /workspace
 
 COPY pyproject.toml uv.lock config.yaml ./
+COPY feature_repo ./feature_repo
 COPY src ./src
 
 RUN python -m venv /opt/venv \
-    && uv pip install --python /opt/venv/bin/python -e . \
+    && uv sync --frozen --no-default-groups --group feast --no-editable \
     && chmod 755 /usr/local/bin/start-app.sh \
     && useradd --create-home --shell /bin/bash appuser \
     && chown -R appuser:appuser /workspace /opt/venv

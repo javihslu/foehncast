@@ -1,4 +1,4 @@
-"""Optional Feast online feature access for application-side integrations."""
+"""Feast online feature access for application-side integrations."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+from foehncast.feast_runtime import render_runtime_config
 from foehncast.inference_pipeline.predict import _resolve_spots
+from foehncast.paths import project_root
 
 _DEFAULT_FEATURE_SERVICE = "foehncast_model_v1"
 _DEFAULT_FEATURE_VIEW = "spot_forecast_features"
@@ -17,7 +19,7 @@ def _repo_path() -> Path:
     if configured_path:
         return Path(configured_path).expanduser()
 
-    return Path(__file__).resolve().parents[3] / "feature_repo"
+    return project_root() / "feature_repo"
 
 
 def _load_feature_store() -> Any:
@@ -25,14 +27,15 @@ def _load_feature_store() -> Any:
         from feast import FeatureStore
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Feast is not installed in this environment. Run `uv sync --group feast` first."
+            "Feast runtime dependency is missing from this environment."
         ) from exc
 
     repo_path = _repo_path()
     if not repo_path.exists():
-        raise RuntimeError(f"Feast repo not found at {repo_path}")
+        raise RuntimeError(f"Configured Feast repo not found at {repo_path}")
 
-    return FeatureStore(repo_path=str(repo_path))
+    config_path = render_runtime_config()
+    return FeatureStore(repo_path=str(repo_path), fs_yaml_file=config_path)
 
 
 def _feature_refs(feature_names: list[str]) -> list[str]:
@@ -70,7 +73,7 @@ def get_online_spot_features(
     spot_ids: list[str] | None = None,
     feature_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Read the latest online features for configured spots via the local Feast repo."""
+    """Read the latest online features for configured spots via the configured Feast repo."""
     requested_spots = _resolve_spots(spot_ids)
     entity_rows = [{"spot_id": spot["id"]} for spot in requested_spots]
     store = _load_feature_store()

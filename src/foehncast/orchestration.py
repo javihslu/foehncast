@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
 import mlflow
 import pandas as pd
@@ -24,10 +23,10 @@ from foehncast.monitoring.pipeline_metrics import (
     build_feature_pipeline_spot_summary,
     emit_feature_pipeline_run_summary,
 )
+from foehncast.paths import project_root
 from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
 logger = logging.getLogger(__name__)
 
 
@@ -178,7 +177,7 @@ def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
     if not metrics:
         raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
 
-    report_dir = _ROOT / "airflow" / "reports"
+    report_dir = project_root() / "airflow" / "reports"
     report_path = report_dir / f"evaluation-{training_run_id}.md"
 
     with mlflow.start_run(run_id=training_run_id):

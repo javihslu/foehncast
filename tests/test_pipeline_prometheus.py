@@ -11,14 +11,14 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(pipeline_metrics, "_DEFAULT_REPORT_DIR", tmp_path)
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
     pipeline_metrics.write_feature_pipeline_run_summary(
         {
             "contract_version": 1,
             "generated_at": "2026-05-05T10:15:00+00:00",
             "run_status": "succeeded",
             "dataset": "train",
-            "storage_backend": "local",
+            "storage_backend": "s3",
             "expected_spot_count": 2,
             "fetched_spot_count": 2,
             "stored_spot_count": 2,
@@ -47,14 +47,14 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
 
     assert "foehncast_feature_pipeline_summary_count 1.0" in payload
     assert (
-        'foehncast_feature_pipeline_run_success{dataset="train",storage_backend="local"} 1.0'
+        'foehncast_feature_pipeline_run_success{dataset="train",storage_backend="s3"} 1.0'
         in payload
     )
     assert (
-        'foehncast_feature_pipeline_spot_ingest_rows{dataset="train",spot_id="silvaplana",storage_backend="local"} 168.0'
+        'foehncast_feature_pipeline_spot_ingest_rows{dataset="train",spot_id="silvaplana",storage_backend="s3"} 168.0'
         in payload
     )
     assert (
-        'foehncast_feature_pipeline_spot_feast_projection_ready{dataset="train",spot_id="silvaplana",storage_backend="local"} 1.0'
+        'foehncast_feature_pipeline_spot_feast_projection_ready{dataset="train",spot_id="silvaplana",storage_backend="s3"} 1.0'
         in payload
     )

@@ -10,6 +10,7 @@ offline_store:
 online_store:
   type: datastore
   project_id: your-gcp-project
+  database: feast-online
 entity_key_serialization_version: 3
 
 # Set FOEHNCAST_FEAST_SOURCE=bigquery and FOEHNCAST_FEAST_BIGQUERY_TABLE to a

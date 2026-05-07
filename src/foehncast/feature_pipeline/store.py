@@ -1,18 +1,16 @@
-"""Persist features via a config-driven local, S3, or BigQuery store."""
+"""Persist curated features via the supported S3 or BigQuery backends."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import importlib
 import os
-from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from foehncast.config import get_gcp_project_id, get_storage_config
+from foehncast.config import get_storage_config
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
 _BQ_TIME_COLUMN = "forecast_time"
 _BQ_DATASET_COLUMN = "dataset_name"
 _BQ_SPOT_COLUMN = "spot_id"
@@ -33,24 +31,6 @@ class FeatureStoreBackend(ABC):
     @abstractmethod
     def list_datasets(self) -> list[str]:
         raise NotImplementedError
-
-
-class LocalFeatureStoreBackend(FeatureStoreBackend):
-    def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
-        path = _local_feature_path(self.storage_config, spot_id, dataset)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(path)
-
-    def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
-        return pd.read_parquet(
-            _local_feature_path(self.storage_config, spot_id, dataset)
-        )
-
-    def list_datasets(self) -> list[str]:
-        root = _ROOT / self.storage_config["local_path"]
-        if not root.exists():
-            return []
-        return sorted(path.name for path in root.iterdir() if path.is_dir())
 
 
 class S3FeatureStoreBackend(FeatureStoreBackend):
@@ -105,7 +85,7 @@ class BigQueryFeatureStoreBackend(FeatureStoreBackend):
 
 def _storage_backend(storage_config: dict[str, Any]) -> str:
     backend = storage_config["backend"]
-    if backend not in {"local", "s3", "bigquery"}:
+    if backend not in {"s3", "bigquery"}:
         raise ValueError(f"Unsupported storage backend: {backend}")
     return backend
 
@@ -157,12 +137,6 @@ def _google_exceptions_module() -> Any:
     return importlib.import_module("google.api_core.exceptions")
 
 
-def _local_feature_path(
-    storage_config: dict[str, Any], spot_id: str, dataset: str
-) -> Path:
-    return _ROOT / storage_config["local_path"] / dataset / f"{spot_id}.parquet"
-
-
 def _s3_feature_path(storage_config: dict[str, Any], spot_id: str, dataset: str) -> str:
     return f"s3://{_s3_bucket(storage_config)}/{dataset}/{spot_id}.parquet"
 
@@ -172,7 +146,7 @@ def _s3_filesystem(storage_config: dict[str, Any]) -> Any:
 
 
 def _bigquery_project_id(storage_config: dict[str, Any]) -> str:
-    project_id = storage_config.get("bigquery_project_id") or get_gcp_project_id()
+    project_id = str(storage_config.get("bigquery_project_id", "")).strip()
     if not project_id:
         raise ValueError("BigQuery storage requires a GCP project ID")
     return project_id
@@ -328,9 +302,6 @@ def _ensure_s3_bucket(storage_config: dict[str, Any]) -> None:
 
 def _feature_store(storage_config: dict[str, Any]) -> FeatureStoreBackend:
     backend = _storage_backend(storage_config)
-
-    if backend == "local":
-        return LocalFeatureStoreBackend(storage_config)
 
     if backend == "bigquery":
         return BigQueryFeatureStoreBackend(storage_config)

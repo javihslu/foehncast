@@ -12,6 +12,8 @@ services:
       - MLFLOW_PORT=5001
       - MLFLOW_ARTIFACT_DESTINATION=${MLFLOW_ARTIFACT_DESTINATION:-file:///mlartifacts}
       - MLFLOW_BACKEND_STORE_URI=sqlite:///metadata/metadata.sqlite
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+      - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
     volumes:
       - mlflow_metadata:/metadata
       - mlflow_artifacts:/mlartifacts

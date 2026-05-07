@@ -1,4 +1,4 @@
-"""Load and manage configuration from config.yaml."""
+"""Load workload configuration from config.yaml and resolve runtime bindings explicitly."""
 
 from __future__ import annotations
 
@@ -9,32 +9,15 @@ from typing import Any
 
 import yaml
 
-_ROOT = Path(__file__).resolve().parent.parent.parent  # foehncast/
-_CONFIG_PATH = _ROOT / "config.yaml"
+from foehncast.paths import project_root
+
 _config: dict[str, Any] | None = None
 
-_ENV_OVERRIDES: dict[tuple[str, str], tuple[str, ...]] = {
-    ("storage", "backend"): ("STORAGE_BACKEND",),
-    ("storage", "local_path"): ("STORAGE_LOCAL_PATH",),
-    ("storage", "s3_bucket"): ("STORAGE_S3_BUCKET",),
-    ("storage", "s3_endpoint"): (
-        "STORAGE_S3_ENDPOINT",
-        "OBJECTSTORE_ENDPOINT",
-        "FSSPEC_S3_ENDPOINT_URL",
-    ),
-    ("storage", "bigquery_project_id"): (
-        "STORAGE_BIGQUERY_PROJECT_ID",
-        "GCP_PROJECT_ID",
-        "GOOGLE_CLOUD_PROJECT",
-    ),
-    ("storage", "bigquery_dataset"): ("STORAGE_BIGQUERY_DATASET",),
-    ("storage", "bigquery_table"): ("STORAGE_BIGQUERY_TABLE",),
-    ("gcp", "project_id"): ("GCP_PROJECT_ID", "GOOGLE_CLOUD_PROJECT"),
-    ("gcp", "location"): ("GCP_LOCATION",),
-    ("gcp", "bucket_name"): ("GCP_BUCKET_NAME",),
-    ("gcp", "cloud_run_service"): ("CLOUD_RUN_SERVICE_NAME",),
-    ("mlflow", "tracking_uri"): ("MLFLOW_TRACKING_URI",),
-}
+_DEFAULT_STORAGE_BACKEND = "s3"
+_DEFAULT_STORAGE_S3_BUCKET = "foehncast-data"
+_DEFAULT_BIGQUERY_DATASET = "foehncast"
+_DEFAULT_BIGQUERY_TABLE = "forecast_features"
+_DEFAULT_MLFLOW_TRACKING_URI = "http://localhost:5001"
 
 
 def _env_value(*names: str) -> str | None:
@@ -48,29 +31,29 @@ def _env_value(*names: str) -> str | None:
     return None
 
 
-def _apply_env_overrides(config: dict[str, Any]) -> dict[str, Any]:
-    resolved = copy.deepcopy(config)
+def _resolved_dict_section(name: str) -> dict[str, Any]:
+    section = load_config().get(name, {})
+    if not isinstance(section, dict):
+        return {}
+    return copy.deepcopy(section)
 
-    for (section, key), env_names in _ENV_OVERRIDES.items():
-        section_values = resolved.get(section)
-        if not isinstance(section_values, dict):
-            continue
 
-        override = _env_value(*env_names)
-        if override is not None:
-            section_values[key] = override
+def _config_path() -> Path:
+    configured_path = _env_value("FOEHNCAST_CONFIG_PATH")
+    if configured_path is not None:
+        return Path(configured_path).expanduser()
 
-    return resolved
+    return project_root() / "config.yaml"
 
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
     """Load config.yaml and cache it."""
     global _config
     if _config is None or path is not None:
-        p = path or _CONFIG_PATH
+        p = path or _config_path()
         with open(p) as f:
             _config = yaml.safe_load(f)
-    return _apply_env_overrides(_config)
+    return copy.deepcopy(_config)
 
 
 def get_spots() -> list[dict[str, Any]]:
@@ -99,18 +82,58 @@ def get_labeling_config() -> dict[str, Any]:
 
 
 def get_storage_config() -> dict[str, Any]:
-    """Return the storage settings."""
-    return load_config()["storage"]
+    """Return storage mode plus runtime-bound storage wiring."""
+    storage = _resolved_dict_section("storage")
 
+    storage["backend"] = (
+        _env_value("STORAGE_BACKEND")
+        or str(storage.get("backend", "")).strip()
+        or _DEFAULT_STORAGE_BACKEND
+    )
+    storage["s3_bucket"] = (
+        _env_value("STORAGE_S3_BUCKET", "OBJECTSTORE_BUCKET")
+        or str(storage.get("s3_bucket", "")).strip()
+        or _DEFAULT_STORAGE_S3_BUCKET
+    )
 
-def get_gcp_config() -> dict[str, Any]:
-    """Return the GCP deployment settings."""
-    return load_config()["gcp"]
+    s3_endpoint = (
+        _env_value(
+            "STORAGE_S3_ENDPOINT",
+            "OBJECTSTORE_ENDPOINT",
+            "FSSPEC_S3_ENDPOINT_URL",
+        )
+        or str(storage.get("s3_endpoint", "")).strip()
+    )
+    if s3_endpoint:
+        storage["s3_endpoint"] = s3_endpoint
+    else:
+        storage.pop("s3_endpoint", None)
 
+    bigquery_project_id = (
+        _env_value(
+            "STORAGE_BIGQUERY_PROJECT_ID",
+            "GCP_PROJECT_ID",
+            "GOOGLE_CLOUD_PROJECT",
+        )
+        or str(storage.get("bigquery_project_id", "")).strip()
+    )
+    if bigquery_project_id:
+        storage["bigquery_project_id"] = bigquery_project_id
+    else:
+        storage.pop("bigquery_project_id", None)
 
-def get_gcp_project_id() -> str | None:
-    """Return the resolved GCP project ID."""
-    return get_gcp_config().get("project_id")
+    storage["bigquery_dataset"] = (
+        _env_value("STORAGE_BIGQUERY_DATASET")
+        or str(storage.get("bigquery_dataset", "")).strip()
+        or _DEFAULT_BIGQUERY_DATASET
+    )
+    storage["bigquery_table"] = (
+        _env_value("STORAGE_BIGQUERY_TABLE")
+        or str(storage.get("bigquery_table", "")).strip()
+        or _DEFAULT_BIGQUERY_TABLE
+    )
+
+    return storage
 
 
 def get_validation_config() -> dict[str, Any]:
@@ -120,12 +143,16 @@ def get_validation_config() -> dict[str, Any]:
 
 def get_mlflow_config() -> dict[str, Any]:
     """Return the MLflow settings."""
-    return load_config()["mlflow"]
+    return _resolved_dict_section("mlflow")
 
 
 def get_mlflow_tracking_uri() -> str:
     """Return the resolved MLflow tracking URI."""
-    return get_mlflow_config()["tracking_uri"]
+    return (
+        _env_value("MLFLOW_TRACKING_URI")
+        or str(get_mlflow_config().get("tracking_uri", "")).strip()
+        or _DEFAULT_MLFLOW_TRACKING_URI
+    )
 
 
 def get_inference_config() -> dict[str, Any]:

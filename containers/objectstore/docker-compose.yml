@@ -5,11 +5,11 @@ services:
     command: server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" /data
     hostname: objectstore
     ports:
-      - 127.0.0.1:9000:9000
-      - 127.0.0.1:9001:9001
+      - ${OBJECTSTORE_BIND_HOST:-127.0.0.1}:${OBJECTSTORE_PORT:-9000}:9000
+      - ${OBJECTSTORE_BIND_HOST:-127.0.0.1}:${OBJECTSTORE_CONSOLE_PORT:-9001}:9001
     environment:
-      - MINIO_ROOT_USER=${OBJECTSTORE_ACCESS_KEY}
-      - MINIO_ROOT_PASSWORD=${OBJECTSTORE_SECRET_KEY}
+      - MINIO_ROOT_USER=${OBJECTSTORE_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${OBJECTSTORE_SECRET_KEY:-minioadmin123}
     volumes:
       - objectstore_data:/data
     networks:
@@ -25,9 +25,9 @@ services:
     depends_on:
       - objectstore
     environment:
-      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY}
-      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY}
-      - OBJECTSTORE_BUCKET=${OBJECTSTORE_BUCKET}
+      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY:-minioadmin}
+      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY:-minioadmin123}
+      - OBJECTSTORE_BUCKET=${OBJECTSTORE_BUCKET:-foehncast-data}
     volumes:
       - ./init-objectstore.sh:/bootstrap/init-objectstore.sh:ro
     healthcheck:

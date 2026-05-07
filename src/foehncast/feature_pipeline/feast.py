@@ -9,8 +9,8 @@ import pandas as pd
 
 from foehncast.config import get_spots
 from foehncast.feature_pipeline.store import read_features
+from foehncast.paths import feast_offline_path
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
 _EVENT_TIMESTAMP_COLUMN = "event_timestamp"
 
 
@@ -71,11 +71,7 @@ def export_offline_store(
     dataset: str = "train", output_path: str | Path | None = None
 ) -> Path:
     """Write the curated Feast offline dataset to a single local parquet file."""
-    destination = (
-        Path(output_path)
-        if output_path
-        else _ROOT / "data" / "feast" / f"{dataset}.parquet"
-    )
+    destination = Path(output_path) if output_path else feast_offline_path(dataset)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     offline_frame = build_offline_store_frame(dataset=dataset)

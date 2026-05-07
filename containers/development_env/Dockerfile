@@ -3,6 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
+    FOEHNCAST_PROJECT_ROOT=/workspace \
     UV_PROJECT_ENVIRONMENT=/home/appuser/.venv \
     PATH=/home/appuser/.venv/bin:$PATH
 

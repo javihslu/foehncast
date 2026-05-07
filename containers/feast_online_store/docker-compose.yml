@@ -1,0 +1,25 @@
+services:
+  feast-online-store:
+    container_name: feast-online-store
+    build:
+      context: ../..
+      dockerfile: containers/feast_online_store/Dockerfile
+    image: ${FOEHNCAST_FEAST_ONLINE_STORE_IMAGE:-foehncast-feast-online-store:local}
+    command:
+      - /bin/sh
+      - -lc
+      - gcloud emulators firestore start --database-mode=datastore-mode --host-port=0.0.0.0:8080 --quiet
+    ports:
+      - ${FEAST_DATASTORE_EMULATOR_BIND_HOST:-127.0.0.1}:${FEAST_DATASTORE_EMULATOR_PORT:-8181}:8080
+    environment:
+      CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import socket; socket.create_connection(('127.0.0.1', 8080), timeout=1).close()"
+      interval: 2s
+      timeout: 2s
+      retries: 60
+    networks:
+      - development
+      - production

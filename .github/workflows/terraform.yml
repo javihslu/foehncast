@@ -46,7 +46,6 @@ on:
       region:
         description: GCP region
         required: false
-        default: europe-west6
         type: string
       artifact_bucket_name:
         description: GCS bucket for artifacts
@@ -55,56 +54,50 @@ on:
       artifact_registry_repository_id:
         description: Artifact Registry repository id
         required: false
-        default: foehncast-docker
         type: string
       bigquery_dataset_id:
         description: BigQuery dataset id
         required: false
-        default: foehncast
         type: string
       bigquery_location:
         description: BigQuery location
         required: false
-        default: europe-west6
         type: string
       bigquery_feature_table_id:
         description: BigQuery feature table id
         required: false
-        default: forecast_features
         type: string
       provision_cloud_run_service:
-        description: Provision Cloud Run app service
+        description: Provision Cloud Run app service (`true` or `false`; leave blank to use repo vars)
         required: false
-        default: false
-        type: boolean
+        type: string
       mlflow_tracking_uri:
-        description: Reachable MLflow URL for the Cloud Run app
+        description: Reachable MLflow URL for the Cloud Run app (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_service_name:
+        description: Cloud Run service name (leave blank to use repo vars)
         required: false
         type: string
       provision_online_compose_host:
-        description: Provision the full online compose host
+        description: Provision the full online compose host (`true` or `false`; leave blank to use repo vars)
         required: false
-        default: false
-        type: boolean
+        type: string
       online_compose_host_name:
-        description: Compute Engine host name
+        description: Compute Engine host name (leave blank to use repo vars)
         required: false
-        default: foehncast-online
         type: string
       online_compose_host_zone:
-        description: Compute Engine zone
+        description: Compute Engine zone (leave blank to use repo vars)
         required: false
-        default: europe-west6-b
         type: string
       online_compose_machine_type:
-        description: Compute Engine machine type
+        description: Compute Engine machine type (leave blank to use repo vars)
         required: false
-        default: e2-standard-4
         type: string
       online_compose_disk_size_gb:
-        description: Boot disk size in GB
+        description: Boot disk size in GB (leave blank to use repo vars)
         required: false
-        default: "40"
         type: string
 permissions:
   contents: read
@@ -171,9 +164,34 @@ jobs:
           REPO_GCP_TERRAFORM_STATE_PREFIX: ${{ steps.repo_config.outputs.state_prefix }}
           REPO_GCP_ARTIFACT_REPOSITORY: ${{ steps.repo_config.outputs.artifact_repository }}
           REPO_GCP_BIGQUERY_DATASET: ${{ steps.repo_config.outputs.bigquery_dataset }}
+          REPO_GCP_BIGQUERY_LOCATION: ${{ steps.repo_config.outputs.bigquery_location }}
           REPO_GCP_BIGQUERY_TABLE: ${{ steps.repo_config.outputs.bigquery_table }}
+          REPO_GCP_PROVISION_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.provision_cloud_run_service }}
+          REPO_GCP_CLOUD_RUN_SERVICE_NAME: ${{ steps.repo_config.outputs.cloud_run_service_name }}
+          REPO_GCP_MLFLOW_TRACKING_URI: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
+          REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
+          REPO_GCP_ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
+          REPO_GCP_ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
+          REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE: ${{ steps.repo_config.outputs.online_compose_machine_type }}
+          REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB: ${{ steps.repo_config.outputs.online_compose_disk_size_gb }}
+          REPO_GCP_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
         run: |
           set -euo pipefail
+
+          normalize_bool() {
+            local name="$1"
+            local value="$2"
+
+            case "$value" in
+              true|false)
+                printf '%s\n' "$value"
+                ;;
+              *)
+                echo "${name} must resolve to true or false, got '${value}'." >&2
+                exit 1
+                ;;
+            esac
+          }
 
           project_id="${{ inputs.project_id }}"
           if [[ -z "$project_id" ]]; then
@@ -229,6 +247,9 @@ jobs:
 
           bigquery_location="${{ inputs.bigquery_location }}"
           if [[ -z "$bigquery_location" ]]; then
+            bigquery_location="$REPO_GCP_BIGQUERY_LOCATION"
+          fi
+          if [[ -z "$bigquery_location" ]]; then
             bigquery_location="$region"
           fi
 
@@ -246,12 +267,67 @@ jobs:
           cleanup_clear_github_actions="${{ inputs.cleanup_clear_github_actions }}"
           cleanup_delete_state_bucket="${{ inputs.cleanup_delete_state_bucket }}"
           provision_cloud_run_service="${{ inputs.provision_cloud_run_service }}"
+          if [[ -z "$provision_cloud_run_service" ]]; then
+            provision_cloud_run_service="$REPO_GCP_PROVISION_CLOUD_RUN_SERVICE"
+          fi
+          if [[ -z "$provision_cloud_run_service" ]]; then
+            provision_cloud_run_service='false'
+          fi
+          provision_cloud_run_service="$(normalize_bool provision_cloud_run_service "$provision_cloud_run_service")"
           mlflow_tracking_uri="${{ inputs.mlflow_tracking_uri }}"
+          if [[ -z "$mlflow_tracking_uri" ]]; then
+            mlflow_tracking_uri="$REPO_GCP_MLFLOW_TRACKING_URI"
+          fi
+          cloud_run_service_name="${{ inputs.cloud_run_service_name }}"
+          if [[ -z "$cloud_run_service_name" ]]; then
+            cloud_run_service_name="$REPO_GCP_CLOUD_RUN_SERVICE_NAME"
+          fi
+          if [[ -z "$cloud_run_service_name" ]]; then
+            cloud_run_service_name="$REPO_GCP_CLOUD_RUN_SERVICE"
+          fi
+          if [[ -z "$cloud_run_service_name" ]]; then
+            cloud_run_service_name='foehncast-serve'
+          fi
+          if [[ "$provision_cloud_run_service" == 'true' && -z "$mlflow_tracking_uri" ]]; then
+            echo "Resolve mlflow_tracking_uri from the workflow input or repository variable GCP_MLFLOW_TRACKING_URI when provision_cloud_run_service is true." >&2
+            exit 1
+          fi
           provision_online_compose_host="${{ inputs.provision_online_compose_host }}"
+          if [[ -z "$provision_online_compose_host" ]]; then
+            provision_online_compose_host="$REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST"
+          fi
+          if [[ -z "$provision_online_compose_host" ]]; then
+            provision_online_compose_host='false'
+          fi
+          provision_online_compose_host="$(normalize_bool provision_online_compose_host "$provision_online_compose_host")"
           online_compose_host_name="${{ inputs.online_compose_host_name }}"
+          if [[ -z "$online_compose_host_name" ]]; then
+            online_compose_host_name="$REPO_GCP_ONLINE_COMPOSE_HOST_NAME"
+          fi
+          if [[ -z "$online_compose_host_name" ]]; then
+            online_compose_host_name='foehncast-online'
+          fi
           online_compose_host_zone="${{ inputs.online_compose_host_zone }}"
+          if [[ -z "$online_compose_host_zone" ]]; then
+            online_compose_host_zone="$REPO_GCP_ONLINE_COMPOSE_HOST_ZONE"
+          fi
+          if [[ -z "$online_compose_host_zone" ]]; then
+            online_compose_host_zone='europe-west6-b'
+          fi
           online_compose_machine_type="${{ inputs.online_compose_machine_type }}"
+          if [[ -z "$online_compose_machine_type" ]]; then
+            online_compose_machine_type="$REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE"
+          fi
+          if [[ -z "$online_compose_machine_type" ]]; then
+            online_compose_machine_type='e2-standard-4'
+          fi
           online_compose_disk_size_gb="${{ inputs.online_compose_disk_size_gb }}"
+          if [[ -z "$online_compose_disk_size_gb" ]]; then
+            online_compose_disk_size_gb="$REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB"
+          fi
+          if [[ -z "$online_compose_disk_size_gb" ]]; then
+            online_compose_disk_size_gb='40'
+          fi
           github_owner="${{ github.repository_owner }}"
           github_repository="${{ github.event.repository.name }}"
 
@@ -270,6 +346,7 @@ jobs:
             echo "TF_VAR_bigquery_feature_table_id=${bigquery_feature_table_id}"
             echo "TF_VAR_provision_cloud_run_service=${provision_cloud_run_service}"
             echo "TF_VAR_mlflow_tracking_uri=${mlflow_tracking_uri}"
+            echo "TF_VAR_cloud_run_service_name=${cloud_run_service_name}"
             echo "TF_VAR_provision_online_compose_host=${provision_online_compose_host}"
             echo "TF_VAR_online_compose_host_name=${online_compose_host_name}"
             echo "TF_VAR_online_compose_host_zone=${online_compose_host_zone}"
