@@ -125,7 +125,7 @@ jobs:
       - run: gcloud auth configure-docker "${REGISTRY_HOST}" --quiet
 
       - id: metadata
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_REPOSITORY }}
           tags: |
