@@ -7,6 +7,8 @@ from foehncast.feature_pipeline.engineer import (
     engineer_features,
     gust_factor,
     shore_alignment,
+    wind_direction_10m_cos,
+    wind_direction_10m_sin,
     wind_steadiness,
 )
 
@@ -74,6 +76,25 @@ class TestShoreAlignment:
         assert result.iloc[0] == pytest.approx(0.0, abs=1e-10)
 
 
+class TestWindDirectionEncoding:
+    def test_sine_encoding_wraps_zero_and_full_circle(self):
+        df = pd.DataFrame({"wind_direction_10m": [0.0, 360.0]})
+
+        result = wind_direction_10m_sin(df)
+
+        assert result.iloc[0] == pytest.approx(0.0, abs=1e-10)
+        assert result.iloc[1] == pytest.approx(0.0, abs=1e-10)
+
+    def test_cosine_encoding_matches_quadrants(self):
+        df = pd.DataFrame({"wind_direction_10m": [0.0, 90.0, 180.0]})
+
+        sine_result = wind_direction_10m_sin(df)
+        cosine_result = wind_direction_10m_cos(df)
+
+        assert sine_result.tolist() == pytest.approx([0.0, 1.0, 0.0], abs=1e-10)
+        assert cosine_result.tolist() == pytest.approx([1.0, 0.0, -1.0], abs=1e-10)
+
+
 class TestEngineerFeatures:
     def test_adds_all_columns(self, sample_df):
         result = engineer_features(sample_df, shore_orientation_deg=225.0)
@@ -81,6 +102,8 @@ class TestEngineerFeatures:
         assert "hour_of_day_cos" in result.columns
         assert "day_of_year_sin" in result.columns
         assert "day_of_year_cos" in result.columns
+        assert "wind_direction_10m_sin" in result.columns
+        assert "wind_direction_10m_cos" in result.columns
         assert "wind_steadiness" in result.columns
         assert "gust_factor" in result.columns
         assert "shore_alignment" in result.columns
@@ -92,6 +115,8 @@ class TestEngineerFeatures:
         assert result.iloc[0]["hour_of_day_cos"] == pytest.approx(1.0)
         assert result.iloc[0]["day_of_year_sin"] == pytest.approx(0.0)
         assert result.iloc[0]["day_of_year_cos"] == pytest.approx(1.0)
+        assert result.iloc[0]["wind_direction_10m_sin"] == pytest.approx(0.0)
+        assert result.iloc[0]["wind_direction_10m_cos"] == pytest.approx(-1.0)
 
     def test_preserves_original_columns(self, sample_df):
         result = engineer_features(sample_df, shore_orientation_deg=225.0)

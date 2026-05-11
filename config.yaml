@@ -6,21 +6,23 @@ rider:
   home_lat: 47.02
   home_lon: 8.65
   home_location: "Schwyz"
-  quiver_m2: [ 5, 7, 8, 10, 12 ]
+  quiver_m2: [5, 7, 8, 10, 12]
 
 # Weather API settings
 api:
   open_meteo:
     forecast_url: "https://api.open-meteo.com/v1/forecast"
     archive_url: "https://archive-api.open-meteo.com/v1/archive"
-    hourly_params: "wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10\
+    hourly_params:
+      "wind_speed_10m,wind_speed_80m,wind_speed_120m,wind_direction_10\
       m,wind_direction_80m,wind_gusts_10m,temperature_2m,precipitation,relative\
       _humidity_2m,cloud_cover,pressure_msl,cape,lifted_index"
     forecast_days: 7
     timezone: "Europe/Zurich"
     wind_speed_unit: "kmh"
   meteoswiss:
-    stations_url: "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwin\
+    stations_url:
+      "https://data.geo.admin.ch/ch.meteoschweiz.messwerte-windgeschwin\
       digkeit-kmh-10min/ch.meteoschweiz.messwerte-windgeschwindigkeit-kmh-10min\
       _en.json"
   osrm:
@@ -129,6 +131,8 @@ validation:
     - hour_of_day_cos
     - day_of_year_sin
     - day_of_year_cos
+    - wind_direction_10m_sin
+    - wind_direction_10m_cos
     - wind_steadiness
     - gust_factor
     - shore_alignment
@@ -171,6 +175,12 @@ validation:
     day_of_year_cos:
       min: -1
       max: 1
+    wind_direction_10m_sin:
+      min: -1
+      max: 1
+    wind_direction_10m_cos:
+      min: -1
+      max: 1
     wind_steadiness:
       min: 0
     gust_factor:
@@ -202,6 +212,8 @@ model:
     - hour_of_day_cos
     - day_of_year_sin
     - day_of_year_cos
+    - wind_direction_10m_sin
+    - wind_direction_10m_cos
     - wind_steadiness
     - gust_factor
     - shore_alignment
@@ -209,7 +221,6 @@ model:
   features:
     - wind_speed_10m
     - wind_speed_80m
-    - wind_direction_10m
     - wind_gusts_10m
     - temperature_2m
     - relative_humidity_2m
@@ -217,6 +228,8 @@ model:
     - hour_of_day_cos
     - day_of_year_sin
     - day_of_year_cos
+    - wind_direction_10m_sin
+    - wind_direction_10m_cos
     - wind_steadiness
     - gust_factor
     - shore_alignment

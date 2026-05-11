@@ -21,11 +21,12 @@ def model_config() -> dict[str, object]:
         "features": [
             "wind_speed_10m",
             "wind_gusts_10m",
-            "wind_direction_10m",
             "hour_of_day_sin",
             "hour_of_day_cos",
             "day_of_year_sin",
             "day_of_year_cos",
+            "wind_direction_10m_sin",
+            "wind_direction_10m_cos",
             "wind_steadiness",
             "gust_factor",
             "shore_alignment",
