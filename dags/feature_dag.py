@@ -6,8 +6,8 @@ from datetime import datetime
 import os
 
 try:
-    from airflow import DAG
-    from airflow.operators.python import PythonOperator
+    from airflow.providers.standard.operators.python import PythonOperator
+    from airflow.sdk import DAG
 except ModuleNotFoundError:  # pragma: no cover - Airflow is container-only
     dag = None
 else:
@@ -28,6 +28,7 @@ else:
         start_date=datetime(2024, 1, 1),
         schedule=feature_schedule,
         catchup=False,
+        is_paused_upon_creation=False,
         tags=["foehncast", "feature"],
     ) as dag:
         PythonOperator(

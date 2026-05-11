@@ -41,14 +41,28 @@ def _load_dag_module(
             return other
 
     airflow_module = types.ModuleType("airflow")
-    airflow_module.DAG = FakeDAG
-    operators_module = types.ModuleType("airflow.operators")
-    python_module = types.ModuleType("airflow.operators.python")
+    airflow_module.__path__ = []
+    sdk_module = types.ModuleType("airflow.sdk")
+    sdk_module.DAG = FakeDAG
+    providers_module = types.ModuleType("airflow.providers")
+    providers_module.__path__ = []
+    standard_module = types.ModuleType("airflow.providers.standard")
+    standard_module.__path__ = []
+    operators_module = types.ModuleType("airflow.providers.standard.operators")
+    operators_module.__path__ = []
+    python_module = types.ModuleType("airflow.providers.standard.operators.python")
     python_module.PythonOperator = FakePythonOperator
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
-    monkeypatch.setitem(sys.modules, "airflow.operators", operators_module)
-    monkeypatch.setitem(sys.modules, "airflow.operators.python", python_module)
+    monkeypatch.setitem(sys.modules, "airflow.sdk", sdk_module)
+    monkeypatch.setitem(sys.modules, "airflow.providers", providers_module)
+    monkeypatch.setitem(sys.modules, "airflow.providers.standard", standard_module)
+    monkeypatch.setitem(
+        sys.modules, "airflow.providers.standard.operators", operators_module
+    )
+    monkeypatch.setitem(
+        sys.modules, "airflow.providers.standard.operators.python", python_module
+    )
 
     for name in (
         "AIRFLOW_FEATURE_DATASET",
@@ -79,6 +93,7 @@ def test_feature_dag_defaults_to_airflow_schedule(
 
     assert module.dag.kwargs["schedule"] == "0 */6 * * *"
     assert module.dag.kwargs["catchup"] is False
+    assert module.dag.kwargs["is_paused_upon_creation"] is False
     assert len(operators) == 1
     assert operators[0].kwargs["task_id"] == "run_feature_pipeline"
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
@@ -98,3 +113,18 @@ def test_feature_dag_supports_manual_override_and_dataset(
 
     assert module.dag.kwargs["schedule"] is None
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "validation"}
+
+
+def test_training_dag_stays_manual_and_paused_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, operators = _load_dag_module(monkeypatch, "dags/training_dag.py")
+
+    assert module.dag.kwargs["schedule"] is None
+    assert module.dag.kwargs["catchup"] is False
+    assert module.dag.kwargs["is_paused_upon_creation"] is True
+    assert [operator.kwargs["task_id"] for operator in operators] == [
+        "train_model",
+        "evaluate_model",
+        "register_model",
+    ]

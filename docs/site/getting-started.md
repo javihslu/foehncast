@@ -13,6 +13,7 @@ This is the default path for a fresh machine.
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
 The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
+The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
 
 After bootstrap completes, the main local endpoints are:
 

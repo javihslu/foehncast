@@ -218,10 +218,11 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
     class FakeMlflow:
         def __init__(self) -> None:
             self.sklearn = SimpleNamespace(
-                log_model=lambda model, artifact_path: logged.update(
+                log_model=lambda model, name, pip_requirements: logged.update(
                     {
                         "logged_model": model,
-                        "artifact_path": artifact_path,
+                        "model_name": name,
+                        "pip_requirements": pip_requirements,
                     }
                 )
             )
@@ -280,6 +281,11 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
             {"feature_plot": list(feature_columns)}
         ),
     )
+    monkeypatch.setattr(
+        train,
+        "_model_pip_requirements",
+        lambda: ["scikit-learn==1.8.0", "cloudpickle==3.1.1"],
+    )
 
     run_id = train.run_training_pipeline(model_config)
 
@@ -294,5 +300,9 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         "r2",
         "overall_class_accuracy",
     }
-    assert logged["artifact_path"] == "model"
+    assert logged["model_name"] == "model"
+    assert logged["pip_requirements"] == [
+        "scikit-learn==1.8.0",
+        "cloudpickle==3.1.1",
+    ]
     assert logged["feature_plot"] == model_config["features"]

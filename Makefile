@@ -5,6 +5,7 @@ DATASET ?= train
 JUPYTER_TOKEN ?= foehncast-local
 TF_REMOTE_ARGS ?= plan
 SMOKE_BOOTSTRAP_ARGS ?=
+LOCAL_ONLY_COMPOSE := COMPOSE_PROFILES=local-only docker compose
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-24s %s\n", $$1, $$2}'
@@ -53,7 +54,7 @@ terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS=
 smoke-bootstrap-only:  ## Run the disposable bootstrap-only smoke driver with SMOKE_BOOTSTRAP_ARGS='--repo owner/repo'
 	cd $(ROOT_DIR) && ./scripts/smoke-bootstrap-only.sh $(SMOKE_BOOTSTRAP_ARGS)
 
-compose-up:  ## Start the local compose stack
+compose-up:  ## Start the default local runtime stack
 	cd $(ROOT_DIR) && docker compose up -d
 
 compose-down:  ## Stop and remove the local compose stack
@@ -65,20 +66,20 @@ compose-ps:  ## List compose services
 compose-logs:  ## Tail compose logs
 	cd $(ROOT_DIR) && docker compose logs -f
 
-dev-build:  ## Rebuild the development_env image
-	cd $(ROOT_DIR) && docker compose build development_env
+dev-build:  ## Rebuild the opt-in development_env image
+	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) build development_env
 
-dev-rebuild:  ## Rebuild and recreate the development_env container
-	cd $(ROOT_DIR) && docker compose up -d --build --force-recreate development_env
+dev-rebuild:  ## Rebuild and recreate the opt-in development_env container
+	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) up -d --build --force-recreate development_env
 
-dev-shell:  ## Open a shell in development_env
-	cd $(ROOT_DIR) && docker compose exec development_env /bin/bash
+dev-shell:  ## Open a shell in the opt-in development_env container
+	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) up -d development_env && $(LOCAL_ONLY_COMPOSE) exec development_env /bin/bash
 
-notebook-server:  ## Restart development_env and start localhost-only Jupyter Lab
-	cd $(ROOT_DIR) && docker compose up -d development_env && docker compose restart development_env && docker compose exec -d development_env env JUPYTER_TOKEN="$(JUPYTER_TOKEN)" start-jupyter-server.sh && printf 'VS Code Jupyter URL: http://127.0.0.1:8888/?token=%s\n' "$(JUPYTER_TOKEN)"
+notebook-server:  ## Start the opt-in development_env container and localhost-only Jupyter Lab
+	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) up -d development_env && $(LOCAL_ONLY_COMPOSE) restart development_env && $(LOCAL_ONLY_COMPOSE) exec -d development_env env JUPYTER_TOKEN="$(JUPYTER_TOKEN)" start-jupyter-server.sh && printf 'VS Code Jupyter URL: http://127.0.0.1:8888/?token=%s\n' "$(JUPYTER_TOKEN)"
 
 notebook-stop:  ## Stop the container-backed notebook server by restarting development_env
-	cd $(ROOT_DIR) && docker compose restart development_env
+	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) up -d development_env && $(LOCAL_ONLY_COMPOSE) restart development_env
 
 feast-prepare:  ## Export stored features and apply the local Feast repo for DATASET=$(DATASET)
 	cd $(ROOT_DIR) && ./scripts/prepare-feast-local.sh $(DATASET)

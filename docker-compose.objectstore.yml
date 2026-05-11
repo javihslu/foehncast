@@ -34,6 +34,10 @@ services:
     environment:
       <<: [*objectstore-runtime-env, *feast-runtime-env]
 
+  airflow-dag-processor:
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
   airflow-scheduler:
     environment:
       <<: [*objectstore-runtime-env, *feast-runtime-env]

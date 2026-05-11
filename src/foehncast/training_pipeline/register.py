@@ -24,12 +24,35 @@ def _registry_alias(stage: str, mlflow_config: dict[str, Any]) -> str:
     return normalized_stage
 
 
+def _logged_model_uri_for_run(run_id: str, client: Any) -> str | None:
+    if not hasattr(client, "get_run") or not hasattr(client, "search_logged_models"):
+        return None
+
+    run = client.get_run(run_id)
+    experiment_id = run.info.experiment_id
+    logged_models = client.search_logged_models(
+        experiment_ids=[experiment_id],
+        filter_string=f"source_run_id = '{run_id}'",
+        max_results=20,
+    )
+    if not logged_models:
+        return None
+
+    for logged_model in logged_models:
+        if getattr(logged_model, "name", None) == "model":
+            return logged_model.model_uri
+
+    return logged_models[0].model_uri
+
+
 def register_model(run_id: str, model_name: str | None = None) -> "ModelVersion":
     """Register the trained model artifact from a run and return its version."""
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
-    return mlflow.register_model(f"runs:/{run_id}/model", resolved_model_name)
+    client = mlflow.MlflowClient()
+    model_uri = _logged_model_uri_for_run(run_id, client) or f"runs:/{run_id}/model"
+    return mlflow.register_model(model_uri, resolved_model_name)
 
 
 def promote_model(
