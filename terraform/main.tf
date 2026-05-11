@@ -315,6 +315,7 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/artifactregistry.admin",
     "roles/bigquery.admin",
     "roles/compute.admin",
+    "roles/datastore.owner",
     "roles/iam.serviceAccountAdmin",
     "roles/iam.workloadIdentityPoolAdmin",
     "roles/resourcemanager.projectIamAdmin",
