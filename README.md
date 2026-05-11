@@ -25,7 +25,7 @@ flowchart LR
 |------|--------|---------|
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
 | Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers versions in MLflow |
-| Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes |
+| Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit live-demo surface |
 | Hosted runtime | Working | The shared environment currently runs the hosted full-stack target on one GCP host; the inference-only Cloud Run target remains provisionable but is not enabled there |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 | Monitoring | Working | Docker Compose provisions Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; and Grafana loads starter dashboards plus alert rules from checked-in config |
@@ -84,6 +84,8 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
+For the rider-facing MS3 demo, run `uv run streamlit run ui/app.py` from the repo root. The dashboard reuses the same prediction and ranking modules as the API, shows the configured rider profile plus current serving model version, and explicitly follows the current 14-hour live inference window instead of inventing a separate forecast contract.
+
 ## Shared Cloud Automation
 
 The shared hosted environment is not part of normal contributor setup.
@@ -101,6 +103,7 @@ Hosted deployment keeps its scope narrow. The cloud targets deploy runtime servi
 ## Repository Map
 
 - `src/foehncast/`: application code for configuration, feature engineering, training, inference, monitoring, and spot metadata
+- `ui/`: Streamlit rider-facing demo app for the MS3 presentation flow
 - `dags/`: Airflow entry points for the feature and training workflows
 - `scripts/`: local bootstrap plus maintainer utilities
 - `terraform/`: maintainer cloud infrastructure definition and reference
