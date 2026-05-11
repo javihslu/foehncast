@@ -32,6 +32,7 @@ keys/
 *.key
 *.json
 !config.json
+!grafana_work/dashboards/foehncast-overview.json
 
 # Terraform
 terraform/.terraform/
