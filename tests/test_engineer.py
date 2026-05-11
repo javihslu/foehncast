@@ -5,6 +5,7 @@ import pytest
 
 from foehncast.feature_pipeline.engineer import (
     engineer_features,
+    gust_excess_10m,
     gust_factor,
     shore_alignment,
     wind_direction_10m_cos,
@@ -56,6 +57,13 @@ class TestGustFactor:
         assert result.isna().all()
 
 
+class TestGustExcess:
+    def test_returns_difference(self, sample_df):
+        result = gust_excess_10m(sample_df)
+        expected = sample_df["wind_gusts_10m"] - sample_df["wind_speed_10m"]
+        pd.testing.assert_series_equal(result, expected.rename("gust_excess_10m"))
+
+
 class TestShoreAlignment:
     def test_perpendicular_scores_one(self):
         """Wind matching shore orientation → cos(0) = 1.0."""
@@ -105,6 +113,7 @@ class TestEngineerFeatures:
         assert "wind_direction_10m_sin" in result.columns
         assert "wind_direction_10m_cos" in result.columns
         assert "wind_steadiness" in result.columns
+        assert "gust_excess_10m" in result.columns
         assert "gust_factor" in result.columns
         assert "shore_alignment" in result.columns
 
@@ -117,6 +126,7 @@ class TestEngineerFeatures:
         assert result.iloc[0]["day_of_year_cos"] == pytest.approx(1.0)
         assert result.iloc[0]["wind_direction_10m_sin"] == pytest.approx(0.0)
         assert result.iloc[0]["wind_direction_10m_cos"] == pytest.approx(-1.0)
+        assert result.iloc[0]["gust_excess_10m"] == pytest.approx(5.0)
 
     def test_preserves_original_columns(self, sample_df):
         result = engineer_features(sample_df, shore_orientation_deg=225.0)

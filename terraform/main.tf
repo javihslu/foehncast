@@ -200,6 +200,12 @@ locals {
       description = "Rolling coefficient of variation of 10 m wind speed."
     },
     {
+      name        = "gust_excess_10m"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Absolute difference between gust speed and sustained 10 m wind speed."
+    },
+    {
       name        = "gust_factor"
       type        = "FLOAT"
       mode        = "NULLABLE"

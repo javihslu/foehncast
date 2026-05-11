@@ -56,7 +56,7 @@ def test_get_online_spot_features_uses_feature_service(
             return {
                 "spot_id": ["silvaplana", "urnersee"],
                 "wind_speed_10m": [14.0, 16.0],
-                "gust_factor": [1.5, 1.7],
+                "gust_excess_10m": [4.0, 5.0],
             }
 
     class FakeStore:
@@ -101,17 +101,17 @@ def test_get_online_spot_features_uses_feature_service(
     ]
     assert result == {
         "feature_service": "foehncast_model_v1",
-        "returned_features": ["wind_speed_10m", "gust_factor"],
+        "returned_features": ["wind_speed_10m", "gust_excess_10m"],
         "rows": [
             {
                 "spot_id": "silvaplana",
                 "wind_speed_10m": 14.0,
-                "gust_factor": 1.5,
+                "gust_excess_10m": 4.0,
             },
             {
                 "spot_id": "urnersee",
                 "wind_speed_10m": 16.0,
-                "gust_factor": 1.7,
+                "gust_excess_10m": 5.0,
             },
         ],
     }
@@ -129,7 +129,7 @@ def test_get_online_spot_features_prefixes_unqualified_feature_names(
             return {
                 "spot_id": ["silvaplana"],
                 "wind_speed_10m": [14.0],
-                "gust_factor": [1.5],
+                "gust_excess_10m": [4.0],
             }
 
     class FakeStore:
@@ -157,12 +157,12 @@ def test_get_online_spot_features_prefixes_unqualified_feature_names(
 
     result = online_features.get_online_spot_features(
         ["silvaplana"],
-        ["wind_speed_10m", "spot_forecast_features:gust_factor"],
+        ["wind_speed_10m", "spot_forecast_features:gust_excess_10m"],
     )
 
     assert logged["features"] == [
         "spot_forecast_features:wind_speed_10m",
-        "spot_forecast_features:gust_factor",
+        "spot_forecast_features:gust_excess_10m",
     ]
     assert (
         logged["fs_yaml_file"]
@@ -174,7 +174,7 @@ def test_get_online_spot_features_prefixes_unqualified_feature_names(
         {
             "spot_id": "silvaplana",
             "wind_speed_10m": 14.0,
-            "gust_factor": 1.5,
+            "gust_excess_10m": 4.0,
         }
     ]
 

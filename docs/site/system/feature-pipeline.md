@@ -63,11 +63,12 @@ The engineering layer creates the project's curated feature frame. The current f
 
 - cyclical time variables are encoded with sine and cosine instead of plain integers
 - shoreline fit is represented with circular math through `shore_alignment`
-- gustiness and steadiness are engineered as operational wind-quality signals
+- gustiness is carried as both a stable absolute surplus (`gust_excess_10m`) for the model and a ratio (`gust_factor`) retained for label semantics
+- steadiness remains an operational wind-quality signal through `wind_steadiness`
 - raw columns remain available alongside engineered columns so downstream validation and storage operate on one complete curated frame
 - the datetime index and time basis are preserved so later storage and Feast preparation can add persistence and serving context without redefining the feature set
 
-The current training path is tree-based, so the design priority is feature representation quality rather than blanket feature scaling. The most important future refinement area is circular wind-direction representation and gustiness robustness, not a generic normalization layer.
+The current training path is tree-based, so the design priority is feature representation quality rather than blanket feature scaling. Circular wind-direction encoding and the shift from ratio-heavy gustiness toward `gust_excess_10m` are part of that same representation choice, not a generic normalization layer.
 
 The engineering stage should also stay narrow. It creates the curated feature frame, but it should not add serving metadata or turn into a Feast-specific layer. That downstream hand-off remains intentional: engineer first, then validate, store, and only later project into Feast-friendly shapes.
 
@@ -80,7 +81,7 @@ The current validated contract is:
 - required columns cover the actual curated feature frame, not only raw ingest fields
 - configured range checks cover the engineered features that later storage and Feast preparation depend on
 - cyclical features and `shore_alignment` are bounded where the math makes the valid range explicit
-- `gust_factor` and `wind_steadiness` are lower-bounded rather than aggressively clipped
+- `gust_excess_10m`, `gust_factor`, and `wind_steadiness` are lower-bounded rather than aggressively clipped
 - completeness checks remain important because ratio-based features can go null when sustained wind approaches zero
 - validation is the explicit gate before downstream persistence and Feast projection
 

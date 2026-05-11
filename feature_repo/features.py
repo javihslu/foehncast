@@ -66,6 +66,7 @@ spot_forecast_features = FeatureView(
         Field(name="wind_direction_10m_sin", dtype=Float64),
         Field(name="wind_direction_10m_cos", dtype=Float64),
         Field(name="wind_steadiness", dtype=Float64),
+        Field(name="gust_excess_10m", dtype=Float64),
         Field(name="gust_factor", dtype=Float64),
         Field(name="shore_alignment", dtype=Float64),
     ],

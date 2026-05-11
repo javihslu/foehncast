@@ -6,7 +6,7 @@ from html import escape
 
 from foehncast.config import get_spots
 
-_DEFAULT_FEATURES = "wind_speed_10m, gust_factor"
+_DEFAULT_FEATURES = "wind_speed_10m, gust_excess_10m"
 
 
 def render_online_features_demo() -> str:
@@ -228,11 +228,11 @@ def render_online_features_demo() -> str:
       }}
 
       button.addEventListener('click', fetchFeatures);
-      result.value = JSON.stringify({{
-        feature_service: null,
-        returned_features: ['wind_speed_10m', 'gust_factor'],
-        rows: [],
-      }}, null, 2);
+        result.value = JSON.stringify({{
+          feature_service: null,
+          returned_features: ['wind_speed_10m', 'gust_excess_10m'],
+          rows: [],
+        }}, null, 2);
     </script>
   </body>
 </html>

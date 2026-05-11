@@ -99,6 +99,22 @@ def wind_steadiness(df: pd.DataFrame, window: int = 3) -> pd.Series:
     return (rolling_std / rolling_mean).replace([np.inf, -np.inf], np.nan)
 
 
+def gust_excess_10m(df: pd.DataFrame) -> pd.Series:
+    """Absolute gust surplus above sustained 10m wind.
+
+    Unlike a ratio, this difference stays well-behaved at low wind speeds while
+    still capturing how far gusts exceed the sustained baseline.
+
+    Args:
+        df: DataFrame with ``wind_gusts_10m`` and ``wind_speed_10m``.
+
+    Returns:
+        Series of gust-minus-sustained wind in km/h.
+    """
+    values = df["wind_gusts_10m"] - df["wind_speed_10m"]
+    return pd.Series(values, index=df.index, name="gust_excess_10m")
+
+
 def gust_factor(df: pd.DataFrame) -> pd.Series:
     """Ratio of gust speed to sustained wind.
 
@@ -113,6 +129,14 @@ def gust_factor(df: pd.DataFrame) -> pd.Series:
     return (df["wind_gusts_10m"] / df["wind_speed_10m"]).replace(
         [np.inf, -np.inf], np.nan
     )
+
+
+def add_gust_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add gustiness features used by labeling and the model."""
+    out = df.copy()
+    out["gust_excess_10m"] = gust_excess_10m(df)
+    out["gust_factor"] = gust_factor(df)
+    return out
 
 
 def shore_alignment(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Series:
@@ -142,10 +166,9 @@ def engineer_features(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Data
 
     Returns:
         DataFrame with added columns for cyclical time, wind steadiness,
-        wind direction, gust factor, and shore alignment.
+        wind direction, gustiness, and shore alignment.
     """
-    out = add_direction_features(add_time_features(df))
+    out = add_gust_features(add_direction_features(add_time_features(df)))
     out["wind_steadiness"] = wind_steadiness(df)
-    out["gust_factor"] = gust_factor(df)
     out["shore_alignment"] = shore_alignment(df, shore_orientation_deg)
     return out
