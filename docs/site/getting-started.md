@@ -15,6 +15,8 @@ You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compil
 The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
 The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
 
+Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`, so the monitoring layer can compare recent model outputs against earlier outputs from the same model version without mixing runtime state into `data/`.
+
 After bootstrap completes, the main local endpoints are:
 
 - App: `http://127.0.0.1:8000`

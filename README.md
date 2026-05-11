@@ -62,6 +62,8 @@ After bootstrap completes, the main local endpoints are:
 
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
+Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`. That runtime log lets the monitoring layer compare recent model outputs against earlier outputs from the same model version without mixing disposable service state into `data/`.
+
 The local bootstrap resets Docker volumes and disposable runtime artifacts, then verifies the live `/features/online` route before it reports the stack ready.
 
 Example check:

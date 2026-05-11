@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
 from prometheus_client import CONTENT_TYPE_LATEST
 
@@ -159,6 +160,40 @@ def test_spots_endpoint_lists_available_spots(
     assert response.json() == [spot]
 
 
+def test_schedule_prediction_monitoring_enqueues_background_task() -> None:
+    payload = {"model_version": "11", "predictions": []}
+    background_tasks = BackgroundTasks()
+
+    serve._schedule_prediction_monitoring(
+        background_tasks,
+        payload,
+        endpoint="predict",
+        spot_ids=["silvaplana"],
+    )
+
+    assert len(background_tasks.tasks) == 1
+    task = background_tasks.tasks[0]
+    assert task.func is serve._emit_prediction_monitoring
+    assert task.args == (payload,)
+    assert task.kwargs == {
+        "endpoint": "predict",
+        "spot_ids": ["silvaplana"],
+    }
+
+
+def test_schedule_prediction_monitoring_ignores_background_task_failure() -> None:
+    class BrokenBackgroundTasks:
+        def add_task(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("background queue unavailable")
+
+    serve._schedule_prediction_monitoring(
+        BrokenBackgroundTasks(),
+        {"model_version": "11", "predictions": []},
+        endpoint="predict",
+        spot_ids=["silvaplana"],
+    )
+
+
 def test_predict_endpoint_returns_prediction_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -173,12 +208,29 @@ def test_predict_endpoint_returns_prediction_payload(
         ],
     }
     monkeypatch.setattr(serve, "predict_spots", lambda spot_ids: payload)
+    recorded: dict[str, object] = {}
+    monkeypatch.setattr(
+        serve,
+        "emit_prediction_drift_metrics",
+        lambda prediction_payload, endpoint, spot_ids=None: recorded.update(
+            {
+                "prediction_payload": prediction_payload,
+                "endpoint": endpoint,
+                "spot_ids": spot_ids,
+            }
+        ),
+    )
     client = TestClient(serve.app)
 
     response = client.post("/predict", json={"spot_ids": ["silvaplana"]})
 
     assert response.status_code == 200
     assert response.json() == payload
+    assert recorded == {
+        "prediction_payload": payload,
+        "endpoint": "predict",
+        "spot_ids": ["silvaplana"],
+    }
 
 
 def test_predict_endpoint_returns_404_for_unknown_spot(
@@ -222,6 +274,18 @@ def test_rank_endpoint_returns_ranked_spots_payload(
     ]
 
     monkeypatch.setattr(serve, "predict_spots", lambda spot_ids: payload)
+    recorded: dict[str, object] = {}
+    monkeypatch.setattr(
+        serve,
+        "emit_prediction_drift_metrics",
+        lambda prediction_payload, endpoint, spot_ids=None: recorded.update(
+            {
+                "prediction_payload": prediction_payload,
+                "endpoint": endpoint,
+                "spot_ids": spot_ids,
+            }
+        ),
+    )
     monkeypatch.setattr(
         serve,
         "get_rider_config",
@@ -239,6 +303,31 @@ def test_rank_endpoint_returns_ranked_spots_payload(
         "model_version": "11",
         "ranked_spots": [asdict(ranked_spots[0])],
     }
+    assert recorded == {
+        "prediction_payload": payload,
+        "endpoint": "rank",
+        "spot_ids": ["silvaplana"],
+    }
+
+
+def test_predict_endpoint_ignores_prediction_monitoring_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {"model_version": "11", "predictions": []}
+    monkeypatch.setattr(serve, "predict_spots", lambda spot_ids: payload)
+    monkeypatch.setattr(
+        serve,
+        "emit_prediction_drift_metrics",
+        lambda prediction_payload, endpoint, spot_ids=None: (_ for _ in ()).throw(
+            RuntimeError("statsd unavailable")
+        ),
+    )
+    client = TestClient(serve.app)
+
+    response = client.post("/predict", json={"spot_ids": ["silvaplana"]})
+
+    assert response.status_code == 200
+    assert response.json() == payload
 
 
 def test_rank_endpoint_returns_404_for_unknown_spot(
@@ -371,19 +460,39 @@ def test_online_features_demo_endpoint_returns_html(
 def test_metrics_endpoint_returns_prometheus_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = (
+    feature_payload = (
         b"# HELP foehncast_feature_pipeline_summary_count example\n"
         b"foehncast_feature_pipeline_summary_count 1\n"
+    )
+    prediction_payload = (
+        b"# HELP foehncast_prediction_log_total_row_count example\n"
+        b"foehncast_prediction_log_total_row_count 2\n"
+    )
+    monitoring_payload = (
+        b"# HELP foehncast_prediction_monitoring_schedule_total example\n"
+        b'foehncast_prediction_monitoring_schedule_total{endpoint="predict",result="scheduled"} 1\n'
     )
     monkeypatch.setattr(
         serve,
         "render_feature_pipeline_prometheus_metrics",
-        lambda: payload,
+        lambda: feature_payload,
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_prediction_log_prometheus_metrics",
+        lambda: prediction_payload,
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_prediction_monitoring_prometheus_metrics",
+        lambda: monitoring_payload,
     )
     client = TestClient(serve.app)
 
     response = client.get("/metrics")
 
     assert response.status_code == 200
-    assert response.content == payload
+    assert response.content == (
+        feature_payload + prediction_payload + monitoring_payload
+    )
     assert response.headers["content-type"] == CONTENT_TYPE_LATEST
