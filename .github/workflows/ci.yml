@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,7 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - run: docker compose -f docker-compose.yml config
       - run: docker compose -f docker-compose.yml -f docker-compose.cloud.yml config
       - run: docker compose -f docker-compose.yml build model-registry app
@@ -27,7 +27,7 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
       - run: bash -n scripts/*.sh
       - run: bash scripts/terraform-remote.sh --help >/dev/null
       - run: bash scripts/smoke-bootstrap-only.sh --repo example/foehncast --project-id fcast-smoke-ci --dry-run >/dev/null
@@ -39,8 +39,8 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v6.0.2
+      - uses: hashicorp/setup-terraform@v4.0.0
       - run: terraform -chdir=terraform init -backend=false
       - run: terraform -chdir=terraform fmt -check
       - run: terraform -chdir=terraform validate
@@ -50,8 +50,8 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v8.1.0
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -61,8 +61,8 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v8.1.0
       - run: uv sync --frozen
       - run: uv run pytest tests/ -v
 
@@ -71,7 +71,7 @@ jobs:
       'pull_request' || github.triggering_actor == github.repository_owner) }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v8.1.0
       - run: uv sync --frozen --only-group docs --no-default-groups
       - run: uv run mkdocs build -f docs/mkdocs.yml --strict
