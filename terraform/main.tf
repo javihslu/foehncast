@@ -382,6 +382,12 @@ resource "google_project_iam_member" "cloud_run_bigquery_job_user" {
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_project_iam_member" "cloud_run_bigquery_read_session_user" {
+  project = var.project_id
+  role    = "roles/bigquery.readSessionUser"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_project_iam_member" "cloud_run_datastore_user" {
   project = var.project_id
   role    = "roles/datastore.user"
@@ -402,12 +408,28 @@ resource "google_project_iam_member" "online_compose_bigquery_job_user" {
   member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
+resource "google_project_iam_member" "online_compose_bigquery_read_session_user" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/bigquery.readSessionUser"
+  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
 resource "google_project_iam_member" "online_compose_datastore_user" {
   count = var.provision_online_compose_host ? 1 : 0
 
   project = var.project_id
   role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "online_compose_bucket_admin" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
 resource "google_bigquery_dataset_iam_member" "online_compose_bigquery_editor" {
@@ -469,6 +491,7 @@ resource "google_cloud_run_v2_service" "app" {
     google_artifact_registry_repository_iam_member.cloud_run_reader,
     google_storage_bucket_iam_member.cloud_run_bucket_reader,
     google_project_iam_member.cloud_run_bigquery_job_user,
+    google_project_iam_member.cloud_run_bigquery_read_session_user,
     google_project_iam_member.cloud_run_datastore_user,
     google_bigquery_dataset_iam_member.cloud_run_bigquery_reader,
   ]
@@ -558,7 +581,9 @@ resource "google_compute_instance" "online_compose" {
     google_firestore_database.feast_online_store,
     google_compute_firewall.online_compose_public,
     google_project_iam_member.online_compose_bigquery_job_user,
+    google_project_iam_member.online_compose_bigquery_read_session_user,
     google_project_iam_member.online_compose_datastore_user,
+    google_storage_bucket_iam_member.online_compose_bucket_admin,
     google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
   ]
 }

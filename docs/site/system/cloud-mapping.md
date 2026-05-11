@@ -6,6 +6,7 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 
     The shared GCP baseline and the hosted entry points exist today.
     Not every longer-term managed service is finished yet, so this page distinguishes between what is implemented now and what remains a transition target.
+    The current shared environment uses the hosted full-stack target. The inference-only Cloud Run path is implemented, but it is not the active shared deployment surface today.
 
 ## Cloud Paths In One View
 
@@ -45,10 +46,12 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 flowchart LR
     TF[Terraform baseline] --> GCP[Shared GCP resources]
     GCP --> HOST[Hosted full-stack target]
-    GCP --> RUN[Hosted inference target]
+    GCP -. optional .-> RUN[Hosted inference target]
     TF --> GH[GitHub OIDC delivery]
     HOST --> STACK[Airflow + MLflow + API]
     RUN --> API[Inference API only]
+    GH --> HOST
+    GH -. app image publish .-> RUN
 </div>
 
 ## What Exists Today
@@ -56,12 +59,14 @@ flowchart LR
 | Surface | Deploys | Leaves out | Current state |
 |--------|---------|------------|---------------|
 | Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented as Terraform inputs and resources |
-| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform path |
-| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform path |
-| GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented |
+| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform path and active in the shared environment |
+| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform and image-delivery path, currently disabled in the shared environment |
+| GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
 
 The hosted paths deploy runtime services only. Development assets stay local or CI-only.
 | BigQuery backend support | implemented in the application | local and hosted runtimes can point the storage backend at BigQuery |
+
+Today the shared environment uses the hosted full-stack target because it keeps Airflow and MLflow co-located with the API. The Cloud Run path remains the smaller optional API-only surface for a later or separate deployment slice.
 
 ## Honest Mapping From Local To Cloud
 

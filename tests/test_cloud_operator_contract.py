@@ -83,12 +83,9 @@ REPO_BACKED_WORKFLOW_INPUTS = {
     "provision_cloud_run_service",
     "mlflow_tracking_uri",
     "cloud_run_service_name",
-    "cloud_run_container_port",
     "cloud_run_allow_unauthenticated",
     "cloud_run_min_instance_count",
     "cloud_run_max_instance_count",
-    "cloud_run_cpu",
-    "cloud_run_memory",
     "provision_online_compose_host",
     "online_compose_host_name",
     "online_compose_host_zone",
@@ -187,10 +184,15 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert "github.event_name == 'workflow_dispatch' ||" in remote_job["if"]
     assert "github.event_name == 'push'" in remote_job["if"]
     assert "environment" not in remote_job
+    assert len(inputs) <= 25
 
     for input_name in REPO_BACKED_WORKFLOW_INPUTS:
         assert input_name in inputs
         assert "default" not in inputs[input_name]
+
+    assert "cloud_run_container_port" not in inputs
+    assert "cloud_run_cpu" not in inputs
+    assert "cloud_run_memory" not in inputs
 
     assert inputs["provision_cloud_run_service"]["type"] == "string"
     assert inputs["provision_online_compose_host"]["type"] == "string"
@@ -212,10 +214,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert (
         'provision_online_compose_host="$(normalize_bool '
         'provision_online_compose_host "$provision_online_compose_host")"' in run_script
-    )
-    assert (
-        'cloud_run_container_port="${{ inputs.cloud_run_container_port }}"'
-        in run_script
     )
     assert 'cloud_run_container_port="$REPO_GCP_CLOUD_RUN_CONTAINER_PORT"' in run_script
     assert "cloud_run_container_port='8080'" in run_script
@@ -266,10 +264,8 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
         'echo "cloud_run_max_instance_count must be greater than or equal to cloud_run_min_instance_count." >&2'
         in run_script
     )
-    assert 'cloud_run_cpu="${{ inputs.cloud_run_cpu }}"' in run_script
     assert 'cloud_run_cpu="$REPO_GCP_CLOUD_RUN_CPU"' in run_script
     assert "cloud_run_cpu='1'" in run_script
-    assert 'cloud_run_memory="${{ inputs.cloud_run_memory }}"' in run_script
     assert 'cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"' in run_script
     assert "cloud_run_memory='512Mi'" in run_script
     assert (
@@ -437,6 +433,113 @@ def test_terraform_injects_feast_runtime_contract_into_both_hosted_targets() -> 
         assert key in online_compose_block.group("body")
 
 
+def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_access() -> (
+    None
+):
+    terraform = _read_text("terraform/main.tf")
+
+    assert (
+        'resource "google_project_iam_member" "cloud_run_bigquery_read_session_user"'
+        in terraform
+    )
+    assert (
+        'resource "google_project_iam_member" "online_compose_bigquery_read_session_user"'
+        in terraform
+    )
+    assert (
+        'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
+        in terraform
+    )
+    assert 'role    = "roles/bigquery.readSessionUser"' in terraform
+    assert 'role   = "roles/storage.objectAdmin"' in terraform
+    assert (
+        "google_project_iam_member.cloud_run_bigquery_read_session_user," in terraform
+    )
+    assert (
+        "google_project_iam_member.online_compose_bigquery_read_session_user,"
+        in terraform
+    )
+    assert "google_storage_bucket_iam_member.online_compose_bucket_admin," in terraform
+
+
+def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert "airflow_uid=50000" in template
+    assert "app_uid=1000" in template
+    assert "grafana_uid=472" in template
+    assert (
+        "install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports"
+        in template
+    )
+    assert (
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast"
+        in template
+    )
+    assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
+    assert "chown -R ${airflow_uid}:0 /opt/foehncast/airflow" in template
+    assert "chown -R ${app_uid}:${app_uid} /opt/foehncast/.state" in template
+    assert (
+        "chown -R ${grafana_uid}:${grafana_uid} /opt/foehncast/grafana_work/data"
+        in template
+    )
+    assert "chown ${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
+
+
+def test_online_compose_startup_template_prepares_writable_runtime_directories() -> (
+    None
+):
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert "airflow_uid=50000" in template
+    assert "app_uid=1000" in template
+    assert "grafana_uid=472" in template
+    assert (
+        "install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports"
+        in template
+    )
+    assert (
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast"
+        in template
+    )
+    assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
+    assert "chown -R ${airflow_uid}:0 /opt/foehncast/airflow" in template
+    assert "chown -R ${app_uid}:${app_uid} /opt/foehncast/.state" in template
+    assert (
+        "chown -R ${grafana_uid}:${grafana_uid} /opt/foehncast/grafana_work/data"
+        in template
+    )
+    assert "chown ${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
+    assert "chmod 600 /opt/foehncast/airflow/.admin-password" in template
+
+
+def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access() -> (
+    None
+):
+    terraform = _read_text("terraform/main.tf")
+
+    assert (
+        'resource "google_project_iam_member" "cloud_run_bigquery_read_session_user"'
+        in terraform
+    )
+    assert 'role    = "roles/bigquery.readSessionUser"' in terraform
+    assert (
+        'resource "google_project_iam_member" "online_compose_bigquery_read_session_user"'
+        in terraform
+    )
+    assert (
+        'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
+        in terraform
+    )
+    assert 'role   = "roles/storage.objectAdmin"' in terraform
+    assert "google_project_iam_member.cloud_run_bigquery_read_session_user" in terraform
+    assert (
+        "google_project_iam_member.online_compose_bigquery_read_session_user"
+        in terraform
+    )
+    assert "google_storage_bucket_iam_member.online_compose_bucket_admin" in terraform
+
+
 def test_bootstrap_gcp_reports_hosted_feast_follow_up_step() -> None:
     bootstrap = _read_text("scripts/bootstrap-gcp.sh")
 
@@ -577,6 +680,11 @@ def test_terraform_remote_reports_hosted_feast_follow_up_for_apply() -> None:
     assert 'INPUT_BIGQUERY_FEATURE_TABLE_ID="$value"' in script
     assert "feast_online_store_database_name)" in script
     assert 'INPUT_FEAST_ONLINE_STORE_DATABASE_NAME="$value"' in script
+    assert "cloud_run_container_port|cloud_run_cpu|cloud_run_memory)" in script
+    assert (
+        'echo "${key} is not exposed as a workflow_dispatch input. Update the synced repository variable or Terraform configuration instead." >&2'
+        in script
+    )
     assert 'echo "Hosted Feast runtime source: bigquery"' in script
     assert (
         'echo "Hosted Feast offline source table: $(remote_feast_bigquery_table)"'

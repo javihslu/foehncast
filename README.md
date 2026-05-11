@@ -26,7 +26,7 @@ flowchart LR
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
 | Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers versions in MLflow |
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes |
-| Hosted runtime | Working | Terraform can provision either a hosted full-stack target on one GCP host or an inference-only Cloud Run service |
+| Hosted runtime | Working | The shared environment currently runs the hosted full-stack target on one GCP host; the inference-only Cloud Run target remains provisionable but is not enabled there |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 | Monitoring | Working | Docker Compose provisions Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; and Grafana loads starter dashboards plus alert rules from checked-in config |
 
@@ -37,7 +37,9 @@ FoehnCast has one supported contributor setup path: run everything locally with 
 ```mermaid
 flowchart TB
     Local[Local setup] --> Compose[Airflow + MLflow + FastAPI]
-    Main[Push to main] --> Cloud[GitHub-managed shared cloud automation]
+  Main[Push to main] --> Cloud[GitHub-managed shared cloud automation]
+  Cloud --> Host[Hosted full-stack target today]
+  Cloud -. optional .-> Run[Inference-only Cloud Run target]
 ```
 
 ## Quick Start
@@ -89,6 +91,8 @@ The shared hosted environment is not part of normal contributor setup.
 - Contributors only need Docker and the local bootstrap path.
 - The shared cloud environment is maintained through GitHub Actions after a one-time maintainer bootstrap.
 - Contributors do not need local Terraform, `gcloud`, or `gh` for normal work.
+
+The current shared environment uses the hosted full-stack target so Airflow, MLflow, and the API stay online together. The Cloud Run path remains available as an inference-only option, but it is not the active shared deployment surface today.
 
 Maintainer-only cloud bootstrap and operator details live in `terraform/README.md`.
 
