@@ -20,6 +20,7 @@ dependencies = [
     "requests>=2.31",
     "scikit-learn>=1.5",
     "s3fs>=2024.0",
+    "streamlit>=1.45",
     "uvicorn>=0.30",
     "evidently>=0.7.21",
 ]
