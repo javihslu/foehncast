@@ -477,13 +477,13 @@ def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> Non
         in template
     )
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
-    assert "chown -R ${airflow_uid}:0 /opt/foehncast/airflow" in template
-    assert "chown -R ${app_uid}:${app_uid} /opt/foehncast/.state" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
+    assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
     assert (
-        "chown -R ${grafana_uid}:${grafana_uid} /opt/foehncast/grafana_work/data"
+        "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
         in template
     )
-    assert "chown ${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
+    assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
 
 
 def test_online_compose_startup_template_prepares_writable_runtime_directories() -> (
@@ -503,13 +503,13 @@ def test_online_compose_startup_template_prepares_writable_runtime_directories()
         in template
     )
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
-    assert "chown -R ${airflow_uid}:0 /opt/foehncast/airflow" in template
-    assert "chown -R ${app_uid}:${app_uid} /opt/foehncast/.state" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
+    assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
     assert (
-        "chown -R ${grafana_uid}:${grafana_uid} /opt/foehncast/grafana_work/data"
+        "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
         in template
     )
-    assert "chown ${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
+    assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
     assert "chmod 600 /opt/foehncast/airflow/.admin-password" in template
 
 

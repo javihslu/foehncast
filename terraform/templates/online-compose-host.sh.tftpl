@@ -38,15 +38,15 @@ install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehn
 install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast
 install -d -m 0755 /opt/foehncast/grafana_work/data
 
-chown -R ${airflow_uid}:0 /opt/foehncast/airflow
-chown -R ${app_uid}:${app_uid} /opt/foehncast/.state
-chown -R ${grafana_uid}:${grafana_uid} /opt/foehncast/grafana_work/data
+chown -R $${airflow_uid}:0 /opt/foehncast/airflow
+chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state
+chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data
 
 if [[ ! -s /opt/foehncast/airflow/.admin-password ]]; then
   head -c 32 /dev/urandom | base64 | tr -d '\n' > /opt/foehncast/airflow/.admin-password
   printf '\n' >> /opt/foehncast/airflow/.admin-password
 fi
-chown ${airflow_uid}:0 /opt/foehncast/airflow/.admin-password
+chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password
 chmod 600 /opt/foehncast/airflow/.admin-password
 
 cat > /opt/foehncast/.env <<'EOF'
