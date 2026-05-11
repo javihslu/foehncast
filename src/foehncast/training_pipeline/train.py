@@ -117,14 +117,16 @@ def _model_pip_requirements() -> list[str]:
     return mlflow.sklearn.get_default_pip_requirements(include_cloudpickle=True)
 
 
-def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
+def run_training_pipeline(
+    model_config: dict[str, Any] | None = None, dataset: str = "train"
+) -> str:
     """Train the configured model, log the run to MLflow, and return the run id."""
     resolved_model_config = model_config or get_model_config()
     mlflow_config = get_mlflow_config()
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     mlflow.set_experiment(mlflow_config["experiment_name"])
 
-    features_df, target_series = load_training_data()
+    features_df, target_series = load_training_data(dataset=dataset)
     (
         features_train,
         features_test,
@@ -145,6 +147,7 @@ def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
     ) as run:
         mlflow.log_params(
             {
+                "dataset": dataset,
                 "algorithm": resolved_model_config["algorithm"],
                 "test_size": resolved_model_config["test_size"],
                 "random_state": resolved_model_config["random_state"],

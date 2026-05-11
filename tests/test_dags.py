@@ -52,6 +52,7 @@ def _load_dag_module(
     operators_module.__path__ = []
     python_module = types.ModuleType("airflow.providers.standard.operators.python")
     python_module.PythonOperator = FakePythonOperator
+    python_module.ShortCircuitOperator = FakePythonOperator
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.sdk", sdk_module)
@@ -67,6 +68,8 @@ def _load_dag_module(
     for name in (
         "AIRFLOW_FEATURE_DATASET",
         "AIRFLOW_FEATURE_SCHEDULE",
+        "AIRFLOW_AUTO_RETRAIN_MODE",
+        "AIRFLOW_TRAINING_DATASET",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -94,12 +97,24 @@ def test_feature_dag_defaults_to_airflow_schedule(
     assert module.dag.kwargs["schedule"] == "0 */6 * * *"
     assert module.dag.kwargs["catchup"] is False
     assert module.dag.kwargs["is_paused_upon_creation"] is False
-    assert len(operators) == 1
-    assert operators[0].kwargs["task_id"] == "run_feature_pipeline"
+    assert [operator.kwargs["task_id"] for operator in operators] == [
+        "run_feature_pipeline",
+        "check_retraining_trigger",
+        "train_model",
+        "evaluate_model",
+        "register_model",
+    ]
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert operators[1].kwargs["op_kwargs"] == {
+        "feature_result": "output:run_feature_pipeline",
+        "mode": "always",
+    }
+    assert operators[2].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert operators[3].kwargs["op_args"] == ["output:train_model"]
+    assert operators[3].kwargs["op_kwargs"] == {"dataset": "train"}
 
 
-def test_feature_dag_supports_manual_override_and_dataset(
+def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module, operators = _load_dag_module(
@@ -108,10 +123,12 @@ def test_feature_dag_supports_manual_override_and_dataset(
         env={
             "AIRFLOW_FEATURE_DATASET": "validation",
             "AIRFLOW_FEATURE_SCHEDULE": "manual",
+            "AIRFLOW_AUTO_RETRAIN_MODE": "off",
         },
     )
 
     assert module.dag.kwargs["schedule"] is None
+    assert len(operators) == 1
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "validation"}
 
 
@@ -128,3 +145,18 @@ def test_training_dag_stays_manual_and_paused_by_default(
         "evaluate_model",
         "register_model",
     ]
+    assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert operators[1].kwargs["op_kwargs"] == {"dataset": "train"}
+
+
+def test_training_dag_supports_dataset_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, operators = _load_dag_module(
+        monkeypatch,
+        "dags/training_dag.py",
+        env={"AIRFLOW_TRAINING_DATASET": "validation"},
+    )
+
+    assert operators[0].kwargs["op_kwargs"] == {"dataset": "validation"}
+    assert operators[1].kwargs["op_kwargs"] == {"dataset": "validation"}

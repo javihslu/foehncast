@@ -173,7 +173,11 @@ def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
                     "current_rows": len(current_df),
                 }
             )
-            or SimpleNamespace(dataset_name="silvaplana", dataset_version="train")
+            or SimpleNamespace(
+                dataset_name="silvaplana",
+                dataset_version="train",
+                dataset_drift=True,
+            )
         ),
     )
     monkeypatch.setattr(
@@ -364,6 +368,120 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
         "stored_spots": "silvaplana,urnersee",
     }
     assert logged["metrics"] == {"stored_spot_count": 2}
+
+
+def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: dict[str, object] = {}
+
+    class FakeRun:
+        def __enter__(self) -> FakeRun:
+            logged["entered"] = True
+            return self
+
+        def __exit__(self, exc_type, exc, exc_tb) -> None:
+            return None
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+        def set_experiment(self, experiment_name: str) -> None:
+            logged["experiment_name"] = experiment_name
+
+        def start_run(self, run_name: str) -> FakeRun:
+            logged["run_name"] = run_name
+            return FakeRun()
+
+        def log_params(self, params: dict[str, object]) -> None:
+            logged["params"] = params
+
+        def log_metric(self, name: str, value: float) -> None:
+            logged.setdefault("metrics", {})[name] = value
+
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
+    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(
+        orchestration,
+        "get_mlflow_config",
+        lambda: {"experiment_name": "foehncast"},
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "_run_feature_pipeline_result",
+        lambda dataset="train": {
+            "dataset": dataset,
+            "storage_backend": "s3",
+            "stored_spots": ["silvaplana", "urnersee"],
+            "drifted_spots": ["silvaplana"],
+            "dataset_drift_detected": True,
+        },
+    )
+
+    result = orchestration.run_feature_pipeline_job_context(dataset="train")
+
+    assert result == {
+        "dataset": "train",
+        "storage_backend": "s3",
+        "stored_spots": ["silvaplana", "urnersee"],
+        "drifted_spots": ["silvaplana"],
+        "dataset_drift_detected": True,
+    }
+    assert logged["tracking_uri"] == "https://mlflow.example.com"
+    assert logged["experiment_name"] == "foehncast"
+    assert logged["run_name"] == "feature-train-refresh"
+    assert logged["params"] == {
+        "dataset": "train",
+        "storage_backend": "s3",
+        "stored_spots": "silvaplana,urnersee",
+        "drifted_spots": "silvaplana",
+    }
+    assert logged["metrics"] == {
+        "stored_spot_count": 2,
+        "drifted_spot_count": 1,
+        "dataset_drift_detected": 1.0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        (None, "always"),
+        ("always", "always"),
+        ("new-data", "always"),
+        ("drift", "drift"),
+        ("drift-only", "drift"),
+        ("off", None),
+        ("manual", None),
+    ],
+)
+def test_resolve_auto_retraining_mode_normalizes_values(
+    mode: str | None, expected: str | None
+) -> None:
+    assert (
+        orchestration.resolve_auto_retraining_mode(mode, default="always") == expected
+    )
+
+
+def test_resolve_auto_retraining_mode_rejects_unknown_values() -> None:
+    with pytest.raises(ValueError, match="Unsupported auto retraining mode"):
+        orchestration.resolve_auto_retraining_mode("surprise")
+
+
+def test_should_auto_retrain_supports_always_and_drift_modes() -> None:
+    feature_result = {
+        "stored_spots": ["silvaplana"],
+        "dataset_drift_detected": False,
+    }
+    assert orchestration.should_auto_retrain(feature_result, mode="always") is True
+    assert orchestration.should_auto_retrain(feature_result, mode="drift") is False
+
+    drift_result = {
+        "stored_spots": ["silvaplana"],
+        "dataset_drift_detected": True,
+    }
+    assert orchestration.should_auto_retrain(drift_result, mode="drift") is True
 
 
 def test_resolve_airflow_schedule_uses_default_when_env_is_missing() -> None:

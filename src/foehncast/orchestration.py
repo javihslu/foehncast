@@ -65,9 +65,9 @@ def _emit_feature_drift_metrics(
     dataset: str,
     reference_df: pd.DataFrame,
     current_df: pd.DataFrame,
-) -> None:
+) -> bool:
     if reference_df.empty or current_df.empty:
-        return
+        return False
 
     try:
         report = detect_data_drift(
@@ -75,12 +75,14 @@ def _emit_feature_drift_metrics(
             _feature_drift_frame(current_df, spot_id=spot_id, dataset=dataset),
         )
         push_drift_metrics(report)
+        return report.dataset_drift
     except Exception:
         logger.exception(
             "Failed to emit feature drift metrics for spot '%s' in dataset '%s'",
             spot_id,
             dataset,
         )
+        return False
 
 
 def resolve_airflow_schedule(
@@ -101,11 +103,55 @@ def resolve_airflow_schedule(
     return normalized
 
 
-def run_feature_pipeline(dataset: str = "train") -> list[str]:
-    """Fetch, engineer, validate, store, and monitor features for all spots."""
+def resolve_auto_retraining_mode(
+    mode: str | None, *, default: str | None = "always"
+) -> str | None:
+    """Normalize Airflow auto-retraining mode values."""
+    candidate = default if mode is None else mode
+    if candidate is None:
+        return None
+
+    normalized = candidate.strip().lower()
+    if not normalized or normalized in {"none", "off", "false", "manual"}:
+        return None
+
+    if normalized in {"always", "new-data", "new_data", "on-success", "on_success"}:
+        return "always"
+
+    if normalized in {"drift", "drift-only", "drift_only"}:
+        return "drift"
+
+    raise ValueError(
+        "Unsupported auto retraining mode. Use 'always', 'drift', or 'off'."
+    )
+
+
+def should_auto_retrain(
+    feature_result: dict[str, object], mode: str | None = "always"
+) -> bool:
+    """Return whether the Airflow feature refresh should continue into retraining."""
+    resolved_mode = resolve_auto_retraining_mode(mode, default="always")
+    if resolved_mode is None:
+        return False
+
+    stored_spots = [
+        str(spot_id).strip()
+        for spot_id in feature_result.get("stored_spots", [])
+        if str(spot_id).strip()
+    ]
+    if resolved_mode == "always":
+        return bool(stored_spots)
+
+    return bool(feature_result.get("dataset_drift_detected", False))
+
+
+def _run_feature_pipeline_result(dataset: str = "train") -> dict[str, object]:
+    """Run the feature pipeline and return stored spots plus retraining context."""
+    storage_backend = get_storage_config()["backend"]
     spots = get_spots()
     forecasts_by_spot: dict[str, pd.DataFrame] = {}
     stored_spots: list[str] = []
+    drifted_spots: list[str] = []
     spot_summaries: list[dict[str, object]] = []
     run_error: str | None = None
 
@@ -141,12 +187,13 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
 
                 write_features(feature_df, spot_id=spot_id, dataset=dataset)
                 stored_df = read_features(spot_id=spot_id, dataset=dataset)
-                _emit_feature_drift_metrics(
+                if _emit_feature_drift_metrics(
                     spot_id=spot_id,
                     dataset=dataset,
                     reference_df=previous_stored_df,
                     current_df=stored_df,
-                )
+                ):
+                    drifted_spots.append(spot_id)
             except Exception as exc:
                 spot_summaries.append(
                     build_feature_pipeline_spot_summary(
@@ -176,7 +223,13 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
         if not stored_spots:
             raise ValueError("No feature data was generated for any configured spot")
 
-        return stored_spots
+        return {
+            "dataset": dataset,
+            "storage_backend": storage_backend,
+            "stored_spots": stored_spots,
+            "drifted_spots": drifted_spots,
+            "dataset_drift_detected": bool(drifted_spots),
+        }
     except Exception as exc:
         run_error = str(exc)
         raise
@@ -188,7 +241,7 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
         ]
         summary = build_feature_pipeline_run_summary(
             dataset=dataset,
-            storage_backend=get_storage_config()["backend"],
+            storage_backend=storage_backend,
             expected_spots=[spot["id"] for spot in spots],
             fetched_spots=fetched_spots,
             stored_spots=stored_spots,
@@ -200,6 +253,11 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
             emit_feature_pipeline_run_summary(summary)
         except Exception:
             logger.exception("Failed to emit feature pipeline run summary")
+
+
+def run_feature_pipeline(dataset: str = "train") -> list[str]:
+    """Fetch, engineer, validate, store, and monitor features for all spots."""
+    return list(_run_feature_pipeline_result(dataset=dataset)["stored_spots"])
 
 
 def _scheduled_mlflow_tracking_uri() -> str | None:
@@ -227,6 +285,33 @@ def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
         )
         mlflow.log_metric("stored_spot_count", len(stored_spots))
         return stored_spots
+
+
+def run_feature_pipeline_job_context(dataset: str = "train") -> dict[str, object]:
+    """Run the feature pipeline and return Airflow-friendly retraining context."""
+    result = _run_feature_pipeline_result(dataset=dataset)
+    tracking_uri = _scheduled_mlflow_tracking_uri()
+    if tracking_uri is None:
+        return result
+
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment(get_mlflow_config()["experiment_name"])
+
+    with mlflow.start_run(run_name=f"feature-{dataset}-refresh"):
+        mlflow.log_params(
+            {
+                "dataset": dataset,
+                "storage_backend": result["storage_backend"],
+                "stored_spots": ",".join(result["stored_spots"]),
+                "drifted_spots": ",".join(result["drifted_spots"]),
+            }
+        )
+        mlflow.log_metric("stored_spot_count", len(result["stored_spots"]))
+        mlflow.log_metric("drifted_spot_count", len(result["drifted_spots"]))
+        mlflow.log_metric(
+            "dataset_drift_detected", float(result["dataset_drift_detected"])
+        )
+        return result
 
 
 def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
