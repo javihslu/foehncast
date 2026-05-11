@@ -18,6 +18,7 @@ from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation
+from foehncast.monitoring.drift import detect_data_drift, push_drift_metrics
 from foehncast.monitoring.pipeline_metrics import (
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
@@ -28,6 +29,58 @@ from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
 
 logger = logging.getLogger(__name__)
+
+
+def _read_optional_feature_slice(spot_id: str, dataset: str) -> pd.DataFrame:
+    try:
+        return read_features(spot_id=spot_id, dataset=dataset)
+    except FileNotFoundError:
+        return pd.DataFrame()
+    except Exception:
+        logger.exception(
+            "Failed to load prior stored features for drift monitoring on spot '%s'",
+            spot_id,
+        )
+        return pd.DataFrame()
+
+
+def _feature_drift_frame(
+    frame: pd.DataFrame,
+    *,
+    spot_id: str,
+    dataset: str,
+) -> pd.DataFrame:
+    tagged = frame.copy()
+    tagged.attrs = {
+        **getattr(tagged, "attrs", {}),
+        "dataset_name": spot_id,
+        "dataset_version": dataset,
+    }
+    return tagged
+
+
+def _emit_feature_drift_metrics(
+    *,
+    spot_id: str,
+    dataset: str,
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+) -> None:
+    if reference_df.empty or current_df.empty:
+        return
+
+    try:
+        report = detect_data_drift(
+            _feature_drift_frame(reference_df, spot_id=spot_id, dataset=dataset),
+            _feature_drift_frame(current_df, spot_id=spot_id, dataset=dataset),
+        )
+        push_drift_metrics(report)
+    except Exception:
+        logger.exception(
+            "Failed to emit feature drift metrics for spot '%s' in dataset '%s'",
+            spot_id,
+            dataset,
+        )
 
 
 def resolve_airflow_schedule(
@@ -49,7 +102,7 @@ def resolve_airflow_schedule(
 
 
 def run_feature_pipeline(dataset: str = "train") -> list[str]:
-    """Fetch, engineer, validate, and store features for all configured spots."""
+    """Fetch, engineer, validate, store, and monitor features for all spots."""
     spots = get_spots()
     forecasts_by_spot: dict[str, pd.DataFrame] = {}
     stored_spots: list[str] = []
@@ -74,6 +127,7 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
                 continue
 
             feature_df = pd.DataFrame()
+            previous_stored_df = _read_optional_feature_slice(spot_id, dataset)
             validation = None
             stored_df = pd.DataFrame()
 
@@ -87,6 +141,12 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
 
                 write_features(feature_df, spot_id=spot_id, dataset=dataset)
                 stored_df = read_features(spot_id=spot_id, dataset=dataset)
+                _emit_feature_drift_metrics(
+                    spot_id=spot_id,
+                    dataset=dataset,
+                    reference_df=previous_stored_df,
+                    current_df=stored_df,
+                )
             except Exception as exc:
                 spot_summaries.append(
                     build_feature_pipeline_spot_summary(

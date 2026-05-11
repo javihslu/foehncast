@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import logging
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -18,10 +19,22 @@ from foehncast.inference_pipeline.predict import (
     predict_spots,
 )
 from foehncast.inference_pipeline.rank import rank_spots
+from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
 from foehncast.monitoring.pipeline_prometheus import (
     CONTENT_TYPE_LATEST,
     render_feature_pipeline_prometheus_metrics,
 )
+from foehncast.monitoring.prediction_monitoring_prometheus import (
+    record_prediction_monitoring_execution,
+    record_prediction_monitoring_schedule,
+    render_prediction_monitoring_prometheus_metrics,
+)
+from foehncast.monitoring.prediction_prometheus import (
+    render_prediction_log_prometheus_metrics,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class PredictionRequest(BaseModel):
@@ -38,13 +51,64 @@ def _not_found(exc: KeyError) -> HTTPException:
     return HTTPException(status_code=404, detail=message)
 
 
-def _rank_response(spot_ids: list[str] | None) -> dict[str, Any]:
-    prediction_payload = predict_spots(spot_ids)
+def _emit_prediction_monitoring(
+    prediction_payload: dict[str, Any],
+    *,
+    endpoint: str,
+    spot_ids: list[str] | None,
+) -> None:
+    try:
+        emit_prediction_drift_metrics(
+            prediction_payload,
+            endpoint=endpoint,
+            spot_ids=spot_ids,
+        )
+        record_prediction_monitoring_execution(endpoint, "succeeded")
+    except Exception:
+        record_prediction_monitoring_execution(endpoint, "failed")
+        logger.exception(
+            "Failed to emit prediction monitoring for endpoint '%s'",
+            endpoint,
+        )
+
+
+def _schedule_prediction_monitoring(
+    background_tasks: BackgroundTasks,
+    prediction_payload: dict[str, Any],
+    *,
+    endpoint: str,
+    spot_ids: list[str] | None,
+) -> None:
+    try:
+        background_tasks.add_task(
+            _emit_prediction_monitoring,
+            prediction_payload,
+            endpoint=endpoint,
+            spot_ids=spot_ids,
+        )
+        record_prediction_monitoring_schedule(endpoint, "scheduled")
+    except Exception:
+        record_prediction_monitoring_schedule(endpoint, "failed")
+        logger.exception(
+            "Failed to schedule prediction monitoring for endpoint '%s'",
+            endpoint,
+        )
+
+
+def _rank_response(prediction_payload: dict[str, Any]) -> dict[str, Any]:
     ranked_spots = rank_spots(prediction_payload, get_rider_config())
     return {
         "model_version": prediction_payload["model_version"],
         "ranked_spots": [asdict(spot) for spot in ranked_spots],
     }
+
+
+def _metrics_payload() -> bytes:
+    return (
+        render_feature_pipeline_prometheus_metrics()
+        + render_prediction_log_prometheus_metrics()
+        + render_prediction_monitoring_prometheus_metrics()
+    )
 
 
 def create_app() -> FastAPI:
@@ -66,16 +130,36 @@ def create_app() -> FastAPI:
         return list_available_spots()
 
     @app.post("/predict")
-    def predict(request: PredictionRequest) -> dict[str, Any]:
+    def predict(
+        request: PredictionRequest,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
         try:
-            return predict_spots(request.spot_ids)
+            prediction_payload = predict_spots(request.spot_ids)
+            _schedule_prediction_monitoring(
+                background_tasks,
+                prediction_payload,
+                endpoint="predict",
+                spot_ids=request.spot_ids,
+            )
+            return prediction_payload
         except KeyError as exc:
             raise _not_found(exc) from exc
 
     @app.post("/rank")
-    def rank(request: PredictionRequest) -> dict[str, Any]:
+    def rank(
+        request: PredictionRequest,
+        background_tasks: BackgroundTasks,
+    ) -> dict[str, Any]:
         try:
-            return _rank_response(request.spot_ids)
+            prediction_payload = predict_spots(request.spot_ids)
+            _schedule_prediction_monitoring(
+                background_tasks,
+                prediction_payload,
+                endpoint="rank",
+                spot_ids=request.spot_ids,
+            )
+            return _rank_response(prediction_payload)
         except KeyError as exc:
             raise _not_found(exc) from exc
 
@@ -97,7 +181,7 @@ def create_app() -> FastAPI:
     @app.get("/metrics")
     def metrics() -> Response:
         return Response(
-            content=render_feature_pipeline_prometheus_metrics(),
+            content=_metrics_payload(),
             headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 

@@ -1,5 +1,12 @@
 """Monitoring helpers for pipeline observability, drift, and model tracking."""
 
+from foehncast.monitoring.drift import (
+    DriftMetric,
+    DriftReport,
+    detect_data_drift,
+    detect_prediction_drift,
+    push_drift_metrics,
+)
 from foehncast.monitoring.pipeline_metrics import (
     FEATURE_PIPELINE_METRIC_CONTRACT,
     emit_feature_pipeline_run_summary,
@@ -7,11 +14,30 @@ from foehncast.monitoring.pipeline_metrics import (
     feature_pipeline_summary_path,
     read_feature_pipeline_run_summary,
 )
+from foehncast.monitoring.prediction_log import (
+    append_prediction_log,
+    emit_prediction_drift_metrics,
+    read_prediction_log,
+)
+from foehncast.monitoring.prediction_prometheus import (
+    build_prediction_log_prometheus_registry,
+    render_prediction_log_prometheus_metrics,
+)
 
 __all__ = [
+    "DriftMetric",
+    "DriftReport",
     "FEATURE_PIPELINE_METRIC_CONTRACT",
+    "append_prediction_log",
+    "build_prediction_log_prometheus_registry",
+    "detect_data_drift",
+    "detect_prediction_drift",
+    "emit_prediction_drift_metrics",
     "emit_feature_pipeline_run_summary",
     "feature_pipeline_stage_overview",
     "feature_pipeline_summary_path",
+    "push_drift_metrics",
+    "read_prediction_log",
     "read_feature_pipeline_run_summary",
+    "render_prediction_log_prometheus_metrics",
 ]

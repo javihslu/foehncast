@@ -264,3 +264,4 @@ inference:
 monitoring:
   drift_threshold: 0.15
   evaluation_window_days: 30
+  prediction_log_retention_days: 60

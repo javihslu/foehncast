@@ -59,11 +59,25 @@ def test_run_feature_pipeline_fetches_validated_features(
         "write_features",
         lambda df, spot_id, dataset: stored.append((spot_id, dataset)),
     )
+
+    read_calls = 0
+
+    def fake_read_features(spot_id: str, dataset: str) -> pd.DataFrame:
+        nonlocal read_calls
+        read_calls += 1
+        if read_calls == 1:
+            raise FileNotFoundError("No stored feature rows yet")
+        return feature_df.assign(gust_factor=1.2)
+
     monkeypatch.setattr(
         orchestration,
         "read_features",
-        lambda spot_id, dataset: feature_df.assign(gust_factor=1.2),
+        fake_read_features,
     )
+    monkeypatch.setattr(
+        orchestration, "detect_data_drift", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(orchestration, "push_drift_metrics", lambda report: None)
     monkeypatch.setattr(
         orchestration,
         "emit_feature_pipeline_run_summary",
@@ -78,6 +92,115 @@ def test_run_feature_pipeline_fetches_validated_features(
     assert emitted["summary"]["stored_spot_count"] == 1
     assert emitted["summary"]["spots"][0]["storage"]["stored_rows"] == 1
     assert emitted["summary"]["spots"][0]["feast"]["projection_ready"] is False
+
+
+def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    forecast_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [12.0, 13.0],
+            "wind_gusts_10m": [16.0, 17.0],
+            "wind_direction_10m": [220.0, 221.0],
+        }
+    )
+    previous_stored_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [10.0, 11.0],
+            "wind_gusts_10m": [14.0, 15.0],
+            "wind_direction_10m": [218.0, 219.0],
+            "gust_factor": [1.1, 1.15],
+        }
+    )
+    current_stored_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [12.0, 13.0],
+            "wind_gusts_10m": [16.0, 17.0],
+            "wind_direction_10m": [220.0, 221.0],
+            "gust_factor": [1.2, 1.25],
+        }
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "fetch_all_spots",
+        lambda: {"silvaplana": forecast_df},
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "engineer_features",
+        lambda df, shore_orientation_deg: df.assign(gust_factor=[1.2, 1.25]),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "run_validation",
+        lambda df, spot_id: SimpleNamespace(
+            is_valid=True,
+            missing_columns=[],
+            null_fractions={"wind_speed_10m": 0.0},
+            range_violations=pd.DataFrame(),
+        ),
+    )
+    monkeypatch.setattr(
+        orchestration, "write_features", lambda df, spot_id, dataset: None
+    )
+
+    read_calls = 0
+
+    def fake_read_features(spot_id: str, dataset: str) -> pd.DataFrame:
+        nonlocal read_calls
+        read_calls += 1
+        if read_calls == 1:
+            return previous_stored_df
+        return current_stored_df
+
+    monkeypatch.setattr(orchestration, "read_features", fake_read_features)
+    monkeypatch.setattr(
+        orchestration,
+        "detect_data_drift",
+        lambda reference_df, current_df, threshold=None: (
+            captured.update(
+                {
+                    "reference_attrs": dict(reference_df.attrs),
+                    "current_attrs": dict(current_df.attrs),
+                    "reference_rows": len(reference_df),
+                    "current_rows": len(current_df),
+                }
+            )
+            or SimpleNamespace(dataset_name="silvaplana", dataset_version="train")
+        ),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "push_drift_metrics",
+        lambda report: captured.update({"pushed_report": report}),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_feature_pipeline_run_summary",
+        lambda summary: None,
+    )
+
+    stored_spots = orchestration.run_feature_pipeline(dataset="train")
+
+    assert stored_spots == ["silvaplana"]
+    assert captured["reference_attrs"] == {
+        "dataset_name": "silvaplana",
+        "dataset_version": "train",
+    }
+    assert captured["current_attrs"] == {
+        "dataset_name": "silvaplana",
+        "dataset_version": "train",
+    }
+    assert captured["reference_rows"] == 2
+    assert captured["current_rows"] == 2
+    assert captured["pushed_report"].dataset_name == "silvaplana"
 
 
 def test_run_feature_pipeline_raises_on_validation_failure(

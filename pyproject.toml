@@ -21,6 +21,7 @@ dependencies = [
     "scikit-learn>=1.5",
     "s3fs>=2024.0",
     "uvicorn>=0.30",
+    "evidently>=0.7.21",
 ]
 
 [dependency-groups]
