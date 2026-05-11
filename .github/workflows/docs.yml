@@ -2,7 +2,7 @@ name: Deploy Docs
 
 on:
     push:
-        branches: [ main ]
+        branches: [main]
         paths:
             - "docs/site/**"
             - "docs/mkdocs.yml"
@@ -22,8 +22,8 @@ jobs:
         permissions:
             contents: read
         steps:
-            - uses: actions/checkout@v4
-            - uses: astral-sh/setup-uv@v5
+            - uses: actions/checkout@v6.0.2
+            - uses: astral-sh/setup-uv@v8.1.0
             - uses: actions/configure-pages@v5
             - run: uv sync --frozen --only-group docs --no-default-groups
             - run: uv run mkdocs build -f docs/mkdocs.yml --strict

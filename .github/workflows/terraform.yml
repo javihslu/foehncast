@@ -143,8 +143,8 @@ jobs:
       github.repository_owner }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v6.0.2
+      - uses: hashicorp/setup-terraform@v4.0.0
       - run: terraform -chdir=terraform init -backend=false
       - run: terraform -chdir=terraform fmt -check
       - run: terraform -chdir=terraform validate
@@ -162,9 +162,9 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4.0.0
 
       - name: Load repository configuration
         id: repo_config
