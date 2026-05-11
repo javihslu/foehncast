@@ -28,7 +28,7 @@ def model_config() -> dict[str, object]:
             "wind_direction_10m_sin",
             "wind_direction_10m_cos",
             "wind_steadiness",
-            "gust_factor",
+            "gust_excess_10m",
             "shore_alignment",
         ]
     }
@@ -351,12 +351,12 @@ def test_online_features_endpoint_returns_payload(
 ) -> None:
     payload = {
         "feature_service": None,
-        "returned_features": ["wind_speed_10m", "gust_factor"],
+        "returned_features": ["wind_speed_10m", "gust_excess_10m"],
         "rows": [
             {
                 "spot_id": "silvaplana",
                 "wind_speed_10m": 14.0,
-                "gust_factor": 1.5,
+                "gust_excess_10m": 4.0,
             }
         ],
     }
@@ -371,7 +371,7 @@ def test_online_features_endpoint_returns_payload(
         "/features/online",
         json={
             "spot_ids": ["silvaplana"],
-            "feature_names": ["wind_speed_10m", "gust_factor"],
+            "feature_names": ["wind_speed_10m", "gust_excess_10m"],
         },
     )
 

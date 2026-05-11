@@ -22,6 +22,7 @@ from foehncast.config import (
 )
 from foehncast.feature_pipeline.engineer import (
     add_direction_features,
+    add_gust_features,
     add_time_features,
 )
 from foehncast.feature_pipeline.store import read_features
@@ -47,7 +48,9 @@ def load_training_data(dataset: str = "train") -> tuple[pd.DataFrame, pd.Series]
 
         # Rebuild schema-derived features here so training still works with
         # older stored datasets after the feature schema grows.
-        features_df = add_direction_features(add_time_features(features_df))
+        features_df = add_gust_features(
+            add_direction_features(add_time_features(features_df))
+        )
         labeled_frames.append(label_dataset(features_df, rider_config))
 
     if not labeled_frames:

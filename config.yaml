@@ -134,6 +134,7 @@ validation:
     - wind_direction_10m_sin
     - wind_direction_10m_cos
     - wind_steadiness
+    - gust_excess_10m
     - gust_factor
     - shore_alignment
   completeness:
@@ -183,6 +184,8 @@ validation:
       max: 1
     wind_steadiness:
       min: 0
+    gust_excess_10m:
+      min: 0
     gust_factor:
       min: 0
     shore_alignment:
@@ -215,9 +218,9 @@ model:
     - wind_direction_10m_sin
     - wind_direction_10m_cos
     - wind_steadiness
+    - gust_excess_10m
     - gust_factor
     - shore_alignment
-    - kite_size_optimal
   features:
     - wind_speed_10m
     - wind_speed_80m
@@ -231,7 +234,7 @@ model:
     - wind_direction_10m_sin
     - wind_direction_10m_cos
     - wind_steadiness
-    - gust_factor
+    - gust_excess_10m
     - shore_alignment
   test_size: 0.2
   random_state: 42

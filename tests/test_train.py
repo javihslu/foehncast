@@ -25,7 +25,7 @@ def feature_columns() -> list[str]:
         "wind_direction_10m_sin",
         "wind_direction_10m_cos",
         "wind_steadiness",
-        "gust_factor",
+        "gust_excess_10m",
         "shore_alignment",
     ]
 
@@ -58,6 +58,7 @@ def labeled_training_df(feature_columns: list[str]) -> pd.DataFrame:
         "wind_direction_10m_sin": [-0.5, -0.6427876097, -0.7660444431],
         "wind_direction_10m_cos": [-0.8660254038, -0.7660444431, -0.6427876097],
         "wind_steadiness": [0.12, 0.15, 0.10],
+        "gust_excess_10m": [6.0, 7.0, 7.0],
         "gust_factor": [1.2, 1.15, 1.1],
         "shore_alignment": [0.7, 0.8, 0.9],
         "quality_index": [2, 3, 4],
@@ -111,6 +112,7 @@ def test_load_training_data_adds_time_features_before_labeling(
             "day_of_year_cos",
             "wind_direction_10m_sin",
             "wind_direction_10m_cos",
+            "gust_excess_10m",
         ]
     )
 
@@ -139,6 +141,7 @@ def test_load_training_data_adds_time_features_before_labeling(
     assert "day_of_year_cos" in logged["columns_before_labeling"]
     assert "wind_direction_10m_sin" in logged["columns_before_labeling"]
     assert "wind_direction_10m_cos" in logged["columns_before_labeling"]
+    assert "gust_excess_10m" in logged["columns_before_labeling"]
     assert list(features_df.columns) == model_config["features"]
 
 

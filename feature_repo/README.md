@@ -30,9 +30,9 @@ The runtime contract now renders the active Feast config from environment into `
 2. Export the current stored features, render the active Feast runtime config, apply the repo, and materialize the local online store:
    `./scripts/prepare-feast-local.sh`
 3. Read features back through the application-side helper:
-   `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_factor']))"`
+   `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_excess_10m']))"`
 4. Or use the API endpoint if the app is already running:
-   `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_factor"]}'`
+   `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_excess_10m"]}'`
 5. Or open the built-in demo page in the running app:
    `http://127.0.0.1:8000/features/online/demo`
 

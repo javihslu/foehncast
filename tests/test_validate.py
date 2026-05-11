@@ -43,6 +43,7 @@ def _sample_curated_features() -> pd.DataFrame:
     df["wind_direction_10m_sin"] = [-0.642788, -0.819152]
     df["wind_direction_10m_cos"] = [-0.766044, -0.573576]
     df["wind_steadiness"] = [0.0, 0.052632]
+    df["gust_excess_10m"] = [6.0, 6.0]
     df["gust_factor"] = [1.50, 1.33]
     df["shore_alignment"] = [0.85, 0.88]
     return df
@@ -104,6 +105,7 @@ def test_run_validation_returns_valid_result_for_clean_dataset(monkeypatch) -> N
                 "wind_direction_10m_sin": {"min": -1, "max": 1},
                 "wind_direction_10m_cos": {"min": -1, "max": 1},
                 "wind_steadiness": {"min": 0},
+                "gust_excess_10m": {"min": 0},
                 "gust_factor": {"min": 0},
                 "shore_alignment": {"min": -1, "max": 1},
             },
@@ -124,6 +126,7 @@ def test_run_validation_collects_missing_columns_and_range_violations(
 ) -> None:
     df = _sample_curated_features().drop(columns=["shore_alignment"])
     df.loc["row-2", "hour_of_day_sin"] = 1.2
+    df.loc["row-2", "gust_excess_10m"] = -1.0
     df.loc["row-1", "wind_direction_10m_cos"] = 1.5
     monkeypatch.setattr(
         "foehncast.feature_pipeline.validate.get_validation_config",
@@ -132,6 +135,7 @@ def test_run_validation_collects_missing_columns_and_range_violations(
             "completeness": {"max_null_pct": 0.1},
             "ranges": {
                 "hour_of_day_sin": {"min": -1, "max": 1},
+                "gust_excess_10m": {"min": 0},
                 "wind_direction_10m_cos": {"min": -1, "max": 1},
                 "shore_alignment": {"min": -1, "max": 1},
             },
@@ -147,5 +151,6 @@ def test_run_validation_collects_missing_columns_and_range_violations(
     assert result.missing_columns == ["shore_alignment"]
     assert list(result.range_violations["column"]) == [
         "hour_of_day_sin",
+        "gust_excess_10m",
         "wind_direction_10m_cos",
     ]
