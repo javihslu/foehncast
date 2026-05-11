@@ -2,7 +2,7 @@ name: Terraform
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - terraform/**
       - docker-compose.cloud.yml
@@ -20,12 +20,14 @@ on:
           - destroy
           - cleanup
       destroy_confirmation:
-        description: For destroy only, type the resolved GCP project id to confirm
+        description:
+          For destroy only, type the resolved GCP project id to confirm
           remote teardown
         required: false
         type: string
       cleanup_confirmation:
-        description: For cleanup only, type the resolved GCP project id to confirm
+        description:
+          For cleanup only, type the resolved GCP project id to confirm
           remote cleanup
         required: false
         type: string
@@ -67,6 +69,14 @@ on:
         description: BigQuery feature table id
         required: false
         type: string
+      feast_online_store_location:
+        description: Feast online store location (leave blank to use repo vars)
+        required: false
+        type: string
+      feast_online_store_database_name:
+        description: Feast online store database name (leave blank to use repo vars)
+        required: false
+        type: string
       provision_cloud_run_service:
         description: Provision Cloud Run app service (`true` or `false`; leave blank to use repo vars)
         required: false
@@ -77,6 +87,30 @@ on:
         type: string
       cloud_run_service_name:
         description: Cloud Run service name (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_container_port:
+        description: Cloud Run container port (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_allow_unauthenticated:
+        description: Allow unauthenticated Cloud Run access (`true` or `false`; leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_min_instance_count:
+        description: Minimum Cloud Run instance count (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_max_instance_count:
+        description: Maximum Cloud Run instance count (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_cpu:
+        description: Cloud Run CPU limit (leave blank to use repo vars)
+        required: false
+        type: string
+      cloud_run_memory:
+        description: Cloud Run memory limit (leave blank to use repo vars)
         required: false
         type: string
       provision_online_compose_host:
@@ -104,7 +138,8 @@ permissions:
 
 jobs:
   validate:
-    if: ${{ github.actor == github.repository_owner && github.triggering_actor ==
+    if:
+      ${{ github.actor == github.repository_owner && github.triggering_actor ==
       github.repository_owner }}
     runs-on: ubuntu-latest
     steps:
@@ -115,7 +150,8 @@ jobs:
       - run: terraform -chdir=terraform validate
 
   remote:
-    if: ${{ github.actor == github.repository_owner && github.triggering_actor ==
+    if:
+      ${{ github.actor == github.repository_owner && github.triggering_actor ==
       github.repository_owner && (github.event_name == 'workflow_dispatch' ||
       github.event_name == 'push') }}
     runs-on: ubuntu-latest
@@ -214,8 +250,16 @@ jobs:
           REPO_GCP_BIGQUERY_DATASET: ${{ steps.repo_config.outputs.bigquery_dataset }}
           REPO_GCP_BIGQUERY_LOCATION: ${{ steps.repo_config.outputs.bigquery_location }}
           REPO_GCP_BIGQUERY_TABLE: ${{ steps.repo_config.outputs.bigquery_table }}
+          REPO_GCP_FEAST_ONLINE_STORE_LOCATION: ${{ steps.repo_config.outputs.feast_online_store_location }}
+          REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME: ${{ steps.repo_config.outputs.feast_online_store_database_name }}
           REPO_GCP_PROVISION_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.provision_cloud_run_service }}
           REPO_GCP_CLOUD_RUN_SERVICE_NAME: ${{ steps.repo_config.outputs.cloud_run_service_name }}
+          REPO_GCP_CLOUD_RUN_CONTAINER_PORT: ${{ steps.repo_config.outputs.cloud_run_container_port }}
+          REPO_GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
+          REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT: ${{ steps.repo_config.outputs.cloud_run_min_instance_count }}
+          REPO_GCP_CLOUD_RUN_MAX_INSTANCE_COUNT: ${{ steps.repo_config.outputs.cloud_run_max_instance_count }}
+          REPO_GCP_CLOUD_RUN_CPU: ${{ steps.repo_config.outputs.cloud_run_cpu }}
+          REPO_GCP_CLOUD_RUN_MEMORY: ${{ steps.repo_config.outputs.cloud_run_memory }}
           REPO_GCP_MLFLOW_TRACKING_URI: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
           REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
           REPO_GCP_ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
@@ -239,6 +283,31 @@ jobs:
                 exit 1
                 ;;
             esac
+          }
+
+          normalize_non_negative_integer() {
+            local name="$1"
+            local value="$2"
+
+            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+              echo "${name} must resolve to a non-negative integer, got '${value}'." >&2
+              exit 1
+            fi
+
+            printf '%s\n' "$value"
+          }
+
+          normalize_positive_integer() {
+            local name="$1"
+            local value="$2"
+
+            value="$(normalize_non_negative_integer "$name" "$value")"
+            if [[ "$value" -lt 1 ]]; then
+              echo "${name} must resolve to an integer greater than zero, got '${value}'." >&2
+              exit 1
+            fi
+
+            printf '%s\n' "$value"
           }
 
           project_id="${{ inputs.project_id }}"
@@ -309,6 +378,22 @@ jobs:
             bigquery_feature_table_id='forecast_features'
           fi
 
+          feast_online_store_location="${{ inputs.feast_online_store_location }}"
+          if [[ -z "$feast_online_store_location" ]]; then
+            feast_online_store_location="$REPO_GCP_FEAST_ONLINE_STORE_LOCATION"
+          fi
+          if [[ -z "$feast_online_store_location" ]]; then
+            feast_online_store_location="$region"
+          fi
+
+          feast_online_store_database_name="${{ inputs.feast_online_store_database_name }}"
+          if [[ -z "$feast_online_store_database_name" ]]; then
+            feast_online_store_database_name="$REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME"
+          fi
+          if [[ -z "$feast_online_store_database_name" ]]; then
+            feast_online_store_database_name='feast-online'
+          fi
+
           terraform_command="${{ steps.flags.outputs.command }}"
           destroy_confirmation="${{ inputs.destroy_confirmation }}"
           cleanup_confirmation="${{ inputs.cleanup_confirmation }}"
@@ -336,6 +421,63 @@ jobs:
           if [[ -z "$cloud_run_service_name" ]]; then
             cloud_run_service_name='foehncast-serve'
           fi
+
+          cloud_run_container_port="${{ inputs.cloud_run_container_port }}"
+          if [[ -z "$cloud_run_container_port" ]]; then
+            cloud_run_container_port="$REPO_GCP_CLOUD_RUN_CONTAINER_PORT"
+          fi
+          if [[ -z "$cloud_run_container_port" ]]; then
+            cloud_run_container_port='8080'
+          fi
+          cloud_run_container_port="$(normalize_positive_integer cloud_run_container_port "$cloud_run_container_port")"
+
+          cloud_run_allow_unauthenticated="${{ inputs.cloud_run_allow_unauthenticated }}"
+          if [[ -z "$cloud_run_allow_unauthenticated" ]]; then
+            cloud_run_allow_unauthenticated="$REPO_GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED"
+          fi
+          if [[ -z "$cloud_run_allow_unauthenticated" ]]; then
+            cloud_run_allow_unauthenticated='true'
+          fi
+          cloud_run_allow_unauthenticated="$(normalize_bool cloud_run_allow_unauthenticated "$cloud_run_allow_unauthenticated")"
+
+          cloud_run_min_instance_count="${{ inputs.cloud_run_min_instance_count }}"
+          if [[ -z "$cloud_run_min_instance_count" ]]; then
+            cloud_run_min_instance_count="$REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT"
+          fi
+          if [[ -z "$cloud_run_min_instance_count" ]]; then
+            cloud_run_min_instance_count='0'
+          fi
+          cloud_run_min_instance_count="$(normalize_non_negative_integer cloud_run_min_instance_count "$cloud_run_min_instance_count")"
+
+          cloud_run_max_instance_count="${{ inputs.cloud_run_max_instance_count }}"
+          if [[ -z "$cloud_run_max_instance_count" ]]; then
+            cloud_run_max_instance_count="$REPO_GCP_CLOUD_RUN_MAX_INSTANCE_COUNT"
+          fi
+          if [[ -z "$cloud_run_max_instance_count" ]]; then
+            cloud_run_max_instance_count='2'
+          fi
+          cloud_run_max_instance_count="$(normalize_non_negative_integer cloud_run_max_instance_count "$cloud_run_max_instance_count")"
+          if [[ "$cloud_run_max_instance_count" -lt "$cloud_run_min_instance_count" ]]; then
+            echo "cloud_run_max_instance_count must be greater than or equal to cloud_run_min_instance_count." >&2
+            exit 1
+          fi
+
+          cloud_run_cpu="${{ inputs.cloud_run_cpu }}"
+          if [[ -z "$cloud_run_cpu" ]]; then
+            cloud_run_cpu="$REPO_GCP_CLOUD_RUN_CPU"
+          fi
+          if [[ -z "$cloud_run_cpu" ]]; then
+            cloud_run_cpu='1'
+          fi
+
+          cloud_run_memory="${{ inputs.cloud_run_memory }}"
+          if [[ -z "$cloud_run_memory" ]]; then
+            cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"
+          fi
+          if [[ -z "$cloud_run_memory" ]]; then
+            cloud_run_memory='512Mi'
+          fi
+
           if [[ "$provision_cloud_run_service" == 'true' && -z "$mlflow_tracking_uri" ]]; then
             echo "Resolve mlflow_tracking_uri from the workflow input or repository variable GCP_MLFLOW_TRACKING_URI when provision_cloud_run_service is true." >&2
             exit 1
@@ -392,9 +534,17 @@ jobs:
             echo "TF_VAR_bigquery_dataset_id=${bigquery_dataset_id}"
             echo "TF_VAR_bigquery_location=${bigquery_location}"
             echo "TF_VAR_bigquery_feature_table_id=${bigquery_feature_table_id}"
+            echo "TF_VAR_feast_online_store_location=${feast_online_store_location}"
+            echo "TF_VAR_feast_online_store_database_name=${feast_online_store_database_name}"
             echo "TF_VAR_provision_cloud_run_service=${provision_cloud_run_service}"
             echo "TF_VAR_mlflow_tracking_uri=${mlflow_tracking_uri}"
             echo "TF_VAR_cloud_run_service_name=${cloud_run_service_name}"
+            echo "TF_VAR_cloud_run_container_port=${cloud_run_container_port}"
+            echo "TF_VAR_cloud_run_allow_unauthenticated=${cloud_run_allow_unauthenticated}"
+            echo "TF_VAR_cloud_run_min_instance_count=${cloud_run_min_instance_count}"
+            echo "TF_VAR_cloud_run_max_instance_count=${cloud_run_max_instance_count}"
+            echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"
+            echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"
             echo "TF_VAR_provision_online_compose_host=${provision_online_compose_host}"
             echo "TF_VAR_online_compose_host_name=${online_compose_host_name}"
             echo "TF_VAR_online_compose_host_zone=${online_compose_host_zone}"
@@ -499,7 +649,8 @@ jobs:
 
       - name: Remote cleanup clear repository variables
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' && inputs.cleanup_clear_github_actions == true }}
-        run: ./scripts/configure-github-actions.sh --clear --repo "${{ github.repository
+        run:
+          ./scripts/configure-github-actions.sh --clear --repo "${{ github.repository
           }}"
 
       - name: Sync repository variables
@@ -525,6 +676,10 @@ jobs:
             printf '%s\n' "$fallback"
           }
 
+          feast_bigquery_dataset="$(render_output bigquery_dataset_id "${TF_VAR_bigquery_dataset_id}")"
+          feast_bigquery_table="$(render_output bigquery_feature_table_id "${TF_VAR_bigquery_feature_table_id}")"
+          feast_online_store_database_name="$(render_output feast_online_store_database_name "${TF_VAR_feast_online_store_database_name}")"
+
           {
             echo "## Terraform apply"
             echo
@@ -532,6 +687,10 @@ jobs:
             echo "- Airflow URL: $(render_output online_compose_airflow_url host-local-by-default)"
             echo "- MLflow URL: $(render_output online_compose_mlflow_url host-local-by-default)"
             echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
+            echo "- Hosted Feast source: bigquery"
+            echo "- Hosted Feast offline source table: ${TF_VAR_project_id}.${feast_bigquery_dataset}.${feast_bigquery_table}"
+            echo "- Hosted Feast online store database: ${feast_online_store_database_name}"
+            echo "- Feast follow-up: after curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize destroy

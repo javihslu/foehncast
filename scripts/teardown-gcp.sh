@@ -168,6 +168,9 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
   if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "false" ]]; then
     echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to preview in this working copy."
     echo "If this environment was provisioned through the remote Terraform backend, use ./scripts/terraform-remote.sh destroy instead."
+  elif [[ ! -f "$TFVARS_FILE" ]]; then
+    echo "Terraform variables file not found: $TFVARS_FILE. Nothing to preview in this working copy."
+    echo "Reuse the file created for provisioning to preview local destroy targets, or use ./scripts/terraform-remote.sh destroy for remote-backend environments."
   else
     ensure_terraform_command
     require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."

@@ -33,38 +33,35 @@ locals {
   )
   online_compose_env_vars = merge(
     {
-      APP_BIND_HOST                        = contains(var.online_compose_public_ports, 8000) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_BIND_HOST                    = contains(var.online_compose_public_ports, 8080) ? "0.0.0.0" : "127.0.0.1"
-      MLFLOW_BIND_HOST                     = contains(var.online_compose_public_ports, 5001) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_CREATE_ADMIN_USER            = "true"
-      AIRFLOW_ADMIN_USERNAME               = var.online_compose_airflow_admin_username
-      AIRFLOW_ADMIN_FIRSTNAME              = "FoehnCast"
-      AIRFLOW_ADMIN_LASTNAME               = "Admin"
-      AIRFLOW_ADMIN_ROLE                   = "Admin"
-      AIRFLOW_ADMIN_EMAIL                  = "admin@example.com"
-      AIRFLOW_ADMIN_PASSWORD_FILE          = "/workspace/airflow/.admin-password"
-      AIRFLOW__WEBSERVER__CONFIG_FILE      = "/opt/airflow/webserver_config_cloud.py"
-      GCP_PROJECT_ID                       = var.project_id
-      GCP_LOCATION                         = var.region
-      GCP_BUCKET_NAME                      = var.artifact_bucket_name
-      MLFLOW_ARTIFACT_DESTINATION          = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      STORAGE_BACKEND                      = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
-      STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE               = var.bigquery_feature_table_id
-      FOEHNCAST_FEAST_SOURCE               = "bigquery"
-      FOEHNCAST_FEAST_PROJECT              = "foehncast"
-      FOEHNCAST_FEAST_PROJECT_ID           = var.project_id
-      FOEHNCAST_FEAST_REGISTRY             = local.feast_registry_uri
-      FOEHNCAST_FEAST_GCS_BUCKET           = var.artifact_bucket_name
-      FOEHNCAST_FEAST_GCS_STAGING_LOCATION = local.feast_staging_uri
-      FOEHNCAST_FEAST_BIGQUERY_DATASET     = var.bigquery_dataset_id
-      FOEHNCAST_FEAST_BIGQUERY_LOCATION    = var.bigquery_location
-      FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
-      FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
-      FOEHNCAST_APP_IMAGE                  = local.online_compose_app_image
-      FOEHNCAST_AIRFLOW_IMAGE              = local.online_compose_airflow_image
-      FOEHNCAST_MLFLOW_IMAGE               = local.online_compose_mlflow_image
+      APP_BIND_HOST                                 = contains(var.online_compose_public_ports, 8000) ? "0.0.0.0" : "127.0.0.1"
+      AIRFLOW_BIND_HOST                             = contains(var.online_compose_public_ports, 8080) ? "0.0.0.0" : "127.0.0.1"
+      MLFLOW_BIND_HOST                              = contains(var.online_compose_public_ports, 5001) ? "0.0.0.0" : "127.0.0.1"
+      AIRFLOW_ADMIN_USERNAME                        = var.online_compose_airflow_admin_username
+      AIRFLOW_ADMIN_PASSWORD_FILE                   = "/workspace/airflow/.admin-password"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS = "false"
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS      = "${var.online_compose_airflow_admin_username}:admin"
+      AIRFLOW__API_AUTH__JWT_SECRET                 = random_password.airflow_api_auth_jwt_secret.result
+      GCP_PROJECT_ID                                = var.project_id
+      GCP_LOCATION                                  = var.region
+      GCP_BUCKET_NAME                               = var.artifact_bucket_name
+      MLFLOW_ARTIFACT_DESTINATION                   = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
+      STORAGE_BACKEND                               = "bigquery"
+      STORAGE_BIGQUERY_PROJECT_ID                   = var.project_id
+      STORAGE_BIGQUERY_DATASET                      = var.bigquery_dataset_id
+      STORAGE_BIGQUERY_TABLE                        = var.bigquery_feature_table_id
+      FOEHNCAST_FEAST_SOURCE                        = "bigquery"
+      FOEHNCAST_FEAST_PROJECT                       = "foehncast"
+      FOEHNCAST_FEAST_PROJECT_ID                    = var.project_id
+      FOEHNCAST_FEAST_REGISTRY                      = local.feast_registry_uri
+      FOEHNCAST_FEAST_GCS_BUCKET                    = var.artifact_bucket_name
+      FOEHNCAST_FEAST_GCS_STAGING_LOCATION          = local.feast_staging_uri
+      FOEHNCAST_FEAST_BIGQUERY_DATASET              = var.bigquery_dataset_id
+      FOEHNCAST_FEAST_BIGQUERY_LOCATION             = var.bigquery_location
+      FOEHNCAST_FEAST_BIGQUERY_TABLE                = local.feast_bigquery_table
+      FOEHNCAST_FEAST_DATASTORE_DATABASE            = var.feast_online_store_database_name
+      FOEHNCAST_APP_IMAGE                           = local.online_compose_app_image
+      FOEHNCAST_AIRFLOW_IMAGE                       = local.online_compose_airflow_image
+      FOEHNCAST_MLFLOW_IMAGE                        = local.online_compose_mlflow_image
     },
     var.online_compose_env_vars,
   )
@@ -226,6 +223,11 @@ locals {
     "run.googleapis.com",
     "sts.googleapis.com",
   ])
+}
+
+resource "random_password" "airflow_api_auth_jwt_secret" {
+  length  = 32
+  special = false
 }
 
 resource "google_project_service" "required" {

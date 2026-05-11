@@ -210,6 +210,18 @@ read_tfvars_value() {
     fi
   }
 
+  print_feast_runtime_summary() {
+    local feast_bigquery_table
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    feast_bigquery_table="${FOEHNCAST_TF_PROJECT_ID}.${FOEHNCAST_TF_BIGQUERY_DATASET}.${FOEHNCAST_TF_BIGQUERY_TABLE}"
+
+    echo "Hosted Feast runtime source: bigquery"
+    echo "Hosted Feast offline source table: ${feast_bigquery_table}"
+    echo "Hosted Feast online store database: ${FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE}"
+    echo "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
+  }
+
   print_bootstrap_only_summary() {
     local state_bucket state_prefix
 
@@ -736,6 +748,7 @@ else
     echo "Syncing local cloud identifiers into .env..."
     sync_env_from_terraform_outputs
     print_auth_summary
+    print_feast_runtime_summary
   fi
 fi
 
