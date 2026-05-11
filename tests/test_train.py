@@ -263,13 +263,20 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         lambda: {"tracking_uri": "http://mlflow", "experiment_name": "foehncast"},
     )
     monkeypatch.setattr(train, "get_mlflow_tracking_uri", lambda: "http://mlflow")
+
+    def fake_load_training_data(
+        dataset: str = "train",
+    ) -> tuple[pd.DataFrame, pd.Series]:
+        logged["dataset"] = dataset
+        return (
+            labeled_training_df[model_config["features"]],
+            labeled_training_df[model_config["target"]],
+        )
+
     monkeypatch.setattr(
         train,
         "load_training_data",
-        lambda: (
-            labeled_training_df[model_config["features"]],
-            labeled_training_df[model_config["target"]],
-        ),
+        fake_load_training_data,
     )
     monkeypatch.setattr(
         train,
@@ -297,12 +304,14 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         lambda: ["scikit-learn==1.8.0", "cloudpickle==3.1.1"],
     )
 
-    run_id = train.run_training_pipeline(model_config)
+    run_id = train.run_training_pipeline(model_config, dataset="validation")
 
     assert run_id == "run-123"
+    assert logged["dataset"] == "validation"
     assert logged["tracking_uri"] == "http://mlflow"
     assert logged["experiment_name"] == "foehncast"
     assert logged["run_name"] == "random_forest-train"
+    assert logged["params"]["dataset"] == "validation"
     assert logged["params"]["algorithm"] == "random_forest"
     assert set(logged["metrics"].keys()) >= {
         "mae",
