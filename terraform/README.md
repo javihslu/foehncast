@@ -67,6 +67,7 @@ When `provision_cloud_run_service = true`, provide:
 - any extra runtime configuration in `cloud_run_env_vars`
 
 Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
+That runtime service account includes both BigQuery job access and BigQuery Storage API read-session access so pandas-backed BigQuery reads can succeed without falling back to mounted credentials.
 Terraform also injects the Feast runtime env contract for the hosted app path: the service gets `FOEHNCAST_FEAST_SOURCE=bigquery`, the managed bucket-backed registry and staging paths, the fully-qualified curated BigQuery table reference used by the rendered Feast runtime config, and the named Datastore-mode database used for Feast online serving.
 
 ## Hosted Full-Stack Target Inputs
@@ -84,7 +85,7 @@ The same generated `.env` also points the hosted MLflow service at `gs://<artifa
 
 The hosted baseline also provisions a Firestore Datastore-mode database dedicated to Feast online serving. Using a named database avoids coupling the repo to whatever default Firestore state a reused GCP project may already have.
 
-The host uses a dedicated runtime service account with BigQuery job access, BigQuery dataset edit access, and Datastore user access, so the Airflow, training, Feast, app, and MLflow containers can rely on Application Default Credentials instead of mounted key files.
+The host uses a dedicated runtime service account with BigQuery job access, BigQuery Storage API read-session access, BigQuery dataset edit access, bucket object-admin access for MLflow and Feast artifacts, and Datastore user access, so the Airflow, training, Feast, app, and MLflow containers can rely on Application Default Credentials instead of mounted key files.
 
 After curated BigQuery rows are available, run `./scripts/prepare-feast-cloud.sh` on the host or from another shell with ADC to apply the Feast repo and materialize the hosted online store.
 
@@ -180,6 +181,8 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies resync the repository variables automatically.
 
 Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
+
+GitHub limits `workflow_dispatch` to 25 inputs. The manual workflow therefore keeps the higher-value environment and topology overrides exposed there, while lower-level Cloud Run sizing defaults such as container port, CPU, and memory stay repo-variable-backed through the Terraform sync contract.
 
 For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 

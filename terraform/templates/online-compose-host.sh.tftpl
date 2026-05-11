@@ -23,6 +23,10 @@ systemctl enable docker --now
 
 install -d -m 0755 /opt/foehncast
 
+airflow_uid=50000
+app_uid=1000
+grafana_uid=472
+
 if [[ ! -d /opt/foehncast/.git ]]; then
   git clone "https://github.com/${github_repository_path}.git" /opt/foehncast
 fi
@@ -30,12 +34,20 @@ fi
 git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"
 git -C /opt/foehncast checkout --force FETCH_HEAD
 
-install -d -m 0700 /opt/foehncast/airflow
+install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports
+install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast
+install -d -m 0755 /opt/foehncast/grafana_work/data
+
+chown -R $${airflow_uid}:0 /opt/foehncast/airflow
+chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state
+chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data
+
 if [[ ! -s /opt/foehncast/airflow/.admin-password ]]; then
   head -c 32 /dev/urandom | base64 | tr -d '\n' > /opt/foehncast/airflow/.admin-password
   printf '\n' >> /opt/foehncast/airflow/.admin-password
-  chmod 600 /opt/foehncast/airflow/.admin-password
 fi
+chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password
+chmod 600 /opt/foehncast/airflow/.admin-password
 
 cat > /opt/foehncast/.env <<'EOF'
 %{ for key, value in stack_env ~}

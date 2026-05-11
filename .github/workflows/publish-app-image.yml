@@ -186,7 +186,8 @@ jobs:
             --image "$IMAGE_URI" \
             --quiet
 
-          echo "service_url=$(gcloud run services describe \"$CLOUD_RUN_SERVICE\" --project \"$GCP_PROJECT_ID\" --region \"$GCP_LOCATION\" --format='value(status.url)')" >> "$GITHUB_OUTPUT"
+          service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
+          echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
 
       - name: Summarize Cloud Run deployment
         run: |

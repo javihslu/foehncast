@@ -220,6 +220,10 @@ record_input() {
       INPUT_FEAST_ONLINE_STORE_DATABASE_NAME="$value"
       EXTRA_INPUTS+=("$input")
       ;;
+    cloud_run_container_port|cloud_run_cpu|cloud_run_memory)
+      echo "${key} is not exposed as a workflow_dispatch input. Update the synced repository variable or Terraform configuration instead." >&2
+      exit 1
+      ;;
     cleanup_clear_github_actions)
       CLEANUP_CLEAR_GITHUB_ACTIONS="$(normalize_bool "$value")"
       ;;
