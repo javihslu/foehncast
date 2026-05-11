@@ -28,6 +28,7 @@ flowchart LR
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes |
 | Hosted runtime | Working | Terraform can provision either a hosted full-stack target on one GCP host or an inference-only Cloud Run service |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
+| Monitoring | Working | Docker Compose provisions Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; and Grafana loads starter dashboards plus alert rules from checked-in config |
 
 ## Default Setup
 
@@ -50,21 +51,28 @@ This is the default path for a fresh machine.
 3. Run `./scripts/bootstrap-local.sh`.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
-The local bootstrap uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, and it prepares Feast against the bundled Datastore-mode emulator before declaring the stack ready. If the preferred host ports are already busy, the helper moves the local bindings to the next free ports and prints the resolved endpoints.
+The local bootstrap uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, prepares Feast against the bundled Datastore-mode emulator, and confirms Grafana loaded the checked-in dashboard plus alerting resources before declaring the stack ready. If the preferred host ports are already busy, the helper moves the local bindings to the next free ports and prints the resolved endpoints.
 On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically; the `training_pipeline` DAG remains manual.
 The optional `development_env` notebook container stays out of the default runtime path and starts only when you explicitly target the notebook or dev-shell Makefile commands.
 
 After bootstrap completes, the main local endpoints are:
 
 - App: `http://127.0.0.1:8000`
+- App metrics: `http://127.0.0.1:8000/metrics`
 - Airflow: `http://127.0.0.1:8080`
 - MLflow: `http://127.0.0.1:5001`
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000`
+- StatsD UDP sink: `127.0.0.1:8125`
+- StatsD exporter: `http://127.0.0.1:9102/metrics`
 
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
 Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`. That runtime log lets the monitoring layer compare recent model outputs against earlier outputs from the same model version without mixing disposable service state into `data/`.
 
-The local bootstrap resets Docker volumes and disposable runtime artifacts, then verifies the live `/features/online` route before it reports the stack ready.
+Grafana also provisions a starter email contact point for the checked-in alert rules. The local Docker path keeps that route on the built-in placeholder address.
+
+The local bootstrap resets Docker volumes and disposable runtime artifacts, then verifies the live `/features/online` route plus the Grafana provisioning API before it reports the stack ready.
 
 Example check:
 
@@ -93,6 +101,7 @@ Hosted deployment keeps its scope narrow. The cloud targets deploy runtime servi
 - `scripts/`: local bootstrap plus maintainer utilities
 - `terraform/`: maintainer cloud infrastructure definition and reference
 - `feature_repo/`: Feast integration surface and config repo
+- `prometheus_config/` and `grafana_work/`: checked-in monitoring stack configuration for Prometheus and Grafana
 - `tests/`: regression coverage for pipeline logic and API behavior
 - `docs/`: GitHub Pages source for the public project documentation
 

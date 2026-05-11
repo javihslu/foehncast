@@ -10,6 +10,7 @@ flowchart LR
 		Airflow[Airflow services]
 		MLflow[MLflow]
 		API[FastAPI app]
+		Monitor[Prometheus + StatsD exporter + Grafana]
 	end
 	subgraph LocalOnly[Local-only services]
 		Dev[optional development_env]
@@ -21,6 +22,7 @@ flowchart LR
 	Objectstore --> Airflow
 	Objectstore --> API
 	Emulator --> API
+	API --> Monitor
 	Dev --> Tests[Local tools and tests]
 ```
 
@@ -44,6 +46,7 @@ flowchart LR
 |---------------|-----------------|--------------------------|-------------------------|
 | optional `development_env`, MinIO, Feast emulator | yes | no | no |
 | Airflow, MLflow, app | yes | yes | app only |
+| Prometheus, StatsD exporter, Grafana | yes | yes | no |
 
 ## Main Components
 
@@ -69,19 +72,27 @@ flowchart LR
 - `app`: runs the FastAPI inference service in its own container so prediction and ranking are part of the stack.
 - the runtime image includes Feast support and the bundled `feature_repo/` contract so online feature access is part of the deployable app surface.
 
+### `monitoring/`
+
+- `prometheus`: scrapes the app `/metrics` route, the StatsD exporter, and stack monitoring surfaces.
+- `statsd`: exposes the UDP sink that FoehnCast monitoring helpers push to, then republishes them in Prometheus format.
+- `grafana`: provisions the Prometheus datasource, starter FoehnCast dashboard, alert rules, and a starter notification route from checked-in config.
+
+The starter notification route stays on a built-in placeholder address for the local Docker path. If the hosted full-stack target needs real mail delivery, inject `FOEHNCAST_GRAFANA_ALERT_EMAIL` through Terraform `online_compose_env_vars` and add Grafana SMTP settings for that tenant.
+
 ### `feast_online_store/`
 
 - `feast-online-store`: runs the Firestore emulator in Datastore mode so the local Feast online store matches the hosted Datastore contract more closely without requiring local `gcloud`.
 
 ## Default Local Path
 
-For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the API health endpoint.
+For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the app plus Grafana monitoring surfaces.
 
 This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it.
 
 The default local path uses the bundled MinIO service for curated feature storage and MLflow artifacts, starts Airflow and MLflow without a login, prepares Feast against the bundled Datastore-mode emulator, and resets Docker volumes plus disposable local runtime artifacts for a clean run each time. The helper keeps the container-side endpoints on `objectstore:9000` and `feast-online-store:8080`, and can shift the host-exposed ports when the preferred defaults are already occupied.
 The optional `development_env` container now stays off unless you explicitly target it through the dedicated Makefile notebook and dev-shell commands.
-The app image itself is Feast-capable, and the local bootstrap prepares Feast state and verifies the online-feature route before declaring the stack ready.
+The app image itself is Feast-capable, and the local bootstrap prepares Feast state, verifies the online-feature route, and confirms that Grafana loaded the checked-in dashboard and alerting resources before declaring the stack ready.
 
 The initialized local runtime file is `.env`. The bootstrap script creates it from `.env.example` on first run if it does not exist yet.
 
@@ -91,7 +102,10 @@ Run these checks before deployment work:
 2. `docker compose -f docker-compose.yml -f docker-compose.objectstore.yml ps -a`
 3. `curl -fsS http://127.0.0.1:8080/api/v2/monitor/health`
 4. `curl -fsS http://127.0.0.1:8000/health`
-5. `docker compose -f docker-compose.yml -f docker-compose.objectstore.yml exec -T airflow-scheduler airflow dags list`
+5. `curl -fsS http://127.0.0.1:8000/metrics`
+6. `curl -fsS http://127.0.0.1:9090/-/ready`
+7. `curl -fsS http://127.0.0.1:3000/api/health`
+8. `docker compose -f docker-compose.yml -f docker-compose.objectstore.yml exec -T airflow-scheduler airflow dags list`
 
 ## Hosted Reuse
 

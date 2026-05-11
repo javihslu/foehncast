@@ -12,7 +12,7 @@ This is the default path for a fresh machine.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
-The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
+The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. The same local stack now includes Prometheus, a StatsD exporter, and Grafana from checked-in monitoring config, and the bootstrap helper verifies that Grafana loaded its starter resources before reporting success. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
 The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
 
 Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`, so the monitoring layer can compare recent model outputs against earlier outputs from the same model version without mixing runtime state into `data/`.
@@ -20,8 +20,11 @@ Prediction requests also append flattened local inference rows to `.state/monito
 After bootstrap completes, the main local endpoints are:
 
 - App: `http://127.0.0.1:8000`
+- App metrics: `http://127.0.0.1:8000/metrics`
 - Airflow: `http://127.0.0.1:8080`
 - MLflow: `http://127.0.0.1:5001`
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000`
 - Objectstore UI: printed by the bootstrap helper when the stack comes up
 - Feast online store emulator: printed by the bootstrap helper when the stack comes up
 
