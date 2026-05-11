@@ -16,6 +16,8 @@ dags/
 scripts/
 terraform/
 feature_repo/
+prometheus_config/
+grafana_work/
 tests/
 docs/
 ```
@@ -27,6 +29,7 @@ docs/
 - `scripts/`: local bootstrap, cloud bootstrap, remote Terraform, and helper scripts.
 - `terraform/`: hosted infrastructure definition plus operator-facing notes.
 - `feature_repo/`: the Feast integration repo and configuration surface.
+- `prometheus_config/` and `grafana_work/`: the checked-in monitoring stack configuration for Prometheus and Grafana.
 - `tests/`: regression coverage for the core pipeline logic and API behavior.
 - `docs/`: the public documentation site, milestone pages, and system notes used in the course handoff.
 

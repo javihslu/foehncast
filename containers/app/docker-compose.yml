@@ -17,6 +17,9 @@ services:
     environment:
       MLFLOW_TRACKING_URI: http://model-registry:5001
       GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
+      FOEHNCAST_STATSD_HOST: statsd
+      FOEHNCAST_STATSD_PORT: 8125
+      FOEHNCAST_STATSD_PREFIX: ${FOEHNCAST_STATSD_PREFIX:-drift_metrics}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: 8000
     volumes:

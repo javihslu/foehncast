@@ -10,6 +10,8 @@ TRAINING_DATE="${TRAINING_DATE:-2024-01-02}"
 AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/api/v2/monitor/health}"
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
+GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-http://127.0.0.1:3000}"
+GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 
@@ -123,6 +125,9 @@ BOOTSTRAP_SERVICES=(
   airflow-scheduler
   airflow-triggerer
   app
+  statsd
+  prometheus
+  grafana
 )
 
 compose() {
@@ -217,6 +222,83 @@ wait_for_service_health() {
   return 1
 }
 
+grafana_api_get() {
+  local path="$1"
+
+  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "${GRAFANA_BASE_URL}${path}"
+}
+
+require_payload_pattern() {
+  local payload="$1"
+  local pattern="$2"
+  local description="$3"
+
+  if ! printf '%s' "$payload" | grep -Eq "$pattern"; then
+    echo "Grafana provisioning check failed: expected ${description}." >&2
+    printf '%s\n' "$payload" >&2
+    return 1
+  fi
+}
+
+verify_grafana_provisioning() {
+  local dashboard_payload alert_rules_payload contact_points_payload policies_payload
+
+  echo "Waiting for Grafana health..."
+  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$GRAFANA_HEALTH_URL" >/dev/null
+
+  echo "Checking Grafana dashboard provisioning..."
+  dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-monitoring")"
+  require_payload_pattern \
+    "$dashboard_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast-monitoring"' \
+    'dashboard uid foehncast-monitoring'
+  require_payload_pattern \
+    "$dashboard_payload" \
+    '"title"[[:space:]]*:[[:space:]]*"FoehnCast Monitoring"' \
+    'dashboard title FoehnCast Monitoring'
+
+  echo "Checking Grafana alert-rule provisioning..."
+  alert_rules_payload="$(grafana_api_get "/api/v1/provisioning/alert-rules")"
+  require_payload_pattern \
+    "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_schedule_fail"' \
+    'schedule failure alert rule'
+  require_payload_pattern \
+    "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_execution_fail"' \
+    'execution failure alert rule'
+  require_payload_pattern \
+    "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_stale_success"' \
+    'stale success alert rule'
+
+  echo "Checking Grafana contact point provisioning..."
+  contact_points_payload="$(grafana_api_get "/api/v1/provisioning/contact-points?name=foehncast-email")"
+  require_payload_pattern \
+    "$contact_points_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_email"' \
+    'foehncast email contact point uid'
+  require_payload_pattern \
+    "$contact_points_payload" \
+    '"name"[[:space:]]*:[[:space:]]*"foehncast-email"' \
+    'foehncast email contact point name'
+
+  echo "Checking Grafana notification policy provisioning..."
+  policies_payload="$(grafana_api_get "/api/v1/provisioning/policies")"
+  require_payload_pattern \
+    "$policies_payload" \
+    '"receiver"[[:space:]]*:[[:space:]]*"foehncast-email"' \
+    'notification policy receiver foehncast-email'
+  require_payload_pattern \
+    "$policies_payload" \
+    '"object_matchers"' \
+    'notification policy route matchers'
+  require_payload_pattern \
+    "$policies_payload" \
+    '"inference-monitoring"' \
+    'notification policy inference-monitoring matcher'
+}
+
 RUN_MODE_LABEL="local MinIO-backed objectstore baseline"
 
 export STORAGE_BACKEND="s3"
@@ -290,6 +372,8 @@ curl --retry 30 --retry-all-errors --retry-delay 2 -fsS -X POST "$FEAST_DATASTOR
 echo "Waiting for Airflow API server health..."
 curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$AIRFLOW_HEALTH_URL" >/dev/null
 
+verify_grafana_provisioning
+
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 
@@ -314,6 +398,7 @@ echo "Profile:  ${RUN_MODE_LABEL}"
 echo "App:      http://127.0.0.1:8000"
 echo "Airflow:  http://127.0.0.1:8080"
 echo "MLflow:   http://127.0.0.1:5001"
+echo "Grafana:  ${GRAFANA_BASE_URL}"
 echo "Feast:    /features/online verified"
 echo "Airflow UI/API and MLflow open directly in local mode."
 echo "This bootstrap path resets local Docker volumes and disposable local runtime artifacts so each run starts clean."
@@ -322,7 +407,7 @@ echo "This keeps the local object-access layer aligned with the hosted GCS-facin
 echo "Objectstore API: ${OBJECTSTORE_ENDPOINT}"
 echo "Objectstore UI:  http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_CONSOLE_PORT}"
 echo "Feast online store: http://${DATASTORE_EMULATOR_HOST}"
-echo "The local bootstrap also prepares Feast state and verifies the online-feature route against the running app."
+echo "The local bootstrap also prepares Feast state, verifies the online-feature route, and confirms Grafana loaded the checked-in dashboard and alerting resources."
 echo
 echo "Sample check:"
 echo "curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{\"spot_ids\":[\"silvaplana\",\"urnersee\"]}'"

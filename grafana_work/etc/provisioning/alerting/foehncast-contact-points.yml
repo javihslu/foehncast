@@ -1,0 +1,10 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: foehncast-email
+    receivers:
+      - uid: foehncast_email
+        type: email
+        settings:
+          addresses: $FOEHNCAST_GRAFANA_ALERT_EMAIL

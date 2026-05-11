@@ -49,6 +49,7 @@ flowchart LR
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
 | Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
 | Online features | Surface curated fields through an online lookup route | Feast-backed path plus demo page |
+| Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana |
 
 ## Deployment Targets
 
@@ -62,8 +63,8 @@ flowchart LR
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
-| Local evaluator target | Airflow, MLflow, FastAPI, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and course evaluation |
-| Hosted full-stack target | Airflow, MLflow, and FastAPI on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep the whole stack online |
+| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and course evaluation |
+| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep the whole stack online |
 | Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | publish the inference API as a smaller hosted surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | repeatable delivery, not a runtime target |
 
@@ -85,6 +86,7 @@ flowchart TD
     PAR --> OFF[Feast offline export]
     OFF --> FEAST[(Datastore-mode emulator)]
     FEAST --> APP
+    APP --> MON[Prometheus + StatsD exporter + Grafana]
 </div>
 
 ## Hosted Runtime Detail

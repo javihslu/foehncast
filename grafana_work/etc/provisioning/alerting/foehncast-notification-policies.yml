@@ -1,0 +1,22 @@
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: foehncast-email
+    group_by:
+      - alertname
+      - severity
+    group_wait: 30s
+    group_interval: 15m
+    repeat_interval: 4h
+    routes:
+      - receiver: foehncast-email
+        object_matchers:
+          - [component, "=", inference-monitoring]
+        group_by:
+          - alertname
+          - endpoint
+          - severity
+        group_wait: 0s
+        group_interval: 15m
+        repeat_interval: 4h

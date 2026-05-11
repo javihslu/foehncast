@@ -1,0 +1,49 @@
+services:
+  statsd:
+    container_name: statsd
+    image: prom/statsd-exporter
+    command:
+      - --statsd.mapping-config=/etc/statsd-exporter/statsd_metrics-mapping.yml
+      - --statsd.listen-udp=:8125
+      - --web.listen-address=:9102
+    ports:
+      - ${STATSD_BIND_HOST:-127.0.0.1}:${STATSD_PORT:-8125}:8125/udp
+      - ${STATSD_EXPORTER_BIND_HOST:-127.0.0.1}:${STATSD_EXPORTER_PORT:-9102}:9102
+    volumes:
+      - ../../prometheus_config/statsd_metrics-mapping.yml:/etc/statsd-exporter/statsd_metrics-mapping.yml:ro
+    networks:
+      - development
+      - production
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    ports:
+      - ${PROMETHEUS_BIND_HOST:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090
+    volumes:
+      - ../../prometheus_config:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    networks:
+      - production
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana
+    depends_on:
+      - prometheus
+    environment:
+      FOEHNCAST_GRAFANA_ALERT_EMAIL: ${FOEHNCAST_GRAFANA_ALERT_EMAIL:-alerts@example.invalid}
+    ports:
+      - ${GRAFANA_BIND_HOST:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000
+    volumes:
+      - ../../grafana_work/etc:/etc/grafana:ro
+      - ../../grafana_work/data:/var/lib/grafana
+      - ../../grafana_work/dashboards:/opt/grafana/dashboards:ro
+    networks:
+      - production
+
+volumes:
+  prometheus_data:
