@@ -62,6 +62,26 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def wind_direction_10m_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical sine encoding of 10m wind direction in degrees."""
+    values = np.sin(np.radians(df["wind_direction_10m"]))
+    return pd.Series(values, index=df.index, name="wind_direction_10m_sin")
+
+
+def wind_direction_10m_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical cosine encoding of 10m wind direction in degrees."""
+    values = np.cos(np.radians(df["wind_direction_10m"]))
+    return pd.Series(values, index=df.index, name="wind_direction_10m_cos")
+
+
+def add_direction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add cyclical encodings for raw direction features used by the model."""
+    out = df.copy()
+    out["wind_direction_10m_sin"] = wind_direction_10m_sin(df)
+    out["wind_direction_10m_cos"] = wind_direction_10m_cos(df)
+    return out
+
+
 def wind_steadiness(df: pd.DataFrame, window: int = 3) -> pd.Series:
     """Coefficient of variation of 10m wind over a rolling window.
 
@@ -122,9 +142,9 @@ def engineer_features(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Data
 
     Returns:
         DataFrame with added columns for cyclical time, wind steadiness,
-        gust factor, and shore alignment.
+        wind direction, gust factor, and shore alignment.
     """
-    out = add_time_features(df)
+    out = add_direction_features(add_time_features(df))
     out["wind_steadiness"] = wind_steadiness(df)
     out["gust_factor"] = gust_factor(df)
     out["shore_alignment"] = shore_alignment(df, shore_orientation_deg)

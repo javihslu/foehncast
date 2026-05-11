@@ -15,7 +15,6 @@ def feature_columns() -> list[str]:
     return [
         "wind_speed_10m",
         "wind_speed_80m",
-        "wind_direction_10m",
         "wind_gusts_10m",
         "temperature_2m",
         "relative_humidity_2m",
@@ -23,6 +22,8 @@ def feature_columns() -> list[str]:
         "hour_of_day_cos",
         "day_of_year_sin",
         "day_of_year_cos",
+        "wind_direction_10m_sin",
+        "wind_direction_10m_cos",
         "wind_steadiness",
         "gust_factor",
         "shore_alignment",
@@ -54,12 +55,14 @@ def labeled_training_df(feature_columns: list[str]) -> pd.DataFrame:
         "hour_of_day_cos": [1.0, 0.9659258263, 0.8660254038],
         "day_of_year_sin": [0.0, 0.0, 0.0],
         "day_of_year_cos": [1.0, 1.0, 1.0],
+        "wind_direction_10m_sin": [-0.5, -0.6427876097, -0.7660444431],
+        "wind_direction_10m_cos": [-0.8660254038, -0.7660444431, -0.6427876097],
         "wind_steadiness": [0.12, 0.15, 0.10],
         "gust_factor": [1.2, 1.15, 1.1],
         "shore_alignment": [0.7, 0.8, 0.9],
         "quality_index": [2, 3, 4],
     }
-    return pd.DataFrame(base_data, index=index)[[*feature_columns, "quality_index"]]
+    return pd.DataFrame(base_data, index=index)
 
 
 def test_load_training_data_concatenates_spot_frames(
@@ -106,6 +109,8 @@ def test_load_training_data_adds_time_features_before_labeling(
             "hour_of_day_cos",
             "day_of_year_sin",
             "day_of_year_cos",
+            "wind_direction_10m_sin",
+            "wind_direction_10m_cos",
         ]
     )
 
@@ -132,6 +137,8 @@ def test_load_training_data_adds_time_features_before_labeling(
     assert "hour_of_day_cos" in logged["columns_before_labeling"]
     assert "day_of_year_sin" in logged["columns_before_labeling"]
     assert "day_of_year_cos" in logged["columns_before_labeling"]
+    assert "wind_direction_10m_sin" in logged["columns_before_labeling"]
+    assert "wind_direction_10m_cos" in logged["columns_before_labeling"]
     assert list(features_df.columns) == model_config["features"]
 
 
