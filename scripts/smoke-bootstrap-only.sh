@@ -66,6 +66,16 @@ validate_project_id() {
   fi
 }
 
+smoke_feast_bigquery_table() {
+  printf '%s.%s.%s\n' "$PROJECT_ID" "foehncast" "forecast_features"
+}
+
+print_smoke_feast_summary() {
+  echo "- hosted Feast source: bigquery"
+  echo "- hosted Feast offline source table: $(smoke_feast_bigquery_table)"
+  echo "- hosted Feast online store database: feast-online"
+}
+
 prepare_local_inputs() {
   local repo_owner repo_name artifact_repo artifact_bucket cloud_run_service
 
@@ -245,6 +255,7 @@ echo "- project_id: ${PROJECT_ID}"
 echo "- region: ${REGION}"
 echo "- env file: ${ENV_FILE}"
 echo "- tfvars file: ${TFVARS_FILE}"
+print_smoke_feast_summary
 if [[ -n "$REF" ]]; then
   echo "- workflow ref: ${REF}"
 fi
@@ -271,6 +282,7 @@ run_step "Applying the broader platform through the remote Terraform workflow" "
 if [[ "$KEEP_ENVIRONMENT" == "true" ]]; then
   echo
   echo "Bootstrap-only smoke apply completed. The environment was kept for inspection."
+  echo "When curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
   exit 0
 fi
 

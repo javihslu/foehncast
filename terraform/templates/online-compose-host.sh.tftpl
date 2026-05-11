@@ -43,7 +43,7 @@ ${key}=${value}
 %{ endfor ~}
 EOF
 
-if docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull model-registry app airflow-init airflow-webserver airflow-scheduler airflow-triggerer; then
+if docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer; then
   docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build
 else
   docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --build

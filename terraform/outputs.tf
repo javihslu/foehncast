@@ -73,6 +73,36 @@ output "configured_cloud_run_service_name" {
   value       = var.cloud_run_service_name
 }
 
+output "configured_cloud_run_container_port" {
+  description = "Configured container port for the Cloud Run inference service."
+  value       = var.cloud_run_container_port
+}
+
+output "configured_cloud_run_allow_unauthenticated" {
+  description = "Whether the configured Cloud Run inference service should allow unauthenticated access."
+  value       = var.cloud_run_allow_unauthenticated
+}
+
+output "configured_cloud_run_min_instance_count" {
+  description = "Configured minimum Cloud Run instance count."
+  value       = var.cloud_run_min_instance_count
+}
+
+output "configured_cloud_run_max_instance_count" {
+  description = "Configured maximum Cloud Run instance count."
+  value       = var.cloud_run_max_instance_count
+}
+
+output "configured_cloud_run_cpu" {
+  description = "Configured CPU limit for the Cloud Run inference service."
+  value       = var.cloud_run_cpu
+}
+
+output "configured_cloud_run_memory" {
+  description = "Configured memory limit for the Cloud Run inference service."
+  value       = var.cloud_run_memory
+}
+
 output "mlflow_tracking_uri" {
   description = "Configured MLflow tracking URI used by the Cloud Run inference service."
   value       = var.mlflow_tracking_uri

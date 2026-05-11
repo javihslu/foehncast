@@ -76,6 +76,8 @@ When `provision_online_compose_host = true`, provide:
 - optional image overrides if you do not want the default GHCR `:main` tags
 - any extra stack environment in `online_compose_env_vars`
 
+If the hosted Grafana tenant should deliver the provisioned monitoring alerts by email, set `FOEHNCAST_GRAFANA_ALERT_EMAIL` in `online_compose_env_vars`. The local Docker path intentionally leaves that override out of `.env.example` and relies on the placeholder route instead.
+
 Terraform provisions a dedicated network, static public IP, and Compute Engine instance. The instance clones the repo, writes a runtime `.env` file with the Terraform-managed GCP and BigQuery settings, tries to pull the GHCR images, and falls back to local Docker builds on the host if the packages are not available yet.
 That generated `.env` now includes the same Feast runtime env contract as the Cloud Run path, so the online host and the inference-only service render the same logical Feast config with different runtime surfaces.
 The same generated `.env` also points the hosted MLflow service at `gs://<artifact-bucket>/mlflow/artifacts`, so artifact storage uses the shared cloud object plane instead of a host-local volume.
@@ -139,8 +141,16 @@ Set these GitHub repository variables:
 - `GCP_BIGQUERY_DATASET`
 - `GCP_BIGQUERY_LOCATION`
 - `GCP_BIGQUERY_TABLE`
+- `GCP_FEAST_ONLINE_STORE_LOCATION`
+- `GCP_FEAST_ONLINE_STORE_DATABASE_NAME`
 - `GCP_PROVISION_CLOUD_RUN_SERVICE`
 - `GCP_CLOUD_RUN_SERVICE_NAME`
+- `GCP_CLOUD_RUN_CONTAINER_PORT`
+- `GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED`
+- `GCP_CLOUD_RUN_MIN_INSTANCE_COUNT`
+- `GCP_CLOUD_RUN_MAX_INSTANCE_COUNT`
+- `GCP_CLOUD_RUN_CPU`
+- `GCP_CLOUD_RUN_MEMORY`
 - `GCP_MLFLOW_TRACKING_URI` when Cloud Run is enabled
 - `GCP_PROVISION_ONLINE_COMPOSE_HOST`
 - `GCP_ONLINE_COMPOSE_HOST_NAME`

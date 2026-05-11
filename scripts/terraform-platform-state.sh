@@ -199,6 +199,12 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"
+  FOEHNCAST_TF_CLOUD_RUN_CONTAINER_PORT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_container_port cloud_run_container_port)"
+  FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_allow_unauthenticated cloud_run_allow_unauthenticated)"
+  FOEHNCAST_TF_CLOUD_RUN_MIN_INSTANCE_COUNT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_min_instance_count cloud_run_min_instance_count)"
+  FOEHNCAST_TF_CLOUD_RUN_MAX_INSTANCE_COUNT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_max_instance_count cloud_run_max_instance_count)"
+  FOEHNCAST_TF_CLOUD_RUN_CPU="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_cpu cloud_run_cpu)"
+  FOEHNCAST_TF_CLOUD_RUN_MEMORY="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_memory cloud_run_memory)"
   FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
@@ -219,12 +225,20 @@ terraform_repo_variable_names() {
     GCP_BIGQUERY_DATASET \
     GCP_BIGQUERY_LOCATION \
     GCP_BIGQUERY_TABLE \
+    GCP_FEAST_ONLINE_STORE_LOCATION \
+    GCP_FEAST_ONLINE_STORE_DATABASE_NAME \
     GCP_WORKLOAD_IDENTITY_PROVIDER \
     GCP_SERVICE_ACCOUNT_EMAIL \
     GCP_TERRAFORM_STATE_BUCKET \
     GCP_TERRAFORM_STATE_PREFIX \
     GCP_PROVISION_CLOUD_RUN_SERVICE \
     GCP_CLOUD_RUN_SERVICE_NAME \
+    GCP_CLOUD_RUN_CONTAINER_PORT \
+    GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED \
+    GCP_CLOUD_RUN_MIN_INSTANCE_COUNT \
+    GCP_CLOUD_RUN_MAX_INSTANCE_COUNT \
+    GCP_CLOUD_RUN_CPU \
+    GCP_CLOUD_RUN_MEMORY \
     GCP_MLFLOW_TRACKING_URI \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
     GCP_ONLINE_COMPOSE_HOST_NAME \
@@ -246,12 +260,20 @@ terraform_repo_variable_pairs() {
   printf 'GCP_BIGQUERY_DATASET\t%s\n' "$FOEHNCAST_TF_BIGQUERY_DATASET"
   printf 'GCP_BIGQUERY_LOCATION\t%s\n' "$FOEHNCAST_TF_BIGQUERY_LOCATION"
   printf 'GCP_BIGQUERY_TABLE\t%s\n' "$FOEHNCAST_TF_BIGQUERY_TABLE"
+  printf 'GCP_FEAST_ONLINE_STORE_LOCATION\t%s\n' "$FOEHNCAST_TF_FEAST_ONLINE_STORE_LOCATION"
+  printf 'GCP_FEAST_ONLINE_STORE_DATABASE_NAME\t%s\n' "$FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE"
   printf 'GCP_WORKLOAD_IDENTITY_PROVIDER\t%s\n' "$FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER"
   printf 'GCP_SERVICE_ACCOUNT_EMAIL\t%s\n' "$FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL"
   printf 'GCP_TERRAFORM_STATE_BUCKET\t%s\n' "$FOEHNCAST_TF_STATE_BUCKET"
   printf 'GCP_TERRAFORM_STATE_PREFIX\t%s\n' "$FOEHNCAST_TF_STATE_PREFIX"
   printf 'GCP_PROVISION_CLOUD_RUN_SERVICE\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE"
   printf 'GCP_CLOUD_RUN_SERVICE_NAME\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME"
+  printf 'GCP_CLOUD_RUN_CONTAINER_PORT\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_CONTAINER_PORT"
+  printf 'GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED"
+  printf 'GCP_CLOUD_RUN_MIN_INSTANCE_COUNT\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MIN_INSTANCE_COUNT"
+  printf 'GCP_CLOUD_RUN_MAX_INSTANCE_COUNT\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MAX_INSTANCE_COUNT"
+  printf 'GCP_CLOUD_RUN_CPU\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_CPU"
+  printf 'GCP_CLOUD_RUN_MEMORY\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MEMORY"
   printf 'GCP_PROVISION_ONLINE_COMPOSE_HOST\t%s\n' "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST"
   printf 'GCP_ONLINE_COMPOSE_HOST_NAME\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME"
   printf 'GCP_ONLINE_COMPOSE_HOST_ZONE\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_ZONE"

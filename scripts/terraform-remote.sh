@@ -10,6 +10,9 @@ REF=""
 COMMAND=""
 PROJECT_ID=""
 REGION=""
+INPUT_BIGQUERY_DATASET_ID=""
+INPUT_BIGQUERY_FEATURE_TABLE_ID=""
+INPUT_FEAST_ONLINE_STORE_DATABASE_NAME=""
 DRY_RUN=false
 WAIT_FOR_COMPLETION=false
 WATCH_INTERVAL=3
@@ -117,6 +120,71 @@ repo_variable_value() {
   printf '%s\n' "$value"
 }
 
+remote_feast_bigquery_dataset() {
+  local value
+
+  value="${INPUT_BIGQUERY_DATASET_ID:-}"
+  if [[ -z "$value" ]]; then
+    value="$(repo_variable_value "$REPOSITORY_PATH" GCP_BIGQUERY_DATASET)"
+  fi
+  if [[ -z "$value" ]]; then
+    value="${GCP_BIGQUERY_DATASET:-${STORAGE_BIGQUERY_DATASET:-${FOEHNCAST_FEAST_BIGQUERY_DATASET:-foehncast}}}"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+remote_feast_bigquery_table() {
+  local runtime_table dataset table_id project_id
+
+  if [[ -z "$INPUT_BIGQUERY_DATASET_ID" && -z "$INPUT_BIGQUERY_FEATURE_TABLE_ID" ]]; then
+    runtime_table="${FOEHNCAST_FEAST_BIGQUERY_TABLE:-}"
+    if [[ -n "$runtime_table" ]]; then
+      printf '%s\n' "$runtime_table"
+      return
+    fi
+  fi
+
+  dataset="$(remote_feast_bigquery_dataset)"
+  table_id="${INPUT_BIGQUERY_FEATURE_TABLE_ID:-}"
+  if [[ -z "$table_id" ]]; then
+    table_id="$(repo_variable_value "$REPOSITORY_PATH" GCP_BIGQUERY_TABLE)"
+  fi
+  if [[ -z "$table_id" ]]; then
+    table_id="${GCP_BIGQUERY_TABLE:-${STORAGE_BIGQUERY_TABLE:-forecast_features}}"
+  fi
+
+  project_id="${PROJECT_ID:-<project_id>}"
+  printf '%s.%s.%s\n' "$project_id" "$dataset" "$table_id"
+}
+
+remote_feast_online_store_database() {
+  local value
+
+  value="${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-}"
+  if [[ -z "$value" ]]; then
+    value="$(repo_variable_value "$REPOSITORY_PATH" GCP_FEAST_ONLINE_STORE_DATABASE_NAME)"
+  fi
+  if [[ -z "$value" ]]; then
+    value="${GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-${FOEHNCAST_FEAST_DATASTORE_DATABASE:-feast-online}}"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+print_remote_feast_follow_up() {
+  echo "Hosted Feast runtime source: bigquery"
+  echo "Hosted Feast offline source table: $(remote_feast_bigquery_table)"
+  echo "Hosted Feast online store database: $(remote_feast_online_store_database)"
+
+  if [[ "$WAIT_FOR_COMPLETION" == "true" ]]; then
+    echo "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
+    return
+  fi
+
+  echo "After the remote apply succeeds and curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
+}
+
 record_input() {
   local input="$1"
   local key value
@@ -139,6 +207,18 @@ record_input() {
       ;;
     region)
       REGION="$value"
+      ;;
+    bigquery_dataset_id)
+      INPUT_BIGQUERY_DATASET_ID="$value"
+      EXTRA_INPUTS+=("$input")
+      ;;
+    bigquery_feature_table_id)
+      INPUT_BIGQUERY_FEATURE_TABLE_ID="$value"
+      EXTRA_INPUTS+=("$input")
+      ;;
+    feast_online_store_database_name)
+      INPUT_FEAST_ONLINE_STORE_DATABASE_NAME="$value"
+      EXTRA_INPUTS+=("$input")
       ;;
     cleanup_clear_github_actions)
       CLEANUP_CLEAR_GITHUB_ACTIONS="$(normalize_bool "$value")"
@@ -366,4 +446,9 @@ fi
 
 if [[ "$WAIT_FOR_COMPLETION" == "true" ]]; then
   wait_for_dispatched_run "$REPOSITORY_PATH" "$WATCH_REF" "$PREVIOUS_RUN_ID" "$TRIGGERING_USER"
+fi
+
+if [[ "$COMMAND" == "apply" ]]; then
+  echo
+  print_remote_feast_follow_up
 fi
