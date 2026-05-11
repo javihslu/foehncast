@@ -531,6 +531,13 @@ def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access()
         'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
         in terraform
     )
+
+
+def test_terraform_grants_github_deployer_firestore_admin() -> None:
+    terraform = _read_text("terraform/main.tf")
+
+    assert 'resource "google_project_iam_member" "github_project_admin"' in terraform
+    assert '"roles/datastore.owner"' in terraform
     assert 'role   = "roles/storage.objectAdmin"' in terraform
     assert "google_project_iam_member.cloud_run_bigquery_read_session_user" in terraform
     assert (
