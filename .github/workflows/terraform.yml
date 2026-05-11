@@ -147,8 +147,6 @@ jobs:
       contents: read
       actions: write
       id-token: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -628,13 +626,30 @@ jobs:
 
       - name: Remote cleanup clear repository variables
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'cleanup' && inputs.cleanup_clear_github_actions == true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run:
           ./scripts/configure-github-actions.sh --clear --repo "${{ github.repository
           }}"
 
       - name: Sync repository variables
+        id: sync_repository_variables
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./scripts/configure-github-actions.sh --repo "${{ github.repository }}"
+
+      - name: Explain skipped repository variable sync
+        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' && steps.sync_repository_variables.outcome == 'failure' }}
+        run: |
+          {
+            echo "## Repository variable sync skipped"
+            echo
+            echo "Terraform apply succeeded, but the workflow token could not edit GitHub repository variables through the Actions variables API."
+            echo "Existing repository variables remain unchanged."
+            echo "If the shared contract needs a refresh, run ./scripts/configure-github-actions.sh from a maintainer shell authenticated with gh."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize outputs
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}

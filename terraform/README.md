@@ -168,9 +168,9 @@ The normal shared-environment path is:
 
 1. one-time maintainer bootstrap from Google Cloud Shell
 2. GitHub Actions remote apply
-3. automatic repository-variable resync after each successful apply
+3. best-effort repository-variable resync after each successful apply
 
-In normal operation you should not edit these variables by hand. The bootstrap path and each successful remote apply keep the shared contract synchronized automatically.
+In normal operation you should not edit these variables by hand. The bootstrap path seeds the shared contract automatically. Remote applies also attempt to resync it, but GitHub's default workflow token may not be allowed to edit repository variables in every repository configuration.
 
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
@@ -178,7 +178,7 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 
 ## GitHub Actions Terraform Path
 
-Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies resync the repository variables automatically.
+Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies also attempt to resync the repository variables, but a repository-variable permission limit should not mark the apply itself as failed.
 
 Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
 
@@ -190,6 +190,8 @@ For `command=cleanup`, the workflow skips Terraform execution entirely. Instead 
 
 - `cleanup_delete_state_bucket=true` deletes the remote Terraform state bucket if it still exists
 - `cleanup_clear_github_actions=true` clears the synced GitHub Actions repository variables on the target repository
+
+GitHub can reject repository-variable edits from the default workflow token with `Resource not accessible by integration`. When that happens during the automatic apply path, Terraform still applies successfully and the workflow records that the repository-variable sync was skipped. If you need to refresh or clear the variable contract explicitly, run `./scripts/configure-github-actions.sh` from a maintainer shell authenticated with `gh`.
 
 The recommended remote retirement sequence is:
 

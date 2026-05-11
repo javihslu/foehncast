@@ -332,6 +332,39 @@ def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> N
     assert "github.event_name == 'push'" in skipped_step["if"]
 
 
+def test_remote_terraform_workflow_treats_repo_variable_sync_as_best_effort() -> None:
+    workflow = _workflow_yaml(".github/workflows/terraform.yml")
+    remote_job = workflow["jobs"]["remote"]
+
+    assert "env" not in remote_job or "GH_TOKEN" not in remote_job.get("env", {})
+
+    skipped_sync_step = _workflow_step(
+        workflow, "remote", "Explain skipped repository variable sync"
+    )
+    assert "steps.flags.outputs.command == 'apply'" in skipped_sync_step["if"]
+    assert (
+        "steps.sync_repository_variables.outcome == 'failure'"
+        in skipped_sync_step["if"]
+    )
+    assert (
+        "workflow token could not edit GitHub repository variables"
+        in skipped_sync_step["run"]
+    )
+    assert "Existing repository variables remain unchanged." in skipped_sync_step["run"]
+    assert "./scripts/configure-github-actions.sh" in skipped_sync_step["run"]
+
+    cleanup_step = _workflow_step(
+        workflow, "remote", "Remote cleanup clear repository variables"
+    )
+    assert cleanup_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+    sync_step = _workflow_step(workflow, "remote", "Sync repository variables")
+    assert sync_step["id"] == "sync_repository_variables"
+    assert sync_step["continue-on-error"] is True
+    assert sync_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "steps.flags.outputs.command == 'apply'" in sync_step["if"]
+
+
 def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up() -> (
     None
 ):
