@@ -7,7 +7,7 @@ DEFAULT_ENV_FILE="${ROOT_DIR}/.env"
 EXAMPLE_ENV_FILE="${ROOT_DIR}/.env.example"
 FEATURE_DATE="${FEATURE_DATE:-2024-01-01}"
 TRAINING_DATE="${TRAINING_DATE:-2024-01-02}"
-AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/health}"
+AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/api/v2/monitor/health}"
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
 # shellcheck disable=SC1091
@@ -15,6 +15,60 @@ source "${ROOT_DIR}/scripts/cli-common.sh"
 
 usage() {
   echo "Usage: $0 [env-file]" >&2
+}
+
+TEMP_DOCKER_CONFIG=""
+
+cleanup_temporary_docker_config() {
+  if [[ -n "$TEMP_DOCKER_CONFIG" && -d "$TEMP_DOCKER_CONFIG" ]]; then
+    rm -rf "$TEMP_DOCKER_CONFIG"
+  fi
+}
+
+
+configure_docker_client_for_bootstrap() {
+  local source_docker_config="${HOME}/.docker"
+  local config_file="${DOCKER_CONFIG:-${source_docker_config}}/config.json"
+  local current_context="desktop-linux"
+
+  if [[ -n "${DOCKER_CONFIG:-}" ]]; then
+    return
+  fi
+
+  if [[ ! -f "$config_file" ]]; then
+    return
+  fi
+
+  if ! grep -Eq '"credsStore"[[:space:]]*:[[:space:]]*"desktop"' "$config_file"; then
+    return
+  fi
+
+  if command -v docker-credential-desktop >/dev/null 2>&1; then
+    return
+  fi
+
+  current_context="$(sed -nE 's/.*"currentContext"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$config_file" | head -n 1)"
+  current_context="${current_context:-desktop-linux}"
+  TEMP_DOCKER_CONFIG="$(mktemp -d "${TMPDIR:-/tmp}/foehncast-docker-config.XXXXXX")"
+
+  if [[ -d "$source_docker_config/cli-plugins" ]]; then
+    ln -s "$source_docker_config/cli-plugins" "$TEMP_DOCKER_CONFIG/cli-plugins"
+  fi
+  if [[ -d "$source_docker_config/contexts" ]]; then
+    ln -s "$source_docker_config/contexts" "$TEMP_DOCKER_CONFIG/contexts"
+  fi
+  if [[ -d "$source_docker_config/buildx" ]]; then
+    ln -s "$source_docker_config/buildx" "$TEMP_DOCKER_CONFIG/buildx"
+  fi
+  if [[ -d "$source_docker_config/desktop-build" ]]; then
+    ln -s "$source_docker_config/desktop-build" "$TEMP_DOCKER_CONFIG/desktop-build"
+  fi
+
+  printf '{\n  "currentContext": "%s",\n  "features": {\n    "hooks": "true"\n  }\n}\n' \
+    "$current_context" > "$TEMP_DOCKER_CONFIG/config.json"
+
+  export DOCKER_CONFIG="$TEMP_DOCKER_CONFIG"
+  echo "Docker credential helper 'docker-credential-desktop' is unavailable; using a temporary Docker client config for this bootstrap run."
 }
 
 ENV_FILE="$DEFAULT_ENV_FILE"
@@ -42,6 +96,9 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+trap cleanup_temporary_docker_config EXIT
+configure_docker_client_for_bootstrap
+
 require_docker_compose
 require_command curl
 
@@ -58,6 +115,15 @@ fi
 cd "$ROOT_DIR"
 
 COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.objectstore.yml)
+BOOTSTRAP_SERVICES=(
+  objectstore-init
+  feast-online-store
+  airflow-webserver
+  airflow-dag-processor
+  airflow-scheduler
+  airflow-triggerer
+  app
+)
 
 compose() {
   docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
@@ -115,8 +181,13 @@ next_available_port() {
 cleanup_local_runtime_state() {
   local dataset="$1"
 
+  rm -f "$ROOT_DIR/airflow/airflow.cfg"
+  rm -f "$ROOT_DIR/airflow/simple_auth_manager_passwords.json"
+  rm -f "$ROOT_DIR/airflow/simple_auth_manager_passwords.json.generated"
+  rm -f "$ROOT_DIR/airflow/webserver_config.py"
   rm -rf "$ROOT_DIR/airflow/reports"
   rm -rf "$ROOT_DIR/.state/feast"
+  rm -rf "$ROOT_DIR/.state/monitoring"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
 }
@@ -210,13 +281,13 @@ echo "Removing disposable local runtime artifacts..."
 cleanup_local_runtime_state "$FEAST_DATASET"
 
 echo "Starting local stack..."
-compose up --build -d --remove-orphans
+compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"
 
 echo "Waiting for Feast Datastore emulator..."
 wait_for_service_health feast-online-store 90 2
 curl --retry 30 --retry-all-errors --retry-delay 2 -fsS -X POST "$FEAST_DATASTORE_EMULATOR_RESET_URL" >/dev/null
 
-echo "Waiting for Airflow webserver health..."
+echo "Waiting for Airflow API server health..."
 curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$AIRFLOW_HEALTH_URL" >/dev/null
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
@@ -244,7 +315,7 @@ echo "App:      http://127.0.0.1:8000"
 echo "Airflow:  http://127.0.0.1:8080"
 echo "MLflow:   http://127.0.0.1:5001"
 echo "Feast:    /features/online verified"
-echo "Airflow and MLflow open directly in local mode."
+echo "Airflow UI/API and MLflow open directly in local mode."
 echo "This bootstrap path resets local Docker volumes and disposable local runtime artifacts so each run starts clean."
 echo "Curated features and MLflow artifacts are using the MinIO-backed local objectstore baseline for this run."
 echo "This keeps the local object-access layer aligned with the hosted GCS-facing architecture while Feast uses the local Datastore-mode emulator for online serving."

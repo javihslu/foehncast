@@ -12,7 +12,7 @@ flowchart LR
 		API[FastAPI app]
 	end
 	subgraph LocalOnly[Local-only services]
-		Dev[development_env]
+		Dev[optional development_env]
 		Objectstore[MinIO]
 		Emulator[Feast Datastore emulator]
 	end
@@ -42,7 +42,7 @@ flowchart LR
 
 | Surface group | Local evaluator | Hosted full-stack target | Hosted inference target |
 |---------------|-----------------|--------------------------|-------------------------|
-| `development_env`, MinIO, Feast emulator | yes | no | no |
+| optional `development_env`, MinIO, Feast emulator | yes | no | no |
 | Airflow, MLflow, app | yes | yes | app only |
 
 ## Main Components
@@ -54,14 +54,15 @@ flowchart LR
 
 ### `airflow/`
 
-- `airflow-init`: sets up the metadata database, log directories, and health marker, and can create an admin user when local auth is enabled.
-- `airflow-webserver`: serves the UI and API.
+- `airflow-init`: sets up the metadata database, log directories, a clean Airflow 3 config state, and can seed the simple-auth password file when login is enabled.
+- `airflow-webserver`: runs the Airflow 3 API server and UI on port 8080 under the repo's legacy service name.
+- `airflow-dag-processor`: parses DAG files into the metadata database for the scheduler and UI.
 - `airflow-scheduler`: schedules DAG runs.
 - `airflow-triggerer`: handles deferred task triggers.
 
 ### `development_env/`
 
-- `development_env`: keeps a local development container ready with the project environment synced by `uv`. It is part of the local baseline, not a hosted runtime target.
+- `development_env`: keeps a local development container ready with the project environment synced by `uv`. It is opt-in local tooling for notebooks, ad hoc shells, and container-side checks, not part of the default Airflow runtime path or any hosted target.
 
 ### `app/`
 
@@ -79,6 +80,7 @@ For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the rep
 This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it.
 
 The default local path uses the bundled MinIO service for curated feature storage and MLflow artifacts, starts Airflow and MLflow without a login, prepares Feast against the bundled Datastore-mode emulator, and resets Docker volumes plus disposable local runtime artifacts for a clean run each time. The helper keeps the container-side endpoints on `objectstore:9000` and `feast-online-store:8080`, and can shift the host-exposed ports when the preferred defaults are already occupied.
+The optional `development_env` container now stays off unless you explicitly target it through the dedicated Makefile notebook and dev-shell commands.
 The app image itself is Feast-capable, and the local bootstrap prepares Feast state and verifies the online-feature route before declaring the stack ready.
 
 The initialized local runtime file is `.env`. The bootstrap script creates it from `.env.example` on first run if it does not exist yet.
@@ -87,7 +89,7 @@ Run these checks before deployment work:
 
 1. `./scripts/bootstrap-local.sh`
 2. `docker compose -f docker-compose.yml -f docker-compose.objectstore.yml ps -a`
-3. `curl -fsS http://127.0.0.1:8080/health`
+3. `curl -fsS http://127.0.0.1:8080/api/v2/monitor/health`
 4. `curl -fsS http://127.0.0.1:8000/health`
 5. `docker compose -f docker-compose.yml -f docker-compose.objectstore.yml exec -T airflow-scheduler airflow dags list`
 

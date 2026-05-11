@@ -23,15 +23,32 @@ def mlflow_config() -> dict[str, str]:
     }
 
 
-def test_register_model_registers_run_artifact(
+def test_register_model_registers_logged_model_uri_when_available(
     monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
 ) -> None:
     logged: dict[str, object] = {}
     expected_version = SimpleNamespace(name="foehncast-quality", version="3")
 
+    class FakeClient:
+        def get_run(self, run_id: str) -> object:
+            logged["run_id"] = run_id
+            return SimpleNamespace(info=SimpleNamespace(experiment_id="exp-123"))
+
+        def search_logged_models(
+            self,
+            experiment_ids: list[str],
+            filter_string: str | None = None,
+            max_results: int | None = None,
+        ) -> list[object]:
+            logged["search"] = (experiment_ids, filter_string, max_results)
+            return [SimpleNamespace(name="model", model_uri="models:/m-123")]
+
     class FakeMlflow:
         def set_tracking_uri(self, tracking_uri: str) -> None:
             logged["tracking_uri"] = tracking_uri
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
 
         def register_model(self, model_uri: str, model_name: str) -> object:
             logged["registration"] = (model_uri, model_name)
@@ -47,8 +64,14 @@ def test_register_model_registers_run_artifact(
 
     assert model_version is expected_version
     assert logged["tracking_uri"] == "http://localhost:5001"
+    assert logged["run_id"] == "run-123"
+    assert logged["search"] == (
+        ["exp-123"],
+        "source_run_id = 'run-123'",
+        20,
+    )
     assert logged["registration"] == (
-        "runs:/run-123/model",
+        "models:/m-123",
         "foehncast-quality",
     )
 
@@ -58,9 +81,24 @@ def test_register_model_allows_model_name_override(
 ) -> None:
     logged: dict[str, tuple[str, str]] = {}
 
+    class FakeClient:
+        def get_run(self, run_id: str) -> object:
+            return SimpleNamespace(info=SimpleNamespace(experiment_id="exp-123"))
+
+        def search_logged_models(
+            self,
+            experiment_ids: list[str],
+            filter_string: str | None = None,
+            max_results: int | None = None,
+        ) -> list[object]:
+            return [SimpleNamespace(name="model", model_uri="models:/m-456")]
+
     class FakeMlflow:
         def set_tracking_uri(self, tracking_uri: str) -> None:
             return None
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
 
         def register_model(self, model_uri: str, model_name: str) -> object:
             logged["registration"] = (model_uri, model_name)
@@ -75,8 +113,41 @@ def test_register_model_allows_model_name_override(
     register.register_model("run-456", model_name="foehncast-experiment")
 
     assert logged["registration"] == (
-        "runs:/run-456/model",
+        "models:/m-456",
         "foehncast-experiment",
+    )
+
+
+def test_register_model_falls_back_to_run_artifact_when_logged_model_lookup_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, tuple[str, str]] = {}
+
+    class FakeClient:
+        pass
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            return None
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
+
+        def register_model(self, model_uri: str, model_name: str) -> object:
+            logged["registration"] = (model_uri, model_name)
+            return object()
+
+    monkeypatch.setattr(register, "mlflow", FakeMlflow())
+    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
+
+    register.register_model("run-789")
+
+    assert logged["registration"] == (
+        "runs:/run-789/model",
+        "foehncast-quality",
     )
 
 

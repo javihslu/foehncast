@@ -1,10 +1,10 @@
 #!/bin/sh
 
-# Remove an old pid file, then start the Airflow webserver.
+# Remove stale pid files, then start the Airflow API server.
 
 set -eu
 
 airflow_home="/workspace/airflow"
 
-rm -f "$airflow_home/airflow-webserver.pid"
-exec airflow webserver
+rm -f "$airflow_home/airflow-webserver.pid" "$airflow_home/airflow-api-server.pid"
+exec airflow api-server

@@ -62,7 +62,7 @@ flowchart LR
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
-| Local evaluator target | Airflow, MLflow, FastAPI, `development_env`, MinIO, and the Feast Datastore emulator | shared GCP baseline | default development and course evaluation |
+| Local evaluator target | Airflow, MLflow, FastAPI, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and course evaluation |
 | Hosted full-stack target | Airflow, MLflow, and FastAPI on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep the whole stack online |
 | Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | publish the inference API as a smaller hosted surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | repeatable delivery, not a runtime target |
@@ -73,7 +73,6 @@ The hosted targets deploy only runtime surfaces. Development assets, notebooks, 
 
 <div class="mermaid">
 flowchart TD
-    DEV[development_env] --> FEAT[Feature DAG]
     OME[Open-Meteo] --> FEAT
     FEAT --> PAR[(MinIO curated features)]
     PAR --> TRAIN[Training DAG]
@@ -86,7 +85,6 @@ flowchart TD
     PAR --> OFF[Feast offline export]
     OFF --> FEAST[(Datastore-mode emulator)]
     FEAST --> APP
-    DEV --> APP
 </div>
 
 ## Hosted Runtime Detail

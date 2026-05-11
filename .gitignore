@@ -45,6 +45,7 @@ mlartifacts/
 # Airflow
 airflow/logs/
 airflow/airflow.db
+airflow/airflow.db-*
 airflow/.init-complete
 airflow/*.pid
 airflow/airflow.cfg

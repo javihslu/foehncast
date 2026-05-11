@@ -44,7 +44,7 @@ flowchart LR
 | `airflow dags test training_pipeline 2024-01-01` | the training DAG can execute through Airflow |
 | `curl -fsS http://127.0.0.1:8000/health` | the API starts with a serving model version |
 | `curl -fsS -X POST http://127.0.0.1:8000/predict ...` | the app returns live per-spot predictions |
-| `docker compose exec -T development_env uv run pytest` | the local stack still passes the regression suite after initialization |
+| `COMPOSE_PROFILES=local-only docker compose up -d development_env && COMPOSE_PROFILES=local-only docker compose exec -T development_env uv run pytest` | the opt-in notebook container still passes the regression suite after initialization |
 
 ## What Changed From MS1
 

@@ -1,6 +1,8 @@
 services:
   development_env:
     container_name: development_env
+    profiles:
+      - local-only
     build:
       context: ../..
       dockerfile: containers/development_env/Dockerfile

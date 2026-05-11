@@ -107,6 +107,10 @@ def _log_feature_importance_plot(model: Any, feature_columns: list[str]) -> None
     plt.close(figure)
 
 
+def _model_pip_requirements() -> list[str]:
+    return mlflow.sklearn.get_default_pip_requirements(include_cloudpickle=True)
+
+
 def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
     """Train the configured model, log the run to MLflow, and return the run id."""
     resolved_model_config = model_config or get_model_config()
@@ -142,6 +146,10 @@ def run_training_pipeline(model_config: dict[str, Any] | None = None) -> str:
             }
         )
         mlflow.log_metrics(metrics)
-        mlflow.sklearn.log_model(model, artifact_path="model")
+        mlflow.sklearn.log_model(
+            model,
+            name="model",
+            pip_requirements=_model_pip_requirements(),
+        )
         _log_feature_importance_plot(model, resolved_model_config["features"])
         return run.info.run_id
