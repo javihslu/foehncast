@@ -28,14 +28,19 @@ from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation
 from foehncast.monitoring.drift import detect_data_drift, push_drift_metrics
 from foehncast.monitoring.pipeline_metrics import (
-    FEATURE_PIPELINE_STAGES,
-    TRAINING_PIPELINE_STAGES,
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
     build_training_pipeline_run_summary,
     emit_feature_pipeline_run_summary,
     emit_training_pipeline_run_summary,
     read_training_pipeline_run_summary,
+)
+from foehncast.pipeline_state import FeaturePipelineState, TrainingPipelineState
+from foehncast.pipeline_stage_tracking import (
+    FEATURE_PIPELINE_STAGES,
+    TRAINING_PIPELINE_STAGES,
+    increment_stage_failure,
+    record_stage_duration,
 )
 from foehncast.paths import project_root
 from foehncast.training_pipeline.evaluate import generate_evaluation_report
@@ -149,87 +154,33 @@ def _read_feature_pipeline_validation(source: Path) -> SimpleNamespace | None:
 
 
 def _copy_feature_pipeline_context(
-    feature_context: dict[str, object],
-) -> dict[str, object]:
-    context = dict(feature_context)
-
-    for key in (
-        "expected_spots",
-        "fetched_spots",
-        "engineered_spots",
-        "validated_spots",
-        "stored_spots",
-        "drifted_spots",
-    ):
-        context[key] = list(feature_context.get(key, []))
-
-    context["stage_durations_seconds"] = dict(
-        feature_context.get("stage_durations_seconds", {})
-    )
-    context["stage_failure_counts"] = dict(
-        feature_context.get("stage_failure_counts", {})
-    )
-    context["spot_config"] = dict(feature_context.get("spot_config", {}))
-    context["spot_errors"] = dict(feature_context.get("spot_errors", {}))
-    return context
-
-
-def _set_feature_pipeline_stage_duration(
-    feature_context: dict[str, object],
-    *,
-    stage: str,
-    started_at: float,
-) -> None:
-    durations = dict(feature_context.get("stage_durations_seconds", {}))
-    durations[str(stage)] = float(perf_counter() - started_at)
-    feature_context["stage_durations_seconds"] = durations
-
-
-def _increment_feature_pipeline_stage_failure(
-    feature_context: dict[str, object],
-    *,
-    stage: str,
-) -> None:
-    counts = {
-        known_stage: int(
-            dict(feature_context.get("stage_failure_counts", {})).get(known_stage, 0)
-        )
-        for known_stage in FEATURE_PIPELINE_STAGES
-    }
-    counts[str(stage)] = int(counts.get(str(stage), 0)) + 1
-    feature_context["stage_failure_counts"] = counts
+    feature_context: FeaturePipelineState,
+) -> FeaturePipelineState:
+    return feature_context.copy()
 
 
 def _feature_pipeline_context(
     dataset: str = "train",
     *,
     run_key: str | None = None,
-) -> dict[str, object]:
+) -> FeaturePipelineState:
     spots = get_spots()
     resolved_run_key = _sanitize_feature_pipeline_run_key(run_key)
     run_dir = _feature_pipeline_run_dir(dataset, resolved_run_key)
 
-    return {
-        "dataset": dataset,
-        "run_key": resolved_run_key,
-        "run_dir": str(run_dir),
-        "storage_backend": get_storage_config()["backend"],
-        "expected_spots": [str(spot["id"]) for spot in spots],
-        "fetched_spots": [],
-        "engineered_spots": [],
-        "validated_spots": [],
-        "stored_spots": [],
-        "drifted_spots": [],
-        "stage_durations_seconds": {},
-        "stage_failure_counts": {stage: 0 for stage in FEATURE_PIPELINE_STAGES},
-        "spot_errors": {},
-        "spot_config": {
+    return FeaturePipelineState.new(
+        dataset=dataset,
+        run_key=resolved_run_key,
+        run_dir=run_dir,
+        storage_backend=str(get_storage_config()["backend"]),
+        expected_spots=[str(spot["id"]) for spot in spots],
+        spot_config={
             str(spot["id"]): {
                 "shore_orientation_deg": spot["shore_orientation_deg"],
             }
             for spot in spots
         },
-    }
+    )
 
 
 def _feature_pipeline_metric_count(
@@ -246,24 +197,23 @@ def _feature_pipeline_metric_count(
 
 
 def _feature_pipeline_result(
-    feature_context: dict[str, object],
+    feature_context: FeaturePipelineState,
 ) -> dict[str, object]:
     context = _copy_feature_pipeline_context(feature_context)
-    expected_spots = list(context.get("expected_spots", []))
-    fetched_spots = list(context.get("fetched_spots", []))
-    engineered_spots = list(context.get("engineered_spots", []))
-    validated_spots = list(context.get("validated_spots", []))
-    stored_spots = list(context.get("stored_spots", []))
-    drifted_spots = list(context.get("drifted_spots", []))
-    stage_durations_seconds = dict(context.get("stage_durations_seconds", {}))
+    expected_spots = list(context.expected_spots)
+    fetched_spots = list(context.fetched_spots)
+    engineered_spots = list(context.engineered_spots)
+    validated_spots = list(context.validated_spots)
+    stored_spots = list(context.stored_spots)
+    drifted_spots = list(context.drifted_spots)
+    stage_durations_seconds = dict(context.stage_durations_seconds)
     stage_failure_counts = {
-        str(stage): int(count)
-        for stage, count in dict(context.get("stage_failure_counts", {})).items()
+        str(stage): int(count) for stage, count in context.stage_failure_counts.items()
     }
 
     return {
-        "dataset": context["dataset"],
-        "storage_backend": context["storage_backend"],
+        "dataset": context.dataset,
+        "storage_backend": context.storage_backend,
         "expected_spots": expected_spots,
         "fetched_spots": fetched_spots,
         "engineered_spots": engineered_spots,
@@ -283,16 +233,16 @@ def _feature_pipeline_result(
 
 
 def _emit_feature_pipeline_summary(
-    feature_context: dict[str, object],
+    feature_context: FeaturePipelineState,
     *,
     run_status: str,
     error: str | None = None,
 ) -> None:
     context = _copy_feature_pipeline_context(feature_context)
-    run_dir = Path(str(context["run_dir"]))
-    fetched_spots = set(context.get("fetched_spots", []))
-    stored_spots = set(context.get("stored_spots", []))
-    spot_errors = dict(context.get("spot_errors", {}))
+    run_dir = context.run_dir
+    fetched_spots = set(context.fetched_spots)
+    stored_spots = set(context.stored_spots)
+    spot_errors = dict(context.spot_errors)
     spot_summaries: list[dict[str, object]] = []
 
     has_stage_artifacts = run_dir.exists() and any(run_dir.rglob("*"))
@@ -304,15 +254,15 @@ def _emit_feature_pipeline_summary(
         and not has_stage_artifacts
     ):
         summary = build_feature_pipeline_run_summary(
-            dataset=str(context["dataset"]),
-            storage_backend=str(context["storage_backend"]),
-            expected_spots=list(context.get("expected_spots", [])),
+            dataset=context.dataset,
+            storage_backend=context.storage_backend,
+            expected_spots=list(context.expected_spots),
             fetched_spots=[],
             engineered_spots=[],
             validated_spots=[],
             stored_spots=[],
-            stage_durations_seconds=dict(context.get("stage_durations_seconds", {})),
-            stage_failure_counts=dict(context.get("stage_failure_counts", {})),
+            stage_durations_seconds=dict(context.stage_durations_seconds),
+            stage_failure_counts=dict(context.stage_failure_counts),
             spot_summaries=[],
             run_status=run_status,
             error=error,
@@ -320,50 +270,46 @@ def _emit_feature_pipeline_summary(
         emit_feature_pipeline_run_summary(summary)
         return
 
-    for spot_id in context.get("expected_spots", []):
+    for spot_id in context.expected_spots:
         forecast_df = _read_optional_feature_pipeline_frame(
-            _feature_pipeline_stage_path(run_dir, "forecast", str(spot_id))
+            _feature_pipeline_stage_path(run_dir, "forecast", spot_id)
         )
         feature_df = _read_optional_feature_pipeline_frame(
-            _feature_pipeline_stage_path(run_dir, "feature", str(spot_id))
+            _feature_pipeline_stage_path(run_dir, "feature", spot_id)
         )
         validation = _read_feature_pipeline_validation(
-            _feature_pipeline_validation_path(run_dir, str(spot_id))
+            _feature_pipeline_validation_path(run_dir, spot_id)
         )
         stored_df = _read_optional_feature_pipeline_frame(
-            _feature_pipeline_stage_path(run_dir, "stored", str(spot_id))
+            _feature_pipeline_stage_path(run_dir, "stored", spot_id)
         )
 
         status = "stored"
-        if str(spot_id) not in stored_spots:
-            status = "failed" if str(spot_id) in spot_errors else "skipped"
+        if spot_id not in stored_spots:
+            status = "failed" if spot_id in spot_errors else "skipped"
 
         spot_summaries.append(
             build_feature_pipeline_spot_summary(
-                spot_id=str(spot_id),
+                spot_id=spot_id,
                 forecast_df=forecast_df,
                 feature_df=feature_df,
                 validation=validation,
                 stored_df=stored_df,
                 status=status,
-                error=spot_errors.get(str(spot_id)),
+                error=spot_errors.get(spot_id),
             )
         )
 
     summary = build_feature_pipeline_run_summary(
-        dataset=str(context["dataset"]),
-        storage_backend=str(context["storage_backend"]),
-        expected_spots=list(context.get("expected_spots", [])),
-        fetched_spots=[str(spot_id) for spot_id in context.get("fetched_spots", [])],
-        engineered_spots=[
-            str(spot_id) for spot_id in context.get("engineered_spots", [])
-        ],
-        validated_spots=[
-            str(spot_id) for spot_id in context.get("validated_spots", [])
-        ],
-        stored_spots=[str(spot_id) for spot_id in context.get("stored_spots", [])],
-        stage_durations_seconds=dict(context.get("stage_durations_seconds", {})),
-        stage_failure_counts=dict(context.get("stage_failure_counts", {})),
+        dataset=context.dataset,
+        storage_backend=context.storage_backend,
+        expected_spots=list(context.expected_spots),
+        fetched_spots=list(context.fetched_spots),
+        engineered_spots=list(context.engineered_spots),
+        validated_spots=list(context.validated_spots),
+        stored_spots=list(context.stored_spots),
+        stage_durations_seconds=dict(context.stage_durations_seconds),
+        stage_failure_counts=dict(context.stage_failure_counts),
         spot_summaries=spot_summaries,
         run_status=run_status,
         error=error,
@@ -371,13 +317,12 @@ def _emit_feature_pipeline_summary(
     emit_feature_pipeline_run_summary(summary)
 
 
-def fetch_feature_pipeline_context(
+def _fetch_feature_pipeline_context_state(
     dataset: str = "train",
     run_key: str | None = None,
-) -> dict[str, object]:
-    """Fetch forecasts and persist them for downstream Airflow feature tasks."""
+) -> FeaturePipelineState:
     context = _feature_pipeline_context(dataset=dataset, run_key=run_key)
-    run_dir = Path(str(context["run_dir"]))
+    run_dir = context.run_dir
     started_at = perf_counter()
 
     if run_dir.exists():
@@ -388,19 +333,19 @@ def fetch_feature_pipeline_context(
         forecasts_by_spot = fetch_all_spots()
         fetched_spots: list[str] = []
 
-        for spot_id in context["expected_spots"]:
-            forecast_df = forecasts_by_spot.get(str(spot_id), pd.DataFrame())
+        for spot_id in context.expected_spots:
+            forecast_df = forecasts_by_spot.get(spot_id, pd.DataFrame())
             if forecast_df.empty:
                 continue
 
             _write_feature_pipeline_frame(
-                _feature_pipeline_stage_path(run_dir, "forecast", str(spot_id)),
+                _feature_pipeline_stage_path(run_dir, "forecast", spot_id),
                 forecast_df,
             )
-            fetched_spots.append(str(spot_id))
+            fetched_spots.append(spot_id)
 
-        context["fetched_spots"] = fetched_spots
-        _set_feature_pipeline_stage_duration(
+        context.fetched_spots = fetched_spots
+        record_stage_duration(
             context,
             stage="fetch",
             started_at=started_at,
@@ -408,8 +353,12 @@ def fetch_feature_pipeline_context(
         _emit_feature_pipeline_summary(context, run_status="running")
         return context
     except Exception as exc:
-        _increment_feature_pipeline_stage_failure(context, stage="fetch")
-        _set_feature_pipeline_stage_duration(
+        increment_stage_failure(
+            context,
+            stage="fetch",
+            stage_names=FEATURE_PIPELINE_STAGES,
+        )
+        record_stage_duration(
             context,
             stage="fetch",
             started_at=started_at,
@@ -418,35 +367,49 @@ def fetch_feature_pipeline_context(
         raise
 
 
-def engineer_feature_pipeline_context(
-    feature_context: dict[str, object],
+def fetch_feature_pipeline_context(
+    dataset: str = "train",
+    run_key: str | None = None,
 ) -> dict[str, object]:
-    """Engineer features from fetched forecasts for downstream Airflow tasks."""
+    """Fetch forecasts and persist them for downstream Airflow feature tasks."""
+    return _fetch_feature_pipeline_context_state(
+        dataset=dataset,
+        run_key=run_key,
+    ).to_payload()
+
+
+def _engineer_feature_pipeline_context_state(
+    feature_context: FeaturePipelineState,
+) -> FeaturePipelineState:
     context = _copy_feature_pipeline_context(feature_context)
-    run_dir = Path(str(context["run_dir"]))
+    run_dir = context.run_dir
     engineered_spots: list[str] = []
     started_at = perf_counter()
 
     try:
-        for spot_id in context.get("fetched_spots", []):
+        for spot_id in context.fetched_spots:
             try:
                 forecast_df = _read_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "forecast", str(spot_id))
+                    _feature_pipeline_stage_path(run_dir, "forecast", spot_id)
                 )
                 feature_df = engineer_features(
                     forecast_df,
-                    context["spot_config"][str(spot_id)]["shore_orientation_deg"],
+                    context.spot_config[spot_id]["shore_orientation_deg"],
                 )
                 _write_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "feature", str(spot_id)),
+                    _feature_pipeline_stage_path(run_dir, "feature", spot_id),
                     feature_df,
                 )
-                engineered_spots.append(str(spot_id))
+                engineered_spots.append(spot_id)
             except Exception as exc:
-                context["engineered_spots"] = engineered_spots
-                context["spot_errors"][str(spot_id)] = str(exc)
-                _increment_feature_pipeline_stage_failure(context, stage="engineer")
-                _set_feature_pipeline_stage_duration(
+                context.engineered_spots = engineered_spots
+                context.spot_errors[spot_id] = str(exc)
+                increment_stage_failure(
+                    context,
+                    stage="engineer",
+                    stage_names=FEATURE_PIPELINE_STAGES,
+                )
+                record_stage_duration(
                     context,
                     stage="engineer",
                     started_at=started_at,
@@ -458,10 +421,73 @@ def engineer_feature_pipeline_context(
                 )
                 raise
 
-        context["engineered_spots"] = engineered_spots
-        _set_feature_pipeline_stage_duration(
+            context.engineered_spots = engineered_spots
+        record_stage_duration(
             context,
             stage="engineer",
+            started_at=started_at,
+        )
+        _emit_feature_pipeline_summary(context, run_status="running")
+        return context
+    except Exception:
+        raise
+
+
+def engineer_feature_pipeline_context(
+    feature_context: dict[str, object],
+) -> dict[str, object]:
+    """Engineer features from fetched forecasts for downstream Airflow tasks."""
+    return _engineer_feature_pipeline_context_state(
+        FeaturePipelineState.from_payload(feature_context)
+    ).to_payload()
+
+
+def _validate_feature_pipeline_context_state(
+    feature_context: FeaturePipelineState,
+) -> FeaturePipelineState:
+    context = _copy_feature_pipeline_context(feature_context)
+    run_dir = context.run_dir
+    validated_spots: list[str] = []
+    started_at = perf_counter()
+
+    try:
+        for spot_id in context.engineered_spots:
+            try:
+                feature_df = _read_feature_pipeline_frame(
+                    _feature_pipeline_stage_path(run_dir, "feature", spot_id)
+                )
+                validation = run_validation(feature_df, spot_id)
+                _write_feature_pipeline_validation(
+                    _feature_pipeline_validation_path(run_dir, spot_id),
+                    validation,
+                )
+                if not validation.is_valid:
+                    raise ValueError(f"Feature validation failed for spot '{spot_id}'")
+                validated_spots.append(spot_id)
+            except Exception as exc:
+                context.validated_spots = validated_spots
+                context.spot_errors[spot_id] = str(exc)
+                increment_stage_failure(
+                    context,
+                    stage="validate",
+                    stage_names=FEATURE_PIPELINE_STAGES,
+                )
+                record_stage_duration(
+                    context,
+                    stage="validate",
+                    started_at=started_at,
+                )
+                _emit_feature_pipeline_summary(
+                    context,
+                    run_status="failed",
+                    error=str(exc),
+                )
+                raise
+
+            context.validated_spots = validated_spots
+        record_stage_duration(
+            context,
+            stage="validate",
             started_at=started_at,
         )
         _emit_feature_pipeline_summary(context, run_status="running")
@@ -474,102 +500,63 @@ def validate_feature_pipeline_context(
     feature_context: dict[str, object],
 ) -> dict[str, object]:
     """Validate engineered features and persist validation outcomes."""
-    context = _copy_feature_pipeline_context(feature_context)
-    run_dir = Path(str(context["run_dir"]))
-    validated_spots: list[str] = []
-    started_at = perf_counter()
-
-    try:
-        for spot_id in context.get("engineered_spots", []):
-            try:
-                feature_df = _read_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "feature", str(spot_id))
-                )
-                validation = run_validation(feature_df, str(spot_id))
-                _write_feature_pipeline_validation(
-                    _feature_pipeline_validation_path(run_dir, str(spot_id)),
-                    validation,
-                )
-                if not validation.is_valid:
-                    raise ValueError(f"Feature validation failed for spot '{spot_id}'")
-                validated_spots.append(str(spot_id))
-            except Exception as exc:
-                context["validated_spots"] = validated_spots
-                context["spot_errors"][str(spot_id)] = str(exc)
-                _increment_feature_pipeline_stage_failure(context, stage="validate")
-                _set_feature_pipeline_stage_duration(
-                    context,
-                    stage="validate",
-                    started_at=started_at,
-                )
-                _emit_feature_pipeline_summary(
-                    context,
-                    run_status="failed",
-                    error=str(exc),
-                )
-                raise
-
-        context["validated_spots"] = validated_spots
-        _set_feature_pipeline_stage_duration(
-            context,
-            stage="validate",
-            started_at=started_at,
-        )
-        _emit_feature_pipeline_summary(context, run_status="running")
-        return context
-    except Exception:
-        raise
+    return _validate_feature_pipeline_context_state(
+        FeaturePipelineState.from_payload(feature_context)
+    ).to_payload()
 
 
-def store_feature_pipeline_context(
-    feature_context: dict[str, object],
+def _store_feature_pipeline_context_state(
+    feature_context: FeaturePipelineState,
 ) -> dict[str, object]:
-    """Store validated features, emit drift metrics, and return retraining context."""
     context = _copy_feature_pipeline_context(feature_context)
-    run_dir = Path(str(context["run_dir"]))
+    run_dir = context.run_dir
     stored_spots: list[str] = []
     drifted_spots: list[str] = []
     started_at = perf_counter()
 
     try:
-        for spot_id in context.get("validated_spots", []):
+        for spot_id in context.validated_spots:
             try:
                 feature_df = _read_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "feature", str(spot_id))
+                    _feature_pipeline_stage_path(run_dir, "feature", spot_id)
                 )
                 previous_stored_df = _read_optional_feature_slice(
-                    str(spot_id),
-                    str(context["dataset"]),
+                    spot_id,
+                    context.dataset,
                 )
                 write_features(
                     feature_df,
-                    spot_id=str(spot_id),
-                    dataset=str(context["dataset"]),
+                    spot_id=spot_id,
+                    dataset=context.dataset,
                 )
                 stored_df = read_features(
-                    spot_id=str(spot_id),
-                    dataset=str(context["dataset"]),
+                    spot_id=spot_id,
+                    dataset=context.dataset,
                 )
                 _write_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "stored", str(spot_id)),
+                    _feature_pipeline_stage_path(run_dir, "stored", spot_id),
                     stored_df,
                 )
 
                 if _emit_feature_drift_metrics(
-                    spot_id=str(spot_id),
-                    dataset=str(context["dataset"]),
+                    spot_id=spot_id,
+                    dataset=context.dataset,
                     reference_df=previous_stored_df,
                     current_df=stored_df,
                 ):
-                    drifted_spots.append(str(spot_id))
+                    drifted_spots.append(spot_id)
 
-                stored_spots.append(str(spot_id))
+                stored_spots.append(spot_id)
             except Exception as exc:
-                context["stored_spots"] = stored_spots
-                context["drifted_spots"] = drifted_spots
-                context["spot_errors"][str(spot_id)] = str(exc)
-                _increment_feature_pipeline_stage_failure(context, stage="store")
-                _set_feature_pipeline_stage_duration(
+                context.stored_spots = stored_spots
+                context.drifted_spots = drifted_spots
+                context.spot_errors[spot_id] = str(exc)
+                increment_stage_failure(
+                    context,
+                    stage="store",
+                    stage_names=FEATURE_PIPELINE_STAGES,
+                )
+                record_stage_duration(
                     context,
                     stage="store",
                     started_at=started_at,
@@ -582,11 +569,15 @@ def store_feature_pipeline_context(
                 raise
 
         if not stored_spots:
-            context["stored_spots"] = []
-            context["drifted_spots"] = []
+            context.stored_spots = []
+            context.drifted_spots = []
             error = "No feature data was generated for any configured spot"
-            _increment_feature_pipeline_stage_failure(context, stage="store")
-            _set_feature_pipeline_stage_duration(
+            increment_stage_failure(
+                context,
+                stage="store",
+                stage_names=FEATURE_PIPELINE_STAGES,
+            )
+            record_stage_duration(
                 context,
                 stage="store",
                 started_at=started_at,
@@ -598,9 +589,9 @@ def store_feature_pipeline_context(
             )
             raise ValueError(error)
 
-        context["stored_spots"] = stored_spots
-        context["drifted_spots"] = drifted_spots
-        _set_feature_pipeline_stage_duration(
+        context.stored_spots = stored_spots
+        context.drifted_spots = drifted_spots
+        record_stage_duration(
             context,
             stage="store",
             started_at=started_at,
@@ -609,6 +600,15 @@ def store_feature_pipeline_context(
         return _feature_pipeline_result(context)
     except Exception:
         raise
+
+
+def store_feature_pipeline_context(
+    feature_context: dict[str, object],
+) -> dict[str, object]:
+    """Store validated features, emit drift metrics, and return retraining context."""
+    return _store_feature_pipeline_context_state(
+        FeaturePipelineState.from_payload(feature_context)
+    )
 
 
 def _log_feature_pipeline_job_context(feature_result: dict[str, object]) -> None:
@@ -786,10 +786,10 @@ def should_auto_retrain(
 
 def _run_feature_pipeline_result(dataset: str = "train") -> dict[str, object]:
     """Run the feature pipeline and return stored spots plus retraining context."""
-    feature_context = fetch_feature_pipeline_context(dataset=dataset)
-    feature_context = engineer_feature_pipeline_context(feature_context)
-    feature_context = validate_feature_pipeline_context(feature_context)
-    return store_feature_pipeline_context(feature_context)
+    feature_context = _fetch_feature_pipeline_context_state(dataset=dataset)
+    feature_context = _engineer_feature_pipeline_context_state(feature_context)
+    feature_context = _validate_feature_pipeline_context_state(feature_context)
+    return _store_feature_pipeline_context_state(feature_context)
 
 
 def run_feature_pipeline(dataset: str = "train") -> list[str]:
@@ -836,102 +836,29 @@ def _training_summary_state(
     dataset: str,
     requested_stage: str,
     training_run_id: str | None = None,
-) -> dict[str, Any]:
+) -> TrainingPipelineState:
     try:
         summary = read_training_pipeline_run_summary(dataset)
     except FileNotFoundError:
         summary = {}
 
-    if training_run_id and summary.get("training_run_id") not in {
-        None,
-        training_run_id,
-    }:
-        summary = {}
-
-    return {
-        "dataset": dataset,
-        "requested_stage": requested_stage,
-        "training_run_id": training_run_id or summary.get("training_run_id"),
-        "stage_durations_seconds": dict(summary.get("stage_durations_seconds", {})),
-        "stage_failure_counts": {
-            stage: int(dict(summary.get("stage_failure_counts", {})).get(stage, 0))
-            for stage in TRAINING_PIPELINE_STAGES
-        },
-        "training_row_count": summary.get("training_row_count"),
-        "training_feature_count": summary.get("training_feature_count"),
-        "train_row_count": summary.get("train_row_count"),
-        "test_row_count": summary.get("test_row_count"),
-        "evaluation_report_path": summary.get("evaluation_report_path"),
-        "evaluation_report_exists": bool(
-            summary.get("evaluation_report_exists", False)
-        ),
-        "registered_model_name": summary.get("registered_model_name"),
-        "registered_model_version": summary.get("registered_model_version"),
-        "run_metrics": {
-            str(name): float(value)
-            for name, value in dict(summary.get("run_metrics", {})).items()
-        },
-    }
-
-
-def _set_training_pipeline_stage_duration(
-    training_state: dict[str, Any],
-    *,
-    stage: str,
-    started_at: float,
-) -> None:
-    durations = dict(training_state.get("stage_durations_seconds", {}))
-    durations[str(stage)] = float(perf_counter() - started_at)
-    training_state["stage_durations_seconds"] = durations
-
-
-def _increment_training_pipeline_stage_failure(
-    training_state: dict[str, Any],
-    *,
-    stage: str,
-) -> None:
-    counts = {
-        known_stage: int(
-            dict(training_state.get("stage_failure_counts", {})).get(known_stage, 0)
-        )
-        for known_stage in TRAINING_PIPELINE_STAGES
-    }
-    counts[str(stage)] = int(counts.get(str(stage), 0)) + 1
-    training_state["stage_failure_counts"] = counts
+    return TrainingPipelineState.from_summary(
+        dataset=dataset,
+        requested_stage=requested_stage,
+        summary=summary,
+        training_run_id=training_run_id,
+    )
 
 
 def _emit_training_summary(
-    training_state: dict[str, Any],
+    training_state: TrainingPipelineState,
     *,
     run_status: str,
     error: str | None = None,
 ) -> None:
     summary = build_training_pipeline_run_summary(
-        dataset=str(training_state["dataset"]),
-        requested_stage=str(training_state["requested_stage"]),
-        training_run_id=(
-            None
-            if training_state.get("training_run_id") is None
-            else str(training_state["training_run_id"])
-        ),
-        stage_durations_seconds=dict(training_state.get("stage_durations_seconds", {})),
-        stage_failure_counts=dict(training_state.get("stage_failure_counts", {})),
+        **training_state.to_summary_payload(),
         run_status=run_status,
-        run_metrics=dict(training_state.get("run_metrics", {})),
-        training_row_count=training_state.get("training_row_count"),
-        training_feature_count=training_state.get("training_feature_count"),
-        train_row_count=training_state.get("train_row_count"),
-        test_row_count=training_state.get("test_row_count"),
-        evaluation_report_path=training_state.get("evaluation_report_path"),
-        evaluation_report_exists=bool(
-            training_state.get("evaluation_report_exists", False)
-        ),
-        registered_model_name=training_state.get("registered_model_name"),
-        registered_model_version=(
-            None
-            if training_state.get("registered_model_version") is None
-            else str(training_state["registered_model_version"])
-        ),
         error=error,
     )
     emit_training_pipeline_run_summary(summary)
@@ -971,11 +898,9 @@ def run_training_pipeline_step(
 
     try:
         training_run_id = run_training_pipeline(dataset=dataset)
-        training_state.update(
-            _training_run_snapshot(training_run_id),
-        )
-        training_state["training_run_id"] = training_run_id
-        _set_training_pipeline_stage_duration(
+        training_state.merge_run_snapshot(_training_run_snapshot(training_run_id))
+        training_state.training_run_id = training_run_id
+        record_stage_duration(
             training_state,
             stage="train",
             started_at=started_at,
@@ -983,8 +908,12 @@ def run_training_pipeline_step(
         _emit_training_summary(training_state, run_status="running")
         return training_run_id
     except Exception as exc:
-        _increment_training_pipeline_stage_failure(training_state, stage="train")
-        _set_training_pipeline_stage_duration(
+        increment_stage_failure(
+            training_state,
+            stage="train",
+            stage_names=TRAINING_PIPELINE_STAGES,
+        )
+        record_stage_duration(
             training_state,
             stage="train",
             started_at=started_at,
@@ -1021,11 +950,11 @@ def evaluate_training_run(
         with mlflow.start_run(run_id=training_run_id):
             resolved_report_path = generate_evaluation_report(metrics, str(report_path))
 
-        training_state["training_run_id"] = training_run_id
-        training_state["run_metrics"] = metrics
-        training_state["evaluation_report_path"] = resolved_report_path
-        training_state["evaluation_report_exists"] = Path(resolved_report_path).exists()
-        _set_training_pipeline_stage_duration(
+        training_state.training_run_id = training_run_id
+        training_state.run_metrics = metrics
+        training_state.evaluation_report_path = resolved_report_path
+        training_state.evaluation_report_exists = Path(resolved_report_path).exists()
+        record_stage_duration(
             training_state,
             stage="evaluate",
             started_at=started_at,
@@ -1033,8 +962,12 @@ def evaluate_training_run(
         _emit_training_summary(training_state, run_status="running")
         return resolved_report_path
     except Exception as exc:
-        _increment_training_pipeline_stage_failure(training_state, stage="evaluate")
-        _set_training_pipeline_stage_duration(
+        increment_stage_failure(
+            training_state,
+            stage="evaluate",
+            stage_names=TRAINING_PIPELINE_STAGES,
+        )
+        record_stage_duration(
             training_state,
             stage="evaluate",
             started_at=started_at,
@@ -1059,10 +992,10 @@ def register_training_run(
     try:
         model_version = register_model(training_run_id)
         promote_model(None, model_version.version, stage=stage)
-        training_state["training_run_id"] = training_run_id
-        training_state["registered_model_name"] = get_mlflow_config()["model_name"]
-        training_state["registered_model_version"] = str(model_version.version)
-        _set_training_pipeline_stage_duration(
+        training_state.training_run_id = training_run_id
+        training_state.registered_model_name = get_mlflow_config()["model_name"]
+        training_state.registered_model_version = str(model_version.version)
+        record_stage_duration(
             training_state,
             stage="register",
             started_at=started_at,
@@ -1070,8 +1003,12 @@ def register_training_run(
         _emit_training_summary(training_state, run_status="succeeded")
         return str(model_version.version)
     except Exception as exc:
-        _increment_training_pipeline_stage_failure(training_state, stage="register")
-        _set_training_pipeline_stage_duration(
+        increment_stage_failure(
+            training_state,
+            stage="register",
+            stage_names=TRAINING_PIPELINE_STAGES,
+        )
+        record_stage_duration(
             training_state,
             stage="register",
             started_at=started_at,
