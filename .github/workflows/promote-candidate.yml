@@ -230,6 +230,69 @@ jobs:
             echo "candidate_invocation_mode=${invocation_mode}"
           } >> "$GITHUB_OUTPUT"
 
+      - id: capture_live
+        name: Capture current live rollback inputs
+        run: |
+          set -euo pipefail
+
+          service_description="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format=json)"
+          live_service_url="$(printf '%s' "$service_description" | jq -r '.status.url // empty')"
+          if [[ -z "$live_service_url" ]]; then
+            echo "Current live service URL is empty." >&2
+            exit 1
+          fi
+
+          live_revision_name="$(printf '%s' "$service_description" | jq -r 'first(.status.traffic[] | select((.tag | not) and (.percent // 0) > 0) | .revisionName)')"
+          if [[ -z "$live_revision_name" || "$live_revision_name" == 'null' ]]; then
+            live_revision_name="$(printf '%s' "$service_description" | jq -r 'first(.status.traffic[] | select((.percent // 0) > 0) | .revisionName)')"
+          fi
+
+          if [[ -z "$live_revision_name" || "$live_revision_name" == 'null' ]]; then
+            echo "Current live revision could not be resolved before promotion." >&2
+            exit 1
+          fi
+
+          health_url="${live_service_url%/}/health"
+          allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
+          curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
+          invocation_mode="anonymous"
+
+          if [[ "$allow_unauthenticated" != 'true' ]]; then
+            invocation_mode="identity-token"
+            identity_token="$(gcloud auth print-identity-token --audiences="$live_service_url")"
+            curl_args+=(-H "Authorization: Bearer ${identity_token}")
+          fi
+
+          echo "Waiting for current live health at ${health_url}..."
+          health_payload="$(curl "${curl_args[@]}" "$health_url")"
+          if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+            echo "Current live health verification failed before promotion." >&2
+            printf '%s\n' "$health_payload" >&2
+            exit 1
+          fi
+
+          live_model_alias="$(printf '%s' "$health_payload" | jq -r '.model_alias // empty')"
+          if [[ -z "$live_model_alias" ]]; then
+            echo "Current live health payload did not include model_alias." >&2
+            printf '%s\n' "$health_payload" >&2
+            exit 1
+          fi
+
+          live_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
+          if [[ -z "$live_model_version" ]]; then
+            echo "Current live health payload did not include model_version." >&2
+            printf '%s\n' "$health_payload" >&2
+            exit 1
+          fi
+
+          {
+            echo "live_service_url=${live_service_url}"
+            echo "live_revision_name=${live_revision_name}"
+            echo "live_model_alias=${live_model_alias}"
+            echo "live_model_version=${live_model_version}"
+            echo "live_invocation_mode=${invocation_mode}"
+          } >> "$GITHUB_OUTPUT"
+
       - id: promote_model
         name: Promote candidate model version to champion
         env:
@@ -351,6 +414,11 @@ jobs:
             echo "- Live alias: $TARGET_ALIAS"
             echo "- URL: ${{ steps.deploy_live.outputs.service_url }}"
             echo "- Invocation: ${{ steps.verify_live.outputs.invocation_mode }}"
+            echo
+            echo "### Rollback inputs"
+            echo "- Revision: ${{ steps.capture_live.outputs.live_revision_name }}"
+            echo "- Model alias: ${{ steps.capture_live.outputs.live_model_alias }}"
+            echo "- Model version: ${{ steps.capture_live.outputs.live_model_version }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   blocked:
