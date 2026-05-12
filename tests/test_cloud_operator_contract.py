@@ -671,6 +671,21 @@ def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -
     assert 'echo "Online compose app URL: ${app_url}"' in bootstrap
 
 
+def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "print_cloud_run_summary()" in bootstrap
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url'
+        in bootstrap
+    )
+    assert 'echo "Cloud Run service URL: ${service_url}"' in bootstrap
+    assert (
+        'echo "Cloud Run allows unauthenticated access: ${FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED}"'
+        in bootstrap
+    )
+
+
 def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply() -> (
     None
 ):
@@ -694,6 +709,33 @@ def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply()
     )
     assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
         "verify_online_compose_runtime"
+    )
+
+
+def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "verify_cloud_run_runtime()" in bootstrap
+    assert (
+        'service_url="$(optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"'
+        in bootstrap
+    )
+    assert 'health_url="${service_url%/}/health"' in bootstrap
+    assert 'spots_url="${service_url%/}/spots"' in bootstrap
+    assert 'echo "Waiting for Cloud Run health at ${health_url}..."' in bootstrap
+    assert 'echo "Checking Cloud Run spots endpoint at ${spots_url}..."' in bootstrap
+    assert 'gcloud auth print-identity-token --audiences="$service_url"' in bootstrap
+    assert (
+        'echo "Cloud Run service requires authenticated invocation; requesting identity token..."'
+        in bootstrap
+    )
+    assert '"id"[[:space:]]*:' in bootstrap
+    assert (
+        'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
+        in bootstrap
+    )
+    assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
+        "verify_cloud_run_runtime"
     )
 
 

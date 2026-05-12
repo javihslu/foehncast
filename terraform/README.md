@@ -253,6 +253,8 @@ The bootstrap script will:
 
 After bootstrap, run the Terraform workflow with `apply` if you want to provision the shared environment right away. After that, pushes to `main` keep it up to date automatically.
 
+If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks the Cloud Run `/health` endpoint and the `/spots` route. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling it.
+
 If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` waits for the hosted `/health` endpoint and checks that `/metrics` contains the online compose sync metrics.
 
 The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target or the full online compose host target.
