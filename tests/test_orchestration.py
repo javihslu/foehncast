@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -262,6 +263,72 @@ def test_run_feature_pipeline_raises_on_validation_failure(
     assert emitted["summary"]["failed_spot_count"] == 1
     assert emitted["summary"]["stage_failure_counts"]["validate"] == 1
     assert emitted["summary"]["spots"][0]["validation"]["is_valid"] is False
+
+
+def test_validate_feature_pipeline_context_serializes_timestamp_range_violations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: dict[str, object] = {}
+    feature_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [14.0],
+            "wind_gusts_10m": [18.0],
+            "wind_direction_10m": [220.0],
+        },
+        index=pd.to_datetime(["2026-05-12T09:38:51Z"]),
+    )
+
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
+    )
+
+    feature_context = orchestration._feature_pipeline_context(run_key="timestamp-test")
+    feature_context["engineered_spots"] = ["silvaplana"]
+    run_dir = Path(str(feature_context["run_dir"]))
+    orchestration._write_feature_pipeline_frame(
+        orchestration._feature_pipeline_stage_path(run_dir, "feature", "silvaplana"),
+        feature_df,
+    )
+
+    monkeypatch.setattr(
+        orchestration,
+        "run_validation",
+        lambda df, spot_id: SimpleNamespace(
+            is_valid=False,
+            missing_columns=[],
+            null_fractions={"wind_speed_10m": 0.0},
+            range_violations=pd.DataFrame(
+                [
+                    {
+                        "column": "wind_speed_10m",
+                        "index": pd.Timestamp("2026-05-12T09:38:51Z"),
+                        "value": 300.0,
+                        "min": 0.0,
+                        "max": 200.0,
+                    }
+                ]
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_feature_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
+
+    with pytest.raises(ValueError, match="Feature validation failed"):
+        orchestration.validate_feature_pipeline_context(feature_context)
+
+    validation_path = orchestration._feature_pipeline_validation_path(
+        run_dir, "silvaplana"
+    )
+    payload = json.loads(validation_path.read_text())
+
+    assert payload["range_violations"][0]["index"] == "2026-05-12T09:38:51+00:00"
+    assert emitted["summary"]["run_status"] == "failed"
+    assert emitted["summary"]["stage_failure_counts"]["validate"] == 1
 
 
 def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(

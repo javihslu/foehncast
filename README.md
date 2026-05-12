@@ -24,11 +24,11 @@ flowchart LR
 | Area | Status | Summary |
 |------|--------|---------|
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
-| Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers fresh versions in MLflow under a candidate alias |
+| Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers fresh versions in MLflow under the requested registry alias |
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit demo |
 | Hosted runtime | Working | The shared environment runs the hosted full-stack target on one GCP host; the inference-only Cloud Run target is available but not enabled there |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
-| Monitoring | Working | Docker Compose runs Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; and Grafana loads starter dashboards and alert rules from checked-in config |
+| Monitoring | Working | Docker Compose runs Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; feature panels are derived from persisted Airflow report summaries; and Grafana loads starter dashboards and alert rules from checked-in config |
 
 ## Default Setup
 
@@ -53,7 +53,7 @@ This is the default path for a fresh machine.
 3. Run `./scripts/bootstrap-local.sh`.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
-The local bootstrap uses the bundled MinIO service for curated features and MLflow artifacts. It prepares Feast with the bundled Datastore-mode emulator and checks that Grafana loaded the checked-in dashboard and alerts before it reports the stack ready. If the default ports are busy, it moves to the next free ports and prints the resolved endpoints.
+The local bootstrap uses the bundled MinIO service for curated features and MLflow artifacts. It prepares Feast with the bundled Datastore-mode emulator, runs the training DAG with the serving alias path so the app comes up healthy on a real registry version, and checks that Grafana loaded the checked-in dashboard and alerts before it reports the stack ready. If the default ports are busy, it moves to the next free ports and prints the resolved endpoints.
 On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically. When the retraining gate passes, it triggers the separate `training_pipeline` DAG instead of embedding train, evaluate, and register steps inside the feature flow. The `training_pipeline` DAG itself stays unscheduled and paused by default for manual reruns.
 The optional `development_env` notebook container is not part of the default path. Start it only when you need notebook or dev-shell Makefile commands.
 
@@ -70,11 +70,13 @@ After bootstrap completes, the main local endpoints are:
 
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
+Feature-pipeline Grafana panels are backed by the latest summary JSON written under `airflow/reports/`. The app mounts that directory and republishes the summary as Prometheus metrics through `/metrics`, so local dashboard plots and Prometheus queries follow the same contract.
+
 Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`. That log lets the monitoring layer compare recent model outputs with earlier outputs from the same model version without mixing temporary service state into `data/`.
 
 Grafana also creates a starter email contact point for the checked-in alert rules. In the local Docker path, that route uses the built-in placeholder address.
 
-The local bootstrap resets Docker volumes and temporary runtime artifacts, then checks the live `/features/online` route and the Grafana provisioning API before it reports the stack ready.
+The local bootstrap resets Docker volumes, local Airflow metadata, and temporary runtime artifacts, then checks the live `/features/online` route and the Grafana provisioning API before it reports the stack ready.
 
 Example check:
 

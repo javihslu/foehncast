@@ -35,6 +35,8 @@ docs/
 
 One local workload data root lives under `data/`, while local runtime state stays separate. For example, curated feature rows and Feast offline parquet belong under `data/`, but local Feast registry, rendered runtime config, and inference prediction logs belong under `.state/` instead of mixing service state into the workload dataset tree.
 
+Airflow also writes operator-facing artifacts under `airflow/reports/`. That directory now includes the latest feature-pipeline run summary JSON and evaluation markdown outputs, and the local app mounts it so Prometheus and Grafana can expose the latest feature-pipeline monitoring panels.
+
 ## Why The Layout Matters
 
 The runtime code lives under one package, while orchestration, operator scripts, infrastructure, tests, and docs stay beside it instead of being mixed into the same folder tree. That makes it easier to explain which parts define the model pipeline, which parts schedule it, which parts provision hosted environments, and which parts document the result.
@@ -53,6 +55,7 @@ There is currently no separate product UI package in the repository. The optiona
 - `feature_repo/feature_store*.yaml`: checked-in Feast reference configs that stay separate from the base application config.
 - `.state/feast/feature_store.runtime.yaml`: the rendered runtime Feast binding generated from environment and used by the app and host-side Feast CLI commands.
 - `.state/monitoring/prediction-log.jsonl`: the local inference monitoring log used to compare current model outputs against earlier outputs from the same model version.
+- `airflow/reports/feature-pipeline-*-latest.json`: the persisted feature-pipeline summary files that the local monitoring path republishes through the app `/metrics` endpoint.
 
 The supported curated-storage backends are intentionally narrow: `s3` for the local MinIO-backed baseline and `bigquery` for the hosted analytical surface. The older file-backed curated-store compatibility path is no longer part of the runtime contract.
 

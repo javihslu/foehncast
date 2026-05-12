@@ -63,6 +63,19 @@ class TestGustExcess:
         expected = sample_df["wind_gusts_10m"] - sample_df["wind_speed_10m"]
         pd.testing.assert_series_equal(result, expected.rename("gust_excess_10m"))
 
+    def test_clips_negative_surplus_to_zero(self):
+        df = pd.DataFrame(
+            {
+                "wind_gusts_10m": [11.6, 9.0],
+                "wind_speed_10m": [12.0, 8.0],
+            }
+        )
+
+        result = gust_excess_10m(df)
+
+        expected = pd.Series([0.0, 1.0], name="gust_excess_10m")
+        pd.testing.assert_series_equal(result.reset_index(drop=True), expected)
+
 
 class TestShoreAlignment:
     def test_perpendicular_scores_one(self):

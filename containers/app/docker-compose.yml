@@ -23,6 +23,7 @@ services:
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: 8000
     volumes:
+      - ../../airflow/reports:/workspace/airflow/reports
       - ../../data:/workspace/data
       - ../../.state:/workspace/.state
     ports:

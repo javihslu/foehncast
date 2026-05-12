@@ -324,7 +324,9 @@ def test_local_bootstrap_verifies_grafana_provisioning() -> None:
 
 def test_app_compose_routes_monitoring_metrics_to_statsd_service() -> None:
     compose = _read_yaml("containers/app/docker-compose.yml")
+    app_service = compose["services"]["app"]
     environment = compose["services"]["app"]["environment"]
+    volumes = app_service["volumes"]
 
     assert environment["FOEHNCAST_STATSD_HOST"] == "statsd"
     assert environment["FOEHNCAST_STATSD_PORT"] == 8125
@@ -332,6 +334,7 @@ def test_app_compose_routes_monitoring_metrics_to_statsd_service() -> None:
         environment["FOEHNCAST_STATSD_PREFIX"]
         == "${FOEHNCAST_STATSD_PREFIX:-drift_metrics}"
     )
+    assert "../../airflow/reports:/workspace/airflow/reports" in volumes
 
 
 def test_local_bootstrap_verifies_grafana_before_pipeline_runs() -> None:
