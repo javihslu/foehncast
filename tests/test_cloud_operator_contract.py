@@ -506,7 +506,7 @@ def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> Non
         in template
     )
     assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast"
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
         in template
     )
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
@@ -517,6 +517,10 @@ def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> Non
         in template
     )
     assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
+    assert "cat > /usr/local/bin/foehncast-online-compose-sync <<'EOF'" in template
+    assert "chmod 0755 /usr/local/bin/foehncast-online-compose-sync" in template
+    assert "systemctl enable --now foehncast-online-compose-sync.timer" in template
+    assert "systemctl start foehncast-online-compose-sync.service" in template
 
 
 def test_online_compose_startup_template_prepares_writable_runtime_directories() -> (
@@ -532,7 +536,7 @@ def test_online_compose_startup_template_prepares_writable_runtime_directories()
         in template
     )
     assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast"
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
         in template
     )
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
@@ -544,6 +548,48 @@ def test_online_compose_startup_template_prepares_writable_runtime_directories()
     )
     assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
     assert "chmod 600 /opt/foehncast/airflow/.admin-password" in template
+
+
+def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert 'git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"' in template
+    assert "git -C /opt/foehncast checkout --force FETCH_HEAD" in template
+    assert (
+        "cat > /etc/systemd/system/foehncast-online-compose-sync.service <<'EOF'"
+        in template
+    )
+    assert "ExecStart=/usr/local/bin/foehncast-online-compose-sync" in template
+    assert (
+        "cat > /etc/systemd/system/foehncast-online-compose-sync.timer <<'EOF'"
+        in template
+    )
+    assert "OnBootSec=2m" in template
+    assert "OnUnitActiveSec=5m" in template
+    assert "Persistent=true" in template
+    assert (
+        "docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull"
+        in template
+    )
+
+
+def test_online_compose_sync_template_records_last_success_status_file() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert (
+        "cat > /opt/foehncast/.state/online-compose-sync/last-success.json <<'EOF'"
+        in template
+    )
+    assert '"state": "pending"' in template
+    assert (
+        'sync_status_file="/opt/foehncast/.state/online-compose-sync/last-success.json"'
+        in template
+    )
+    assert 'sync_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"' in template
+    assert 'sync_commit="$(git -C /opt/foehncast rev-parse HEAD)"' in template
+    assert '"last_successful_sync_at": "${sync_timestamp}"' in template
+    assert '"last_successful_commit": "${sync_commit}"' in template
+    assert '"compose_deploy_mode": "${compose_deploy_mode}"' in template
 
 
 def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access() -> (
@@ -590,6 +636,61 @@ def test_bootstrap_gcp_reports_hosted_feast_follow_up_step() -> None:
     assert (
         "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
         in bootstrap
+    )
+
+
+def test_bootstrap_gcp_requires_curl_for_hosted_runtime_verification() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "require_command curl" in bootstrap
+
+
+def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "print_online_compose_summary()" in bootstrap
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" online_compose_host_ip'
+        in bootstrap
+    )
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url'
+        in bootstrap
+    )
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" online_compose_airflow_url'
+        in bootstrap
+    )
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" online_compose_mlflow_url'
+        in bootstrap
+    )
+    assert 'echo "Online compose app URL: ${app_url}"' in bootstrap
+
+
+def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply() -> (
+    None
+):
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "verify_online_compose_runtime()" in bootstrap
+    assert 'health_url="${app_url%/}/health"' in bootstrap
+    assert 'metrics_url="${app_url%/}/metrics"' in bootstrap
+    assert 'echo "Waiting for hosted app health at ${health_url}..."' in bootstrap
+    assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in bootstrap
+    assert (
+        "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
+        in bootstrap
+    )
+    assert (
+        "foehncast_online_compose_sync_last_success_timestamp_seconds\\{" in bootstrap
+    )
+    assert (
+        'echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."'
+        in bootstrap
+    )
+    assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
+        "verify_online_compose_runtime"
     )
 
 

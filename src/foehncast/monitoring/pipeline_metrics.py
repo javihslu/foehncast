@@ -24,7 +24,11 @@ FEATURE_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
         "storage_backend",
         "expected_spot_count",
         "fetched_spot_count",
+        "engineered_spot_count",
+        "validated_spot_count",
         "stored_spot_count",
+        "stage_durations_seconds",
+        "stage_failure_counts",
         "skipped_spot_count",
         "failed_spot_count",
     ),
@@ -267,7 +271,11 @@ def build_feature_pipeline_run_summary(
     storage_backend: str,
     expected_spots: list[str],
     fetched_spots: list[str],
+    engineered_spots: list[str],
+    validated_spots: list[str],
     stored_spots: list[str],
+    stage_durations_seconds: dict[str, float] | None,
+    stage_failure_counts: dict[str, int] | None,
     spot_summaries: list[dict[str, Any]],
     run_status: str,
     error: str | None = None,
@@ -282,10 +290,22 @@ def build_feature_pipeline_run_summary(
         "storage_backend": storage_backend,
         "expected_spots": expected_spots,
         "fetched_spots": fetched_spots,
+        "engineered_spots": engineered_spots,
+        "validated_spots": validated_spots,
         "stored_spots": stored_spots,
         "expected_spot_count": int(len(expected_spots)),
         "fetched_spot_count": int(len(fetched_spots)),
+        "engineered_spot_count": int(len(engineered_spots)),
+        "validated_spot_count": int(len(validated_spots)),
         "stored_spot_count": int(len(stored_spots)),
+        "stage_durations_seconds": {
+            str(stage): float(duration)
+            for stage, duration in dict(stage_durations_seconds or {}).items()
+        },
+        "stage_failure_counts": {
+            str(stage): int(count)
+            for stage, count in dict(stage_failure_counts or {}).items()
+        },
         "skipped_spot_count": int(
             sum(summary["status"] == "skipped" for summary in spot_summaries)
         ),
@@ -362,10 +382,18 @@ def _summary_metrics(summary: dict[str, Any]) -> dict[str, float]:
     metrics = {
         "feature_expected_spot_count": float(summary["expected_spot_count"]),
         "feature_fetched_spot_count": float(summary["fetched_spot_count"]),
+        "feature_engineered_spot_count": float(summary["engineered_spot_count"]),
+        "feature_validated_spot_count": float(summary["validated_spot_count"]),
         "feature_stored_spot_count": float(summary["stored_spot_count"]),
         "feature_skipped_spot_count": float(summary["skipped_spot_count"]),
         "feature_failed_spot_count": float(summary["failed_spot_count"]),
     }
+
+    for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
+        metrics[f"feature_{stage}_duration_seconds"] = float(duration)
+
+    for stage, count in dict(summary.get("stage_failure_counts", {})).items():
+        metrics[f"feature_{stage}_failure_count"] = float(count)
 
     for spot_summary in summary.get("spots", []):
         prefix = f"feature_{spot_summary['spot_id']}"

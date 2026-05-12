@@ -11,6 +11,18 @@ import pytest
 from foehncast import orchestration
 
 
+@pytest.fixture(autouse=True)
+def _feature_pipeline_state_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        orchestration,
+        "_feature_pipeline_state_root",
+        lambda: tmp_path / "feature-pipeline-state",
+    )
+
+
 def test_run_feature_pipeline_fetches_validated_features(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -248,6 +260,7 @@ def test_run_feature_pipeline_raises_on_validation_failure(
 
     assert emitted["summary"]["run_status"] == "failed"
     assert emitted["summary"]["failed_spot_count"] == 1
+    assert emitted["summary"]["stage_failure_counts"]["validate"] == 1
     assert emitted["summary"]["spots"][0]["validation"]["is_valid"] is False
 
 
@@ -281,6 +294,7 @@ def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(
     assert emitted["summary"]["error"] == (
         "Unexpected unit for wind_speed_10m: expected km/h, got 'kn'"
     )
+    assert emitted["summary"]["stage_failure_counts"]["fetch"] == 1
     assert emitted["summary"]["fetched_spot_count"] == 0
     assert emitted["summary"]["spots"] == []
 
@@ -415,6 +429,13 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
             "storage_backend": "s3",
             "stored_spots": ["silvaplana", "urnersee"],
             "drifted_spots": ["silvaplana"],
+            "stage_durations_seconds": {"fetch": 1.5, "store": 2.5},
+            "stage_failure_counts": {
+                "fetch": 0,
+                "engineer": 0,
+                "validate": 0,
+                "store": 0,
+            },
             "dataset_drift_detected": True,
         },
     )
@@ -426,6 +447,13 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
         "storage_backend": "s3",
         "stored_spots": ["silvaplana", "urnersee"],
         "drifted_spots": ["silvaplana"],
+        "stage_durations_seconds": {"fetch": 1.5, "store": 2.5},
+        "stage_failure_counts": {
+            "fetch": 0,
+            "engineer": 0,
+            "validate": 0,
+            "store": 0,
+        },
         "dataset_drift_detected": True,
     }
     assert logged["tracking_uri"] == "https://mlflow.example.com"
@@ -440,6 +468,12 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
     assert logged["metrics"] == {
         "stored_spot_count": 2,
         "drifted_spot_count": 1,
+        "fetch_duration_seconds": 1.5,
+        "store_duration_seconds": 2.5,
+        "fetch_failure_count": 0.0,
+        "engineer_failure_count": 0.0,
+        "validate_failure_count": 0.0,
+        "store_failure_count": 0.0,
         "dataset_drift_detected": 1.0,
     }
 

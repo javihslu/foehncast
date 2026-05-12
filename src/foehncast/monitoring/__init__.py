@@ -7,6 +7,11 @@ from foehncast.monitoring.drift import (
     detect_prediction_drift,
     push_drift_metrics,
 )
+from foehncast.monitoring.online_compose_sync_prometheus import (
+    build_online_compose_sync_prometheus_registry,
+    read_online_compose_sync_status,
+    render_online_compose_sync_prometheus_metrics,
+)
 from foehncast.monitoring.pipeline_metrics import (
     FEATURE_PIPELINE_METRIC_CONTRACT,
     emit_feature_pipeline_run_summary,
@@ -30,6 +35,7 @@ __all__ = [
     "FEATURE_PIPELINE_METRIC_CONTRACT",
     "append_prediction_log",
     "build_prediction_log_prometheus_registry",
+    "build_online_compose_sync_prometheus_registry",
     "detect_data_drift",
     "detect_prediction_drift",
     "emit_prediction_drift_metrics",
@@ -37,7 +43,9 @@ __all__ = [
     "feature_pipeline_stage_overview",
     "feature_pipeline_summary_path",
     "push_drift_metrics",
+    "read_online_compose_sync_status",
     "read_prediction_log",
     "read_feature_pipeline_run_summary",
+    "render_online_compose_sync_prometheus_metrics",
     "render_prediction_log_prometheus_metrics",
 ]

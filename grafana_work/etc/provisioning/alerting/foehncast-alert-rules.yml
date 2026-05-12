@@ -203,7 +203,7 @@ groups:
               expr: '((time() - max by (endpoint) (foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="succeeded"})) * on (endpoint) (sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="scheduled"}[15m])) > bool 0))'
               instant: true
               intervalMs: 1000
-              legendFormat: '{{endpoint}}'
+              legendFormat: "{{endpoint}}"
               maxDataPoints: 43200
               range: false
               refId: A
@@ -211,7 +211,7 @@ groups:
             relativeTimeRange:
               from: 900
               to: 0
-            datasourceUid: '__expr__'
+            datasourceUid: "__expr__"
             model:
               conditions:
                 - evaluator:
@@ -228,7 +228,7 @@ groups:
                   type: query
               datasource:
                 type: __expr__
-                uid: '__expr__'
+                uid: "__expr__"
               expression: A
               intervalMs: 1000
               maxDataPoints: 43200
@@ -239,7 +239,7 @@ groups:
             relativeTimeRange:
               from: 900
               to: 0
-            datasourceUid: '__expr__'
+            datasourceUid: "__expr__"
             model:
               conditions:
                 - evaluator:
@@ -257,7 +257,7 @@ groups:
                   type: query
               datasource:
                 type: __expr__
-                uid: '__expr__'
+                uid: "__expr__"
               expression: B
               intervalMs: 1000
               maxDataPoints: 43200
@@ -270,9 +270,189 @@ groups:
         for: 0s
         annotations:
           __dashboardUid__: foehncast-monitoring
-          __panelId__: '14'
+          __panelId__: "14"
           summary: Prediction monitoring has been active without a successful background execution for more than 15 minutes.
         labels:
           component: inference-monitoring
+          severity: warning
+        isPaused: false
+      - uid: foehncast_feature_stage_failures
+        title: FoehnCast Feature Stage Failures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)"
+              instant: true
+              intervalMs: 1000
+              legendFormat: "{{dataset}} / {{storage_backend}} / {{stage}}"
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: foehncast-monitoring
+        panelId: 18
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          __dashboardUid__: foehncast-monitoring
+          __panelId__: "18"
+          summary: The latest feature-pipeline summary reports a failing stage.
+        labels:
+          component: feature-pipeline
+          severity: warning
+        isPaused: false
+      - uid: foehncast_hosted_sync_stale
+        title: FoehnCast Hosted Sync Stale
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
+              instant: true
+              intervalMs: 1000
+              legendFormat: "{{git_ref}} / {{compose_deploy_mode}}"
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 900
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: foehncast-monitoring
+        panelId: 19
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          __dashboardUid__: foehncast-monitoring
+          __panelId__: "19"
+          summary: The hosted compose sync has not reported a successful refresh for more than 15 minutes.
+        labels:
+          component: hosted-operator
           severity: warning
         isPaused: false

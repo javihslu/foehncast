@@ -59,7 +59,16 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
         "dataset": "notebook_eval",
         "expected_spot_count": 1,
         "fetched_spot_count": 1,
+        "engineered_spot_count": 1,
+        "validated_spot_count": 1,
         "stored_spot_count": 1,
+        "stage_durations_seconds": {"fetch": 12.5, "store": 3.5},
+        "stage_failure_counts": {
+            "fetch": 0,
+            "engineer": 0,
+            "validate": 0,
+            "store": 0,
+        },
         "skipped_spot_count": 0,
         "failed_spot_count": 0,
         "spots": [
@@ -85,6 +94,11 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
         "monitoring/feature_pipeline",
     )
     assert logged["metrics"]["feature_stored_spot_count"] == 1.0
+    assert logged["metrics"]["feature_engineered_spot_count"] == 1.0
+    assert logged["metrics"]["feature_validated_spot_count"] == 1.0
+    assert logged["metrics"]["feature_fetch_duration_seconds"] == 12.5
+    assert logged["metrics"]["feature_store_duration_seconds"] == 3.5
+    assert logged["metrics"]["feature_validate_failure_count"] == 0.0
     assert logged["metrics"]["feature_silvaplana_feast_projection_ready"] == 1.0
 
 

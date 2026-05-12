@@ -473,6 +473,10 @@ def test_metrics_endpoint_returns_prometheus_payload(
         b"# HELP foehncast_prediction_monitoring_schedule_total example\n"
         b'foehncast_prediction_monitoring_schedule_total{endpoint="predict",result="scheduled"} 1\n'
     )
+    hosted_sync_payload = (
+        b"# HELP foehncast_online_compose_sync_status_file_present example\n"
+        b"foehncast_online_compose_sync_status_file_present 1\n"
+    )
     monkeypatch.setattr(
         serve,
         "render_feature_pipeline_prometheus_metrics",
@@ -488,12 +492,17 @@ def test_metrics_endpoint_returns_prometheus_payload(
         "render_prediction_monitoring_prometheus_metrics",
         lambda: monitoring_payload,
     )
+    monkeypatch.setattr(
+        serve,
+        "render_online_compose_sync_prometheus_metrics",
+        lambda: hosted_sync_payload,
+    )
     client = TestClient(serve.app)
 
     response = client.get("/metrics")
 
     assert response.status_code == 200
     assert response.content == (
-        feature_payload + prediction_payload + monitoring_payload
+        feature_payload + prediction_payload + monitoring_payload + hosted_sync_payload
     )
     assert response.headers["content-type"] == CONTENT_TYPE_LATEST
