@@ -227,6 +227,12 @@ jobs:
                     exit 1
                   fi
 
+                  if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
+                    echo "Rollback target health verification did not report serving alias ${TARGET_ALIAS}." >&2
+                    printf '%s\n' "$health_payload" >&2
+                    exit 1
+                  fi
+
                   rollback_target_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
                   if [[ -z "$rollback_target_model_version" ]]; then
                     echo "Rollback target health payload did not include model_version." >&2
@@ -256,6 +262,53 @@ jobs:
                   fi
 
                   echo "restored_model_version=${restored_model_version}" >> "$GITHUB_OUTPUT"
+
+            - id: reverify_rollback_target
+              name: Reverify rollback target with restored model version
+              env:
+                  SERVICE_URL: ${{ steps.resolve_rollback.outputs.rollback_tag_url }}
+                  RESTORED_MODEL_VERSION: ${{ steps.restore_model.outputs.restored_model_version }}
+              run: |
+                  set -euo pipefail
+
+                  if [[ -z "$SERVICE_URL" || -z "$RESTORED_MODEL_VERSION" ]]; then
+                    echo "Rollback target service URL and restored model version are required for pre-traffic revalidation." >&2
+                    exit 1
+                  fi
+
+                  health_url="${SERVICE_URL%/}/health"
+                  allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
+                  curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
+                  invocation_mode="anonymous"
+
+                  if [[ "$allow_unauthenticated" != 'true' ]]; then
+                    invocation_mode="identity-token"
+                    identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+                    curl_args+=(-H "Authorization: Bearer ${identity_token}")
+                  fi
+
+                  echo "Waiting for rollback target health after alias restore at ${health_url}..."
+                  health_payload="$(curl "${curl_args[@]}" "$health_url")"
+                  if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+                    echo "Rollback target health revalidation failed after alias restore." >&2
+                    printf '%s\n' "$health_payload" >&2
+                    exit 1
+                  fi
+
+                  if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
+                    echo "Rollback target revalidation did not report serving alias ${TARGET_ALIAS}." >&2
+                    printf '%s\n' "$health_payload" >&2
+                    exit 1
+                  fi
+
+                  rollback_target_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
+                  if [[ "$rollback_target_model_version" != "$RESTORED_MODEL_VERSION" ]]; then
+                    echo "Rollback target revalidation did not report the restored model version." >&2
+                    printf '%s\n' "$health_payload" >&2
+                    exit 1
+                  fi
+
+                  echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"
 
             - id: shift_traffic
               name: Restore live traffic to rollback revision
@@ -345,6 +398,7 @@ jobs:
                     echo "- Restored model version: ${{ steps.restore_model.outputs.restored_model_version }}"
                     echo "- Live alias: $TARGET_ALIAS"
                     echo "- URL: ${{ steps.shift_traffic.outputs.service_url }}"
+                    echo "- Tagged revalidation: passed"
                     echo "- Invocation: ${{ steps.verify_live.outputs.invocation_mode }}"
                   } >> "$GITHUB_STEP_SUMMARY"
 
