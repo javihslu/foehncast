@@ -73,6 +73,7 @@ After bootstrap completes, the main local endpoints are:
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
 Feature-pipeline Grafana panels are backed by the latest summary JSON written under `airflow/reports/`. The app mounts that directory and republishes the summary as Prometheus metrics through `/metrics`, so local dashboard plots and Prometheus queries follow the same contract. The bootstrap also validates the Airflow health payload itself, not just the HTTP status code returned by the webserver.
+The pipeline summary writers also keep timestamped history copies under `airflow/reports/history/`, so operator review does not depend on a single mutable latest-summary file.
 
 Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl` as a bounded working set and to `.state/monitoring/prediction-events.jsonl` as the retained history contract. The retained history path can be redirected with `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` when multiple runtimes should contribute to one shared monitoring history.
 Public docs should prefer rendered screenshots or exported evidence over live embeds of private operator dashboards.
