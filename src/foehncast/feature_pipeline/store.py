@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import importlib
 import os
+import types
 from typing import Any
 
 import pandas as pd
@@ -14,6 +15,9 @@ from foehncast.config import get_storage_config
 _BQ_TIME_COLUMN = "forecast_time"
 _BQ_DATASET_COLUMN = "dataset_name"
 _BQ_SPOT_COLUMN = "spot_id"
+_DEFAULT_BIGQUERY_PARTITION_GRANULARITY = "DAY"
+_DEFAULT_BIGQUERY_RETENTION_DAYS = 730
+_DEFAULT_BIGQUERY_CLUSTER_FIELDS = (_BQ_DATASET_COLUMN, _BQ_SPOT_COLUMN)
 
 
 class FeatureStoreBackend(ABC):
@@ -177,6 +181,93 @@ def _bigquery_client(storage_config: dict[str, Any]) -> Any:
     return _bigquery_module().Client(project=_bigquery_project_id(storage_config))
 
 
+def _bigquery_curated_feature_contract(
+    storage_config: dict[str, Any],
+) -> dict[str, Any]:
+    warehouse_contracts = storage_config.get("warehouse_contracts", {})
+    raw_contract = {}
+    if isinstance(warehouse_contracts, dict):
+        candidate = warehouse_contracts.get("curated_features", {})
+        if isinstance(candidate, dict):
+            raw_contract = candidate
+
+    cluster_fields = raw_contract.get(
+        "cluster_fields",
+        _DEFAULT_BIGQUERY_CLUSTER_FIELDS,
+    )
+    resolved_cluster_fields = [
+        str(field).strip() for field in cluster_fields if str(field).strip()
+    ]
+    if not resolved_cluster_fields:
+        resolved_cluster_fields = list(_DEFAULT_BIGQUERY_CLUSTER_FIELDS)
+
+    retention_days = raw_contract.get(
+        "retention_days",
+        _DEFAULT_BIGQUERY_RETENTION_DAYS,
+    )
+    try:
+        resolved_retention_days = max(int(retention_days), 1)
+    except (TypeError, ValueError):
+        resolved_retention_days = _DEFAULT_BIGQUERY_RETENTION_DAYS
+
+    return {
+        "partition_field": (
+            str(raw_contract.get("partition_field", "")).strip() or _BQ_TIME_COLUMN
+        ),
+        "partition_granularity": (
+            str(raw_contract.get("partition_granularity", "")).strip().upper()
+            or _DEFAULT_BIGQUERY_PARTITION_GRANULARITY
+        ),
+        "cluster_fields": resolved_cluster_fields,
+        "retention_days": resolved_retention_days,
+    }
+
+
+def _bigquery_time_partitioning(bigquery: Any, contract: dict[str, Any]) -> Any:
+    partition_type = contract["partition_granularity"]
+    enum = getattr(bigquery, "TimePartitioningType", None)
+    if enum is not None:
+        partition_type = getattr(enum, partition_type, partition_type)
+
+    time_partitioning = getattr(bigquery, "TimePartitioning", None)
+    expiration_ms = contract["retention_days"] * 24 * 60 * 60 * 1000
+    if time_partitioning is None:
+        return types.SimpleNamespace(
+            type_=partition_type,
+            field=contract["partition_field"],
+            expiration_ms=expiration_ms,
+            require_partition_filter=False,
+        )
+
+    return time_partitioning(
+        type_=partition_type,
+        field=contract["partition_field"],
+        expiration_ms=expiration_ms,
+        require_partition_filter=False,
+    )
+
+
+def _validate_bigquery_contract_frame(
+    frame: pd.DataFrame,
+    contract: dict[str, Any],
+) -> None:
+    partition_field = contract["partition_field"]
+    if partition_field not in frame.columns:
+        raise ValueError(
+            f"Curated BigQuery contract requires partition field '{partition_field}'"
+        )
+
+    missing_cluster_fields = [
+        field for field in contract["cluster_fields"] if field not in frame.columns
+    ]
+    if missing_cluster_fields:
+        missing = ", ".join(missing_cluster_fields)
+        raise ValueError(
+            "Curated BigQuery contract requires cluster fields present in the write frame: "
+            f"{missing}"
+        )
+
+
 def _bigquery_not_found(storage_config: dict[str, Any]) -> bool:
     client = _bigquery_client(storage_config)
     table_id = _bigquery_table_id(storage_config)
@@ -239,8 +330,14 @@ def _write_features_bigquery(
     bigquery = _bigquery_module()
     client = _bigquery_client(storage_config)
     write_frame = _bigquery_write_frame(df, spot_id=spot_id, dataset=dataset)
+    contract = _bigquery_curated_feature_contract(storage_config)
+    _validate_bigquery_contract_frame(write_frame, contract)
     _delete_features_bigquery(storage_config, spot_id=spot_id, dataset=dataset)
-    job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
+    job_config = bigquery.LoadJobConfig(
+        write_disposition="WRITE_APPEND",
+        time_partitioning=_bigquery_time_partitioning(bigquery, contract),
+        clustering_fields=contract["cluster_fields"],
+    )
     client.load_table_from_dataframe(
         write_frame,
         _bigquery_table_id(storage_config),
