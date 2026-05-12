@@ -74,9 +74,21 @@ def promote_model(
 
 
 def get_production_model(model_name: str | None = None) -> Any:
-    """Load the currently deployed production model from the registry."""
+    """Load a registry model by alias, defaulting to the production alias."""
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
     alias = _registry_alias("Production", mlflow_config)
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     return mlflow.pyfunc.load_model(f"models:/{resolved_model_name}@{alias}")
+
+
+def get_model_by_alias(alias: str, model_name: str | None = None) -> Any:
+    """Load a registry model from an explicit alias."""
+    normalized_alias = alias.strip()
+    if not normalized_alias:
+        raise ValueError("Model alias must be non-empty")
+
+    mlflow_config = get_mlflow_config()
+    resolved_model_name = _resolved_model_name(model_name, mlflow_config)
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+    return mlflow.pyfunc.load_model(f"models:/{resolved_model_name}@{normalized_alias}")

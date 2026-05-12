@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import mlflow
@@ -16,7 +17,10 @@ from foehncast.config import (
 )
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_forecast
-from foehncast.training_pipeline.register import get_production_model
+from foehncast.training_pipeline.register import get_model_by_alias
+
+
+_DEFAULT_SERVING_ALIAS = "champion"
 
 
 def _spot_lookup() -> dict[str, dict[str, Any]]:
@@ -41,15 +45,30 @@ def list_available_spots() -> list[dict[str, Any]]:
     return [spot.copy() for spot in get_spots()]
 
 
-def get_serving_model_version(model_name: str | None = None) -> str:
+def get_serving_model_alias() -> str:
+    """Return the registry alias this runtime should serve."""
+    override = os.getenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", "").strip()
+    if override:
+        return override
+
+    mlflow_config = get_mlflow_config()
+    configured_alias = str(mlflow_config.get("champion_alias", "")).strip()
+    return configured_alias or _DEFAULT_SERVING_ALIAS
+
+
+def get_serving_model_version(
+    model_name: str | None = None, alias: str | None = None
+) -> str:
     """Return the MLflow registry version currently assigned to the serving alias."""
     mlflow_config = get_mlflow_config()
     resolved_model_name = model_name or mlflow_config["model_name"]
-    alias = mlflow_config.get("champion_alias", "champion")
+    resolved_alias = alias or get_serving_model_alias()
 
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     client = mlflow.MlflowClient()
-    model_version = client.get_model_version_by_alias(resolved_model_name, alias)
+    model_version = client.get_model_version_by_alias(
+        resolved_model_name, resolved_alias
+    )
     return str(model_version.version)
 
 
@@ -64,7 +83,8 @@ def _prepare_feature_frame(
 def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
     """Fetch forecasts for the requested spots and return model predictions."""
     requested_spots = _resolve_spots(spot_ids)
-    model = get_production_model()
+    serving_alias = get_serving_model_alias()
+    model = get_model_by_alias(serving_alias)
     model_config = get_model_config()
     inference_config = get_inference_config()
     feature_columns = model_config["features"]
@@ -109,6 +129,6 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
         )
 
     return {
-        "model_version": get_serving_model_version(),
+        "model_version": get_serving_model_version(alias=serving_alias),
         "predictions": predictions,
     }

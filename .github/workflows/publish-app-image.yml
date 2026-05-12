@@ -11,6 +11,25 @@ on:
       - uv.lock
       - config.yaml
   workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: Cloud Run deploy mode (`live` or `candidate`)
+        required: false
+        default: live
+        type: choice
+        options:
+          - live
+          - candidate
+      candidate_revision_tag:
+        description: Tagged Cloud Run revision name when deploy_mode=`candidate`
+        required: false
+        default: candidate
+        type: string
+      serving_alias:
+        description: Serving alias override (blank defaults to champion for live and candidate for candidate mode)
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -28,6 +47,9 @@ jobs:
       service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
       cloud_run_service: ${{ steps.repo_config.outputs.cloud_run_service }}
       cloud_run_allow_unauthenticated: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
+      deploy_mode: ${{ steps.derived.outputs.deploy_mode }}
+      cloud_run_revision_tag: ${{ steps.derived.outputs.cloud_run_revision_tag }}
+      serving_alias: ${{ steps.derived.outputs.serving_alias }}
       registry_host: ${{ steps.derived.outputs.registry_host }}
       image_repository: ${{ steps.derived.outputs.image_repository }}
       publish_ready: ${{ steps.derived.outputs.publish_ready }}
@@ -65,6 +87,9 @@ jobs:
           WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
           SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
           CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
+          DEPLOY_MODE_INPUT: ${{ github.event.inputs.deploy_mode }}
+          CANDIDATE_REVISION_TAG_INPUT: ${{ github.event.inputs.candidate_revision_tag }}
+          SERVING_ALIAS_INPUT: ${{ github.event.inputs.serving_alias }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
@@ -89,7 +114,31 @@ jobs:
             deploy_ready=true
           fi
 
+          deploy_mode="$(printf '%s' "${DEPLOY_MODE_INPUT:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$deploy_mode" != 'candidate' ]]; then
+            deploy_mode='live'
+          fi
+
+          cloud_run_revision_tag="$(printf '%s' "${CANDIDATE_REVISION_TAG_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          cloud_run_revision_tag="${cloud_run_revision_tag#-}"
+          cloud_run_revision_tag="${cloud_run_revision_tag%-}"
+          if [[ -z "$cloud_run_revision_tag" ]]; then
+            cloud_run_revision_tag='candidate'
+          fi
+
+          serving_alias="$(printf '%s' "${SERVING_ALIAS_INPUT:-}" | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$serving_alias" ]]; then
+            if [[ "$deploy_mode" == 'candidate' ]]; then
+              serving_alias='candidate'
+            else
+              serving_alias='champion'
+            fi
+          fi
+
           {
+            echo "deploy_mode=$deploy_mode"
+            echo "cloud_run_revision_tag=$cloud_run_revision_tag"
+            echo "serving_alias=$serving_alias"
             echo "registry_host=$registry_host"
             echo "image_repository=$image_repository"
             echo "publish_ready=$publish_ready"
@@ -163,6 +212,9 @@ jobs:
       GCP_LOCATION: ${{ needs.config.outputs.location }}
       CLOUD_RUN_SERVICE: ${{ needs.config.outputs.cloud_run_service }}
       CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ needs.config.outputs.cloud_run_allow_unauthenticated }}
+      DEPLOY_MODE: ${{ needs.config.outputs.deploy_mode }}
+      CLOUD_RUN_REVISION_TAG: ${{ needs.config.outputs.cloud_run_revision_tag }}
+      SERVING_ALIAS: ${{ needs.config.outputs.serving_alias }}
       IMAGE_URI: ${{ needs.publish.outputs.image_uri }}
     steps:
       - uses: google-github-actions/auth@v2
@@ -182,14 +234,52 @@ jobs:
       - id: deploy
         name: Deploy published image to Cloud Run
         run: |
-          gcloud run services update "$CLOUD_RUN_SERVICE" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_LOCATION" \
-            --image "$IMAGE_URI" \
-            --quiet
+          set -euo pipefail
 
-          service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
-          echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
+          if [[ "$DEPLOY_MODE" == 'candidate' ]]; then
+            gcloud run deploy "$CLOUD_RUN_SERVICE" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_LOCATION" \
+              --image "$IMAGE_URI" \
+              --no-traffic \
+              --tag "$CLOUD_RUN_REVISION_TAG" \
+              --update-env-vars "FOEHNCAST_MLFLOW_SERVING_ALIAS=$SERVING_ALIAS" \
+              --quiet
+
+            service_description="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format=json)"
+            service_url="$(printf '%s' "$service_description" | jq -r --arg tag "$CLOUD_RUN_REVISION_TAG" '.status.traffic[] | select(.tag == $tag) | .url' | head -n1)"
+            traffic_percent="$(printf '%s' "$service_description" | jq -r --arg tag "$CLOUD_RUN_REVISION_TAG" 'first(.status.traffic[] | select(.tag == $tag) | (.percent // 0))')"
+
+            if [[ -z "$service_url" || "$service_url" == 'null' ]]; then
+              echo "Candidate tagged revision URL is empty after deploy." >&2
+              exit 1
+            fi
+
+            if [[ -z "$traffic_percent" || "$traffic_percent" == 'null' ]]; then
+              traffic_percent='0'
+            fi
+
+            if [[ "$traffic_percent" != '0' ]]; then
+              echo "Candidate deployment must keep traffic at 0%." >&2
+              exit 1
+            fi
+          else
+            gcloud run services update "$CLOUD_RUN_SERVICE" \
+              --project "$GCP_PROJECT_ID" \
+              --region "$GCP_LOCATION" \
+              --image "$IMAGE_URI" \
+              --update-env-vars "FOEHNCAST_MLFLOW_SERVING_ALIAS=$SERVING_ALIAS" \
+              --quiet
+
+            service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
+            traffic_percent='100'
+          fi
+
+          {
+            echo "deploy_mode=$DEPLOY_MODE"
+            echo "service_url=${service_url}"
+            echo "traffic_percent=${traffic_percent}"
+          } >> "$GITHUB_OUTPUT"
 
       - id: verify
         name: Verify deployed Cloud Run runtime
@@ -222,6 +312,11 @@ jobs:
             printf '%s\n' "$health_payload" >&2
             exit 1
           fi
+          if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${SERVING_ALIAS}"'"'; then
+            echo "Cloud Run health verification did not report serving alias ${SERVING_ALIAS}." >&2
+            printf '%s\n' "$health_payload" >&2
+            exit 1
+          fi
 
           echo "Checking Cloud Run spots endpoint at ${spots_url}..."
           spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
@@ -238,9 +333,15 @@ jobs:
           {
             echo "## Cloud Run deployment"
             echo
+            echo "- Mode: $DEPLOY_MODE"
             echo "- Service: $CLOUD_RUN_SERVICE"
             echo "- Image: $IMAGE_URI"
             echo "- URL: ${{ steps.deploy.outputs.service_url }}"
+            echo "- Serving alias: $SERVING_ALIAS"
+            echo "- Traffic: ${{ steps.deploy.outputs.traffic_percent }}%"
+            if [[ "$DEPLOY_MODE" == 'candidate' ]]; then
+              echo "- Tagged revision: $CLOUD_RUN_REVISION_TAG"
+            fi
             echo "- Smoke check: passed"
             echo "- Invocation: ${{ steps.verify.outputs.invocation_mode }}"
           } >> "$GITHUB_STEP_SUMMARY"

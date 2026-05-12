@@ -14,6 +14,7 @@ from foehncast.config import get_rider_config
 from foehncast.inference_pipeline.demo import render_online_features_demo
 from foehncast.inference_pipeline.online_features import get_online_spot_features
 from foehncast.inference_pipeline.predict import (
+    get_serving_model_alias,
     get_serving_model_version,
     list_available_spots,
     predict_spots,
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
         try:
             return {
                 "status": "healthy",
+                "model_alias": get_serving_model_alias(),
                 "model_version": get_serving_model_version(),
             }
         except Exception as exc:

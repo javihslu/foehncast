@@ -470,6 +470,12 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
 def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
     config_job = workflow["jobs"]["config"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    assert dispatch_inputs["deploy_mode"]["type"] == "choice"
+    assert dispatch_inputs["deploy_mode"]["options"] == ["live", "candidate"]
+    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
+    assert dispatch_inputs["serving_alias"]["default"] == ""
 
     assert (
         config_job["outputs"]["cloud_run_service"]
@@ -479,13 +485,41 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
         config_job["outputs"]["cloud_run_allow_unauthenticated"]
         == "${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}"
     )
+    assert (
+        config_job["outputs"]["deploy_mode"]
+        == "${{ steps.derived.outputs.deploy_mode }}"
+    )
+    assert (
+        config_job["outputs"]["cloud_run_revision_tag"]
+        == "${{ steps.derived.outputs.cloud_run_revision_tag }}"
+    )
+    assert (
+        config_job["outputs"]["serving_alias"]
+        == "${{ steps.derived.outputs.serving_alias }}"
+    )
 
     derived_step = _workflow_step(workflow, "config", "derived")
     assert (
         derived_step["env"]["CLOUD_RUN_SERVICE"]
         == "${{ steps.repo_config.outputs.cloud_run_service }}"
     )
+    assert (
+        derived_step["env"]["DEPLOY_MODE_INPUT"]
+        == "${{ github.event.inputs.deploy_mode }}"
+    )
+    assert (
+        derived_step["env"]["CANDIDATE_REVISION_TAG_INPUT"]
+        == "${{ github.event.inputs.candidate_revision_tag }}"
+    )
+    assert (
+        derived_step["env"]["SERVING_ALIAS_INPUT"]
+        == "${{ github.event.inputs.serving_alias }}"
+    )
     assert '-n "$CLOUD_RUN_SERVICE"' in derived_step["run"]
+    assert "deploy_mode='live'" in derived_step["run"]
+    assert "cloud_run_revision_tag='candidate'" in derived_step["run"]
+    assert "serving_alias='candidate'" in derived_step["run"]
+    assert "serving_alias='champion'" in derived_step["run"]
 
     deploy_job = workflow["jobs"]["deploy"]
     assert (
@@ -496,6 +530,28 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
         deploy_job["env"]["CLOUD_RUN_ALLOW_UNAUTHENTICATED"]
         == "${{ needs.config.outputs.cloud_run_allow_unauthenticated }}"
     )
+    assert deploy_job["env"]["DEPLOY_MODE"] == "${{ needs.config.outputs.deploy_mode }}"
+    assert (
+        deploy_job["env"]["CLOUD_RUN_REVISION_TAG"]
+        == "${{ needs.config.outputs.cloud_run_revision_tag }}"
+    )
+    assert (
+        deploy_job["env"]["SERVING_ALIAS"]
+        == "${{ needs.config.outputs.serving_alias }}"
+    )
+
+    deploy_step = _workflow_step(
+        workflow, "deploy", "Deploy published image to Cloud Run"
+    )
+    deploy_script = deploy_step["run"]
+
+    assert "if [[ \"$DEPLOY_MODE\" == 'candidate' ]]; then" in deploy_script
+    assert 'gcloud run deploy "$CLOUD_RUN_SERVICE"' in deploy_script
+    assert "--no-traffic" in deploy_script
+    assert ' --tag "$CLOUD_RUN_REVISION_TAG"' in deploy_script
+    assert "FOEHNCAST_MLFLOW_SERVING_ALIAS=$SERVING_ALIAS" in deploy_script
+    assert "traffic_percent='100'" in deploy_script
+    assert 'echo "traffic_percent=${traffic_percent}"' in deploy_script
 
     verify_step = _workflow_step(
         workflow, "deploy", "Verify deployed Cloud Run runtime"
@@ -517,12 +573,24 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
     assert (
         'grep -Eq \x27"status"[[:space:]]*:[[:space:]]*"healthy"\x27' in verify_script
     )
+    assert '"model_alias"' in verify_script
+    assert (
+        "Cloud Run health verification did not report serving alias ${SERVING_ALIAS}."
+        in verify_script
+    )
     assert 'grep -Eq \x27"id"[[:space:]]*:\x27' in verify_script
     assert (
         'echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"' in verify_script
     )
 
     summary_step = _workflow_step(workflow, "deploy", "Summarize Cloud Run deployment")
+    assert 'echo "- Mode: $DEPLOY_MODE"' in summary_step["run"]
+    assert 'echo "- Serving alias: $SERVING_ALIAS"' in summary_step["run"]
+    assert (
+        'echo "- Traffic: ${{ steps.deploy.outputs.traffic_percent }}%"'
+        in summary_step["run"]
+    )
+    assert 'echo "- Tagged revision: $CLOUD_RUN_REVISION_TAG"' in summary_step["run"]
     assert 'echo "- Smoke check: passed"' in summary_step["run"]
     assert (
         'echo "- Invocation: ${{ steps.verify.outputs.invocation_mode }}"'

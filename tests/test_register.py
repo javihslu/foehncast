@@ -240,3 +240,33 @@ def test_get_production_model_loads_model_from_champion_alias(
     assert model is expected_model
     assert logged["tracking_uri"] == "http://localhost:5001"
     assert logged["model_uri"] == "models:/foehncast-quality@champion"
+
+
+def test_get_model_by_alias_loads_requested_alias(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, str] = {}
+    expected_model = object()
+
+    class FakePyfunc:
+        def load_model(self, model_uri: str) -> object:
+            logged["model_uri"] = model_uri
+            return expected_model
+
+    class FakeMlflow:
+        pyfunc = FakePyfunc()
+
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+    monkeypatch.setattr(register, "mlflow", FakeMlflow())
+    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
+
+    model = register.get_model_by_alias("candidate")
+
+    assert model is expected_model
+    assert logged["tracking_uri"] == "http://localhost:5001"
+    assert logged["model_uri"] == "models:/foehncast-quality@candidate"
