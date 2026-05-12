@@ -33,6 +33,7 @@ def test_root_compose_includes_monitoring_module() -> None:
 def test_monitoring_compose_defines_expected_services() -> None:
     compose = _read_yaml("containers/monitoring/docker-compose.yml")
     services = compose["services"]
+    grafana_environment = services["grafana"]["environment"]
 
     assert {"statsd", "prometheus", "grafana"}.issubset(services)
     assert "development" in services["statsd"]["networks"]
@@ -48,8 +49,23 @@ def test_monitoring_compose_defines_expected_services() -> None:
         "../../grafana_work/dashboards:/opt/grafana/dashboards:ro"
         in services["grafana"]["volumes"]
     )
-    assert services["grafana"]["environment"]["FOEHNCAST_GRAFANA_ALERT_EMAIL"] == (
+    assert grafana_environment["FOEHNCAST_GRAFANA_ALERT_EMAIL"] == (
         "${FOEHNCAST_GRAFANA_ALERT_EMAIL:-alerts@example.invalid}"
+    )
+    assert grafana_environment["GF_SECURITY_ADMIN_USER"] == (
+        "${FOEHNCAST_GRAFANA_ADMIN_USER:-admin}"
+    )
+    assert grafana_environment["GF_SECURITY_ADMIN_PASSWORD"] == (
+        "${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-admin}"
+    )
+    assert grafana_environment["GF_AUTH_DISABLE_LOGIN_FORM"] == (
+        "${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-false}"
+    )
+    assert grafana_environment["GF_AUTH_ANONYMOUS_ENABLED"] == (
+        "${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-false}"
+    )
+    assert grafana_environment["GF_AUTH_ANONYMOUS_ORG_ROLE"] == (
+        "${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-Viewer}"
     )
 
 
@@ -293,16 +309,33 @@ def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None
     )
 
 
-def test_grafana_ini_enables_anonymous_access_and_metrics() -> None:
+def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default() -> (
+    None
+):
     config = configparser.ConfigParser()
     config.read_string(_read_text("grafana_work/etc/grafana.ini"))
 
-    assert config.getboolean("auth.anonymous", "enabled")
+    assert not config.getboolean("auth", "disable_login_form")
+    assert not config.getboolean("auth.anonymous", "enabled")
+    assert config["auth.anonymous"]["org_role"] == "Viewer"
+    assert not config.getboolean("security", "allow_embedding")
+    assert not config.getboolean("public_dashboards", "enabled")
     assert config.getboolean("metrics", "enabled")
     assert (
         config["dashboards"]["default_home_dashboard_path"]
         == "/opt/grafana/dashboards/foehncast-overview.json"
     )
+
+
+def test_local_bootstrap_applies_local_only_grafana_access_overrides() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM" in bootstrap
+    assert "FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED" in bootstrap
+    assert "FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE" in bootstrap
+    assert "GRAFANA_API_USER" in bootstrap
+    assert "GRAFANA_API_PASSWORD" in bootstrap
+    assert '--user "${GRAFANA_API_USER}:${GRAFANA_API_PASSWORD}"' in bootstrap
 
 
 def test_local_bootstrap_verifies_grafana_provisioning() -> None:
