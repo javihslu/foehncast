@@ -809,8 +809,8 @@ def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
         return generate_evaluation_report(metrics, str(report_path))
 
 
-def register_training_run(training_run_id: str, stage: str = "Production") -> str:
-    """Register and promote a training run's model, returning the new version."""
+def register_training_run(training_run_id: str, stage: str = "Candidate") -> str:
+    """Register a training run's model and assign the requested registry alias."""
     model_version = register_model(training_run_id)
     promote_model(None, model_version.version, stage=stage)
     return str(model_version.version)

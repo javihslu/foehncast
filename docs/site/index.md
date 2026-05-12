@@ -45,7 +45,7 @@ flowchart LR
 | Area | Status | Meaning |
 |------|--------|---------|
 | Feature pipeline | Working | The feature DAG ingests, engineers, validates, and stores curated weather features |
-| Training pipeline | Working | The training DAG labels data, trains the model, evaluates it, and registers versions in MLflow |
+| Training pipeline | Working | The training DAG labels data, trains the model, evaluates it, and registers fresh versions in MLflow under a candidate alias |
 | Inference pipeline | Working | The app serves the model-backed API routes used for health, prediction, and ranking |
 | Hosted runtime | Working | Terraform plus the online compose stack can run Airflow, MLflow, and the API on GCP |
 | CI/CD | Working | GitHub Actions validates docs and infrastructure and supports remote Terraform operations |

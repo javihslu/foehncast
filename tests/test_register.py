@@ -19,6 +19,7 @@ def mlflow_config() -> dict[str, str]:
     return {
         "tracking_uri": "http://localhost:5001",
         "model_name": "foehncast-quality",
+        "candidate_alias": "candidate",
         "champion_alias": "champion",
     }
 
@@ -179,6 +180,36 @@ def test_promote_model_assigns_champion_alias_for_production(
 
     assert logged["tracking_uri"] == "http://localhost:5001"
     assert logged["alias"] == ("foehncast-quality", "champion", "7")
+
+
+def test_promote_model_assigns_candidate_alias_for_candidate_stage(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, object] = {}
+
+    class FakeClient:
+        def set_registered_model_alias(
+            self, model_name: str, alias: str, version: str
+        ) -> None:
+            logged["alias"] = (model_name, alias, version)
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
+
+    monkeypatch.setattr(register, "mlflow", FakeMlflow())
+    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
+
+    register.promote_model(None, 11, stage="Candidate")
+
+    assert logged["tracking_uri"] == "http://localhost:5001"
+    assert logged["alias"] == ("foehncast-quality", "candidate", "11")
 
 
 def test_get_production_model_loads_model_from_champion_alias(

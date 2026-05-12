@@ -266,6 +266,7 @@ labeling:
 mlflow:
   experiment_name: "foehncast"
   model_name: "foehncast-quality"
+  candidate_alias: "candidate"
   champion_alias: "champion"
 
 # Inference settings

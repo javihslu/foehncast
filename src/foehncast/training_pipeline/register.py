@@ -20,6 +20,8 @@ def _registry_alias(stage: str, mlflow_config: dict[str, Any]) -> str:
     normalized_stage = stage.strip().lower()
     if normalized_stage == "production":
         return mlflow_config.get("champion_alias", "champion")
+    if normalized_stage == "candidate":
+        return mlflow_config.get("candidate_alias", "candidate")
 
     return normalized_stage
 
