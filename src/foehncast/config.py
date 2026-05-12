@@ -17,6 +17,11 @@ _DEFAULT_STORAGE_BACKEND = "s3"
 _DEFAULT_STORAGE_S3_BUCKET = "foehncast-data"
 _DEFAULT_BIGQUERY_DATASET = "foehncast"
 _DEFAULT_BIGQUERY_TABLE = "forecast_features"
+_DEFAULT_BIGQUERY_PARTITION_GRANULARITY = "DAY"
+_DEFAULT_CURATED_FEATURE_RETENTION_DAYS = 730
+_DEFAULT_PREDICTION_EVENT_DATASET = "foehncast_monitoring"
+_DEFAULT_PREDICTION_EVENT_TABLE = "prediction_events"
+_DEFAULT_PREDICTION_EVENT_RETENTION_DAYS = 180
 _DEFAULT_MLFLOW_TRACKING_URI = "http://localhost:5001"
 
 
@@ -36,6 +41,58 @@ def _resolved_dict_section(name: str) -> dict[str, Any]:
     if not isinstance(section, dict):
         return {}
     return copy.deepcopy(section)
+
+
+def _resolved_string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        candidates = value.split(",")
+    elif isinstance(value, (list, tuple)):
+        candidates = value
+    else:
+        candidates = []
+
+    return [str(item).strip() for item in candidates if str(item).strip()]
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(parsed, 1)
+
+
+def _resolved_warehouse_contract(
+    raw_contract: Any,
+    *,
+    default_dataset: str,
+    default_table: str,
+    default_partition_field: str,
+    default_cluster_fields: tuple[str, ...],
+    default_retention_days: int,
+) -> dict[str, Any]:
+    contract = raw_contract if isinstance(raw_contract, dict) else {}
+
+    cluster_fields = _resolved_string_list(contract.get("cluster_fields"))
+    if not cluster_fields:
+        cluster_fields = list(default_cluster_fields)
+
+    return {
+        "dataset": str(contract.get("dataset", "")).strip() or default_dataset,
+        "table": str(contract.get("table", "")).strip() or default_table,
+        "partition_field": (
+            str(contract.get("partition_field", "")).strip() or default_partition_field
+        ),
+        "partition_granularity": (
+            str(contract.get("partition_granularity", "")).strip().upper()
+            or _DEFAULT_BIGQUERY_PARTITION_GRANULARITY
+        ),
+        "cluster_fields": cluster_fields,
+        "retention_days": _positive_int(
+            contract.get("retention_days"),
+            default_retention_days,
+        ),
+    }
 
 
 def _config_path() -> Path:
@@ -84,6 +141,7 @@ def get_labeling_config() -> dict[str, Any]:
 def get_storage_config() -> dict[str, Any]:
     """Return storage mode plus runtime-bound storage wiring."""
     storage = _resolved_dict_section("storage")
+    warehouse = _resolved_dict_section("warehouse")
 
     storage["backend"] = (
         _env_value("STORAGE_BACKEND")
@@ -132,6 +190,25 @@ def get_storage_config() -> dict[str, Any]:
         or str(storage.get("bigquery_table", "")).strip()
         or _DEFAULT_BIGQUERY_TABLE
     )
+
+    storage["warehouse_contracts"] = {
+        "curated_features": _resolved_warehouse_contract(
+            warehouse.get("curated_features"),
+            default_dataset=storage["bigquery_dataset"],
+            default_table=storage["bigquery_table"],
+            default_partition_field="forecast_time",
+            default_cluster_fields=("dataset_name", "spot_id"),
+            default_retention_days=_DEFAULT_CURATED_FEATURE_RETENTION_DAYS,
+        ),
+        "prediction_events": _resolved_warehouse_contract(
+            warehouse.get("prediction_events"),
+            default_dataset=_DEFAULT_PREDICTION_EVENT_DATASET,
+            default_table=_DEFAULT_PREDICTION_EVENT_TABLE,
+            default_partition_field="prediction_timestamp",
+            default_cluster_fields=("model_version", "endpoint", "spot_id"),
+            default_retention_days=_DEFAULT_PREDICTION_EVENT_RETENTION_DAYS,
+        ),
+    }
 
     return storage
 

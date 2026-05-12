@@ -108,6 +108,29 @@ spots:
 storage:
   backend: "s3" # s3 local baseline | bigquery cloud
 
+# BigQuery is the offline warehouse layer when enabled. Curated features are
+# stored under the storage.bigquery_* table binding; retained monitoring facts
+# belong in separate warehouse tables instead of being inferred from live API or
+# /metrics responses.
+warehouse:
+  curated_features:
+    partition_field: forecast_time
+    partition_granularity: day
+    cluster_fields:
+      - dataset_name
+      - spot_id
+    retention_days: 730
+  prediction_events:
+    dataset: foehncast_monitoring
+    table: prediction_events
+    partition_field: prediction_timestamp
+    partition_granularity: day
+    cluster_fields:
+      - model_version
+      - endpoint
+      - spot_id
+    retention_days: 180
+
 # Deployment wiring such as regions, buckets, Cloud Run names, and GitHub OIDC
 # lives outside the package config in .env, Terraform inputs, and CI variables.
 

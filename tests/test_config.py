@@ -158,6 +158,82 @@ def test_legacy_runtime_fields_still_resolve_without_env(
     assert config.get_mlflow_tracking_uri() == "http://legacy-mlflow:5001"
 
 
+def test_storage_config_exposes_default_warehouse_contracts(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path)
+
+    config.load_config(config_path)
+    storage_config = config.get_storage_config()
+
+    assert storage_config["warehouse_contracts"]["curated_features"] == {
+        "dataset": "foehncast",
+        "table": "forecast_features",
+        "partition_field": "forecast_time",
+        "partition_granularity": "DAY",
+        "cluster_fields": ["dataset_name", "spot_id"],
+        "retention_days": 730,
+    }
+    assert storage_config["warehouse_contracts"]["prediction_events"] == {
+        "dataset": "foehncast_monitoring",
+        "table": "prediction_events",
+        "partition_field": "prediction_timestamp",
+        "partition_granularity": "DAY",
+        "cluster_fields": ["model_version", "endpoint", "spot_id"],
+        "retention_days": 180,
+    }
+
+
+def test_storage_config_resolves_custom_warehouse_contracts_from_yaml(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "storage": {
+                    "backend": "bigquery",
+                    "bigquery_dataset": "curated_features",
+                    "bigquery_table": "feature_rows",
+                },
+                "warehouse": {
+                    "curated_features": {
+                        "partition_granularity": "day",
+                        "cluster_fields": ["spot_id", "dataset_name"],
+                        "retention_days": 365,
+                    },
+                    "prediction_events": {
+                        "dataset": "monitoring_ops",
+                        "table": "prediction_history",
+                        "cluster_fields": ["endpoint", "model_version"],
+                        "retention_days": 45,
+                    },
+                },
+            },
+            sort_keys=False,
+        )
+    )
+
+    config.load_config(config_path)
+    storage_config = config.get_storage_config()
+
+    assert storage_config["warehouse_contracts"]["curated_features"] == {
+        "dataset": "curated_features",
+        "table": "feature_rows",
+        "partition_field": "forecast_time",
+        "partition_granularity": "DAY",
+        "cluster_fields": ["spot_id", "dataset_name"],
+        "retention_days": 365,
+    }
+    assert storage_config["warehouse_contracts"]["prediction_events"] == {
+        "dataset": "monitoring_ops",
+        "table": "prediction_history",
+        "partition_field": "prediction_timestamp",
+        "partition_granularity": "DAY",
+        "cluster_fields": ["endpoint", "model_version"],
+        "retention_days": 45,
+    }
+
+
 def test_project_root_env_resolves_default_config_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

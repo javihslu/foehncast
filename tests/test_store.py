@@ -244,6 +244,8 @@ def test_write_features_bigquery_uses_load_job(
             captured["table_id"] = table_id
             captured["frame"] = frame.copy()
             captured["write_disposition"] = job_config.write_disposition
+            captured["time_partitioning"] = job_config.time_partitioning
+            captured["clustering_fields"] = job_config.clustering_fields
             return FakeLoadJob()
 
         def query(self, query: str, job_config: object | None = None) -> FakeDeleteJob:
@@ -252,8 +254,24 @@ def test_write_features_bigquery_uses_load_job(
             return FakeDeleteJob()
 
     class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str) -> None:
+        def __init__(self, write_disposition: str, **kwargs: object) -> None:
             self.write_disposition = write_disposition
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+    class FakeTimePartitioning:
+        def __init__(
+            self,
+            *,
+            type_: object,
+            field: str,
+            expiration_ms: int,
+            require_partition_filter: bool,
+        ) -> None:
+            self.type_ = type_
+            self.field = field
+            self.expiration_ms = expiration_ms
+            self.require_partition_filter = require_partition_filter
 
     class FakeScalarQueryParameter:
         def __init__(self, name: str, param_type: str, value: str) -> None:
@@ -273,6 +291,8 @@ def test_write_features_bigquery_uses_load_job(
             LoadJobConfig=FakeLoadJobConfig,
             QueryJobConfig=FakeQueryJobConfig,
             ScalarQueryParameter=FakeScalarQueryParameter,
+            TimePartitioning=FakeTimePartitioning,
+            TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
     monkeypatch.setattr(
@@ -302,6 +322,11 @@ def test_write_features_bigquery_uses_load_job(
     assert captured["project"] == "demo-project"
     assert captured["table_id"] == "demo-project.foehncast.forecast_features"
     assert captured["write_disposition"] == "WRITE_APPEND"
+    assert captured["time_partitioning"].field == "forecast_time"
+    assert captured["time_partitioning"].type_ == "DAY"
+    assert captured["time_partitioning"].expiration_ms == 63072000000
+    assert captured["time_partitioning"].require_partition_filter is False
+    assert captured["clustering_fields"] == ["dataset_name", "spot_id"]
     assert captured["delete_completed"] is True
     assert captured["job_completed"] is True
     assert (
@@ -450,8 +475,10 @@ def test_bigquery_round_trip_restores_original_feature_schema(
             self.query_parameters = query_parameters
 
     class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str) -> None:
+        def __init__(self, write_disposition: str, **kwargs: object) -> None:
             self.write_disposition = write_disposition
+            for name, value in kwargs.items():
+                setattr(self, name, value)
 
     class FakeClient:
         def __init__(self, project: str) -> None:
@@ -555,8 +582,10 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
             self.query_parameters = query_parameters
 
     class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str) -> None:
+        def __init__(self, write_disposition: str, **kwargs: object) -> None:
             self.write_disposition = write_disposition
+            for name, value in kwargs.items():
+                setattr(self, name, value)
 
     class FakeClient:
         def __init__(self, project: str) -> None:
