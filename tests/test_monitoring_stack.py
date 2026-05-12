@@ -103,6 +103,9 @@ def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
         panel["title"] == "Feature Pipeline Summary Count"
         for panel in dashboard["panels"]
     )
+    assert any(
+        panel["title"] == "Training Stage State" for panel in dashboard["panels"]
+    )
 
 
 def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
@@ -145,6 +148,14 @@ def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
         "feature-pipeline"
     )
     assert (
+        rules["FoehnCast Training Stage Failures"]["data"][0]["model"]["expr"]
+        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)"
+    )
+    assert rules["FoehnCast Training Stage Failures"]["panelId"] == 27
+    assert rules["FoehnCast Training Stage Failures"]["labels"]["component"] == (
+        "training-pipeline"
+    )
+    assert (
         rules["FoehnCast Hosted Sync Stale"]["data"][0]["model"]["expr"]
         == "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
     )
@@ -179,6 +190,11 @@ def test_grafana_alerting_provisions_contact_point_and_policy_tree() -> None:
         for route in routes
         if route["object_matchers"] == [["component", "=", "feature-pipeline"]]
     )
+    training_route = next(
+        route
+        for route in routes
+        if route["object_matchers"] == [["component", "=", "training-pipeline"]]
+    )
     hosted_route = next(
         route
         for route in routes
@@ -205,6 +221,14 @@ def test_grafana_alerting_provisions_contact_point_and_policy_tree() -> None:
         "alertname",
         "dataset",
         "storage_backend",
+        "stage",
+        "severity",
+    ]
+    assert training_route["receiver"] == "foehncast-email"
+    assert training_route["group_by"] == [
+        "alertname",
+        "dataset",
+        "requested_stage",
         "stage",
         "severity",
     ]
@@ -307,6 +331,48 @@ def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None
         panels["Seconds Since Last Successful Monitoring"]["targets"][0]["expr"]
         == 'time() - max by (endpoint) (foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="succeeded"})'
     )
+    assert (
+        panels["Feature Stage State"]["targets"][0]["expr"]
+        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_state)"
+    )
+    assert (
+        panels["Training Stage State"]["targets"][0]["expr"]
+        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_state)"
+    )
+    assert (
+        panels["Training Pipeline Summary Count"]["targets"][0]["expr"]
+        == "foehncast_training_pipeline_summary_count"
+    )
+    assert (
+        panels["Latest Training Run Success"]["targets"][0]["expr"]
+        == "max by (dataset, requested_stage) (foehncast_training_pipeline_run_success)"
+    )
+    assert (
+        panels["Training Stage Duration"]["targets"][0]["expr"]
+        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_duration_seconds)"
+    )
+    assert (
+        panels["Training Stage Failures"]["targets"][0]["expr"]
+        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)"
+    )
+    assert (
+        panels["Training Metrics"]["targets"][0]["expr"]
+        == 'max by (dataset, requested_stage, metric_name) (foehncast_training_pipeline_run_metric{metric_name=~"accuracy|mae|r2|rmse"})'
+    )
+    assert (
+        panels["Seconds Since Last Training Summary"]["targets"][0]["expr"]
+        == "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)"
+    )
+    assert (
+        panels["Pipeline Freshness"]["targets"][1]["expr"]
+        == "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)"
+    )
+    assert (
+        panels["Seconds Since Last Training Summary"]["fieldConfig"]["defaults"][
+            "thresholds"
+        ]["steps"][1]["value"]
+        == 900
+    )
 
 
 def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default() -> (
@@ -348,10 +414,12 @@ def test_local_bootstrap_verifies_grafana_provisioning() -> None:
     assert "foehncast_predmon_execution_fail" in bootstrap
     assert "foehncast_predmon_stale_success" in bootstrap
     assert "foehncast_feature_stage_failures" in bootstrap
+    assert "foehncast_training_stage_failures" in bootstrap
     assert "foehncast_hosted_sync_stale" in bootstrap
     assert "/api/v1/provisioning/contact-points?name=foehncast-email" in bootstrap
     assert "/api/v1/provisioning/policies" in bootstrap
     assert '"feature-pipeline"' in bootstrap
+    assert '"training-pipeline"' in bootstrap
     assert '"hosted-operator"' in bootstrap
 
 
@@ -382,7 +450,7 @@ def test_local_bootstrap_waits_for_app_health_after_training_pipeline() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
 
     assert bootstrap.index(
-        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
+        'echo "Waiting for asset-triggered training pipeline..."'
     ) < bootstrap.index('echo "Waiting for app health..."')
 
 
