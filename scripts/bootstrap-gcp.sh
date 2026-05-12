@@ -222,6 +222,25 @@ read_tfvars_value() {
     fi
   }
 
+  print_cloud_run_summary() {
+    local service_url
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+
+    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+      return
+    fi
+
+    service_url="$(optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"
+    service_url="$(trim_whitespace "$service_url")"
+
+    if [[ -n "$service_url" && "$service_url" != "null" ]]; then
+      echo "Cloud Run service URL: ${service_url}"
+    fi
+
+    echo "Cloud Run allows unauthenticated access: ${FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED}"
+  }
+
   print_feast_runtime_summary() {
     local feast_bigquery_table
 
@@ -299,6 +318,45 @@ read_tfvars_value() {
       "$metrics_payload" \
       'foehncast_online_compose_sync_last_success_timestamp_seconds\{' \
       'hosted sync last-success timestamp metric'
+  }
+
+  verify_cloud_run_runtime() {
+    local service_url health_url spots_url spots_payload identity_token
+    local -a curl_args
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+
+    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+      return
+    fi
+
+    service_url="$(optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"
+    service_url="$(trim_whitespace "$service_url")"
+
+    if [[ -z "$service_url" || "$service_url" == "null" ]]; then
+      echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."
+      return
+    fi
+
+    health_url="${service_url%/}/health"
+    spots_url="${service_url%/}/spots"
+    curl_args=(--retry 90 --retry-all-errors --retry-delay 10 -fsS)
+
+    if [[ "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED" != "true" ]]; then
+      echo "Cloud Run service requires authenticated invocation; requesting identity token..."
+      identity_token="$(gcloud auth print-identity-token --audiences="$service_url")"
+      curl_args+=(-H "Authorization: Bearer ${identity_token}")
+    fi
+
+    echo "Waiting for Cloud Run health at ${health_url}..."
+    curl "${curl_args[@]}" "$health_url" >/dev/null
+
+    echo "Checking Cloud Run spots endpoint at ${spots_url}..."
+    spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
+    require_payload_pattern \
+      "$spots_payload" \
+      '"id"[[:space:]]*:' \
+      'Cloud Run spots payload'
   }
 
   print_bootstrap_only_summary() {
@@ -828,8 +886,10 @@ else
     echo "Syncing local cloud identifiers into .env..."
     sync_env_from_terraform_outputs
     print_auth_summary
+    print_cloud_run_summary
     print_online_compose_summary
     print_feast_runtime_summary
+    verify_cloud_run_runtime
     verify_online_compose_runtime
   fi
 fi
