@@ -587,9 +587,12 @@ def test_online_compose_sync_template_records_last_success_status_file() -> None
     )
     assert 'sync_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"' in template
     assert 'sync_commit="$(git -C /opt/foehncast rev-parse HEAD)"' in template
-    assert '"last_successful_sync_at": "${sync_timestamp}"' in template
-    assert '"last_successful_commit": "${sync_commit}"' in template
-    assert '"compose_deploy_mode": "${compose_deploy_mode}"' in template
+    assert 'cat > "$${sync_status_file}.tmp" <<STATUS' in template
+    assert 'mv "$${sync_status_file}.tmp" "$${sync_status_file}"' in template
+    assert 'chmod 0644 "$${sync_status_file}"' in template
+    assert '"last_successful_sync_at": "$${sync_timestamp}"' in template
+    assert '"last_successful_commit": "$${sync_commit}"' in template
+    assert '"compose_deploy_mode": "$${compose_deploy_mode}"' in template
 
 
 def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access() -> (

@@ -87,17 +87,17 @@ fi
 sync_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 sync_commit="$(git -C /opt/foehncast rev-parse HEAD)"
 
-cat > "${sync_status_file}.tmp" <<STATUS
+cat > "$${sync_status_file}.tmp" <<STATUS
 {
   "state": "succeeded",
   "git_ref": "${git_ref}",
-  "last_successful_sync_at": "${sync_timestamp}",
-  "last_successful_commit": "${sync_commit}",
-  "compose_deploy_mode": "${compose_deploy_mode}"
+  "last_successful_sync_at": "$${sync_timestamp}",
+  "last_successful_commit": "$${sync_commit}",
+  "compose_deploy_mode": "$${compose_deploy_mode}"
 }
 STATUS
-mv "${sync_status_file}.tmp" "$sync_status_file"
-chmod 0644 "$sync_status_file"
+mv "$${sync_status_file}.tmp" "$${sync_status_file}"
+chmod 0644 "$${sync_status_file}"
 EOF
 chmod 0755 /usr/local/bin/foehncast-online-compose-sync
 
