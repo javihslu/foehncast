@@ -100,6 +100,11 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
     assert logged["metrics"]["feature_store_duration_seconds"] == 3.5
     assert logged["metrics"]["feature_validate_failure_count"] == 0.0
     assert logged["metrics"]["feature_silvaplana_feast_projection_ready"] == 1.0
+    history_paths = pipeline_metrics.feature_pipeline_summary_history_paths(
+        dataset="notebook_eval"
+    )
+    assert len(history_paths) == 1
+    assert json.loads(history_paths[0].read_text())["dataset"] == "notebook_eval"
 
 
 def test_feature_pipeline_stage_overview_flattens_summary() -> None:
@@ -185,6 +190,104 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
     assert logged["metrics"]["training_train_duration_seconds"] == 8.5
     assert logged["metrics"]["training_metric_mae"] == 0.5
     assert logged["metrics"]["training_model_registered"] == 1.0
+    history_paths = pipeline_metrics.training_pipeline_summary_history_paths(
+        dataset="train"
+    )
+    assert len(history_paths) == 1
+    assert json.loads(history_paths[0].read_text())["training_run_id"] == "run-123"
+
+
+def test_feature_pipeline_summary_history_preserves_latest_contract(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+
+    first_summary = {
+        "dataset": "train",
+        "generated_at": "2026-05-12T10:00:00+00:00",
+        "expected_spot_count": 1,
+        "fetched_spot_count": 1,
+        "engineered_spot_count": 1,
+        "validated_spot_count": 1,
+        "stored_spot_count": 1,
+        "stage_durations_seconds": {},
+        "stage_failure_counts": {},
+        "skipped_spot_count": 0,
+        "failed_spot_count": 0,
+        "spots": [],
+    }
+    second_summary = {
+        **first_summary,
+        "generated_at": "2026-05-12T11:00:00+00:00",
+        "stored_spot_count": 2,
+    }
+
+    latest_path = pipeline_metrics.write_feature_pipeline_run_summary(first_summary)
+    pipeline_metrics.write_feature_pipeline_run_summary(second_summary)
+
+    assert latest_path == tmp_path / "feature-pipeline-train-latest.json"
+    assert json.loads(latest_path.read_text())["stored_spot_count"] == 2
+    assert [
+        path.name
+        for path in pipeline_metrics.feature_pipeline_summary_history_paths("train")
+    ] == [
+        "feature-pipeline-train-20260512T100000000000Z.json",
+        "feature-pipeline-train-20260512T110000000000Z.json",
+    ]
+    assert [
+        summary["stored_spot_count"]
+        for summary in pipeline_metrics.read_feature_pipeline_run_summary_history(
+            "train"
+        )
+    ] == [1, 2]
+
+
+def test_training_pipeline_summary_history_preserves_latest_contract(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+
+    first_summary = {
+        "dataset": "train",
+        "generated_at": "2026-05-12T10:00:00+00:00",
+        "requested_stage": "Candidate",
+        "training_run_id": "run-100",
+        "training_row_count": 240,
+        "training_feature_count": 18,
+        "train_row_count": 180,
+        "test_row_count": 60,
+        "evaluation_report_exists": True,
+        "registered_model_version": "7",
+        "stage_durations_seconds": {},
+        "stage_failure_counts": {},
+        "run_metrics": {},
+    }
+    second_summary = {
+        **first_summary,
+        "generated_at": "2026-05-12T11:00:00+00:00",
+        "training_run_id": "run-101",
+    }
+
+    latest_path = pipeline_metrics.write_training_pipeline_run_summary(first_summary)
+    pipeline_metrics.write_training_pipeline_run_summary(second_summary)
+
+    assert latest_path == tmp_path / "training-pipeline-train-latest.json"
+    assert json.loads(latest_path.read_text())["training_run_id"] == "run-101"
+    assert [
+        path.name
+        for path in pipeline_metrics.training_pipeline_summary_history_paths("train")
+    ] == [
+        "training-pipeline-train-20260512T100000000000Z.json",
+        "training-pipeline-train-20260512T110000000000Z.json",
+    ]
+    assert [
+        summary["training_run_id"]
+        for summary in pipeline_metrics.read_training_pipeline_run_summary_history(
+            "train"
+        )
+    ] == ["run-100", "run-101"]
 
 
 def test_training_pipeline_stage_overview_flattens_summary() -> None:
