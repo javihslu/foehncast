@@ -73,6 +73,32 @@ def promote_model(
     )
 
 
+def assign_model_alias(
+    alias: str,
+    version: str | int,
+    model_name: str | None = None,
+) -> None:
+    """Assign an explicit alias to a registered model version."""
+    normalized_alias = alias.strip()
+    if not normalized_alias:
+        raise ValueError("Model alias must be non-empty")
+
+    normalized_version = str(version).strip()
+    if not normalized_version:
+        raise ValueError("Model version must be non-empty")
+
+    mlflow_config = get_mlflow_config()
+    resolved_model_name = _resolved_model_name(model_name, mlflow_config)
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+
+    client = mlflow.MlflowClient()
+    client.set_registered_model_alias(
+        resolved_model_name,
+        normalized_alias,
+        normalized_version,
+    )
+
+
 def get_production_model(model_name: str | None = None) -> Any:
     """Load a registry model by alias, defaulting to the production alias."""
     mlflow_config = get_mlflow_config()

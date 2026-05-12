@@ -270,3 +270,33 @@ def test_get_model_by_alias_loads_requested_alias(
     assert model is expected_model
     assert logged["tracking_uri"] == "http://localhost:5001"
     assert logged["model_uri"] == "models:/foehncast-quality@candidate"
+
+
+def test_assign_model_alias_sets_explicit_alias(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, object] = {}
+
+    class FakeClient:
+        def set_registered_model_alias(
+            self, model_name: str, alias: str, version: str
+        ) -> None:
+            logged["alias"] = (model_name, alias, version)
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
+
+    monkeypatch.setattr(register, "mlflow", FakeMlflow())
+    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    )
+
+    register.assign_model_alias("champion", 13)
+
+    assert logged["tracking_uri"] == "http://localhost:5001"
+    assert logged["alias"] == ("foehncast-quality", "champion", "13")
