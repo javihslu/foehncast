@@ -651,8 +651,109 @@ jobs:
             echo "If the shared contract needs a refresh, run ./scripts/configure-github-actions.sh from a maintainer shell authenticated with gh."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Summarize outputs
+      - name: Verify hosted runtimes
+        id: verify_hosted_runtimes
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
+        run: |
+          set -euo pipefail
+
+          verify_failure=false
+          online_compose_verification_status="skipped"
+          cloud_run_verification_status="skipped"
+          cloud_run_invocation_mode="not-provisioned"
+
+          online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"
+          if [[ -n "$online_compose_app_url" ]]; then
+            online_compose_verification_status="passed"
+            health_url="${online_compose_app_url%/}/health"
+            metrics_url="${online_compose_app_url%/}/metrics"
+
+            echo "Waiting for hosted app health at ${health_url}..."
+            if ! curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url" >/dev/null; then
+              echo "Hosted runtime verification failed: hosted app health check did not succeed." >&2
+              online_compose_verification_status="failed"
+              verify_failure=true
+            else
+              echo "Checking hosted sync metrics at ${metrics_url}..."
+              if ! metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"; then
+                echo "Hosted runtime verification failed: hosted sync metrics did not respond." >&2
+                online_compose_verification_status="failed"
+                verify_failure=true
+              else
+                if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?'; then
+                  echo "Hosted runtime verification failed: expected hosted sync status-file-present metric." >&2
+                  printf '%s\n' "$metrics_payload" >&2
+                  online_compose_verification_status="failed"
+                  verify_failure=true
+                fi
+                if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_last_success_timestamp_seconds\{'; then
+                  echo "Hosted runtime verification failed: expected hosted sync last-success timestamp metric." >&2
+                  printf '%s\n' "$metrics_payload" >&2
+                  online_compose_verification_status="failed"
+                  verify_failure=true
+                fi
+              fi
+            fi
+          else
+            echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."
+          fi
+
+          cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"
+          if [[ -n "$cloud_run_service_url" ]]; then
+            cloud_run_verification_status="passed"
+            cloud_run_allow_unauthenticated="$(printf '%s' "${TF_VAR_cloud_run_allow_unauthenticated}" | tr '[:upper:]' '[:lower:]')"
+            health_url="${cloud_run_service_url%/}/health"
+            spots_url="${cloud_run_service_url%/}/spots"
+            curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
+
+            if [[ "$cloud_run_allow_unauthenticated" != 'true' ]]; then
+              echo "Cloud Run service requires authenticated invocation; requesting identity token..."
+              cloud_run_invocation_mode="identity-token"
+              identity_token="$(gcloud auth print-identity-token --audiences="$cloud_run_service_url")"
+              curl_args+=(-H "Authorization: Bearer ${identity_token}")
+            else
+              cloud_run_invocation_mode="anonymous"
+            fi
+
+            echo "Waiting for Cloud Run health at ${health_url}..."
+            if ! health_payload="$(curl "${curl_args[@]}" "$health_url")"; then
+              echo "Cloud Run runtime verification failed: health endpoint did not respond." >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+              echo "Cloud Run runtime verification failed: expected healthy health payload." >&2
+              printf '%s\n' "$health_payload" >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
+            fi
+
+            echo "Checking Cloud Run spots endpoint at ${spots_url}..."
+            if ! spots_payload="$(curl "${curl_args[@]}" "$spots_url")"; then
+              echo "Cloud Run runtime verification failed: spots endpoint did not respond." >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
+            elif ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
+              echo "Cloud Run runtime verification failed: expected spots payload with ids." >&2
+              printf '%s\n' "$spots_payload" >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
+            fi
+          else
+            echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."
+          fi
+
+          {
+            echo "online_compose_verification_status=${online_compose_verification_status}"
+            echo "cloud_run_verification_status=${cloud_run_verification_status}"
+            echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$verify_failure" == 'true' ]]; then
+            exit 1
+          fi
+
+      - name: Summarize outputs
+        if: ${{ always() && steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
         run: |
           set -euo pipefail
 
@@ -678,9 +779,12 @@ jobs:
             echo "## Terraform apply"
             echo
             echo "- App URL: $(render_output online_compose_app_url not-exposed-or-not-provisioned)"
+            echo "- App verification: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"
             echo "- Airflow URL: $(render_output online_compose_airflow_url host-local-by-default)"
             echo "- MLflow URL: $(render_output online_compose_mlflow_url host-local-by-default)"
             echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
+            echo "- Cloud Run verification: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_verification_status }}"
+            echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"
             echo "- Hosted Feast source: bigquery"
             echo "- Hosted Feast offline source table: ${TF_VAR_project_id}.${feast_bigquery_dataset}.${feast_bigquery_table}"
             echo "- Hosted Feast online store database: ${feast_online_store_database_name}"
