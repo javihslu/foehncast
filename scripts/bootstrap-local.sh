@@ -303,7 +303,14 @@ wait_for_airflow_dag_run_state() {
 grafana_api_get() {
   local path="$1"
 
-  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "${GRAFANA_BASE_URL}${path}"
+  local auth_args=()
+  if [[ -n "${GRAFANA_API_USER:-}" && -n "${GRAFANA_API_PASSWORD:-}" ]]; then
+    auth_args=(--user "${GRAFANA_API_USER}:${GRAFANA_API_PASSWORD}")
+  fi
+
+  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS \
+    "${auth_args[@]}" \
+    "${GRAFANA_BASE_URL}${path}"
 }
 
 require_payload_pattern() {
@@ -320,9 +327,16 @@ require_payload_pattern() {
 
 verify_grafana_provisioning() {
   local dashboard_payload alert_rules_payload contact_points_payload policies_payload
+  local health_auth_args=()
+
+  if [[ -n "${GRAFANA_API_USER:-}" && -n "${GRAFANA_API_PASSWORD:-}" ]]; then
+    health_auth_args=(--user "${GRAFANA_API_USER}:${GRAFANA_API_PASSWORD}")
+  fi
 
   echo "Waiting for Grafana health..."
-  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$GRAFANA_HEALTH_URL" >/dev/null
+  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS \
+    "${health_auth_args[@]}" \
+    "$GRAFANA_HEALTH_URL" >/dev/null
 
   echo "Checking Grafana dashboard provisioning..."
   dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-monitoring")"
@@ -474,6 +488,22 @@ FEAST_DATASTORE_EMULATOR_RESET_URL="http://${DATASTORE_EMULATOR_HOST}/reset"
 FEAST_DATASET="${FEAST_DATASET:-$(env_file_value AIRFLOW_FEATURE_DATASET)}"
 FEAST_DATASET="${FEAST_DATASET:-train}"
 
+export FOEHNCAST_GRAFANA_ADMIN_USER="${FOEHNCAST_GRAFANA_ADMIN_USER:-$(resolved_env_value FOEHNCAST_GRAFANA_ADMIN_USER)}"
+export FOEHNCAST_GRAFANA_ADMIN_PASSWORD="${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-$(resolved_env_value FOEHNCAST_GRAFANA_ADMIN_PASSWORD)}"
+export FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM="${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-$(resolved_env_value FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM)}"
+export FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED="${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-$(resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED)}"
+export FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE="${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-$(resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE)}"
+export GRAFANA_API_USER="${GRAFANA_API_USER:-$(resolved_env_value GRAFANA_API_USER)}"
+export GRAFANA_API_PASSWORD="${GRAFANA_API_PASSWORD:-$(resolved_env_value GRAFANA_API_PASSWORD)}"
+
+export FOEHNCAST_GRAFANA_ADMIN_USER="${FOEHNCAST_GRAFANA_ADMIN_USER:-admin}"
+export FOEHNCAST_GRAFANA_ADMIN_PASSWORD="${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-foehncast-local}"
+export FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM="${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-true}"
+export FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED="${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-true}"
+export FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE="${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-Admin}"
+export GRAFANA_API_USER="${GRAFANA_API_USER:-${FOEHNCAST_GRAFANA_ADMIN_USER}}"
+export GRAFANA_API_PASSWORD="${GRAFANA_API_PASSWORD:-${FOEHNCAST_GRAFANA_ADMIN_PASSWORD}}"
+
 echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
@@ -536,6 +566,7 @@ echo "Objectstore API: ${OBJECTSTORE_ENDPOINT}"
 echo "Objectstore UI:  http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_CONSOLE_PORT}"
 echo "Feast online store: http://${DATASTORE_EMULATOR_HOST}"
 echo "The local bootstrap also prepares Feast state, verifies the online-feature route, and confirms Grafana loaded the checked-in dashboard and alerting resources."
+echo "Grafana uses deployable-safe defaults in the checked-in config; this bootstrap applies local-only access overrides unless you provide stricter local settings in $ENV_FILE."
 echo
 echo "Sample check:"
 echo "curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{\"spot_ids\":[\"silvaplana\",\"urnersee\"]}'"
