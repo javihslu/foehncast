@@ -54,7 +54,7 @@ This is the default path for a fresh machine.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 The local bootstrap uses the bundled MinIO service for curated features and MLflow artifacts. It prepares Feast with the bundled Datastore-mode emulator and checks that Grafana loaded the checked-in dashboard and alerts before it reports the stack ready. If the default ports are busy, it moves to the next free ports and prints the resolved endpoints.
-On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically. It can continue into train, evaluate, and register steps in the same Airflow flow. The separate `training_pipeline` DAG stays manual for reruns.
+On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically. When the retraining gate passes, it triggers the separate `training_pipeline` DAG instead of embedding train, evaluate, and register steps inside the feature flow. The `training_pipeline` DAG itself stays unscheduled and paused by default for manual reruns.
 The optional `development_env` notebook container is not part of the default path. Start it only when you need notebook or dev-shell Makefile commands.
 
 After bootstrap completes, the main local endpoints are:

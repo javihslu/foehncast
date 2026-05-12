@@ -10,22 +10,22 @@ try:
         PythonOperator,
         ShortCircuitOperator,
     )
+    from airflow.providers.standard.operators.trigger_dagrun import (
+        TriggerDagRunOperator,
+    )
     from airflow.sdk import DAG
 except ModuleNotFoundError:  # pragma: no cover - Airflow is container-only
     dag = None
 else:
     from foehncast.orchestration import (
         engineer_feature_pipeline_context,
-        evaluate_training_run,
         fetch_feature_pipeline_context,
-        register_training_run,
         resolve_auto_retraining_mode,
         resolve_airflow_schedule,
         store_feature_pipeline_job_context,
         should_auto_retrain,
         validate_feature_pipeline_context,
     )
-    from foehncast.training_pipeline.train import run_training_pipeline
 
     feature_dataset = os.getenv("AIRFLOW_FEATURE_DATASET", "train").strip() or "train"
     feature_schedule = resolve_airflow_schedule(
@@ -41,7 +41,7 @@ else:
         dag_id="feature_pipeline",
         description=(
             "Fetch forecasts, engineer features, validate them, persist curated "
-            "slices, and optionally continue into retraining."
+            "slices, and optionally trigger the separate retraining DAG."
         ),
         start_date=datetime(2024, 1, 1),
         schedule=feature_schedule,
@@ -83,23 +83,15 @@ else:
                 },
             )
 
-            train_model = PythonOperator(
-                task_id="train_model",
-                python_callable=run_training_pipeline,
-                op_kwargs={"dataset": feature_dataset},
-            )
-
-            evaluate_model_task = PythonOperator(
-                task_id="evaluate_model",
-                python_callable=evaluate_training_run,
-                op_args=[train_model.output],
-                op_kwargs={"dataset": feature_dataset},
-            )
-
-            register_model_task = PythonOperator(
-                task_id="register_model",
-                python_callable=register_training_run,
-                op_args=[train_model.output],
+            trigger_training_pipeline = TriggerDagRunOperator(
+                task_id="trigger_training_pipeline",
+                trigger_dag_id="training_pipeline",
+                conf={
+                    "dataset": feature_dataset,
+                    "source_dag_id": "feature_pipeline",
+                    "source_run_id": "{{ run_id }}",
+                },
+                wait_for_completion=False,
             )
 
             (
@@ -108,9 +100,7 @@ else:
                 >> validate_feature_set
                 >> store_feature_set
                 >> retraining_gate
-                >> train_model
-                >> evaluate_model_task
-                >> register_model_task
+                >> trigger_training_pipeline
             )
 
         else:
