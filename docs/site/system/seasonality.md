@@ -34,7 +34,7 @@ The current implementation favors the smallest feature set that can still captur
 - No wide month-dummy design.
 - No extra architecture dedicated only to seasonal logic.
 
-That keeps the project within course scope while still giving the model useful time context.
+That keeps the design simple while still giving the model useful time context.
 
 ## How It Can Be Evaluated
 

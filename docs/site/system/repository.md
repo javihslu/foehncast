@@ -31,7 +31,7 @@ docs/
 - `feature_repo/`: the Feast integration repo and configuration surface.
 - `prometheus_config/` and `grafana_work/`: the checked-in monitoring stack configuration for Prometheus and Grafana.
 - `tests/`: regression coverage for the core pipeline logic and API behavior.
-- `docs/`: the public documentation site, milestone pages, and system notes used in the course handoff.
+- `docs/`: the public documentation site and system notes.
 
 One local workload data root lives under `data/`, while local runtime state stays separate. For example, curated feature rows and Feast offline parquet belong under `data/`, but local Feast registry, rendered runtime config, and inference prediction logs belong under `.state/` instead of mixing service state into the workload dataset tree.
 

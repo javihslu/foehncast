@@ -64,4 +64,4 @@ Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtim
 - [Feature Pipeline](system/feature-pipeline.md)
 - [Cloud Mapping](system/cloud-mapping.md)
 - [Repository](system/repository.md)
-- [Milestones](milestones/index.md)
+- [Use Case and Data](system/use-case.md)

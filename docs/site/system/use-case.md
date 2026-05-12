@@ -89,6 +89,6 @@ Open-Meteo supplies the forecast data, OSRM already contributes travel-time rank
 - It keeps the labeling and ranking problem aligned with one real rider scenario.
 - It makes route-time personalization meaningful instead of theoretical.
 - It avoids turning the course project into a generic weather portal with weak decision support.
-- It keeps later milestone changes focused on implementation maturity rather than on changing the product question.
+- It keeps later changes focused on implementation maturity rather than on changing the product question.
 
-See [MS1 Proposal](../milestones/ms1.md) for the original baseline and [Architecture](architecture.md) for the current system structure.
+See [Architecture](architecture.md) for the current system structure and [Feature Pipeline](feature-pipeline.md) for how the data moves through the stack.

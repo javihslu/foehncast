@@ -1,6 +1,6 @@
 # FoehnCast Docs
 
-FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for the setup details, architecture notes, and milestone-level documentation.
+FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, system notes, and operator guidance.
 
 ## Start Here
 
@@ -10,7 +10,7 @@ FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live
 | Understand the Feature-Training-Inference split | [Architecture](system/architecture.md) |
 | See how the hosted path maps onto GCP | [Cloud Mapping](system/cloud-mapping.md) |
 | Understand the main code and folder layout | [Repository](system/repository.md) |
-| Review the course delivery story | [Milestones](milestones/index.md) |
+| Understand the rider scope and data inputs | [Use Case and Data](system/use-case.md) |
 
 ## Operating Model
 
@@ -57,4 +57,4 @@ flowchart LR
 - [Feature Pipeline](system/feature-pipeline.md): how data moves from forecast ingestion to curated features.
 - [Cloud Mapping](system/cloud-mapping.md): how local boundaries map onto hosted storage and runtime choices.
 - [Repository](system/repository.md): where the code, orchestration, tests, docs, and demo live.
-- [Milestones](milestones/index.md): the course-facing delivery narrative.
+- [Use Case and Data](system/use-case.md): the rider profile, spot set, and data sources behind the ranking.

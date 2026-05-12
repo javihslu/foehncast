@@ -1,11 +1,11 @@
 # Architecture
 
-FoehnCast keeps one stable Feature-Training-Inference split across every runtime mode. What changes across milestones is the hosting model around that split, not the application boundaries themselves.
+FoehnCast keeps the same Feature-Training-Inference split in every runtime mode. What changes is the hosting around that split, not the application boundaries.
 
 !!! note "How to read this page"
 
     The validated baseline is the local Compose stack.
-    The hosted paths reuse the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
+    The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
 
 ## System In One View
 
@@ -63,12 +63,12 @@ flowchart LR
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
-| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and course evaluation |
+| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
 | Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep the whole stack online |
 | Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | publish the inference API as a smaller hosted surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | repeatable delivery, not a runtime target |
 
-The hosted targets deploy only runtime surfaces. Development assets, notebooks, docs build tooling, and the local emulators stay local or CI-only. The hosted full-stack target exposes only the app on port `8000` by default; Airflow and MLflow stay private unless their ports are explicitly opened.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target exposes only the app on port `8000` by default. Airflow and MLflow stay private unless you open their ports on purpose.
 
 ## Current Local Architecture
 
