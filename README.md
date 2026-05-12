@@ -24,7 +24,7 @@ flowchart LR
 | Area | Status | Summary |
 |------|--------|---------|
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
-| Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers versions in MLflow |
+| Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers fresh versions in MLflow under a candidate alias |
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit demo |
 | Hosted runtime | Working | The shared environment runs the hosted full-stack target on one GCP host; the inference-only Cloud Run target is available but not enabled there |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |

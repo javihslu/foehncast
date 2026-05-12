@@ -40,6 +40,7 @@ def _write_config(path: Path) -> None:
                 "mlflow": {
                     "experiment_name": "foehncast",
                     "model_name": "foehncast-quality",
+                    "candidate_alias": "candidate",
                     "champion_alias": "champion",
                 },
             },
@@ -64,6 +65,7 @@ def _write_legacy_runtime_config(path: Path) -> None:
                     "tracking_uri": "http://legacy-mlflow:5001",
                     "experiment_name": "foehncast",
                     "model_name": "foehncast-quality",
+                    "candidate_alias": "candidate",
                     "champion_alias": "champion",
                 },
             },

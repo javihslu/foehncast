@@ -600,7 +600,7 @@ def test_register_training_run_registers_and_promotes(
     monkeypatch.setattr(
         orchestration,
         "promote_model",
-        lambda model_name, version, stage="Production": logged.update(
+        lambda model_name, version, stage="Candidate": logged.update(
             {"promotion": (model_name, version, stage)}
         ),
     )
@@ -608,4 +608,4 @@ def test_register_training_run_registers_and_promotes(
     version = orchestration.register_training_run("run-456")
 
     assert version == "7"
-    assert logged["promotion"] == (None, "7", "Production")
+    assert logged["promotion"] == (None, "7", "Candidate")
