@@ -366,6 +366,96 @@ groups:
           component: feature-pipeline
           severity: warning
         isPaused: false
+      - uid: foehncast_training_stage_failures
+        title: FoehnCast Training Stage Failures
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)"
+              instant: true
+              intervalMs: 1000
+              legendFormat: "{{dataset}} / {{requested_stage}} / {{stage}}"
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              reducer: last
+              refId: B
+              type: reduce
+          - refId: C
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: "__expr__"
+            model:
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - C
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: "__expr__"
+              expression: B
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+              type: threshold
+        dashboardUid: foehncast-monitoring
+        panelId: 27
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          __dashboardUid__: foehncast-monitoring
+          __panelId__: "27"
+          summary: The latest training-pipeline summary reports a failing stage.
+        labels:
+          component: training-pipeline
+          severity: warning
+        isPaused: false
       - uid: foehncast_hosted_sync_stale
         title: FoehnCast Hosted Sync Stale
         condition: C

@@ -20,6 +20,8 @@ flowchart LR
     VAL --> STO[Store curated rows]
     STO --> OFF[Build Feast offline frame]
     OFF --> EXP[Export Feast-ready parquet]
+    EXP --> FEAST[Publish Feast-sync asset]
+    FEAST --> REQ[Publish training-request asset]
 </div>
 
 The key point is that each stage has one clear job:
@@ -29,6 +31,7 @@ The key point is that each stage has one clear job:
 - validation rejects structurally broken outputs
 - storage preserves the curated contract without mutating it
 - Feast preparation consumes curated rows instead of reimplementing the feature pipeline
+- Airflow publishes the downstream asset hand-offs after persistence and Feast preparation succeed
 
 ## Stage Responsibilities
 
@@ -159,9 +162,12 @@ That means:
 
 - `build_offline_store_frame(...)` and `build_entity_rows(...)` stay thin projections over stored curated data
 - `export_offline_store(...)` is a deterministic materialization step, not a second feature-engineering stage
+- `prepare_feature_store(...)` is the Airflow-owned orchestration step that exports curated rows, renders the runtime config, applies the Feast repo, and materializes the online store without redefining the feature contract
 - the local preparation script is an operator wrapper around those helpers, not the real source of truth for the feature contract
 - local Feast stays lightweight with exported parquet plus the Datastore-mode emulator, while keeping registry and runtime config state outside the workload data root and the curated rows in the local objectstore baseline
 - the cloud direction stays aligned with curated BigQuery plus Datastore and GCS support
+
+The Airflow-facing part of the contract matters here: the feature DAG emits explicit curated-feature and Feast-sync assets after `prepare_feature_store(...)` succeeds, then optionally publishes the training-request asset that schedules the training DAG. That makes the feature-to-training boundary visible in Airflow instead of hiding it behind a direct trigger.
 
 This keeps the same conceptual split available in both local and cloud directions: curated features first, Feast second.
 

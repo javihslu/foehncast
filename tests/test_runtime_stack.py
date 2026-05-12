@@ -33,6 +33,12 @@ def test_airflow_compose_uses_airflow3_runtime_contract() -> None:
     services = compose["services"]
 
     assert runtime_env["AIRFLOW__CORE__EXECUTOR"] == "LocalExecutor"
+    assert runtime_env["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN"].startswith(
+        "${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://"
+    )
+    assert runtime_env["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC"].startswith(
+        "${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC:-postgresql+asyncpg://"
+    )
     assert (
         runtime_env["AIRFLOW__CORE__EXECUTION_API_SERVER_URL"]
         == "http://airflow-webserver:8080/execution/"
@@ -45,7 +51,30 @@ def test_airflow_compose_uses_airflow3_runtime_contract() -> None:
         runtime_env["AIRFLOW__API_AUTH__JWT_SECRET"]
         == "${AIRFLOW__API_AUTH__JWT_SECRET:-foehncast-local-jwt-secret}"
     )
+    assert "airflow-postgres" in services
     assert "airflow-dag-processor" in services
+    assert (
+        services["airflow-webserver"]["healthcheck"]["test"][3]
+        == "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/api/v2/version')"
+    )
+    assert services["airflow-scheduler"]["healthcheck"]["test"] == [
+        "CMD",
+        "airflow",
+        "jobs",
+        "check",
+        "--job-type",
+        "SchedulerJob",
+        "--local",
+    ]
+    assert services["airflow-triggerer"]["healthcheck"]["test"] == [
+        "CMD",
+        "airflow",
+        "jobs",
+        "check",
+        "--job-type",
+        "TriggererJob",
+        "--local",
+    ]
 
 
 def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
@@ -54,17 +83,21 @@ def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
 
     assert "http://127.0.0.1:8080/api/v2/monitor/health" in bootstrap
     assert "Waiting for Airflow API server health" in bootstrap
+    assert "verify_airflow_api_health" in bootstrap
+    assert "wait_for_service_health airflow-postgres 90 2" in bootstrap
+    assert "wait_for_service_health airflow-triggerer 90 2" in bootstrap
     assert 'rm -f "$ROOT_DIR/airflow/airflow.db"' in bootstrap
     assert 'rm -rf "$ROOT_DIR/airflow/logs"' in bootstrap
-    assert 'TRAINING_DAG_CONF="$(printf ' in bootstrap
-    assert '"stage":"Production"' in bootstrap
+    assert "wait_for_airflow_dag_run_state" in bootstrap
+    assert "asset_triggered" in bootstrap
     assert (
-        'airflow dags test training_pipeline "$TRAINING_DATE" -c "$TRAINING_DAG_CONF"'
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
         in bootstrap
     )
     assert (
         'compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"' in bootstrap
     )
+    assert "airflow-postgres" in services
     assert "airflow-dag-processor" in services
     assert "development_env" not in services
 
@@ -106,4 +139,10 @@ def test_runtime_images_use_validated_airflow_and_mlflow_versions() -> None:
 
     assert "FROM apache/airflow:3.2.1-python3.12" in airflow_dockerfile
     assert "apache-airflow-providers-standard==1.12.3" in airflow_dockerfile
+    assert '"feast[gcp]>=0.63.0"' in airflow_dockerfile
+    assert "python -m venv /home/airflow/.local/feast-venv" in airflow_dockerfile
+    assert (
+        "FOEHNCAST_FEAST_PYTHON=/home/airflow/.local/feast-venv/bin/python"
+        in airflow_dockerfile
+    )
     assert "FROM ghcr.io/mlflow/mlflow:v3.12.0" in mlflow_dockerfile

@@ -349,7 +349,7 @@ def test_local_bootstrap_waits_for_app_health_after_training_pipeline() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
 
     assert bootstrap.index(
-        'echo "Running training pipeline for ${TRAINING_DATE}..."'
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
     ) < bootstrap.index('echo "Waiting for app health..."')
 
 

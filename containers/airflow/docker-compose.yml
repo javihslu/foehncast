@@ -8,8 +8,8 @@ x-airflow-runtime-env: &airflow-runtime-env
   AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: ${AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS:-true}
   AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS:-admin:admin}
   AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: ${AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE:-/workspace/airflow/simple_auth_manager_passwords.json}
-  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////workspace/airflow/airflow.db
-  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC: sqlite+aiosqlite:////workspace/airflow/airflow.db
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow}
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC: ${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC:-postgresql+asyncpg://airflow:airflow@airflow-postgres/airflow}
   AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-foehncast-local-jwt-secret}
   MLFLOW_TRACKING_URI: http://model-registry:5001
   GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
@@ -25,7 +25,10 @@ x-airflow-common: &airflow-common
   image: ${FOEHNCAST_AIRFLOW_IMAGE:-foehncast-airflow:local}
   working_dir: /workspace
   depends_on:
-    - model-registry
+    airflow-postgres:
+      condition: service_healthy
+    model-registry:
+      condition: service_started
   env_file:
     - path: ../../.env.example
       required: false
@@ -39,6 +42,27 @@ x-airflow-common: &airflow-common
     - development
 
 services:
+  airflow-postgres:
+    image: postgres:16
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: ${AIRFLOW_POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${AIRFLOW_POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: ${AIRFLOW_POSTGRES_DB:-airflow}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${AIRFLOW_POSTGRES_USER:-airflow} -d ${AIRFLOW_POSTGRES_DB:-airflow}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - airflow-postgres-db:/var/lib/postgresql/data
+    networks:
+      - development
+
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
@@ -61,6 +85,18 @@ services:
       airflow-init:
         condition: service_healthy
     command: ["/usr/local/bin/start-airflow-webserver.sh"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/api/v2/version')",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
     ports:
       - ${AIRFLOW_BIND_HOST:-127.0.0.1}:8080:8080
 
@@ -71,6 +107,12 @@ services:
       airflow-init:
         condition: service_healthy
     command: ["/usr/local/bin/start-airflow-dag-processor.sh"]
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "DagProcessorJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   airflow-scheduler:
     <<: *airflow-common
@@ -79,6 +121,12 @@ services:
       airflow-init:
         condition: service_healthy
     command: ["/usr/local/bin/start-airflow-scheduler.sh"]
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   airflow-triggerer:
     <<: *airflow-common
@@ -87,3 +135,12 @@ services:
       airflow-init:
         condition: service_healthy
     command: ["/usr/local/bin/start-airflow-triggerer.sh"]
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  airflow-postgres-db:

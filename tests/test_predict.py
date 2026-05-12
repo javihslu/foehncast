@@ -525,6 +525,10 @@ def test_metrics_endpoint_returns_prometheus_payload(
         b"# HELP foehncast_feature_pipeline_summary_count example\n"
         b"foehncast_feature_pipeline_summary_count 1\n"
     )
+    training_payload = (
+        b"# HELP foehncast_training_pipeline_summary_count example\n"
+        b"foehncast_training_pipeline_summary_count 1\n"
+    )
     prediction_payload = (
         b"# HELP foehncast_prediction_log_total_row_count example\n"
         b"foehncast_prediction_log_total_row_count 2\n"
@@ -541,6 +545,11 @@ def test_metrics_endpoint_returns_prometheus_payload(
         serve,
         "render_feature_pipeline_prometheus_metrics",
         lambda: feature_payload,
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_training_pipeline_prometheus_metrics",
+        lambda: training_payload,
     )
     monkeypatch.setattr(
         serve,
@@ -563,6 +572,10 @@ def test_metrics_endpoint_returns_prometheus_payload(
 
     assert response.status_code == 200
     assert response.content == (
-        feature_payload + prediction_payload + monitoring_payload + hosted_sync_payload
+        feature_payload
+        + training_payload
+        + prediction_payload
+        + hosted_sync_payload
+        + monitoring_payload
     )
     assert response.headers["content-type"] == CONTENT_TYPE_LATEST

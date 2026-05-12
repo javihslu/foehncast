@@ -28,17 +28,21 @@ from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation
 from foehncast.monitoring.drift import detect_data_drift, push_drift_metrics
 from foehncast.monitoring.pipeline_metrics import (
+    FEATURE_PIPELINE_STAGES,
+    TRAINING_PIPELINE_STAGES,
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
+    build_training_pipeline_run_summary,
     emit_feature_pipeline_run_summary,
+    emit_training_pipeline_run_summary,
+    read_training_pipeline_run_summary,
 )
 from foehncast.paths import project_root
 from foehncast.training_pipeline.evaluate import generate_evaluation_report
 from foehncast.training_pipeline.register import promote_model, register_model
+from foehncast.training_pipeline.train import run_training_pipeline
 
 logger = logging.getLogger(__name__)
-
-_FEATURE_PIPELINE_STAGES = ("fetch", "engineer", "validate", "store")
 
 
 def _feature_pipeline_state_root() -> Path:
@@ -190,7 +194,7 @@ def _increment_feature_pipeline_stage_failure(
         known_stage: int(
             dict(feature_context.get("stage_failure_counts", {})).get(known_stage, 0)
         )
-        for known_stage in _FEATURE_PIPELINE_STAGES
+        for known_stage in FEATURE_PIPELINE_STAGES
     }
     counts[str(stage)] = int(counts.get(str(stage), 0)) + 1
     feature_context["stage_failure_counts"] = counts
@@ -217,7 +221,7 @@ def _feature_pipeline_context(
         "stored_spots": [],
         "drifted_spots": [],
         "stage_durations_seconds": {},
-        "stage_failure_counts": {stage: 0 for stage in _FEATURE_PIPELINE_STAGES},
+        "stage_failure_counts": {stage: 0 for stage in FEATURE_PIPELINE_STAGES},
         "spot_errors": {},
         "spot_config": {
             str(spot["id"]): {
@@ -401,6 +405,7 @@ def fetch_feature_pipeline_context(
             stage="fetch",
             started_at=started_at,
         )
+        _emit_feature_pipeline_summary(context, run_status="running")
         return context
     except Exception as exc:
         _increment_feature_pipeline_stage_failure(context, stage="fetch")
@@ -459,6 +464,7 @@ def engineer_feature_pipeline_context(
             stage="engineer",
             started_at=started_at,
         )
+        _emit_feature_pipeline_summary(context, run_status="running")
         return context
     except Exception:
         raise
@@ -509,6 +515,7 @@ def validate_feature_pipeline_context(
             stage="validate",
             started_at=started_at,
         )
+        _emit_feature_pipeline_summary(context, run_status="running")
         return context
     except Exception:
         raise
@@ -824,23 +831,250 @@ def run_feature_pipeline_job_context(dataset: str = "train") -> dict[str, object
     return result
 
 
-def evaluate_training_run(training_run_id: str, dataset: str = "train") -> str:
-    """Resume a training run, log evaluation metrics, and return the report path."""
-    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+def _training_summary_state(
+    *,
+    dataset: str,
+    requested_stage: str,
+    training_run_id: str | None = None,
+) -> dict[str, Any]:
+    try:
+        summary = read_training_pipeline_run_summary(dataset)
+    except FileNotFoundError:
+        summary = {}
+
+    if training_run_id and summary.get("training_run_id") not in {
+        None,
+        training_run_id,
+    }:
+        summary = {}
+
+    return {
+        "dataset": dataset,
+        "requested_stage": requested_stage,
+        "training_run_id": training_run_id or summary.get("training_run_id"),
+        "stage_durations_seconds": dict(summary.get("stage_durations_seconds", {})),
+        "stage_failure_counts": {
+            stage: int(dict(summary.get("stage_failure_counts", {})).get(stage, 0))
+            for stage in TRAINING_PIPELINE_STAGES
+        },
+        "training_row_count": summary.get("training_row_count"),
+        "training_feature_count": summary.get("training_feature_count"),
+        "train_row_count": summary.get("train_row_count"),
+        "test_row_count": summary.get("test_row_count"),
+        "evaluation_report_path": summary.get("evaluation_report_path"),
+        "evaluation_report_exists": bool(
+            summary.get("evaluation_report_exists", False)
+        ),
+        "registered_model_name": summary.get("registered_model_name"),
+        "registered_model_version": summary.get("registered_model_version"),
+        "run_metrics": {
+            str(name): float(value)
+            for name, value in dict(summary.get("run_metrics", {})).items()
+        },
+    }
+
+
+def _set_training_pipeline_stage_duration(
+    training_state: dict[str, Any],
+    *,
+    stage: str,
+    started_at: float,
+) -> None:
+    durations = dict(training_state.get("stage_durations_seconds", {}))
+    durations[str(stage)] = float(perf_counter() - started_at)
+    training_state["stage_durations_seconds"] = durations
+
+
+def _increment_training_pipeline_stage_failure(
+    training_state: dict[str, Any],
+    *,
+    stage: str,
+) -> None:
+    counts = {
+        known_stage: int(
+            dict(training_state.get("stage_failure_counts", {})).get(known_stage, 0)
+        )
+        for known_stage in TRAINING_PIPELINE_STAGES
+    }
+    counts[str(stage)] = int(counts.get(str(stage), 0)) + 1
+    training_state["stage_failure_counts"] = counts
+
+
+def _emit_training_summary(
+    training_state: dict[str, Any],
+    *,
+    run_status: str,
+    error: str | None = None,
+) -> None:
+    summary = build_training_pipeline_run_summary(
+        dataset=str(training_state["dataset"]),
+        requested_stage=str(training_state["requested_stage"]),
+        training_run_id=(
+            None
+            if training_state.get("training_run_id") is None
+            else str(training_state["training_run_id"])
+        ),
+        stage_durations_seconds=dict(training_state.get("stage_durations_seconds", {})),
+        stage_failure_counts=dict(training_state.get("stage_failure_counts", {})),
+        run_status=run_status,
+        run_metrics=dict(training_state.get("run_metrics", {})),
+        training_row_count=training_state.get("training_row_count"),
+        training_feature_count=training_state.get("training_feature_count"),
+        train_row_count=training_state.get("train_row_count"),
+        test_row_count=training_state.get("test_row_count"),
+        evaluation_report_path=training_state.get("evaluation_report_path"),
+        evaluation_report_exists=bool(
+            training_state.get("evaluation_report_exists", False)
+        ),
+        registered_model_name=training_state.get("registered_model_name"),
+        registered_model_version=(
+            None
+            if training_state.get("registered_model_version") is None
+            else str(training_state["registered_model_version"])
+        ),
+        error=error,
+    )
+    emit_training_pipeline_run_summary(summary)
+
+
+def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
     run = mlflow.MlflowClient().get_run(training_run_id)
-    metrics = dict(run.data.metrics)
-    if not metrics:
-        raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
+    metrics = {
+        str(name): float(value) for name, value in dict(run.data.metrics).items()
+    }
+    params = {str(name): str(value) for name, value in dict(run.data.params).items()}
 
-    report_dir = project_root() / "airflow" / "reports"
-    report_path = report_dir / f"evaluation-{training_run_id}.md"
+    def _metric_count(name: str) -> int | None:
+        value = metrics.get(name)
+        return None if value is None else int(value)
 
-    with mlflow.start_run(run_id=training_run_id):
-        return generate_evaluation_report(metrics, str(report_path))
+    return {
+        "run_metrics": metrics,
+        "training_row_count": _metric_count("training_input_row_count"),
+        "training_feature_count": _metric_count("training_feature_count"),
+        "train_row_count": _metric_count("training_train_row_count"),
+        "test_row_count": _metric_count("training_test_row_count"),
+        "registered_model_name": params.get("model_name"),
+    }
 
 
-def register_training_run(training_run_id: str, stage: str = "Candidate") -> str:
+def run_training_pipeline_step(
+    dataset: str = "train",
+    requested_stage: str = "Candidate",
+) -> str:
+    """Train the model and persist the latest step-level training summary."""
+    training_state = _training_summary_state(
+        dataset=dataset,
+        requested_stage=requested_stage,
+    )
+    started_at = perf_counter()
+
+    try:
+        training_run_id = run_training_pipeline(dataset=dataset)
+        training_state.update(
+            _training_run_snapshot(training_run_id),
+        )
+        training_state["training_run_id"] = training_run_id
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="train",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="running")
+        return training_run_id
+    except Exception as exc:
+        _increment_training_pipeline_stage_failure(training_state, stage="train")
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="train",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="failed", error=str(exc))
+        raise
+
+
+def evaluate_training_run(
+    training_run_id: str,
+    dataset: str = "train",
+    requested_stage: str = "Candidate",
+) -> str:
+    """Resume a training run, log evaluation metrics, and return the report path."""
+    training_state = _training_summary_state(
+        dataset=dataset,
+        requested_stage=requested_stage,
+        training_run_id=training_run_id,
+    )
+    started_at = perf_counter()
+
+    try:
+        mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+        run = mlflow.MlflowClient().get_run(training_run_id)
+        metrics = {
+            str(name): float(value) for name, value in dict(run.data.metrics).items()
+        }
+        if not metrics:
+            raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
+
+        report_dir = project_root() / "airflow" / "reports"
+        report_path = report_dir / f"evaluation-{training_run_id}.md"
+
+        with mlflow.start_run(run_id=training_run_id):
+            resolved_report_path = generate_evaluation_report(metrics, str(report_path))
+
+        training_state["training_run_id"] = training_run_id
+        training_state["run_metrics"] = metrics
+        training_state["evaluation_report_path"] = resolved_report_path
+        training_state["evaluation_report_exists"] = Path(resolved_report_path).exists()
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="evaluate",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="running")
+        return resolved_report_path
+    except Exception as exc:
+        _increment_training_pipeline_stage_failure(training_state, stage="evaluate")
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="evaluate",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="failed", error=str(exc))
+        raise
+
+
+def register_training_run(
+    training_run_id: str,
+    stage: str = "Candidate",
+    dataset: str = "train",
+) -> str:
     """Register a training run's model and assign the requested registry alias."""
-    model_version = register_model(training_run_id)
-    promote_model(None, model_version.version, stage=stage)
-    return str(model_version.version)
+    training_state = _training_summary_state(
+        dataset=dataset,
+        requested_stage=stage,
+        training_run_id=training_run_id,
+    )
+    started_at = perf_counter()
+
+    try:
+        model_version = register_model(training_run_id)
+        promote_model(None, model_version.version, stage=stage)
+        training_state["training_run_id"] = training_run_id
+        training_state["registered_model_name"] = get_mlflow_config()["model_name"]
+        training_state["registered_model_version"] = str(model_version.version)
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="register",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="succeeded")
+        return str(model_version.version)
+    except Exception as exc:
+        _increment_training_pipeline_stage_failure(training_state, stage="register")
+        _set_training_pipeline_stage_duration(
+            training_state,
+            stage="register",
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="failed", error=str(exc))
+        raise

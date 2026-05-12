@@ -104,6 +104,7 @@ configure_docker_client_for_bootstrap
 
 require_docker_compose
 require_command curl
+require_command python3
 
 if [[ ! -f "$ENV_FILE" ]]; then
   if [[ "$ENV_FILE" == "$DEFAULT_ENV_FILE" && $# -eq 0 && -f "$EXAMPLE_ENV_FILE" ]]; then
@@ -121,6 +122,7 @@ COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.objectstore.yml)
 BOOTSTRAP_SERVICES=(
   objectstore-init
   feast-online-store
+  airflow-postgres
   airflow-webserver
   airflow-dag-processor
   airflow-scheduler
@@ -241,6 +243,63 @@ wait_for_service_health() {
   return 1
 }
 
+verify_airflow_api_health() {
+  local max_attempts="${1:-60}"
+  local sleep_seconds="${2:-2}"
+  local payload=""
+  local attempt
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "$AIRFLOW_HEALTH_URL" 2>/dev/null)"; then
+      if printf '%s' "$payload" | python3 -c $'import json, sys\npayload = json.load(sys.stdin)\nrequired = ("metadatabase", "scheduler", "dag_processor", "triggerer")\nfailed = []\nfor name in required:\n    status = (payload.get(name) or {}).get("status")\n    if status != "healthy":\n        failed.append(f"{name}={status!r}")\nif failed:\n    print(", ".join(failed), file=sys.stderr)\n    raise SystemExit(1)\n'; then
+        return 0
+      fi
+    fi
+
+    sleep "$sleep_seconds"
+  done
+
+  echo "Timed out waiting for Airflow health endpoint to report all required components healthy." >&2
+  if [[ -n "$payload" ]]; then
+    printf '%s\n' "$payload" >&2
+  fi
+  return 1
+}
+
+wait_for_airflow_dag_run_state() {
+  local dag_id="$1"
+  local expected_state="$2"
+  local expected_run_type="${3:-}"
+  local max_attempts="${4:-120}"
+  local sleep_seconds="${5:-2}"
+  local payload=""
+  local status
+  local attempt
+
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "http://127.0.0.1:8080/api/v2/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date" 2>/dev/null)"; then
+      if printf '%s' "$payload" | EXPECTED_STATE="$expected_state" EXPECTED_RUN_TYPE="$expected_run_type" python3 -c $'import json, os, sys\npayload = json.load(sys.stdin)\nexpected_state = os.environ["EXPECTED_STATE"]\nexpected_run_type = os.environ.get("EXPECTED_RUN_TYPE", "").strip()\nruns = payload.get("dag_runs") or []\nif expected_run_type:\n    runs = [run for run in runs if run.get("run_type") == expected_run_type]\nif not runs:\n    raise SystemExit(1)\nrun = runs[0]\nstate = (run.get("state") or "").lower()\nif state == expected_state.lower():\n    print(run.get("dag_run_id") or "")\n    raise SystemExit(0)\nif state in {"failed", "error"}:\n    print(json.dumps(run), file=sys.stderr)\n    raise SystemExit(2)\nraise SystemExit(1)\n'; then
+        return 0
+      else
+        status=$?
+        if [[ "$status" -eq 2 ]]; then
+          echo "Airflow DAG '$dag_id' reached a terminal failure state." >&2
+          printf '%s\n' "$payload" >&2
+          return 1
+        fi
+      fi
+    fi
+
+    sleep "$sleep_seconds"
+  done
+
+  echo "Timed out waiting for Airflow DAG '$dag_id' to reach state '$expected_state'." >&2
+  if [[ -n "$payload" ]]; then
+    printf '%s\n' "$payload" >&2
+  fi
+  return 1
+}
+
 grafana_api_get() {
   local path="$1"
 
@@ -296,6 +355,10 @@ verify_grafana_provisioning() {
     'feature stage failure alert rule'
   require_payload_pattern \
     "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_training_stage_failures"' \
+    'training stage failure alert rule'
+  require_payload_pattern \
+    "$alert_rules_payload" \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_hosted_sync_stale"' \
     'hosted sync stale alert rule'
 
@@ -328,6 +391,10 @@ verify_grafana_provisioning() {
     "$policies_payload" \
     '"feature-pipeline"' \
     'notification policy feature-pipeline matcher'
+  require_payload_pattern \
+    "$policies_payload" \
+    '"training-pipeline"' \
+    'notification policy training-pipeline matcher'
   require_payload_pattern \
     "$policies_payload" \
     '"hosted-operator"' \
@@ -406,7 +473,6 @@ FEAST_DATASTORE_EMULATOR_RESET_URL="http://${DATASTORE_EMULATOR_HOST}/reset"
 
 FEAST_DATASET="${FEAST_DATASET:-$(env_file_value AIRFLOW_FEATURE_DATASET)}"
 FEAST_DATASET="${FEAST_DATASET:-train}"
-TRAINING_DAG_CONF="$(printf '{"dataset":"%s","stage":"Production"}' "$FEAST_DATASET")"
 
 echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
@@ -421,16 +487,25 @@ echo "Waiting for Feast Datastore emulator..."
 wait_for_service_health feast-online-store 90 2
 curl --retry 30 --retry-all-errors --retry-delay 2 -fsS -X POST "$FEAST_DATASTORE_EMULATOR_RESET_URL" >/dev/null
 
+echo "Waiting for Airflow metadata database..."
+wait_for_service_health airflow-postgres 90 2
+
+echo "Waiting for Airflow component health checks..."
+wait_for_service_health airflow-webserver 90 2
+wait_for_service_health airflow-dag-processor 90 2
+wait_for_service_health airflow-scheduler 90 2
+wait_for_service_health airflow-triggerer 90 2
+
 echo "Waiting for Airflow API server health..."
-curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$AIRFLOW_HEALTH_URL" >/dev/null
+verify_airflow_api_health 60 2
 
 verify_grafana_provisioning
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 
-echo "Running training pipeline for ${TRAINING_DATE}..."
-compose exec -T airflow-webserver airflow dags test training_pipeline "$TRAINING_DATE" -c "$TRAINING_DAG_CONF"
+echo "Waiting for asset-triggered training pipeline..."
+wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
 
 echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 "${ROOT_DIR}/scripts/prepare-feast-local.sh" --reset-state "$FEAST_DATASET"

@@ -83,3 +83,60 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
         'foehncast_feature_pipeline_spot_feast_projection_ready{dataset="train",spot_id="silvaplana",storage_backend="s3"} 1.0'
         in payload
     )
+
+
+def test_render_training_pipeline_prometheus_metrics_uses_labelled_gauges(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+    pipeline_metrics.write_training_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T13:30:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "requested_stage": "Production",
+            "training_run_id": "run-123",
+            "training_row_count": 240,
+            "training_feature_count": 18,
+            "train_row_count": 180,
+            "test_row_count": 60,
+            "evaluation_report_exists": True,
+            "registered_model_version": "7",
+            "stage_states": {
+                "train": "succeeded",
+                "evaluate": "succeeded",
+                "register": "succeeded",
+            },
+            "stage_durations_seconds": {"train": 12.5, "evaluate": 1.5},
+            "stage_failure_counts": {"train": 0, "evaluate": 0, "register": 0},
+            "run_metrics": {"mae": 0.4, "r2": 0.82},
+        }
+    )
+
+    payload = pipeline_prometheus.render_training_pipeline_prometheus_metrics().decode(
+        "utf-8"
+    )
+
+    assert "foehncast_training_pipeline_summary_count 1.0" in payload
+    assert (
+        'foehncast_training_pipeline_run_success{dataset="train",requested_stage="Production"} 1.0'
+        in payload
+    )
+    assert (
+        'foehncast_training_pipeline_stage_duration_seconds{dataset="train",requested_stage="Production",stage="train"} 12.5'
+        in payload
+    )
+    assert (
+        'foehncast_training_pipeline_stage_state{dataset="train",requested_stage="Production",stage="register"} 1.0'
+        in payload
+    )
+    assert (
+        'foehncast_training_pipeline_row_count{dataset="train",requested_stage="Production"} 240.0'
+        in payload
+    )
+    assert (
+        'foehncast_training_pipeline_run_metric{dataset="train",metric_name="mae",requested_stage="Production"} 0.4'
+        in payload
+    )

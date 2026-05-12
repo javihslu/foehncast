@@ -34,6 +34,18 @@ policies:
         repeat_interval: 4h
       - receiver: foehncast-email
         object_matchers:
+          - [component, "=", training-pipeline]
+        group_by:
+          - alertname
+          - dataset
+          - requested_stage
+          - stage
+          - severity
+        group_wait: 0s
+        group_interval: 15m
+        repeat_interval: 4h
+      - receiver: foehncast-email
+        object_matchers:
           - [component, "=", hosted-operator]
         group_by:
           - alertname

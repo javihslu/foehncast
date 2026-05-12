@@ -14,10 +14,15 @@ from foehncast.monitoring.online_compose_sync_prometheus import (
 )
 from foehncast.monitoring.pipeline_metrics import (
     FEATURE_PIPELINE_METRIC_CONTRACT,
+    TRAINING_PIPELINE_METRIC_CONTRACT,
     emit_feature_pipeline_run_summary,
+    emit_training_pipeline_run_summary,
     feature_pipeline_stage_overview,
     feature_pipeline_summary_path,
     read_feature_pipeline_run_summary,
+    read_training_pipeline_run_summary,
+    training_pipeline_stage_overview,
+    training_pipeline_summary_path,
 )
 from foehncast.monitoring.prediction_log import (
     append_prediction_log,
@@ -33,6 +38,7 @@ __all__ = [
     "DriftMetric",
     "DriftReport",
     "FEATURE_PIPELINE_METRIC_CONTRACT",
+    "TRAINING_PIPELINE_METRIC_CONTRACT",
     "append_prediction_log",
     "build_prediction_log_prometheus_registry",
     "build_online_compose_sync_prometheus_registry",
@@ -40,12 +46,16 @@ __all__ = [
     "detect_prediction_drift",
     "emit_prediction_drift_metrics",
     "emit_feature_pipeline_run_summary",
+    "emit_training_pipeline_run_summary",
     "feature_pipeline_stage_overview",
     "feature_pipeline_summary_path",
     "push_drift_metrics",
     "read_online_compose_sync_status",
     "read_prediction_log",
     "read_feature_pipeline_run_summary",
+    "read_training_pipeline_run_summary",
     "render_online_compose_sync_prometheus_metrics",
     "render_prediction_log_prometheus_metrics",
+    "training_pipeline_stage_overview",
+    "training_pipeline_summary_path",
 ]
