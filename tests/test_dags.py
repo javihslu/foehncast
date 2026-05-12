@@ -9,6 +9,15 @@ from pathlib import Path
 
 import pytest
 
+from foehncast.airflow_assets import (
+    curated_feature_store_asset_uri,
+    feast_feature_store_asset_uri,
+    mlflow_evaluation_asset_uri,
+    mlflow_registry_asset_uri,
+    mlflow_training_run_asset_uri,
+    training_request_asset_uri,
+)
+
 _ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -31,6 +40,14 @@ def _load_dag_module(
         def __exit__(self, exc_type, exc, exc_tb) -> None:
             return None
 
+    class FakeAsset:
+        def __init__(
+            self, name: str | None = None, uri: str | None = None, **kwargs: object
+        ) -> None:
+            self.name = name
+            self.uri = uri
+            self.kwargs = kwargs
+
     class FakePythonOperator:
         def __init__(self, **kwargs: object) -> None:
             self.kwargs = kwargs
@@ -43,6 +60,7 @@ def _load_dag_module(
     airflow_module = types.ModuleType("airflow")
     airflow_module.__path__ = []
     sdk_module = types.ModuleType("airflow.sdk")
+    sdk_module.Asset = FakeAsset
     sdk_module.DAG = FakeDAG
     providers_module = types.ModuleType("airflow.providers")
     providers_module.__path__ = []
@@ -50,13 +68,11 @@ def _load_dag_module(
     standard_module.__path__ = []
     operators_module = types.ModuleType("airflow.providers.standard.operators")
     operators_module.__path__ = []
+    empty_module = types.ModuleType("airflow.providers.standard.operators.empty")
     python_module = types.ModuleType("airflow.providers.standard.operators.python")
-    trigger_module = types.ModuleType(
-        "airflow.providers.standard.operators.trigger_dagrun"
-    )
+    empty_module.EmptyOperator = FakePythonOperator
     python_module.PythonOperator = FakePythonOperator
     python_module.ShortCircuitOperator = FakePythonOperator
-    trigger_module.TriggerDagRunOperator = FakePythonOperator
 
     monkeypatch.setitem(sys.modules, "airflow", airflow_module)
     monkeypatch.setitem(sys.modules, "airflow.sdk", sdk_module)
@@ -66,12 +82,10 @@ def _load_dag_module(
         sys.modules, "airflow.providers.standard.operators", operators_module
     )
     monkeypatch.setitem(
-        sys.modules, "airflow.providers.standard.operators.python", python_module
+        sys.modules, "airflow.providers.standard.operators.empty", empty_module
     )
     monkeypatch.setitem(
-        sys.modules,
-        "airflow.providers.standard.operators.trigger_dagrun",
-        trigger_module,
+        sys.modules, "airflow.providers.standard.operators.python", python_module
     )
 
     for name in (
@@ -111,8 +125,9 @@ def test_feature_dag_defaults_to_airflow_schedule(
         "engineer_feature_set",
         "validate_feature_set",
         "store_feature_set",
+        "prepare_feast_feature_store",
         "check_retraining_trigger",
-        "trigger_training_pipeline",
+        "publish_training_request",
     ]
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": "train",
@@ -121,18 +136,18 @@ def test_feature_dag_defaults_to_airflow_schedule(
     assert operators[1].kwargs["op_args"] == ["output:fetch_feature_inputs"]
     assert operators[2].kwargs["op_args"] == ["output:engineer_feature_set"]
     assert operators[3].kwargs["op_args"] == ["output:validate_feature_set"]
-    assert operators[4].kwargs["op_kwargs"] == {
+    assert operators[4].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert [asset.uri for asset in operators[4].kwargs["outlets"]] == [
+        curated_feature_store_asset_uri("train"),
+        feast_feature_store_asset_uri("train"),
+    ]
+    assert operators[5].kwargs["op_kwargs"] == {
         "feature_result": "output:store_feature_set",
         "mode": "always",
     }
-    assert operators[5].kwargs["trigger_dag_id"] == "training_pipeline"
-    assert operators[5].kwargs["conf"] == {
-        "dataset": "train",
-        "stage": "Production",
-        "source_dag_id": "feature_pipeline",
-        "source_run_id": "{{ run_id }}",
-    }
-    assert operators[5].kwargs["wait_for_completion"] is False
+    assert [asset.uri for asset in operators[6].kwargs["outlets"]] == [
+        training_request_asset_uri("train", stage="production"),
+    ]
 
 
 def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
@@ -154,21 +169,25 @@ def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
         "engineer_feature_set",
         "validate_feature_set",
         "store_feature_set",
+        "prepare_feast_feature_store",
     ]
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": "validation",
         "run_key": "{{ run_id }}",
     }
+    assert operators[4].kwargs["op_kwargs"] == {"dataset": "validation"}
 
 
-def test_training_dag_stays_manual_and_paused_by_default(
+def test_training_dag_is_asset_scheduled_and_active_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module, operators = _load_dag_module(monkeypatch, "dags/training_dag.py")
 
-    assert module.dag.kwargs["schedule"] is None
+    assert [asset.uri for asset in module.dag.kwargs["schedule"]] == [
+        training_request_asset_uri("train", stage="production"),
+    ]
     assert module.dag.kwargs["catchup"] is False
-    assert module.dag.kwargs["is_paused_upon_creation"] is True
+    assert module.dag.kwargs["is_paused_upon_creation"] is False
     assert module.dag.kwargs["params"] == {"dataset": "train"}
     assert [operator.kwargs["task_id"] for operator in operators] == [
         "train_model",
@@ -181,11 +200,41 @@ def test_training_dag_stays_manual_and_paused_by_default(
     )
     expected_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else 'Candidate' }}"
+        "dag_run.conf.get('stage') else ('Production' if dag_run and "
+        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
     )
-    assert operators[0].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
-    assert operators[1].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
-    assert operators[2].kwargs["op_kwargs"] == {"stage": expected_stage_template}
+    assert operators[0].kwargs["op_kwargs"] == {
+        "dataset": expected_dataset_template,
+        "requested_stage": expected_stage_template,
+    }
+    assert operators[1].kwargs["op_kwargs"] == {
+        "dataset": expected_dataset_template,
+        "requested_stage": expected_stage_template,
+    }
+    assert operators[2].kwargs["op_kwargs"] == {
+        "stage": expected_stage_template,
+        "dataset": expected_dataset_template,
+    }
+    assert [asset.uri for asset in operators[0].kwargs["inlets"]] == [
+        curated_feature_store_asset_uri("train"),
+        training_request_asset_uri("train", stage="production"),
+    ]
+    assert [asset.uri for asset in operators[0].kwargs["outlets"]] == [
+        mlflow_training_run_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[1].kwargs["inlets"]] == [
+        mlflow_training_run_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[1].kwargs["outlets"]] == [
+        mlflow_evaluation_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[2].kwargs["inlets"]] == [
+        mlflow_training_run_asset_uri("train"),
+        mlflow_evaluation_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[2].kwargs["outlets"]] == [
+        mlflow_registry_asset_uri(),
+    ]
 
 
 def test_training_dag_supports_dataset_override(
@@ -202,5 +251,16 @@ def test_training_dag_supports_dataset_override(
         "{{ dag_run.conf.get('dataset') if dag_run and dag_run.conf and "
         "dag_run.conf.get('dataset') else params.dataset }}"
     )
-    assert operators[0].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
-    assert operators[1].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
+    expected_stage_template = (
+        "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
+        "dag_run.conf.get('stage') else ('Production' if dag_run and "
+        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+    )
+    assert operators[0].kwargs["op_kwargs"] == {
+        "dataset": expected_dataset_template,
+        "requested_stage": expected_stage_template,
+    }
+    assert operators[1].kwargs["op_kwargs"] == {
+        "dataset": expected_dataset_template,
+        "requested_stage": expected_stage_template,
+    }

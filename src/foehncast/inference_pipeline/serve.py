@@ -24,6 +24,7 @@ from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
 from foehncast.monitoring.pipeline_prometheus import (
     CONTENT_TYPE_LATEST,
     render_feature_pipeline_prometheus_metrics,
+    render_training_pipeline_prometheus_metrics,
 )
 from foehncast.monitoring.online_compose_sync_prometheus import (
     render_online_compose_sync_prometheus_metrics,
@@ -110,9 +111,10 @@ def _rank_response(prediction_payload: dict[str, Any]) -> dict[str, Any]:
 def _metrics_payload() -> bytes:
     return (
         render_feature_pipeline_prometheus_metrics()
+        + render_training_pipeline_prometheus_metrics()
         + render_prediction_log_prometheus_metrics()
-        + render_prediction_monitoring_prometheus_metrics()
         + render_online_compose_sync_prometheus_metrics()
+        + render_prediction_monitoring_prometheus_metrics()
     )
 
 

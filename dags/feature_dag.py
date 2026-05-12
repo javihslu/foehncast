@@ -6,17 +6,21 @@ from datetime import datetime
 import os
 
 try:
+    from airflow.providers.standard.operators.empty import EmptyOperator
     from airflow.providers.standard.operators.python import (
         PythonOperator,
         ShortCircuitOperator,
     )
-    from airflow.providers.standard.operators.trigger_dagrun import (
-        TriggerDagRunOperator,
-    )
-    from airflow.sdk import DAG
+    from airflow.sdk import Asset, DAG
 except ModuleNotFoundError:  # pragma: no cover - Airflow is container-only
     dag = None
 else:
+    from foehncast.airflow_assets import (
+        curated_feature_store_asset_uri,
+        feast_feature_store_asset_uri,
+        training_request_asset_uri,
+    )
+    from foehncast.feature_pipeline.feast import prepare_feature_store
     from foehncast.orchestration import (
         engineer_feature_pipeline_context,
         fetch_feature_pipeline_context,
@@ -36,12 +40,25 @@ else:
         os.getenv("AIRFLOW_AUTO_RETRAIN_MODE"),
         default="always",
     )
+    curated_feature_store_asset = Asset(
+        name=f"{feature_dataset}_curated_feature_store",
+        uri=curated_feature_store_asset_uri(feature_dataset),
+    )
+    feast_feature_store_asset = Asset(
+        name=f"{feature_dataset}_feast_feature_store",
+        uri=feast_feature_store_asset_uri(feature_dataset),
+    )
+    training_request_asset = Asset(
+        name=f"{feature_dataset}_production_training_request",
+        uri=training_request_asset_uri(feature_dataset, stage="production"),
+    )
 
     with DAG(
         dag_id="feature_pipeline",
         description=(
             "Fetch forecasts, engineer features, validate them, persist curated "
-            "slices, and optionally trigger the separate retraining DAG."
+            "slices, sync the local Feast store, and optionally publish a "
+            "retraining asset request for the separate training DAG."
         ),
         start_date=datetime(2024, 1, 1),
         schedule=feature_schedule,
@@ -73,6 +90,13 @@ else:
             op_args=[validate_feature_set.output],
         )
 
+        prepare_feast_feature_store = PythonOperator(
+            task_id="prepare_feast_feature_store",
+            python_callable=prepare_feature_store,
+            op_kwargs={"dataset": feature_dataset},
+            outlets=[curated_feature_store_asset, feast_feature_store_asset],
+        )
+
         if auto_retrain_mode is not None:
             retraining_gate = ShortCircuitOperator(
                 task_id="check_retraining_trigger",
@@ -83,16 +107,9 @@ else:
                 },
             )
 
-            trigger_training_pipeline = TriggerDagRunOperator(
-                task_id="trigger_training_pipeline",
-                trigger_dag_id="training_pipeline",
-                conf={
-                    "dataset": feature_dataset,
-                    "stage": "Production",
-                    "source_dag_id": "feature_pipeline",
-                    "source_run_id": "{{ run_id }}",
-                },
-                wait_for_completion=False,
+            publish_training_request = EmptyOperator(
+                task_id="publish_training_request",
+                outlets=[training_request_asset],
             )
 
             (
@@ -100,8 +117,9 @@ else:
                 >> engineer_feature_set
                 >> validate_feature_set
                 >> store_feature_set
+                >> prepare_feast_feature_store
                 >> retraining_gate
-                >> trigger_training_pipeline
+                >> publish_training_request
             )
 
         else:
@@ -110,4 +128,5 @@ else:
                 >> engineer_feature_set
                 >> validate_feature_set
                 >> store_feature_set
+                >> prepare_feast_feature_store
             )

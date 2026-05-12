@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import sys
+from typing import Any
 
 import pandas as pd
 
 from foehncast.config import get_spots
+from foehncast.feast_runtime import feast_repo_path, render_runtime_config
 from foehncast.feature_pipeline.store import read_features
 from foehncast.paths import feast_offline_path
 
@@ -77,6 +84,88 @@ def export_offline_store(
     offline_frame = build_offline_store_frame(dataset=dataset)
     offline_frame.to_parquet(destination, index=False)
     return destination
+
+
+def _feast_runtime_env(config_path: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    resolved_config_path = str(config_path)
+    env["FOEHNCAST_FEAST_CONFIG_PATH"] = resolved_config_path
+    env["FEAST_FS_YAML_FILE_PATH"] = resolved_config_path
+    return env
+
+
+def _feast_python_executable() -> str:
+    configured = os.getenv("FOEHNCAST_FEAST_PYTHON", "").strip()
+    return configured or sys.executable
+
+
+def _feast_cli_command(args: list[str]) -> list[str]:
+    configured_executable = Path(_feast_python_executable())
+    configured_name = configured_executable.name
+
+    if configured_name == "feast":
+        return [str(configured_executable), *args]
+
+    sibling_feast = configured_executable.with_name("feast")
+    if sibling_feast.exists():
+        return [str(sibling_feast), *args]
+
+    feast_on_path = shutil.which("feast")
+    if feast_on_path:
+        return [feast_on_path, *args]
+
+    return [str(configured_executable), "-m", "feast", *args]
+
+
+def _run_feast_cli(
+    args: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    subprocess.run(
+        _feast_cli_command(args),
+        check=True,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+def prepare_feature_store(
+    dataset: str = "train",
+    *,
+    output_path: str | Path | None = None,
+    materialize: bool = True,
+    materialize_timestamp: str | None = None,
+) -> dict[str, Any]:
+    """Export curated rows and sync the local Feast repo for Airflow-managed runs."""
+    destination = export_offline_store(dataset=dataset, output_path=output_path)
+    config_path = render_runtime_config()
+    repo_path = feast_repo_path()
+    env = _feast_runtime_env(config_path)
+
+    _run_feast_cli(["apply"], cwd=repo_path, env=env)
+
+    resolved_materialize_timestamp = None
+    if materialize:
+        resolved_materialize_timestamp = materialize_timestamp or datetime.now(
+            tz=UTC
+        ).replace(microsecond=0).isoformat()
+        _run_feast_cli(
+            ["materialize-incremental", resolved_materialize_timestamp],
+            cwd=repo_path,
+            env=env,
+        )
+
+    return {
+        "dataset": dataset,
+        "output_path": str(destination),
+        "config_path": str(config_path),
+        "repo_path": str(repo_path),
+        "materialized": materialize,
+        "materialize_timestamp": resolved_materialize_timestamp,
+    }
 
 
 def _parse_args() -> argparse.Namespace:

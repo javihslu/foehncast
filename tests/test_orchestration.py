@@ -607,6 +607,7 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     logged: dict[str, object] = {}
+    emitted: dict[str, object] = {}
 
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
 
@@ -645,6 +646,11 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
         "generate_evaluation_report",
         lambda metrics, output_path: str(tmp_path / "evaluation.md"),
     )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_training_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
 
     report_path = orchestration.evaluate_training_run("run-123")
 
@@ -652,12 +658,17 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     assert logged["tracking_uri"] == "http://localhost:5001"
     assert logged["queried_run_id"] == "run-123"
     assert logged["run_id"] == "run-123"
+    assert emitted["summary"]["run_status"] == "running"
+    assert emitted["summary"]["evaluation_report_path"] == str(
+        tmp_path / "evaluation.md"
+    )
 
 
 def test_register_training_run_registers_and_promotes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     logged: dict[str, object] = {}
+    emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
         orchestration,
@@ -671,8 +682,63 @@ def test_register_training_run_registers_and_promotes(
             {"promotion": (model_name, version, stage)}
         ),
     )
+    monkeypatch.setattr(
+        orchestration,
+        "emit_training_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
 
     version = orchestration.register_training_run("run-456")
 
     assert version == "7"
     assert logged["promotion"] == (None, "7", "Candidate")
+    assert emitted["summary"]["run_status"] == "succeeded"
+    assert emitted["summary"]["registered_model_version"] == "7"
+
+
+def test_run_training_pipeline_step_emits_training_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: dict[str, object] = {}
+
+    class FakeClient:
+        def get_run(self, run_id: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                data=SimpleNamespace(
+                    metrics={
+                        "mae": 0.5,
+                        "training_input_row_count": 240.0,
+                        "training_feature_count": 18.0,
+                        "training_train_row_count": 180.0,
+                        "training_test_row_count": 60.0,
+                    },
+                    params={"model_name": "foehncast"},
+                )
+            )
+
+    class FakeMlflow:
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
+
+    monkeypatch.setattr(
+        orchestration,
+        "run_training_pipeline",
+        lambda dataset="train": "run-123",
+    )
+    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(
+        orchestration,
+        "emit_training_pipeline_run_summary",
+        lambda summary: emitted.update({"summary": summary}),
+    )
+
+    run_id = orchestration.run_training_pipeline_step(
+        dataset="train",
+        requested_stage="Production",
+    )
+
+    assert run_id == "run-123"
+    assert emitted["summary"]["run_status"] == "running"
+    assert emitted["summary"]["requested_stage"] == "Production"
+    assert emitted["summary"]["training_run_id"] == "run-123"
+    assert emitted["summary"]["training_row_count"] == 240

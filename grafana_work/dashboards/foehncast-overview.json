@@ -593,6 +593,477 @@
       ],
       "title": "Seconds Since Last Successful Monitoring",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": -1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "id": 20,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_state)",
+          "legendFormat": "{{dataset}} / {{storage_backend}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Feature Stage State",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": -1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 68
+      },
+      "id": 21,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_state)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Stage State",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 76
+      },
+      "id": 22,
+      "targets": [
+        {
+          "expr": "foehncast_training_pipeline_summary_count",
+          "legendFormat": "summary files",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Pipeline Summary Count",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 6,
+        "y": 76
+      },
+      "id": 23,
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_run_success)",
+          "legendFormat": "{{dataset}} / {{requested_stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Training Run Success",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 9,
+        "x": 15,
+        "y": 76
+      },
+      "id": 24,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_evaluation_report_exists)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / report",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_model_registered)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / registry",
+          "refId": "B"
+        }
+      ],
+      "title": "Training Artifact Checks",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 82
+      },
+      "id": 25,
+      "options": {
+        "displayMode": "lcd",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_row_count)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / rows",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_feature_count)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / features",
+          "refId": "B"
+        },
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_train_row_count)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / train split",
+          "refId": "C"
+        },
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_test_row_count)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / test split",
+          "refId": "D"
+        }
+      ],
+      "title": "Training Data Shape",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 82
+      },
+      "id": 26,
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_duration_seconds)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Stage Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 90
+      },
+      "id": 27,
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Stage Failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 90
+      },
+      "id": 28,
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage, metric_name) (foehncast_training_pipeline_run_metric{metric_name=~\"accuracy|mae|r2|rmse\"})",
+          "legendFormat": "{{dataset}} / {{requested_stage}} / {{metric_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Training Metrics",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 98
+      },
+      "id": 29,
+      "targets": [
+        {
+          "expr": "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)",
+          "legendFormat": "{{dataset}} / {{requested_stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Seconds Since Last Training Summary",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 98
+      },
+      "id": 30,
+      "targets": [
+        {
+          "expr": "time() - max by (dataset, storage_backend) (foehncast_feature_pipeline_summary_generated_timestamp_seconds)",
+          "legendFormat": "feature {{dataset}} / {{storage_backend}}",
+          "refId": "A"
+        },
+        {
+          "expr": "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)",
+          "legendFormat": "training {{dataset}} / {{requested_stage}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Pipeline Freshness",
+      "type": "timeseries"
     }
   ],
   "refresh": "15s",
@@ -611,6 +1082,6 @@
   "timezone": "browser",
   "title": "FoehnCast Monitoring",
   "uid": "foehncast-monitoring",
-  "version": 9,
+  "version": 10,
   "weekStart": ""
 }

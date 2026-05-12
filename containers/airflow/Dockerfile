@@ -28,7 +28,10 @@ USER airflow
 ENV UV_LINK_MODE=copy \
     PATH=/usr/local/bin:$PATH
 
-RUN /usr/local/bin/uv pip install --python /home/airflow/.local/bin/python \
+RUN python -m venv /home/airflow/.local/feast-venv \
+    && /usr/local/bin/uv pip install --python /home/airflow/.local/feast-venv/bin/python \
+    "feast[gcp]>=0.63.0" \
+    && /usr/local/bin/uv pip install --python /home/airflow/.local/bin/python \
     "apache-airflow-providers-standard==1.12.3" \
     -e . \
     && ln -sf /usr/local/bin/uv /home/airflow/.local/bin/uv \
@@ -37,6 +40,7 @@ RUN /usr/local/bin/uv pip install --python /home/airflow/.local/bin/python \
 ENV PYTHONUNBUFFERED=1 \
     AIRFLOW_HOME=/workspace/airflow \
     AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags \
+    FOEHNCAST_FEAST_PYTHON=/home/airflow/.local/feast-venv/bin/python \
     FOEHNCAST_PROJECT_ROOT=/workspace \
     PYTHONPATH=/workspace/src
 

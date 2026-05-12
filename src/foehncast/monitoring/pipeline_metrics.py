@@ -12,6 +12,9 @@ import pandas as pd
 
 from foehncast.paths import project_root
 
+FEATURE_PIPELINE_STAGES = ("fetch", "engineer", "validate", "store")
+TRAINING_PIPELINE_STAGES = ("train", "evaluate", "register")
+
 
 def _default_report_dir() -> Path:
     return project_root() / "airflow" / "reports"
@@ -72,6 +75,43 @@ FEATURE_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
     ),
 }
 
+TRAINING_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
+    "run": (
+        "run_status",
+        "dataset",
+        "requested_stage",
+        "training_run_id",
+        "stage_durations_seconds",
+        "stage_failure_counts",
+        "training_row_count",
+        "training_feature_count",
+        "train_row_count",
+        "test_row_count",
+        "evaluation_report_path",
+        "evaluation_report_exists",
+        "registered_model_name",
+        "registered_model_version",
+        "run_metrics",
+    ),
+    "train": (
+        "training_row_count",
+        "training_feature_count",
+        "train_row_count",
+        "test_row_count",
+        "training_run_id",
+    ),
+    "evaluation": (
+        "evaluation_report_path",
+        "evaluation_report_exists",
+        "run_metrics",
+    ),
+    "registration": (
+        "registered_model_name",
+        "registered_model_version",
+        "requested_stage",
+    ),
+}
+
 
 def feature_pipeline_summary_path(dataset: str = "train") -> Path:
     """Return the stable JSON summary path for the latest feature pipeline run."""
@@ -83,6 +123,16 @@ def feature_pipeline_summary_paths() -> list[Path]:
     return sorted(_default_report_dir().glob("feature-pipeline-*-latest.json"))
 
 
+def training_pipeline_summary_path(dataset: str = "train") -> Path:
+    """Return the stable JSON summary path for the latest training pipeline run."""
+    return _default_report_dir() / f"training-pipeline-{dataset}-latest.json"
+
+
+def training_pipeline_summary_paths() -> list[Path]:
+    """Return all persisted training-pipeline summary paths."""
+    return sorted(_default_report_dir().glob("training-pipeline-*-latest.json"))
+
+
 def _safe_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -90,6 +140,27 @@ def _safe_float(value: Any) -> float | None:
     if pd.isna(numeric):
         return None
     return numeric
+
+
+def _stage_states(
+    *,
+    stage_names: tuple[str, ...],
+    stage_durations_seconds: dict[str, float] | None,
+    stage_failure_counts: dict[str, int] | None,
+) -> dict[str, str]:
+    durations = dict(stage_durations_seconds or {})
+    failures = dict(stage_failure_counts or {})
+    states: dict[str, str] = {}
+
+    for stage in stage_names:
+        if int(failures.get(stage, 0)) > 0:
+            states[stage] = "failed"
+        elif stage in durations:
+            states[stage] = "succeeded"
+        else:
+            states[stage] = "not_run"
+
+    return states
 
 
 def _iso_timestamp(value: Any) -> str | None:
@@ -298,6 +369,11 @@ def build_feature_pipeline_run_summary(
         "engineered_spot_count": int(len(engineered_spots)),
         "validated_spot_count": int(len(validated_spots)),
         "stored_spot_count": int(len(stored_spots)),
+        "stage_states": _stage_states(
+            stage_names=FEATURE_PIPELINE_STAGES,
+            stage_durations_seconds=stage_durations_seconds,
+            stage_failure_counts=stage_failure_counts,
+        ),
         "stage_durations_seconds": {
             str(stage): float(duration)
             for stage, duration in dict(stage_durations_seconds or {}).items()
@@ -313,6 +389,67 @@ def build_feature_pipeline_run_summary(
             sum(summary["status"] == "failed" for summary in spot_summaries)
         ),
         "spots": spot_summaries,
+    }
+
+
+def build_training_pipeline_run_summary(
+    *,
+    dataset: str,
+    requested_stage: str,
+    training_run_id: str | None,
+    stage_durations_seconds: dict[str, float] | None,
+    stage_failure_counts: dict[str, int] | None,
+    run_status: str,
+    run_metrics: dict[str, float] | None = None,
+    training_row_count: int | None = None,
+    training_feature_count: int | None = None,
+    train_row_count: int | None = None,
+    test_row_count: int | None = None,
+    evaluation_report_path: str | None = None,
+    evaluation_report_exists: bool = False,
+    registered_model_name: str | None = None,
+    registered_model_version: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """Build the persisted run summary for one end-to-end training pipeline run."""
+    return {
+        "contract_version": 1,
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "run_status": run_status,
+        "error": error,
+        "dataset": dataset,
+        "requested_stage": requested_stage,
+        "training_run_id": training_run_id,
+        "stage_states": _stage_states(
+            stage_names=TRAINING_PIPELINE_STAGES,
+            stage_durations_seconds=stage_durations_seconds,
+            stage_failure_counts=stage_failure_counts,
+        ),
+        "stage_durations_seconds": {
+            str(stage): float(duration)
+            for stage, duration in dict(stage_durations_seconds or {}).items()
+        },
+        "stage_failure_counts": {
+            str(stage): int(count)
+            for stage, count in dict(stage_failure_counts or {}).items()
+        },
+        "training_row_count": (
+            None if training_row_count is None else int(training_row_count)
+        ),
+        "training_feature_count": (
+            None if training_feature_count is None else int(training_feature_count)
+        ),
+        "train_row_count": None if train_row_count is None else int(train_row_count),
+        "test_row_count": None if test_row_count is None else int(test_row_count),
+        "evaluation_report_path": evaluation_report_path,
+        "evaluation_report_exists": bool(evaluation_report_exists),
+        "registered_model_name": registered_model_name,
+        "registered_model_version": registered_model_version,
+        "run_metrics": {
+            str(name): float(value)
+            for name, value in dict(run_metrics or {}).items()
+            if _safe_float(value) is not None
+        },
     }
 
 
@@ -333,6 +470,25 @@ def read_feature_pipeline_run_summary(dataset: str = "train") -> dict[str, Any]:
 def read_all_feature_pipeline_run_summaries() -> list[dict[str, Any]]:
     """Load all persisted feature-pipeline run summaries."""
     return [json.loads(path.read_text()) for path in feature_pipeline_summary_paths()]
+
+
+def write_training_pipeline_run_summary(summary: dict[str, Any]) -> Path:
+    """Persist the latest training run summary to a stable JSON file."""
+    summary_path = training_pipeline_summary_path(summary["dataset"])
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    return summary_path
+
+
+def read_training_pipeline_run_summary(dataset: str = "train") -> dict[str, Any]:
+    """Load the latest persisted training-pipeline run summary."""
+    summary_path = training_pipeline_summary_path(dataset)
+    return json.loads(summary_path.read_text())
+
+
+def read_all_training_pipeline_run_summaries() -> list[dict[str, Any]]:
+    """Load all persisted training-pipeline run summaries."""
+    return [json.loads(path.read_text()) for path in training_pipeline_summary_paths()]
 
 
 def feature_pipeline_stage_overview(summary: dict[str, Any]) -> pd.DataFrame:
@@ -372,6 +528,30 @@ def feature_pipeline_stage_overview(summary: dict[str, Any]) -> pd.DataFrame:
                 "event_timestamp_source": spot_summary["feast"][
                     "event_timestamp_source"
                 ],
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def training_pipeline_stage_overview(summary: dict[str, Any]) -> pd.DataFrame:
+    """Flatten a persisted training summary into a stage-oriented overview table."""
+    rows: list[dict[str, Any]] = []
+    stage_states = dict(summary.get("stage_states", {}))
+    stage_durations = dict(summary.get("stage_durations_seconds", {}))
+    stage_failures = dict(summary.get("stage_failure_counts", {}))
+
+    for stage in TRAINING_PIPELINE_STAGES:
+        rows.append(
+            {
+                "stage": stage,
+                "state": stage_states.get(stage, "not_run"),
+                "duration_seconds": stage_durations.get(stage),
+                "failure_count": int(stage_failures.get(stage, 0)),
+                "dataset": summary.get("dataset"),
+                "requested_stage": summary.get("requested_stage"),
+                "training_run_id": summary.get("training_run_id"),
+                "registered_model_version": summary.get("registered_model_version"),
             }
         )
 
@@ -421,6 +601,42 @@ def _summary_metrics(summary: dict[str, Any]) -> dict[str, float]:
     return metrics
 
 
+def _training_summary_metrics(summary: dict[str, Any]) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+
+    for key, metric_name in (
+        ("training_row_count", "training_row_count"),
+        ("training_feature_count", "training_feature_count"),
+        ("train_row_count", "training_train_row_count"),
+        ("test_row_count", "training_test_row_count"),
+    ):
+        value = summary.get(key)
+        if value is not None:
+            metrics[metric_name] = float(value)
+
+    metrics["training_evaluation_report_exists"] = float(
+        summary.get("evaluation_report_exists", False)
+    )
+    metrics["training_model_registered"] = float(
+        bool(summary.get("registered_model_version"))
+    )
+
+    version = summary.get("registered_model_version")
+    if version is not None and str(version).strip().isdigit():
+        metrics["training_registered_model_version"] = float(version)
+
+    for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
+        metrics[f"training_{stage}_duration_seconds"] = float(duration)
+
+    for stage, count in dict(summary.get("stage_failure_counts", {})).items():
+        metrics[f"training_{stage}_failure_count"] = float(count)
+
+    for name, value in dict(summary.get("run_metrics", {})).items():
+        metrics[f"training_metric_{name}"] = float(value)
+
+    return metrics
+
+
 def emit_feature_pipeline_run_summary(summary: dict[str, Any]) -> Path:
     """Persist the latest summary and mirror stable metrics into MLflow if active."""
     summary_path = write_feature_pipeline_run_summary(summary)
@@ -433,15 +649,38 @@ def emit_feature_pipeline_run_summary(summary: dict[str, Any]) -> Path:
     return summary_path
 
 
+def emit_training_pipeline_run_summary(summary: dict[str, Any]) -> Path:
+    """Persist the latest summary and mirror stable training metrics into MLflow if active."""
+    summary_path = write_training_pipeline_run_summary(summary)
+    active_run = getattr(mlflow, "active_run", lambda: None)()
+    if active_run is None:
+        return summary_path
+
+    mlflow.log_metrics(_training_summary_metrics(summary))
+    mlflow.log_artifact(str(summary_path), artifact_path="monitoring/training_pipeline")
+    return summary_path
+
+
 __all__ = [
+    "FEATURE_PIPELINE_STAGES",
     "FEATURE_PIPELINE_METRIC_CONTRACT",
+    "TRAINING_PIPELINE_STAGES",
+    "TRAINING_PIPELINE_METRIC_CONTRACT",
     "build_feature_pipeline_run_summary",
     "build_feature_pipeline_spot_summary",
+    "build_training_pipeline_run_summary",
     "emit_feature_pipeline_run_summary",
+    "emit_training_pipeline_run_summary",
     "feature_pipeline_summary_paths",
     "feature_pipeline_stage_overview",
     "feature_pipeline_summary_path",
     "read_all_feature_pipeline_run_summaries",
+    "read_all_training_pipeline_run_summaries",
     "read_feature_pipeline_run_summary",
+    "read_training_pipeline_run_summary",
+    "training_pipeline_stage_overview",
+    "training_pipeline_summary_path",
+    "training_pipeline_summary_paths",
     "write_feature_pipeline_run_summary",
+    "write_training_pipeline_run_summary",
 ]
