@@ -1,4 +1,8 @@
-"""Prometheus export helpers for persisted prediction-log monitoring state."""
+"""Prometheus export helpers for retained file-backed prediction-log state.
+
+These metrics are durable relative to process-local counters because they are
+rendered from persisted JSONL state that survives serving-process restarts.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +12,14 @@ from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from foehncast.monitoring.prediction_log import read_prediction_log
 
 
+DURABLE_METRIC_PREFIX = "foehncast_prediction_log_"
+"""Common prefix for retained file-backed metrics that survive restarts."""
+
+
 def build_prediction_log_prometheus_registry(
     predictions_log: pd.DataFrame | None = None,
 ) -> CollectorRegistry:
-    """Render the retained prediction log into a scrapeable registry."""
+    """Render the retained file-backed prediction log into a scrapeable registry."""
     resolved_log = (
         read_prediction_log() if predictions_log is None else predictions_log.copy()
     )
@@ -19,29 +27,29 @@ def build_prediction_log_prometheus_registry(
 
     total_rows = Gauge(
         "foehncast_prediction_log_total_row_count",
-        "Number of retained prediction-log rows available for inference monitoring.",
+        "Retained file-backed prediction-log rows available for inference monitoring.",
         registry=registry,
     )
     model_count = Gauge(
         "foehncast_prediction_log_model_count",
-        "Number of retained model versions present in the prediction log.",
+        "Number of retained model versions present in the file-backed prediction log.",
         registry=registry,
     )
     row_count = Gauge(
         "foehncast_prediction_log_row_count",
-        "Retained prediction-log row count for one model version.",
+        "Retained file-backed prediction-log row count for one model version.",
         labelnames=("model_version",),
         registry=registry,
     )
     latest_prediction_timestamp = Gauge(
         "foehncast_prediction_log_latest_prediction_timestamp_seconds",
-        "Unix timestamp of the latest retained prediction-log write for one model version.",
+        "Unix timestamp of the latest retained file-backed prediction-log write for one model version.",
         labelnames=("model_version",),
         registry=registry,
     )
     latest_forecast_timestamp = Gauge(
         "foehncast_prediction_log_latest_forecast_timestamp_seconds",
-        "Unix timestamp of the latest retained forecast timestamp for one model version.",
+        "Unix timestamp of the latest retained forecast timestamp in the file-backed prediction log for one model version.",
         labelnames=("model_version",),
         registry=registry,
     )
@@ -89,12 +97,13 @@ def build_prediction_log_prometheus_registry(
 def render_prediction_log_prometheus_metrics(
     predictions_log: pd.DataFrame | None = None,
 ) -> bytes:
-    """Return Prometheus exposition text for the retained prediction log."""
+    """Return Prometheus exposition text for the retained file-backed prediction log."""
     registry = build_prediction_log_prometheus_registry(predictions_log=predictions_log)
     return generate_latest(registry)
 
 
 __all__ = [
     "build_prediction_log_prometheus_registry",
+    "DURABLE_METRIC_PREFIX",
     "render_prediction_log_prometheus_metrics",
 ]

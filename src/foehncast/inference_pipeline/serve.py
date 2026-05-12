@@ -110,10 +110,12 @@ def _rank_response(prediction_payload: dict[str, Any]) -> dict[str, Any]:
 
 def _metrics_payload() -> bytes:
     return (
+        # Durable metrics: rendered from retained files and survive restarts.
         render_feature_pipeline_prometheus_metrics()
         + render_training_pipeline_prometheus_metrics()
         + render_prediction_log_prometheus_metrics()
         + render_online_compose_sync_prometheus_metrics()
+        # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_monitoring_prometheus_metrics()
     )
 

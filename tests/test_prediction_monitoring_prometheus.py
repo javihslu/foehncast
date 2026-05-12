@@ -84,3 +84,45 @@ def test_render_prediction_monitoring_prometheus_metrics_handles_empty_state() -
 
     assert "foehncast_prediction_monitoring_schedule_total" in payload
     assert "foehncast_prediction_monitoring_execution_total" in payload
+
+
+def test_ephemeral_metric_prefix_constant_covers_all_rendered_metric_names() -> None:
+    prediction_monitoring_prometheus.record_prediction_monitoring_schedule(
+        "predict",
+        "scheduled",
+    )
+    prediction_monitoring_prometheus.record_prediction_monitoring_execution(
+        "predict",
+        "succeeded",
+    )
+
+    payload = prediction_monitoring_prometheus.render_prediction_monitoring_prometheus_metrics().decode(
+        "utf-8"
+    )
+    metric_lines = [
+        line for line in payload.splitlines() if line and not line.startswith("#")
+    ]
+
+    assert metric_lines, "Expected at least one metric line in the ephemeral render"
+    prefix = prediction_monitoring_prometheus.EPHEMERAL_METRIC_PREFIX
+    assert all(line.startswith(prefix) for line in metric_lines), (
+        f"All metric lines must start with {prefix!r}; got: {metric_lines}"
+    )
+
+
+def test_ephemeral_help_text_states_process_local_reset() -> None:
+    prediction_monitoring_prometheus.record_prediction_monitoring_schedule(
+        "predict",
+        "scheduled",
+    )
+
+    payload = prediction_monitoring_prometheus.render_prediction_monitoring_prometheus_metrics().decode(
+        "utf-8"
+    )
+    help_lines = [line for line in payload.splitlines() if line.startswith("# HELP")]
+
+    assert help_lines, "Expected HELP lines in the ephemeral render"
+    assert all(
+        "process-local ephemeral" in line.lower() or "resets on restart" in line.lower()
+        for line in help_lines
+    ), f"All HELP lines must state process-local/ephemeral nature; got: {help_lines}"
