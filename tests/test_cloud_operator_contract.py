@@ -774,6 +774,176 @@ def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotio
     assert "GCP_MLFLOW_TRACKING_URI" in blocked_step["run"]
 
 
+def test_rollback_live_release_workflow_restores_explicit_revision_and_model_version() -> (
+    None
+):
+    workflow = _workflow_yaml(".github/workflows/rollback-live-release.yml")
+    config_job = workflow["jobs"]["config"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    assert dispatch_inputs["rollback_revision"]["required"] is True
+    assert dispatch_inputs["rollback_model_version"]["required"] is True
+    assert dispatch_inputs["rollback_revision_tag"]["default"] == "rollback"
+    assert dispatch_inputs["target_alias"]["default"] == "champion"
+
+    assert (
+        config_job["outputs"]["cloud_run_service"]
+        == "${{ steps.repo_config.outputs.cloud_run_service }}"
+    )
+    assert (
+        config_job["outputs"]["mlflow_tracking_uri"]
+        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
+    )
+    assert (
+        config_job["outputs"]["rollback_revision"]
+        == "${{ steps.derived.outputs.rollback_revision }}"
+    )
+    assert (
+        config_job["outputs"]["rollback_model_version"]
+        == "${{ steps.derived.outputs.rollback_model_version }}"
+    )
+    assert (
+        config_job["outputs"]["rollback_revision_tag"]
+        == "${{ steps.derived.outputs.rollback_revision_tag }}"
+    )
+    assert (
+        config_job["outputs"]["target_alias"]
+        == "${{ steps.derived.outputs.target_alias }}"
+    )
+    assert (
+        config_job["outputs"]["rollback_ready"]
+        == "${{ steps.derived.outputs.rollback_ready }}"
+    )
+
+    derived_step = _workflow_step(workflow, "config", "derived")
+    assert (
+        derived_step["env"]["ROLLBACK_REVISION_INPUT"]
+        == "${{ github.event.inputs.rollback_revision }}"
+    )
+    assert (
+        derived_step["env"]["ROLLBACK_MODEL_VERSION_INPUT"]
+        == "${{ github.event.inputs.rollback_model_version }}"
+    )
+    assert (
+        derived_step["env"]["ROLLBACK_REVISION_TAG_INPUT"]
+        == "${{ github.event.inputs.rollback_revision_tag }}"
+    )
+    assert (
+        derived_step["env"]["TARGET_ALIAS_INPUT"]
+        == "${{ github.event.inputs.target_alias }}"
+    )
+    assert 'echo "rollback_revision=$rollback_revision"' in derived_step["run"]
+    assert (
+        'echo "rollback_model_version=$rollback_model_version"' in derived_step["run"]
+    )
+    assert "rollback_revision_tag='rollback'" in derived_step["run"]
+    assert "target_alias='champion'" in derived_step["run"]
+
+    rollback_job = workflow["jobs"]["rollback"]
+    assert rollback_job["environment"] == "cloud-run-production"
+    assert (
+        rollback_job["env"]["ROLLBACK_REVISION"]
+        == "${{ needs.config.outputs.rollback_revision }}"
+    )
+    assert (
+        rollback_job["env"]["ROLLBACK_MODEL_VERSION"]
+        == "${{ needs.config.outputs.rollback_model_version }}"
+    )
+    assert (
+        rollback_job["env"]["ROLLBACK_REVISION_TAG"]
+        == "${{ needs.config.outputs.rollback_revision_tag }}"
+    )
+    assert (
+        rollback_job["env"]["TARGET_ALIAS"]
+        == "${{ needs.config.outputs.target_alias }}"
+    )
+
+    resolve_step = _workflow_step(workflow, "rollback", "Resolve rollback revision")
+    resolve_script = resolve_step["run"]
+    assert 'gcloud run revisions describe "$ROLLBACK_REVISION"' in resolve_script
+    assert 'gcloud run services update-traffic "$CLOUD_RUN_SERVICE"' in resolve_script
+    assert (
+        ' --update-tags "$ROLLBACK_REVISION_TAG=$ROLLBACK_REVISION"' in resolve_script
+    )
+    assert "Rollback tag does not point at the requested revision." in resolve_script
+
+    verify_target_step = _workflow_step(
+        workflow, "rollback", "Verify rollback target runtime"
+    )
+    verify_target_script = verify_target_step["run"]
+    assert (
+        verify_target_step["env"]["SERVICE_URL"]
+        == "${{ steps.resolve_rollback.outputs.rollback_tag_url }}"
+    )
+    assert (
+        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
+        in verify_target_script
+    )
+    assert "rollback_target_model_version" in verify_target_script
+
+    restore_model_step = _workflow_step(
+        workflow, "rollback", "Restore champion alias to rollback model version"
+    )
+    restore_model_script = restore_model_step["run"]
+    assert (
+        'uv run python -m foehncast.training_pipeline.rollback --version "$ROLLBACK_MODEL_VERSION" --target-alias "$TARGET_ALIAS"'
+        in restore_model_script
+    )
+    assert (
+        "Rollback helper did not restore the requested model version."
+        in restore_model_script
+    )
+
+    shift_traffic_step = _workflow_step(
+        workflow, "rollback", "Restore live traffic to rollback revision"
+    )
+    shift_traffic_script = shift_traffic_step["run"]
+    assert (
+        'gcloud run services update-traffic "$CLOUD_RUN_SERVICE"'
+        in shift_traffic_script
+    )
+    assert ' --to-revisions "$ROLLBACK_REVISION=100"' in shift_traffic_script
+
+    verify_live_step = _workflow_step(
+        workflow, "rollback", "Verify rolled back live runtime"
+    )
+    verify_live_script = verify_live_step["run"]
+    assert (
+        verify_live_step["env"]["SERVICE_URL"]
+        == "${{ steps.shift_traffic.outputs.service_url }}"
+    )
+    assert (
+        verify_live_step["env"]["RESTORED_MODEL_VERSION"]
+        == "${{ steps.restore_model.outputs.restored_model_version }}"
+    )
+    assert (
+        "Live rollback health verification did not report serving alias ${TARGET_ALIAS}."
+        in verify_live_script
+    )
+    assert (
+        "Live rollback model version does not match the restored model version."
+        in verify_live_script
+    )
+    assert (
+        'echo "Checking live Cloud Run spots endpoint at ${spots_url}..."'
+        in verify_live_script
+    )
+
+    summary_step = _workflow_step(workflow, "rollback", "Summarize rollback")
+    assert 'echo "## Live rollback"' in summary_step["run"]
+    assert 'echo "- Rollback revision: $ROLLBACK_REVISION"' in summary_step["run"]
+    assert (
+        'echo "- Restored model version: ${{ steps.restore_model.outputs.restored_model_version }}"'
+        in summary_step["run"]
+    )
+
+    blocked_step = _workflow_step(
+        workflow, "blocked", "Explain blocked rollback workflow"
+    )
+    assert "GCP_CLOUD_RUN_SERVICE" in blocked_step["run"]
+    assert "GCP_MLFLOW_TRACKING_URI" in blocked_step["run"]
+
+
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
     push_paths = workflow["on"]["push"]["paths"]
