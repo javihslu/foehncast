@@ -63,6 +63,7 @@ def test_get_serving_model_version_reads_alias(
 ) -> None:
     logged: dict[str, object] = {}
 
+    monkeypatch.delenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", raising=False)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
 
     class FakeClient:
@@ -84,6 +85,7 @@ def test_get_serving_model_version_reads_alias(
         lambda: {
             "tracking_uri": "http://localhost:5001",
             "model_name": "foehncast-quality",
+            "candidate_alias": "candidate",
             "champion_alias": "champion",
         },
     )
@@ -100,6 +102,50 @@ def test_get_serving_model_version_reads_alias(
     assert logged["lookup"] == ("foehncast-quality", "champion")
 
 
+def test_get_serving_model_version_prefers_env_alias_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: dict[str, object] = {}
+
+    monkeypatch.setenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", "candidate")
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+
+    class FakeClient:
+        def get_model_version_by_alias(self, model_name: str, alias: str) -> object:
+            logged["lookup"] = (model_name, alias)
+            return SimpleNamespace(version="11")
+
+    class FakeMlflow:
+        def set_tracking_uri(self, tracking_uri: str) -> None:
+            logged["tracking_uri"] = tracking_uri
+
+        def MlflowClient(self) -> FakeClient:
+            return FakeClient()
+
+    monkeypatch.setattr(predict, "mlflow", FakeMlflow())
+    monkeypatch.setattr(
+        predict,
+        "get_mlflow_config",
+        lambda: {
+            "tracking_uri": "http://localhost:5001",
+            "model_name": "foehncast-quality",
+            "candidate_alias": "candidate",
+            "champion_alias": "champion",
+        },
+    )
+    monkeypatch.setattr(
+        predict,
+        "get_mlflow_tracking_uri",
+        lambda: "http://localhost:5001",
+    )
+
+    model_version = predict.get_serving_model_version()
+
+    assert model_version == "11"
+    assert logged["tracking_uri"] == "http://localhost:5001"
+    assert logged["lookup"] == ("foehncast-quality", "candidate")
+
+
 def test_predict_spots_returns_forecasts_for_requested_spots(
     monkeypatch: pytest.MonkeyPatch,
     model_config: dict[str, object],
@@ -111,14 +157,23 @@ def test_predict_spots_returns_forecasts_for_requested_spots(
             assert list(features_df.columns) == model_config["features"]
             return [2.1, 3.2]
 
-    monkeypatch.setattr(predict, "get_production_model", lambda: FakeModel())
+    monkeypatch.setattr(predict, "get_serving_model_alias", lambda: "champion")
+    monkeypatch.setattr(
+        predict,
+        "get_model_by_alias",
+        lambda alias: FakeModel() if alias == "champion" else None,
+    )
     monkeypatch.setattr(predict, "get_model_config", lambda: model_config)
     monkeypatch.setattr(
         predict, "get_inference_config", lambda: {"max_horizon_hours": 2}
     )
     monkeypatch.setattr(predict, "get_spots", lambda: [spot])
     monkeypatch.setattr(predict, "fetch_forecast", lambda lat, lon: forecast_df)
-    monkeypatch.setattr(predict, "get_serving_model_version", lambda: "7")
+    monkeypatch.setattr(
+        predict,
+        "get_serving_model_version",
+        lambda model_name=None, alias=None: "7",
+    )
 
     result = predict.predict_spots(["silvaplana"])
 
@@ -141,12 +196,17 @@ def test_predict_spots_rejects_unknown_spots(
 
 def test_health_endpoint_reports_model_version(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(serve, "get_serving_model_version", lambda: "9")
+    monkeypatch.setattr(serve, "get_serving_model_alias", lambda: "candidate")
     client = TestClient(serve.app)
 
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "model_version": "9"}
+    assert response.json() == {
+        "status": "healthy",
+        "model_alias": "candidate",
+        "model_version": "9",
+    }
 
 
 def test_spots_endpoint_lists_available_spots(
