@@ -705,6 +705,22 @@ def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotio
     )
     assert "candidate_model_version" in verify_candidate_script
 
+    capture_live_step = _workflow_step(
+        workflow, "promote", "Capture current live rollback inputs"
+    )
+    capture_live_script = capture_live_step["run"]
+    assert 'gcloud run services describe "$CLOUD_RUN_SERVICE"' in capture_live_script
+    assert (
+        'gcloud auth print-identity-token --audiences="$live_service_url"'
+        in capture_live_script
+    )
+    assert (
+        "Current live revision could not be resolved before promotion."
+        in capture_live_script
+    )
+    assert "live_model_alias" in capture_live_script
+    assert "live_model_version" in capture_live_script
+
     promote_model_step = _workflow_step(
         workflow, "promote", "Promote candidate model version to champion"
     )
@@ -764,6 +780,15 @@ def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotio
     assert 'echo "- Candidate tag: $CANDIDATE_REVISION_TAG"' in summary_step["run"]
     assert (
         'echo "- Promoted model version: ${{ steps.promote_model.outputs.promoted_model_version }}"'
+        in summary_step["run"]
+    )
+    assert 'echo "### Rollback inputs"' in summary_step["run"]
+    assert (
+        'echo "- Revision: ${{ steps.capture_live.outputs.live_revision_name }}"'
+        in summary_step["run"]
+    )
+    assert (
+        'echo "- Model version: ${{ steps.capture_live.outputs.live_model_version }}"'
         in summary_step["run"]
     )
 
