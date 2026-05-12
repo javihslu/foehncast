@@ -285,8 +285,8 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
     )
 
     feature_context = orchestration._feature_pipeline_context(run_key="timestamp-test")
-    feature_context["engineered_spots"] = ["silvaplana"]
-    run_dir = Path(str(feature_context["run_dir"]))
+    feature_context.engineered_spots = ["silvaplana"]
+    run_dir = feature_context.run_dir
     orchestration._write_feature_pipeline_frame(
         orchestration._feature_pipeline_stage_path(run_dir, "feature", "silvaplana"),
         feature_df,
@@ -319,7 +319,7 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
-        orchestration.validate_feature_pipeline_context(feature_context)
+        orchestration.validate_feature_pipeline_context(feature_context.to_payload())
 
     validation_path = orchestration._feature_pipeline_validation_path(
         run_dir, "silvaplana"
