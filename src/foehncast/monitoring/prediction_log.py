@@ -1,4 +1,12 @@
-"""Prediction log persistence and model-side drift monitoring helpers."""
+"""Prediction-event persistence and model-side drift monitoring helpers.
+
+The monitoring stack uses two related JSONL contracts:
+
+- ``prediction-log.jsonl`` is a bounded local working set used for request-side
+    drift evaluation.
+- ``prediction-events.jsonl`` is the durable event history contract used by
+    monitoring readers and can be redirected to shared storage with an env var.
+"""
 
 from __future__ import annotations
 
@@ -21,12 +29,40 @@ from foehncast.paths import project_root
 
 logger = logging.getLogger(__name__)
 
+PREDICTION_EVENT_FIELDS = (
+    "prediction_timestamp",
+    "forecast_time",
+    "quality_index",
+    "endpoint",
+    "model_version",
+    "spot_id",
+    "spot_name",
+    "requested_spot_ids",
+)
 _DEFAULT_PREDICTION_LOG_MAX_ROWS = 2048
 _DEFAULT_PREDICTION_LOG_RETENTION_DAYS = 60
 
 
 def _default_prediction_log_path() -> Path:
     return project_root() / ".state" / "monitoring" / "prediction-log.jsonl"
+
+
+def prediction_event_log_path(
+    path: Path | None = None,
+    *,
+    fallback_log_path: Path | None = None,
+) -> Path:
+    if path is not None:
+        return path
+
+    raw_value = os.getenv("FOEHNCAST_PREDICTION_EVENT_LOG_PATH", "").strip()
+    if raw_value:
+        return Path(raw_value).expanduser()
+
+    if fallback_log_path is not None:
+        return fallback_log_path.with_name("prediction-events.jsonl")
+
+    return project_root() / ".state" / "monitoring" / "prediction-events.jsonl"
 
 
 def _prediction_log_max_rows(configured: int | None = None) -> int:
@@ -54,6 +90,14 @@ def _prediction_log_lines(source: Path) -> list[str]:
     return [
         line for line in source.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+
+
+def _append_prediction_rows(destination: Path, rows: list[dict[str, Any]]) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    with destination.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 def _prediction_log_retention_days(configured: int | None = None) -> int:
@@ -173,65 +217,28 @@ def _flatten_prediction_payload(
 
     for prediction in prediction_payload.get("predictions", []):
         for forecast in prediction.get("forecast", []):
-            rows.append(
-                {
-                    "prediction_timestamp": resolved_timestamp,
-                    "forecast_time": forecast.get("time"),
-                    "quality_index": float(forecast["quality_index"]),
-                    "endpoint": endpoint,
-                    "model_version": model_version,
-                    "spot_id": prediction.get("spot_id"),
-                    "spot_name": prediction.get("spot_name"),
-                    "requested_spot_ids": requested_spot_ids,
-                }
-            )
+            row = {
+                "prediction_timestamp": resolved_timestamp,
+                "forecast_time": forecast.get("time"),
+                "quality_index": float(forecast["quality_index"]),
+                "endpoint": endpoint,
+                "model_version": model_version,
+                "spot_id": prediction.get("spot_id"),
+                "spot_name": prediction.get("spot_name"),
+                "requested_spot_ids": requested_spot_ids,
+            }
+            rows.append({field: row[field] for field in PREDICTION_EVENT_FIELDS})
 
     return rows
 
 
-def append_prediction_log(
-    prediction_payload: dict[str, Any],
-    *,
-    endpoint: str,
-    spot_ids: list[str] | None = None,
-    path: Path | None = None,
-    logged_at: datetime | None = None,
-    max_rows: int | None = None,
-    retention_days: int | None = None,
-) -> Path | None:
-    rows = _flatten_prediction_payload(
-        prediction_payload,
-        endpoint=endpoint,
-        spot_ids=spot_ids,
-        logged_at=logged_at,
-    )
-    if not rows:
-        return None
-
-    destination = path or _default_prediction_log_path()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    with destination.open("a", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True) + "\n")
-
-    _trim_prediction_log(
-        destination,
-        max_rows=_prediction_log_max_rows(max_rows),
-        retention_days=_prediction_log_retention_days(retention_days),
-    )
-
-    return destination
-
-
-def read_prediction_log(
-    path: Path | None = None,
+def _read_prediction_rows(
+    source: Path,
     *,
     max_rows: int | None = None,
     model_version: str | None = None,
     retention_days: int | None = None,
 ) -> pd.DataFrame:
-    source = path or _default_prediction_log_path()
     if not source.exists():
         return pd.DataFrame()
 
@@ -254,12 +261,120 @@ def read_prediction_log(
     return frame
 
 
+def append_prediction_log(
+    prediction_payload: dict[str, Any],
+    *,
+    endpoint: str,
+    spot_ids: list[str] | None = None,
+    path: Path | None = None,
+    event_path: Path | None = None,
+    logged_at: datetime | None = None,
+    max_rows: int | None = None,
+    retention_days: int | None = None,
+) -> Path | None:
+    rows = _flatten_prediction_payload(
+        prediction_payload,
+        endpoint=endpoint,
+        spot_ids=spot_ids,
+        logged_at=logged_at,
+    )
+    if not rows:
+        return None
+
+    destination = path or _default_prediction_log_path()
+    durable_destination = prediction_event_log_path(
+        event_path,
+        fallback_log_path=destination,
+    )
+
+    if durable_destination == destination:
+        logger.warning(
+            "Prediction event history path %s matches the retained working log; "
+            "using a sibling prediction-events.jsonl file instead.",
+            durable_destination,
+        )
+        durable_destination = destination.with_name("prediction-events.jsonl")
+
+    _append_prediction_rows(durable_destination, rows)
+    _append_prediction_rows(destination, rows)
+
+    _trim_prediction_log(
+        destination,
+        max_rows=_prediction_log_max_rows(max_rows),
+        retention_days=_prediction_log_retention_days(retention_days),
+    )
+
+    return destination
+
+
+def read_prediction_log(
+    path: Path | None = None,
+    *,
+    max_rows: int | None = None,
+    model_version: str | None = None,
+    retention_days: int | None = None,
+) -> pd.DataFrame:
+    source = path or _default_prediction_log_path()
+    return _read_prediction_rows(
+        source,
+        max_rows=max_rows,
+        model_version=model_version,
+        retention_days=retention_days,
+    )
+
+
+def read_prediction_event_log(
+    path: Path | None = None,
+    *,
+    fallback_log_path: Path | None = None,
+    max_rows: int | None = None,
+    model_version: str | None = None,
+    retention_days: int | None = None,
+) -> pd.DataFrame:
+    source = prediction_event_log_path(path, fallback_log_path=fallback_log_path)
+    return _read_prediction_rows(
+        source,
+        max_rows=max_rows,
+        model_version=model_version,
+        retention_days=retention_days,
+    )
+
+
+def read_prediction_history(
+    event_path: Path | None = None,
+    *,
+    fallback_log_path: Path | None = None,
+    max_rows: int | None = None,
+    model_version: str | None = None,
+    retention_days: int | None = None,
+) -> pd.DataFrame:
+    source = prediction_event_log_path(
+        event_path,
+        fallback_log_path=fallback_log_path,
+    )
+    if source.exists():
+        return _read_prediction_rows(
+            source,
+            max_rows=max_rows,
+            model_version=model_version,
+            retention_days=retention_days,
+        )
+
+    return read_prediction_log(
+        fallback_log_path,
+        max_rows=max_rows,
+        model_version=model_version,
+        retention_days=retention_days,
+    )
+
+
 def emit_prediction_drift_metrics(
     prediction_payload: dict[str, Any],
     *,
     endpoint: str,
     spot_ids: list[str] | None = None,
     path: Path | None = None,
+    event_path: Path | None = None,
     max_rows: int | None = None,
     retention_days: int | None = None,
 ) -> DriftReport | None:
@@ -272,14 +387,16 @@ def emit_prediction_drift_metrics(
             endpoint=endpoint,
             spot_ids=spot_ids,
             path=path,
+            event_path=event_path,
             max_rows=max_rows,
             retention_days=retention_days,
         )
         if log_path is None:
             return None
 
-        predictions_log = read_prediction_log(
-            log_path,
+        predictions_log = read_prediction_history(
+            event_path,
+            fallback_log_path=log_path,
             max_rows=max_rows,
             model_version=model_version,
             retention_days=retention_days,
@@ -307,7 +424,11 @@ def emit_prediction_drift_metrics(
 
 
 __all__ = [
+    "PREDICTION_EVENT_FIELDS",
     "append_prediction_log",
     "emit_prediction_drift_metrics",
+    "prediction_event_log_path",
+    "read_prediction_event_log",
+    "read_prediction_history",
     "read_prediction_log",
 ]

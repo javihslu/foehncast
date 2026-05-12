@@ -103,6 +103,37 @@ def test_durable_help_text_states_file_backed_contract() -> None:
     help_lines = [line for line in payload.splitlines() if line.startswith("# HELP")]
 
     assert help_lines, "Expected HELP lines in the durable render"
-    assert all("file-backed" in line.lower() for line in help_lines), (
-        f"All HELP lines must state file-backed durability; got: {help_lines}"
+    assert all("durable" in line.lower() for line in help_lines), (
+        f"All HELP lines must state durable history semantics; got: {help_lines}"
     )
+
+
+def test_render_prediction_log_prometheus_metrics_reads_durable_history_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    predictions_log = pd.DataFrame(
+        {
+            "model_version": ["9"],
+            "prediction_timestamp": pd.to_datetime(
+                ["2026-05-11T10:00:00+00:00"],
+                utc=True,
+            ),
+            "forecast_time": pd.to_datetime(
+                ["2025-01-01T00:00:00+00:00"],
+                utc=True,
+            ),
+            "quality_index": [3.5],
+        }
+    )
+    monkeypatch.setattr(
+        prediction_prometheus,
+        "read_prediction_history",
+        lambda: predictions_log,
+    )
+
+    payload = prediction_prometheus.render_prediction_log_prometheus_metrics().decode(
+        "utf-8"
+    )
+
+    assert "foehncast_prediction_log_total_row_count 1.0" in payload
+    assert 'foehncast_prediction_log_row_count{model_version="9"} 1.0' in payload

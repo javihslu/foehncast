@@ -51,6 +51,131 @@ def test_append_prediction_log_and_read_prediction_log_round_trip(
     )
 
 
+def test_append_prediction_log_writes_durable_event_history_by_default(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "prediction-log.jsonl"
+    event_path = tmp_path / "prediction-events.jsonl"
+
+    prediction_log.append_prediction_log(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T00:00:00+00:00", "quality_index": 2.4},
+                        {"time": "2025-01-01T01:00:00+00:00", "quality_index": 2.8},
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=log_path,
+        logged_at=datetime(2026, 5, 11, 10, 0, tzinfo=UTC),
+    )
+
+    frame = prediction_log.read_prediction_event_log(event_path)
+
+    assert event_path.exists()
+    assert len(frame) == 2
+    assert list(frame["quality_index"]) == [2.4, 2.8]
+
+
+def test_read_prediction_history_prefers_durable_event_store_when_available(
+    tmp_path: Path,
+) -> None:
+    shared_event_path = tmp_path / "shared" / "prediction-events.jsonl"
+    local_log_path = tmp_path / "instance-a" / "prediction-log.jsonl"
+    remote_log_path = tmp_path / "instance-b" / "prediction-log.jsonl"
+
+    prediction_log.append_prediction_log(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T00:00:00+00:00", "quality_index": 2.1}
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=remote_log_path,
+        event_path=shared_event_path,
+        logged_at=datetime(2026, 5, 11, 9, 0, tzinfo=UTC),
+    )
+    prediction_log.append_prediction_log(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T01:00:00+00:00", "quality_index": 2.3}
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=local_log_path,
+        event_path=shared_event_path,
+        logged_at=datetime(2026, 5, 11, 10, 0, tzinfo=UTC),
+    )
+
+    local_frame = prediction_log.read_prediction_log(local_log_path, max_rows=10)
+    history_frame = prediction_log.read_prediction_history(
+        event_path=shared_event_path,
+        fallback_log_path=local_log_path,
+        max_rows=10,
+    )
+
+    assert len(local_frame) == 1
+    assert list(local_frame["quality_index"]) == [2.3]
+    assert len(history_frame) == 2
+    assert list(history_frame["quality_index"]) == [2.1, 2.3]
+
+
+def test_read_prediction_history_falls_back_to_local_log_when_durable_store_missing(
+    tmp_path: Path,
+) -> None:
+    log_path = tmp_path / "prediction-log.jsonl"
+    event_path = tmp_path / "shared" / "prediction-events.jsonl"
+
+    prediction_log.append_prediction_log(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T00:00:00+00:00", "quality_index": 2.4},
+                        {"time": "2025-01-01T01:00:00+00:00", "quality_index": 2.8},
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=log_path,
+        event_path=log_path.with_name("other-events.jsonl"),
+        logged_at=datetime(2026, 5, 11, 10, 0, tzinfo=UTC),
+    )
+
+    history_frame = prediction_log.read_prediction_history(
+        event_path=event_path,
+        fallback_log_path=log_path,
+        max_rows=10,
+    )
+
+    assert len(history_frame) == 2
+    assert list(history_frame["quality_index"]) == [2.4, 2.8]
+
+
 def test_append_prediction_log_trims_to_recent_rows(
     tmp_path: Path,
 ) -> None:
@@ -450,6 +575,78 @@ def test_emit_prediction_drift_metrics_uses_recent_rows_for_current_model_versio
     assert captured["rows"] == 2
     assert captured["versions"] == ["7", "7"]
     assert captured["quality_index"] == [2.1, 2.2]
+
+
+def test_emit_prediction_drift_metrics_prefers_durable_event_history_when_available(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    shared_event_path = tmp_path / "shared" / "prediction-events.jsonl"
+    local_log_path = tmp_path / "instance-a" / "prediction-log.jsonl"
+    remote_log_path = tmp_path / "instance-b" / "prediction-log.jsonl"
+    captured: dict[str, object] = {}
+
+    prediction_log.append_prediction_log(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T00:00:00+00:00", "quality_index": 2.1}
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=remote_log_path,
+        event_path=shared_event_path,
+        logged_at=datetime(2026, 5, 11, 9, 0, tzinfo=UTC),
+    )
+
+    def fake_detect_prediction_drift(predictions_log: pd.DataFrame) -> SimpleNamespace:
+        captured["rows"] = len(predictions_log)
+        captured["quality_index"] = list(predictions_log["quality_index"])
+        return SimpleNamespace(
+            dataset_name=predictions_log.attrs["dataset_name"],
+            dataset_version=predictions_log.attrs["dataset_version"],
+        )
+
+    monkeypatch.setattr(
+        prediction_log,
+        "detect_prediction_drift",
+        fake_detect_prediction_drift,
+    )
+    monkeypatch.setattr(
+        prediction_log,
+        "push_drift_metrics",
+        lambda report: captured.update({"pushed": report}),
+    )
+
+    report = prediction_log.emit_prediction_drift_metrics(
+        {
+            "model_version": "7",
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "spot_name": "Silvaplana",
+                    "forecast": [
+                        {"time": "2025-01-01T01:00:00+00:00", "quality_index": 2.4}
+                    ],
+                }
+            ],
+        },
+        endpoint="predict",
+        path=local_log_path,
+        event_path=shared_event_path,
+        max_rows=10,
+    )
+
+    assert report is not None
+    assert captured["rows"] == 2
+    assert captured["quality_index"] == [2.1, 2.4]
+    assert captured["pushed"].dataset_version == "7"
 
 
 def test_emit_prediction_drift_metrics_returns_none_when_no_forecast_rows(
