@@ -373,6 +373,20 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     summary_step = _workflow_step(workflow, "remote", "Summarize outputs")
     summary_script = summary_step["run"]
 
+    assert "always()" in summary_step["if"]
+    assert (
+        'echo "- App verification: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"'
+        in summary_script
+    )
+    assert (
+        'echo "- Cloud Run verification: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_verification_status }}"'
+        in summary_script
+    )
+    assert (
+        'echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"'
+        in summary_script
+    )
+
     assert (
         'feast_bigquery_dataset="$(render_output bigquery_dataset_id "${TF_VAR_bigquery_dataset_id}")"'
         in summary_script
@@ -398,6 +412,59 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
         'echo "- Feast follow-up: after curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."'
         in summary_script
     )
+
+
+def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> None:
+    workflow = _workflow_yaml(".github/workflows/terraform.yml")
+
+    verify_step = _workflow_step(workflow, "remote", "Verify hosted runtimes")
+    verify_script = verify_step["run"]
+
+    assert verify_step["id"] == "verify_hosted_runtimes"
+    assert (
+        'online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"'
+        in verify_script
+    )
+    assert 'echo "Waiting for hosted app health at ${health_url}..."' in verify_script
+    assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in verify_script
+    assert (
+        "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
+        in verify_script
+    )
+    assert (
+        "foehncast_online_compose_sync_last_success_timestamp_seconds\\{"
+        in verify_script
+    )
+    assert (
+        'echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."'
+        in verify_script
+    )
+    assert (
+        'cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"'
+        in verify_script
+    )
+    assert (
+        "cloud_run_allow_unauthenticated=\"$(printf '%s' \"${TF_VAR_cloud_run_allow_unauthenticated}\" | tr '[:upper:]' '[:lower:]')\""
+        in verify_script
+    )
+    assert (
+        'gcloud auth print-identity-token --audiences="$cloud_run_service_url"'
+        in verify_script
+    )
+    assert 'echo "Waiting for Cloud Run health at ${health_url}..."' in verify_script
+    assert (
+        'echo "Checking Cloud Run spots endpoint at ${spots_url}..."' in verify_script
+    )
+    assert '"status"[[:space:]]*:[[:space:]]*"healthy"' in verify_script
+    assert '"id"[[:space:]]*:' in verify_script
+    assert (
+        'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
+        in verify_script
+    )
+    assert (
+        'echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"' in verify_script
+    )
+    assert '} >> "$GITHUB_OUTPUT"' in verify_script
 
 
 def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> None:

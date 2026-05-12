@@ -182,7 +182,7 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 
 ## GitHub Actions Terraform Path
 
-Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies also attempt to resync the repository variables, but a repository-variable permission limit should not mark the apply itself as failed.
+Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies also attempt to resync the repository variables, then verify the hosted targets that Terraform exposed through its outputs. A repository-variable permission limit should not mark the apply itself as failed.
 
 Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
 
