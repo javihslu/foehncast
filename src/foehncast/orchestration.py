@@ -82,6 +82,25 @@ def _read_optional_feature_pipeline_frame(source: Path) -> pd.DataFrame:
     return _read_feature_pipeline_frame(source)
 
 
+def _json_safe_feature_pipeline_value(value: Any) -> Any:
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return None if pd.isna(value) else value.isoformat()
+
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return _json_safe_feature_pipeline_value(value.item())
+        except (TypeError, ValueError):
+            pass
+
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+
+    return value
+
+
 def _write_feature_pipeline_validation(
     destination: Path,
     validation: Any,
@@ -91,9 +110,20 @@ def _write_feature_pipeline_validation(
     payload = {
         "is_valid": bool(getattr(validation, "is_valid", False)),
         "missing_columns": list(getattr(validation, "missing_columns", []) or []),
-        "null_fractions": dict(getattr(validation, "null_fractions", {}) or {}),
+        "null_fractions": {
+            str(column): _json_safe_feature_pipeline_value(null_fraction)
+            for column, null_fraction in dict(
+                getattr(validation, "null_fractions", {}) or {}
+            ).items()
+        },
         "range_violations": (
-            range_violations.to_dict(orient="records")
+            [
+                {
+                    str(key): _json_safe_feature_pipeline_value(value)
+                    for key, value in record.items()
+                }
+                for record in range_violations.to_dict(orient="records")
+            ]
             if isinstance(range_violations, pd.DataFrame)
             else []
         ),

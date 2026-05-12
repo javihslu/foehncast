@@ -109,9 +109,9 @@ def gust_excess_10m(df: pd.DataFrame) -> pd.Series:
         df: DataFrame with ``wind_gusts_10m`` and ``wind_speed_10m``.
 
     Returns:
-        Series of gust-minus-sustained wind in km/h.
+        Series of nonnegative gust-minus-sustained wind in km/h.
     """
-    values = df["wind_gusts_10m"] - df["wind_speed_10m"]
+    values = (df["wind_gusts_10m"] - df["wind_speed_10m"]).clip(lower=0.0)
     return pd.Series(values, index=df.index, name="gust_excess_10m")
 
 

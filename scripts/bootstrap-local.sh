@@ -187,10 +187,16 @@ next_available_port() {
 cleanup_local_runtime_state() {
   local dataset="$1"
 
+  rm -f "$ROOT_DIR/airflow/.init-complete"
+  rm -f "$ROOT_DIR/airflow/airflow.db"
+  rm -f "$ROOT_DIR/airflow/airflow.db-shm"
+  rm -f "$ROOT_DIR/airflow/airflow.db-wal"
   rm -f "$ROOT_DIR/airflow/airflow.cfg"
+  rm -f "$ROOT_DIR/airflow"/*.log
   rm -f "$ROOT_DIR/airflow/simple_auth_manager_passwords.json"
   rm -f "$ROOT_DIR/airflow/simple_auth_manager_passwords.json.generated"
   rm -f "$ROOT_DIR/airflow/webserver_config.py"
+  rm -rf "$ROOT_DIR/airflow/logs"
   rm -rf "$ROOT_DIR/airflow/reports"
   rm -rf "$ROOT_DIR/.state/feast"
   rm -rf "$ROOT_DIR/.state/monitoring"
@@ -400,6 +406,7 @@ FEAST_DATASTORE_EMULATOR_RESET_URL="http://${DATASTORE_EMULATOR_HOST}/reset"
 
 FEAST_DATASET="${FEAST_DATASET:-$(env_file_value AIRFLOW_FEATURE_DATASET)}"
 FEAST_DATASET="${FEAST_DATASET:-train}"
+TRAINING_DAG_CONF="$(printf '{"dataset":"%s","stage":"Production"}' "$FEAST_DATASET")"
 
 echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
@@ -423,7 +430,7 @@ echo "Running feature pipeline for ${FEATURE_DATE}..."
 compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 
 echo "Running training pipeline for ${TRAINING_DATE}..."
-compose exec -T airflow-webserver airflow dags test training_pipeline "$TRAINING_DATE"
+compose exec -T airflow-webserver airflow dags test training_pipeline "$TRAINING_DATE" -c "$TRAINING_DAG_CONF"
 
 echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 "${ROOT_DIR}/scripts/prepare-feast-local.sh" --reset-state "$FEAST_DATASET"
@@ -447,7 +454,7 @@ echo "MLflow:   http://127.0.0.1:5001"
 echo "Grafana:  ${GRAFANA_BASE_URL}"
 echo "Feast:    /features/online verified"
 echo "Airflow UI/API and MLflow open directly in local mode."
-echo "This bootstrap path resets local Docker volumes and disposable local runtime artifacts so each run starts clean."
+echo "This bootstrap path resets local Docker volumes, Airflow metadata, and disposable runtime artifacts so each run starts clean."
 echo "Curated features and MLflow artifacts are using the MinIO-backed local objectstore baseline for this run."
 echo "This keeps the local object-access layer aligned with the hosted GCS-facing architecture while Feast uses the local Datastore-mode emulator for online serving."
 echo "Objectstore API: ${OBJECTSTORE_ENDPOINT}"

@@ -54,6 +54,14 @@ def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
 
     assert "http://127.0.0.1:8080/api/v2/monitor/health" in bootstrap
     assert "Waiting for Airflow API server health" in bootstrap
+    assert 'rm -f "$ROOT_DIR/airflow/airflow.db"' in bootstrap
+    assert 'rm -rf "$ROOT_DIR/airflow/logs"' in bootstrap
+    assert 'TRAINING_DAG_CONF="$(printf ' in bootstrap
+    assert '"stage":"Production"' in bootstrap
+    assert (
+        'airflow dags test training_pipeline "$TRAINING_DATE" -c "$TRAINING_DAG_CONF"'
+        in bootstrap
+    )
     assert (
         'compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"' in bootstrap
     )

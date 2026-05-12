@@ -88,6 +88,7 @@ else:
                 trigger_dag_id="training_pipeline",
                 conf={
                     "dataset": feature_dataset,
+                    "stage": "Production",
                     "source_dag_id": "feature_pipeline",
                     "source_run_id": "{{ run_id }}",
                 },

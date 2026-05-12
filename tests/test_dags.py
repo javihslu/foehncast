@@ -128,6 +128,7 @@ def test_feature_dag_defaults_to_airflow_schedule(
     assert operators[5].kwargs["trigger_dag_id"] == "training_pipeline"
     assert operators[5].kwargs["conf"] == {
         "dataset": "train",
+        "stage": "Production",
         "source_dag_id": "feature_pipeline",
         "source_run_id": "{{ run_id }}",
     }
@@ -178,8 +179,13 @@ def test_training_dag_stays_manual_and_paused_by_default(
         "{{ dag_run.conf.get('dataset') if dag_run and dag_run.conf and "
         "dag_run.conf.get('dataset') else params.dataset }}"
     )
+    expected_stage_template = (
+        "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
+        "dag_run.conf.get('stage') else 'Candidate' }}"
+    )
     assert operators[0].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
     assert operators[1].kwargs["op_kwargs"] == {"dataset": expected_dataset_template}
+    assert operators[2].kwargs["op_kwargs"] == {"stage": expected_stage_template}
 
 
 def test_training_dag_supports_dataset_override(

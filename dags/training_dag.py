@@ -19,6 +19,10 @@ else:
         "{{ dag_run.conf.get('dataset') if dag_run and dag_run.conf and "
         "dag_run.conf.get('dataset') else params.dataset }}"
     )
+    registration_stage_template = (
+        "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
+        "dag_run.conf.get('stage') else 'Candidate' }}"
+    )
 
     with DAG(
         dag_id="training_pipeline",
@@ -50,6 +54,7 @@ else:
             task_id="register_model",
             python_callable=register_training_run,
             op_args=[train_model.output],
+            op_kwargs={"stage": registration_stage_template},
         )
 
         train_model >> evaluate_model_task >> register_model_task
