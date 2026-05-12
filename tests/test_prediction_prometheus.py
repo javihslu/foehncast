@@ -64,3 +64,45 @@ def test_render_prediction_log_prometheus_metrics_handles_empty_log() -> None:
 
     assert "foehncast_prediction_log_total_row_count 0.0" in payload
     assert "foehncast_prediction_log_model_count 0.0" in payload
+
+
+def test_durable_metric_prefix_constant_covers_all_rendered_metric_names() -> None:
+    predictions_log = pd.DataFrame(
+        {
+            "model_version": ["9"],
+            "prediction_timestamp": pd.to_datetime(
+                ["2026-05-11T10:00:00+00:00"],
+                utc=True,
+            ),
+            "forecast_time": pd.to_datetime(
+                ["2025-01-01T00:00:00+00:00"],
+                utc=True,
+            ),
+            "quality_index": [3.5],
+        }
+    )
+
+    payload = prediction_prometheus.render_prediction_log_prometheus_metrics(
+        predictions_log=predictions_log,
+    ).decode("utf-8")
+    metric_lines = [
+        line for line in payload.splitlines() if line and not line.startswith("#")
+    ]
+
+    assert metric_lines, "Expected at least one metric line in the durable render"
+    prefix = prediction_prometheus.DURABLE_METRIC_PREFIX
+    assert all(line.startswith(prefix) for line in metric_lines), (
+        f"All metric lines must start with {prefix!r}; got: {metric_lines}"
+    )
+
+
+def test_durable_help_text_states_file_backed_contract() -> None:
+    payload = prediction_prometheus.render_prediction_log_prometheus_metrics(
+        predictions_log=pd.DataFrame(),
+    ).decode("utf-8")
+    help_lines = [line for line in payload.splitlines() if line.startswith("# HELP")]
+
+    assert help_lines, "Expected HELP lines in the durable render"
+    assert all("file-backed" in line.lower() for line in help_lines), (
+        f"All HELP lines must state file-backed durability; got: {help_lines}"
+    )

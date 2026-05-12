@@ -1,4 +1,10 @@
-"""Prometheus export helpers for in-process prediction-monitoring runtime signals."""
+"""Prometheus export helpers for in-process prediction-monitoring runtime signals.
+
+All metrics in this module are process-local and ephemeral: they are rendered
+from in-memory counters that reset whenever the serving process restarts.
+Operators should treat them as runtime diagnostics, not durable historical
+truth.
+"""
 
 from __future__ import annotations
 
@@ -57,31 +63,35 @@ def _reset_prediction_monitoring_state() -> None:
         _execution_timestamps.clear()
 
 
+EPHEMERAL_METRIC_PREFIX = "foehncast_prediction_monitoring_"
+"""Common prefix for process-local metrics that reset on process restart."""
+
+
 def build_prediction_monitoring_prometheus_registry() -> CollectorRegistry:
     """Render in-process prediction-monitoring state into a scrapeable registry."""
     registry = CollectorRegistry()
 
     schedule_total = Counter(
         "foehncast_prediction_monitoring_schedule_total",
-        "Total prediction-monitoring background task scheduling attempts by endpoint and result.",
+        "Process-local ephemeral (resets on restart). Total prediction-monitoring background task scheduling attempts by endpoint and result.",
         labelnames=("endpoint", "result"),
         registry=registry,
     )
     execution_total = Counter(
         "foehncast_prediction_monitoring_execution_total",
-        "Total prediction-monitoring background task executions by endpoint and result.",
+        "Process-local ephemeral (resets on restart). Total prediction-monitoring background task executions by endpoint and result.",
         labelnames=("endpoint", "result"),
         registry=registry,
     )
     last_schedule_timestamp = Gauge(
         "foehncast_prediction_monitoring_last_schedule_timestamp_seconds",
-        "Unix timestamp of the latest prediction-monitoring scheduling event by endpoint and result.",
+        "Process-local ephemeral (resets on restart). Unix timestamp of the latest prediction-monitoring scheduling event by endpoint and result.",
         labelnames=("endpoint", "result"),
         registry=registry,
     )
     last_execution_timestamp = Gauge(
         "foehncast_prediction_monitoring_last_execution_timestamp_seconds",
-        "Unix timestamp of the latest prediction-monitoring execution event by endpoint and result.",
+        "Process-local ephemeral (resets on restart). Unix timestamp of the latest prediction-monitoring execution event by endpoint and result.",
         labelnames=("endpoint", "result"),
         registry=registry,
     )
@@ -111,6 +121,7 @@ def render_prediction_monitoring_prometheus_metrics() -> bytes:
 
 
 __all__ = [
+    "EPHEMERAL_METRIC_PREFIX",
     "build_prediction_monitoring_prometheus_registry",
     "record_prediction_monitoring_execution",
     "record_prediction_monitoring_schedule",
