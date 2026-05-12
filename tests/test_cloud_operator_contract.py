@@ -904,6 +904,10 @@ def test_rollback_live_release_workflow_restores_explicit_revision_and_model_ver
         'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
         in verify_target_script
     )
+    assert (
+        "Rollback target health verification did not report serving alias ${TARGET_ALIAS}."
+        in verify_target_script
+    )
     assert "rollback_target_model_version" in verify_target_script
 
     restore_model_step = _workflow_step(
@@ -917,6 +921,31 @@ def test_rollback_live_release_workflow_restores_explicit_revision_and_model_ver
     assert (
         "Rollback helper did not restore the requested model version."
         in restore_model_script
+    )
+
+    reverify_target_step = _workflow_step(
+        workflow, "rollback", "Reverify rollback target with restored model version"
+    )
+    reverify_target_script = reverify_target_step["run"]
+    assert (
+        reverify_target_step["env"]["SERVICE_URL"]
+        == "${{ steps.resolve_rollback.outputs.rollback_tag_url }}"
+    )
+    assert (
+        reverify_target_step["env"]["RESTORED_MODEL_VERSION"]
+        == "${{ steps.restore_model.outputs.restored_model_version }}"
+    )
+    assert (
+        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
+        in reverify_target_script
+    )
+    assert (
+        "Rollback target revalidation did not report serving alias ${TARGET_ALIAS}."
+        in reverify_target_script
+    )
+    assert (
+        "Rollback target revalidation did not report the restored model version."
+        in reverify_target_script
     )
 
     shift_traffic_step = _workflow_step(
@@ -961,6 +990,7 @@ def test_rollback_live_release_workflow_restores_explicit_revision_and_model_ver
         'echo "- Restored model version: ${{ steps.restore_model.outputs.restored_model_version }}"'
         in summary_step["run"]
     )
+    assert 'echo "- Tagged revalidation: passed"' in summary_step["run"]
 
     blocked_step = _workflow_step(
         workflow, "blocked", "Explain blocked rollback workflow"

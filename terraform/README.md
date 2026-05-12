@@ -182,7 +182,7 @@ When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow
 Manual workflow dispatch also supports `deploy_mode=candidate`. That path deploys a tagged no-traffic Cloud Run revision, sets `FOEHNCAST_MLFLOW_SERVING_ALIAS` for that revision, and smoke-checks the tagged URL before any later traffic shift.
 After a candidate revision has been validated, `.github/workflows/promote-candidate.yml` promotes the exact validated model version to the live `champion` alias, redeploys the live Cloud Run service with the validated candidate image, and verifies the live `/health` response reports `champion` plus the promoted model version.
 That promotion summary also records the pre-promotion live revision and model version so operators can feed those exact values into `.github/workflows/rollback-live-release.yml` if the release needs to be reversed later.
-If a live release needs to be reversed, `.github/workflows/rollback-live-release.yml` restores a specific previous Cloud Run revision and a specific previous `champion` model version, verifies the tagged rollback target first, then restores live traffic and confirms the live `/health` response reports the requested rollback version.
+If a live release needs to be reversed, `.github/workflows/rollback-live-release.yml` restores a specific previous Cloud Run revision and a specific previous `champion` model version, verifies the tagged rollback target first, rechecks that tagged target after the alias restore, then restores live traffic and confirms the live `/health` response reports the requested rollback version.
 
 ## GitHub Actions Terraform Path
 
