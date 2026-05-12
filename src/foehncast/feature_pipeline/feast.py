@@ -149,9 +149,10 @@ def prepare_feature_store(
 
     resolved_materialize_timestamp = None
     if materialize:
-        resolved_materialize_timestamp = materialize_timestamp or datetime.now(
-            tz=UTC
-        ).replace(microsecond=0).isoformat()
+        resolved_materialize_timestamp = (
+            materialize_timestamp
+            or datetime.now(tz=UTC).replace(microsecond=0).isoformat()
+        )
         _run_feast_cli(
             ["materialize-incremental", resolved_materialize_timestamp],
             cwd=repo_path,

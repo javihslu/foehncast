@@ -842,7 +842,10 @@ def _training_summary_state(
     except FileNotFoundError:
         summary = {}
 
-    if training_run_id and summary.get("training_run_id") not in {None, training_run_id}:
+    if training_run_id and summary.get("training_run_id") not in {
+        None,
+        training_run_id,
+    }:
         summary = {}
 
     return {
@@ -859,7 +862,9 @@ def _training_summary_state(
         "train_row_count": summary.get("train_row_count"),
         "test_row_count": summary.get("test_row_count"),
         "evaluation_report_path": summary.get("evaluation_report_path"),
-        "evaluation_report_exists": bool(summary.get("evaluation_report_exists", False)),
+        "evaluation_report_exists": bool(
+            summary.get("evaluation_report_exists", False)
+        ),
         "registered_model_name": summary.get("registered_model_name"),
         "registered_model_version": summary.get("registered_model_version"),
         "run_metrics": {
@@ -918,7 +923,9 @@ def _emit_training_summary(
         train_row_count=training_state.get("train_row_count"),
         test_row_count=training_state.get("test_row_count"),
         evaluation_report_path=training_state.get("evaluation_report_path"),
-        evaluation_report_exists=bool(training_state.get("evaluation_report_exists", False)),
+        evaluation_report_exists=bool(
+            training_state.get("evaluation_report_exists", False)
+        ),
         registered_model_name=training_state.get("registered_model_name"),
         registered_model_version=(
             None
@@ -932,7 +939,9 @@ def _emit_training_summary(
 
 def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
     run = mlflow.MlflowClient().get_run(training_run_id)
-    metrics = {str(name): float(value) for name, value in dict(run.data.metrics).items()}
+    metrics = {
+        str(name): float(value) for name, value in dict(run.data.metrics).items()
+    }
     params = {str(name): str(value) for name, value in dict(run.data.params).items()}
 
     def _metric_count(name: str) -> int | None:
@@ -1000,7 +1009,9 @@ def evaluate_training_run(
     try:
         mlflow.set_tracking_uri(get_mlflow_tracking_uri())
         run = mlflow.MlflowClient().get_run(training_run_id)
-        metrics = {str(name): float(value) for name, value in dict(run.data.metrics).items()}
+        metrics = {
+            str(name): float(value) for name, value in dict(run.data.metrics).items()
+        }
         if not metrics:
             raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
 

@@ -374,7 +374,9 @@ def build_training_pipeline_prometheus_registry(
         run_success.labels(*labels).set(float(summary.get("run_status") == "succeeded"))
         generated_at = summary.get("generated_at")
         if generated_at:
-            summary_generated.labels(*labels).set(pd.Timestamp(generated_at).timestamp())
+            summary_generated.labels(*labels).set(
+                pd.Timestamp(generated_at).timestamp()
+            )
 
         for key, gauge in (
             ("training_row_count", row_count),
@@ -398,15 +400,21 @@ def build_training_pipeline_prometheus_registry(
             registered_model_version.labels(*labels).set(float(version))
 
         for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
-            stage_duration.labels(dataset, requested_stage, str(stage)).set(float(duration))
+            stage_duration.labels(dataset, requested_stage, str(stage)).set(
+                float(duration)
+            )
         for stage, count in dict(summary.get("stage_failure_counts", {})).items():
-            stage_failure_count.labels(dataset, requested_stage, str(stage)).set(float(count))
+            stage_failure_count.labels(dataset, requested_stage, str(stage)).set(
+                float(count)
+            )
         for stage in TRAINING_PIPELINE_STAGES:
             stage_state.labels(dataset, requested_stage, stage).set(
                 _stage_state_value(stage, summary)
             )
         for metric_name, value in dict(summary.get("run_metrics", {})).items():
-            run_metric.labels(dataset, requested_stage, str(metric_name)).set(float(value))
+            run_metric.labels(dataset, requested_stage, str(metric_name)).set(
+                float(value)
+            )
 
     return registry
 

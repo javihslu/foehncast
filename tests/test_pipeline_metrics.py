@@ -206,4 +206,8 @@ def test_training_pipeline_stage_overview_flattens_summary() -> None:
 
     assert list(overview["stage"]) == ["train", "evaluate", "register"]
     assert list(overview["state"]) == ["succeeded", "succeeded", "not_run"]
-    assert list(overview["requested_stage"]) == ["Production", "Production", "Production"]
+    assert list(overview["requested_stage"]) == [
+        "Production",
+        "Production",
+        "Production",
+    ]

@@ -91,7 +91,7 @@ def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
     assert "wait_for_airflow_dag_run_state" in bootstrap
     assert "asset_triggered" in bootstrap
     assert (
-        'wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2'
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
         in bootstrap
     )
     assert (

@@ -110,7 +110,9 @@ def test_prepare_feature_store_applies_repo_and_materializes(
     monkeypatch.setattr(
         feast,
         "export_offline_store",
-        lambda dataset, output_path=None: Path(output_path) if output_path else export_destination,
+        lambda dataset, output_path=None: (
+            Path(output_path) if output_path else export_destination
+        ),
     )
     monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
     monkeypatch.setattr(feast, "feast_repo_path", lambda: repo_path)
@@ -169,7 +171,9 @@ def test_prepare_feature_store_can_skip_materialize(
     monkeypatch.setattr(
         feast,
         "export_offline_store",
-        lambda dataset, output_path=None: Path(output_path) if output_path else export_destination,
+        lambda dataset, output_path=None: (
+            Path(output_path) if output_path else export_destination
+        ),
     )
     monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
     monkeypatch.setattr(feast, "feast_repo_path", lambda: repo_path)

@@ -123,6 +123,7 @@ def run_training_pipeline(
     """Train the configured model, log the run to MLflow, and return the run id."""
     resolved_model_config = model_config or get_model_config()
     mlflow_config = get_mlflow_config()
+    resolved_model_name = str(mlflow_config.get("model_name") or "foehncast")
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
     mlflow.set_experiment(mlflow_config["experiment_name"])
 
@@ -156,7 +157,7 @@ def run_training_pipeline(
         mlflow.log_params(
             {
                 "dataset": dataset,
-                "model_name": mlflow_config["model_name"],
+                "model_name": resolved_model_name,
                 "algorithm": resolved_model_config["algorithm"],
                 "test_size": resolved_model_config["test_size"],
                 "random_state": resolved_model_config["random_state"],
