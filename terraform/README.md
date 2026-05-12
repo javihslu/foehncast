@@ -180,6 +180,7 @@ In normal operation you should not edit these variables by hand. The bootstrap p
 
 When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
 Manual workflow dispatch also supports `deploy_mode=candidate`. That path deploys a tagged no-traffic Cloud Run revision, sets `FOEHNCAST_MLFLOW_SERVING_ALIAS` for that revision, and smoke-checks the tagged URL before any later traffic shift.
+After a candidate revision has been validated, `.github/workflows/promote-candidate.yml` promotes the exact validated model version to the live `champion` alias, redeploys the live Cloud Run service with the validated candidate image, and verifies the live `/health` response reports `champion` plus the promoted model version.
 
 ## GitHub Actions Terraform Path
 
