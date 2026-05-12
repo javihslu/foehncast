@@ -27,6 +27,7 @@ jobs:
       workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
       service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
       cloud_run_service: ${{ steps.repo_config.outputs.cloud_run_service }}
+      cloud_run_allow_unauthenticated: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
       registry_host: ${{ steps.derived.outputs.registry_host }}
       image_repository: ${{ steps.derived.outputs.image_repository }}
       publish_ready: ${{ steps.derived.outputs.publish_ready }}
@@ -161,6 +162,7 @@ jobs:
       GCP_PROJECT_ID: ${{ needs.config.outputs.project_id }}
       GCP_LOCATION: ${{ needs.config.outputs.location }}
       CLOUD_RUN_SERVICE: ${{ needs.config.outputs.cloud_run_service }}
+      CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ needs.config.outputs.cloud_run_allow_unauthenticated }}
       IMAGE_URI: ${{ needs.publish.outputs.image_uri }}
     steps:
       - uses: google-github-actions/auth@v2
@@ -189,6 +191,48 @@ jobs:
           service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
           echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
 
+      - id: verify
+        name: Verify deployed Cloud Run runtime
+        env:
+          SERVICE_URL: ${{ steps.deploy.outputs.service_url }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$SERVICE_URL" ]]; then
+            echo "Cloud Run service URL is empty after deploy." >&2
+            exit 1
+          fi
+
+          health_url="${SERVICE_URL%/}/health"
+          spots_url="${SERVICE_URL%/}/spots"
+          allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
+          curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
+          invocation_mode="anonymous"
+
+          if [[ "$allow_unauthenticated" != 'true' ]]; then
+            invocation_mode="identity-token"
+            identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+            curl_args+=(-H "Authorization: Bearer ${identity_token}")
+          fi
+
+          echo "Waiting for Cloud Run health at ${health_url}..."
+          health_payload="$(curl "${curl_args[@]}" "$health_url")"
+          if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+            echo "Cloud Run health verification failed." >&2
+            printf '%s\n' "$health_payload" >&2
+            exit 1
+          fi
+
+          echo "Checking Cloud Run spots endpoint at ${spots_url}..."
+          spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
+          if ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
+            echo "Cloud Run spots verification failed." >&2
+            printf '%s\n' "$spots_payload" >&2
+            exit 1
+          fi
+
+          echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"
+
       - name: Summarize Cloud Run deployment
         run: |
           {
@@ -197,6 +241,8 @@ jobs:
             echo "- Service: $CLOUD_RUN_SERVICE"
             echo "- Image: $IMAGE_URI"
             echo "- URL: ${{ steps.deploy.outputs.service_url }}"
+            echo "- Smoke check: passed"
+            echo "- Invocation: ${{ steps.verify.outputs.invocation_mode }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy_skipped:

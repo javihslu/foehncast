@@ -408,6 +408,10 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
         config_job["outputs"]["cloud_run_service"]
         == "${{ steps.repo_config.outputs.cloud_run_service }}"
     )
+    assert (
+        config_job["outputs"]["cloud_run_allow_unauthenticated"]
+        == "${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}"
+    )
 
     derived_step = _workflow_step(workflow, "config", "derived")
     assert (
@@ -420,6 +424,42 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
     assert (
         deploy_job["env"]["CLOUD_RUN_SERVICE"]
         == "${{ needs.config.outputs.cloud_run_service }}"
+    )
+    assert (
+        deploy_job["env"]["CLOUD_RUN_ALLOW_UNAUTHENTICATED"]
+        == "${{ needs.config.outputs.cloud_run_allow_unauthenticated }}"
+    )
+
+    verify_step = _workflow_step(
+        workflow, "deploy", "Verify deployed Cloud Run runtime"
+    )
+    verify_script = verify_step["run"]
+
+    assert (
+        verify_step["env"]["SERVICE_URL"] == "${{ steps.deploy.outputs.service_url }}"
+    )
+    assert 'health_url="${SERVICE_URL%/}/health"' in verify_script
+    assert 'spots_url="${SERVICE_URL%/}/spots"' in verify_script
+    assert (
+        "allow_unauthenticated=\"$(printf '%s' \"${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}\" | tr '[:upper:]' '[:lower:]')\""
+        in verify_script
+    )
+    assert (
+        'gcloud auth print-identity-token --audiences="$SERVICE_URL"' in verify_script
+    )
+    assert (
+        'grep -Eq \x27"status"[[:space:]]*:[[:space:]]*"healthy"\x27' in verify_script
+    )
+    assert 'grep -Eq \x27"id"[[:space:]]*:\x27' in verify_script
+    assert (
+        'echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"' in verify_script
+    )
+
+    summary_step = _workflow_step(workflow, "deploy", "Summarize Cloud Run deployment")
+    assert 'echo "- Smoke check: passed"' in summary_step["run"]
+    assert (
+        'echo "- Invocation: ${{ steps.verify.outputs.invocation_mode }}"'
+        in summary_step["run"]
     )
 
 
