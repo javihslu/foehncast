@@ -28,6 +28,18 @@ usage() {
   echo "Maintainer-only cloud bootstrap. Supported no-local-install path: run this from Google Cloud Shell." >&2
 }
 
+require_payload_pattern() {
+  local payload="$1"
+  local pattern="$2"
+  local description="$3"
+
+  if ! printf '%s' "$payload" | grep -Eq "$pattern"; then
+    echo "Hosted bootstrap verification failed: expected ${description}." >&2
+    printf '%s\n' "$payload" >&2
+    exit 1
+  fi
+}
+
 in_cloud_shell() {
   [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]
 }
@@ -220,6 +232,73 @@ read_tfvars_value() {
     echo "Hosted Feast offline source table: ${feast_bigquery_table}"
     echo "Hosted Feast online store database: ${FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE}"
     echo "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
+  }
+
+  print_online_compose_summary() {
+    local host_ip app_url airflow_url mlflow_url
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+
+    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" != "true" ]]; then
+      return
+    fi
+
+    host_ip="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_host_ip)"
+    host_ip="$(trim_whitespace "$host_ip")"
+    app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
+    app_url="$(trim_whitespace "$app_url")"
+    airflow_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_airflow_url)"
+    airflow_url="$(trim_whitespace "$airflow_url")"
+    mlflow_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_mlflow_url)"
+    mlflow_url="$(trim_whitespace "$mlflow_url")"
+
+    if [[ -n "$host_ip" && "$host_ip" != "null" ]]; then
+      echo "Online compose host IP: ${host_ip}"
+    fi
+    if [[ -n "$app_url" && "$app_url" != "null" ]]; then
+      echo "Online compose app URL: ${app_url}"
+    fi
+    if [[ -n "$airflow_url" && "$airflow_url" != "null" ]]; then
+      echo "Online compose Airflow URL: ${airflow_url}"
+    fi
+    if [[ -n "$mlflow_url" && "$mlflow_url" != "null" ]]; then
+      echo "Online compose MLflow URL: ${mlflow_url}"
+    fi
+  }
+
+  verify_online_compose_runtime() {
+    local app_url health_url metrics_url metrics_payload
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+
+    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" != "true" ]]; then
+      return
+    fi
+
+    app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
+    app_url="$(trim_whitespace "$app_url")"
+
+    if [[ -z "$app_url" || "$app_url" == "null" ]]; then
+      echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."
+      return
+    fi
+
+    health_url="${app_url%/}/health"
+    metrics_url="${app_url%/}/metrics"
+
+    echo "Waiting for hosted app health at ${health_url}..."
+    curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url" >/dev/null
+
+    echo "Checking hosted sync metrics at ${metrics_url}..."
+    metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"
+    require_payload_pattern \
+      "$metrics_payload" \
+      'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
+      'hosted sync status-file-present metric'
+    require_payload_pattern \
+      "$metrics_payload" \
+      'foehncast_online_compose_sync_last_success_timestamp_seconds\{' \
+      'hosted sync last-success timestamp metric'
   }
 
   print_bootstrap_only_summary() {
@@ -666,6 +745,7 @@ print_bootstrap_context
 
 require_command gcloud
 ensure_terraform_command
+require_command curl
 
 if [[ "$CONFIGURE_GITHUB" == "true" ]]; then
   require_command gh
@@ -748,7 +828,9 @@ else
     echo "Syncing local cloud identifiers into .env..."
     sync_env_from_terraform_outputs
     print_auth_summary
+    print_online_compose_summary
     print_feast_runtime_summary
+    verify_online_compose_runtime
   fi
 fi
 

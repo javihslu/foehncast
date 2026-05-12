@@ -21,7 +21,16 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
             "storage_backend": "s3",
             "expected_spot_count": 2,
             "fetched_spot_count": 2,
+            "engineered_spot_count": 2,
+            "validated_spot_count": 2,
             "stored_spot_count": 2,
+            "stage_durations_seconds": {"fetch": 12.5, "store": 3.5},
+            "stage_failure_counts": {
+                "fetch": 0,
+                "engineer": 0,
+                "validate": 0,
+                "store": 0,
+            },
             "skipped_spot_count": 0,
             "failed_spot_count": 0,
             "spots": [
@@ -52,6 +61,22 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
     )
     assert (
         'foehncast_feature_pipeline_spot_ingest_rows{dataset="train",spot_id="silvaplana",storage_backend="s3"} 168.0'
+        in payload
+    )
+    assert (
+        'foehncast_feature_pipeline_engineered_spot_count{dataset="train",storage_backend="s3"} 2.0'
+        in payload
+    )
+    assert (
+        'foehncast_feature_pipeline_validated_spot_count{dataset="train",storage_backend="s3"} 2.0'
+        in payload
+    )
+    assert (
+        'foehncast_feature_pipeline_stage_duration_seconds{dataset="train",stage="fetch",storage_backend="s3"} 12.5'
+        in payload
+    )
+    assert (
+        'foehncast_feature_pipeline_stage_failure_count{dataset="train",stage="fetch",storage_backend="s3"} 0.0'
         in payload
     )
     assert (

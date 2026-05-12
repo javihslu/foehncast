@@ -98,20 +98,29 @@ def test_feature_dag_defaults_to_airflow_schedule(
     assert module.dag.kwargs["catchup"] is False
     assert module.dag.kwargs["is_paused_upon_creation"] is False
     assert [operator.kwargs["task_id"] for operator in operators] == [
-        "run_feature_pipeline",
+        "fetch_feature_inputs",
+        "engineer_feature_set",
+        "validate_feature_set",
+        "store_feature_set",
         "check_retraining_trigger",
         "train_model",
         "evaluate_model",
         "register_model",
     ]
-    assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
-    assert operators[1].kwargs["op_kwargs"] == {
-        "feature_result": "output:run_feature_pipeline",
+    assert operators[0].kwargs["op_kwargs"] == {
+        "dataset": "train",
+        "run_key": "{{ run_id }}",
+    }
+    assert operators[1].kwargs["op_args"] == ["output:fetch_feature_inputs"]
+    assert operators[2].kwargs["op_args"] == ["output:engineer_feature_set"]
+    assert operators[3].kwargs["op_args"] == ["output:validate_feature_set"]
+    assert operators[4].kwargs["op_kwargs"] == {
+        "feature_result": "output:store_feature_set",
         "mode": "always",
     }
-    assert operators[2].kwargs["op_kwargs"] == {"dataset": "train"}
-    assert operators[3].kwargs["op_args"] == ["output:train_model"]
-    assert operators[3].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert operators[5].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert operators[6].kwargs["op_args"] == ["output:train_model"]
+    assert operators[6].kwargs["op_kwargs"] == {"dataset": "train"}
 
 
 def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
@@ -128,8 +137,16 @@ def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
     )
 
     assert module.dag.kwargs["schedule"] is None
-    assert len(operators) == 1
-    assert operators[0].kwargs["op_kwargs"] == {"dataset": "validation"}
+    assert [operator.kwargs["task_id"] for operator in operators] == [
+        "fetch_feature_inputs",
+        "engineer_feature_set",
+        "validate_feature_set",
+        "store_feature_set",
+    ]
+    assert operators[0].kwargs["op_kwargs"] == {
+        "dataset": "validation",
+        "run_key": "{{ run_id }}",
+    }
 
 
 def test_training_dag_stays_manual_and_paused_by_default(

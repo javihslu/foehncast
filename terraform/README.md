@@ -79,17 +79,21 @@ When `provision_online_compose_host = true`, provide:
 
 If the hosted Grafana tenant should deliver the provisioned monitoring alerts by email, set `FOEHNCAST_GRAFANA_ALERT_EMAIL` in `online_compose_env_vars`. The local Docker path intentionally leaves that override out of `.env.example` and relies on the placeholder route instead.
 
-Terraform provisions a dedicated network, static public IP, and Compute Engine instance. The instance clones the repo, writes a runtime `.env` file with the Terraform-managed GCP and BigQuery settings, tries to pull the GHCR images, and falls back to local Docker builds on the host if the packages are not available yet.
-That generated `.env` now includes the same Feast runtime env contract as the Cloud Run path, so the online host and the inference-only service render the same logical Feast config with different runtime surfaces.
-The same generated `.env` also points the hosted MLflow service at `gs://<artifact-bucket>/mlflow/artifacts`, so artifact storage uses the shared cloud object plane instead of a host-local volume.
+Terraform creates a network, a static public IP, and a Compute Engine VM. The VM clones the repo, writes a runtime `.env` file with the GCP and BigQuery settings, and tries to pull the GHCR images. If the images are not available yet, it builds them on the VM instead.
+That `.env` file uses the same Feast runtime settings as the Cloud Run path, so both hosted targets use the same Feast config.
+It also points MLflow artifacts to `gs://<artifact-bucket>/mlflow/artifacts`, so artifacts go to the shared bucket instead of a VM-local volume.
+The VM installs a `foehncast-online-compose-sync` systemd timer. Every run fetches the configured Git ref and refreshes the hosted compose stack, so DAG and runtime changes land on the host without a manual SSH pull.
+Each successful sync also updates `/opt/foehncast/.state/online-compose-sync/last-success.json`.
+The app exposes that status through Prometheus `/metrics`, and Grafana shows it on the monitoring dashboard.
 
-The hosted baseline also provisions a Firestore Datastore-mode database dedicated to Feast online serving. Using a named database avoids coupling the repo to whatever default Firestore state a reused GCP project may already have.
+Terraform also creates a Firestore Datastore-mode database for Feast online serving. Using a named database keeps this setup separate from any default Firestore state in the project.
 
-The host uses a dedicated runtime service account with BigQuery job access, BigQuery Storage API read-session access, BigQuery dataset edit access, bucket object-admin access for MLflow and Feast artifacts, and Datastore user access, so the Airflow, training, Feast, app, and MLflow containers can rely on Application Default Credentials instead of mounted key files.
+The VM uses a dedicated service account with access to BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
 
-After curated BigQuery rows are available, run `./scripts/prepare-feast-cloud.sh` on the host or from another shell with ADC to apply the Feast repo and materialize the hosted online store.
+When curated BigQuery rows are ready, run `./scripts/prepare-feast-cloud.sh` on the host, or from another shell with ADC, to apply the Feast repo and materialize the hosted online store.
 
-On first boot, the host generates an Airflow admin password locally and stores it at `/opt/foehncast/airflow/.admin-password`. Retrieve it over SSH when you need to sign in instead of passing it through Terraform input variables.
+On first boot, the host creates an Airflow admin password and stores it at `/opt/foehncast/airflow/.admin-password`. Use SSH to read it when you need to sign in.
+You can also check `/opt/foehncast/.state/online-compose-sync/last-success.json` over SSH to see the last successful hosted DAG and runtime refresh.
 
 The online host starts:
 
@@ -99,7 +103,7 @@ The online host starts:
 
 By default, `online_compose_public_ports = [8000]`, so only the app is internet-reachable. If you want public admin UIs, add `8080` or `5001` deliberately.
 
-The compose-host path is the simplest way to keep the whole course stack online without forcing Airflow into Cloud Run.
+The compose-host path is the simplest way to keep the whole stack online without forcing Airflow into Cloud Run.
 
 ## What The Hosted Paths Expose
 
@@ -230,28 +234,30 @@ Automatic Terraform apply on `main` is no longer paused behind a GitHub environm
 
 Use this only for the initial hosted-environment bootstrap, or when you intentionally need direct admin access to the cloud project.
 
-Preferred environment: Google Cloud Shell. That keeps the admin toolchain off the default evaluator machine and matches the intended operator path.
+Preferred environment: Google Cloud Shell. It keeps the admin tools off the default evaluator machine and matches the intended operator path.
 
-If you run from another admin shell, keep `gcloud`, `gh`, and `terraform` available there. The supported no-local-install path remains Google Cloud Shell for bootstrap, followed by GitHub Actions for day-2 work.
+If you use another admin shell, make sure `gcloud`, `gh`, and `terraform` are available there. The supported no-local-install path is still: bootstrap in Google Cloud Shell, then use GitHub Actions for normal follow-up work.
 
-Supported first-time maintainer path:
+For the first setup, run:
 
 `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions`
 
 The bootstrap script will:
 
-1. Sign in in the browser when `gcloud` opens the login flow.
-2. Pick an existing GCP project or type `n` to create a new one.
-3. Pick a billing account from the list shown by the script.
-4. Confirm or edit the values for region, bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
-5. Decide which hosted targets should exist after GitHub Actions takes over.
-6. Sync the repository variables that GitHub Actions needs for the shared cloud path.
+1. Sign in when `gcloud` opens the browser login.
+2. Choose an existing GCP project, or type `n` to create one.
+3. Choose a billing account.
+4. Confirm or edit the region, bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table.
+5. Choose which hosted targets to enable.
+6. Sync the GitHub repository variables used by the shared cloud path.
 
-After bootstrap, run the Terraform workflow with `apply` once if you want the shared environment provisioned immediately. After that, pushes to `main` keep the shared environment aligned automatically.
+After bootstrap, run the Terraform workflow with `apply` if you want to provision the shared environment right away. After that, pushes to `main` keep it up to date automatically.
 
-The script writes `.env` and `terraform/terraform.tfvars` during setup and asks explicitly whether the next apply should enable the inference-only Cloud Run target and/or the full online compose host target.
+If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` waits for the hosted `/health` endpoint and checks that `/metrics` contains the online compose sync metrics.
 
-Authentication stays in the active `gcloud` application default credentials for the admin shell you used, while Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
+The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target or the full online compose host target.
+
+Authentication stays in the active `gcloud` application default credentials for the shell you used. Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
 
 ## Local BigQuery Use
 

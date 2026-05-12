@@ -9,6 +9,7 @@ FEATURE_DATE="${FEATURE_DATE:-2024-01-01}"
 TRAINING_DATE="${TRAINING_DATE:-2024-01-02}"
 AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/api/v2/monitor/health}"
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
+APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
 GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-http://127.0.0.1:3000}"
 GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
@@ -193,8 +194,20 @@ cleanup_local_runtime_state() {
   rm -rf "$ROOT_DIR/airflow/reports"
   rm -rf "$ROOT_DIR/.state/feast"
   rm -rf "$ROOT_DIR/.state/monitoring"
+  rm -rf "$ROOT_DIR/.state/online-compose-sync"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
+}
+
+seed_local_online_compose_sync_status() {
+  local sync_dir="$ROOT_DIR/.state/online-compose-sync"
+  local sync_status_file="$sync_dir/last-success.json"
+  local sync_time
+
+  sync_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  mkdir -p "$sync_dir"
+  printf '{\n  "state": "succeeded",\n  "git_ref": "local-bootstrap",\n  "last_successful_sync_at": "%s",\n  "last_successful_commit": "local-smoke",\n  "compose_deploy_mode": "bootstrap"\n}\n' \
+    "$sync_time" > "$sync_status_file"
 }
 
 wait_for_service_health() {
@@ -271,6 +284,14 @@ verify_grafana_provisioning() {
     "$alert_rules_payload" \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_stale_success"' \
     'stale success alert rule'
+  require_payload_pattern \
+    "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_feature_stage_failures"' \
+    'feature stage failure alert rule'
+  require_payload_pattern \
+    "$alert_rules_payload" \
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast_hosted_sync_stale"' \
+    'hosted sync stale alert rule'
 
   echo "Checking Grafana contact point provisioning..."
   contact_points_payload="$(grafana_api_get "/api/v1/provisioning/contact-points?name=foehncast-email")"
@@ -297,6 +318,29 @@ verify_grafana_provisioning() {
     "$policies_payload" \
     '"inference-monitoring"' \
     'notification policy inference-monitoring matcher'
+  require_payload_pattern \
+    "$policies_payload" \
+    '"feature-pipeline"' \
+    'notification policy feature-pipeline matcher'
+  require_payload_pattern \
+    "$policies_payload" \
+    '"hosted-operator"' \
+    'notification policy hosted-operator matcher'
+}
+
+verify_hosted_sync_metrics() {
+  local metrics_payload
+
+  echo "Checking hosted sync metrics exposure..."
+  metrics_payload="$(curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_METRICS_URL")"
+  require_payload_pattern \
+    "$metrics_payload" \
+    'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
+    'hosted sync status-file-present metric'
+  require_payload_pattern \
+    "$metrics_payload" \
+    'foehncast_online_compose_sync_last_success_timestamp_seconds\{compose_deploy_mode="bootstrap",git_ref="local-bootstrap"\}[[:space:]]+[0-9.e+-]+' \
+    'hosted sync last-success timestamp metric'
 }
 
 RUN_MODE_LABEL="local MinIO-backed objectstore baseline"
@@ -361,6 +405,7 @@ echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
 cleanup_local_runtime_state "$FEAST_DATASET"
+seed_local_online_compose_sync_status
 
 echo "Starting local stack..."
 compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"
@@ -385,6 +430,7 @@ echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 
 echo "Waiting for app health..."
 curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_HEALTH_URL" >/dev/null
+verify_hosted_sync_metrics
 
 echo "Checking Feast online features..."
 curl --retry 30 --retry-all-errors --retry-delay 2 -fsS \

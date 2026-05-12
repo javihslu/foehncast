@@ -120,6 +120,22 @@ def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
         == '((time() - max by (endpoint) (foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="succeeded"})) * on (endpoint) (sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="scheduled"}[15m])) > bool 0))'
     )
     assert rules["FoehnCast Prediction Monitoring Stale Success"]["panelId"] == 14
+    assert (
+        rules["FoehnCast Feature Stage Failures"]["data"][0]["model"]["expr"]
+        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)"
+    )
+    assert rules["FoehnCast Feature Stage Failures"]["panelId"] == 18
+    assert rules["FoehnCast Feature Stage Failures"]["labels"]["component"] == (
+        "feature-pipeline"
+    )
+    assert (
+        rules["FoehnCast Hosted Sync Stale"]["data"][0]["model"]["expr"]
+        == "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
+    )
+    assert rules["FoehnCast Hosted Sync Stale"]["panelId"] == 19
+    assert rules["FoehnCast Hosted Sync Stale"]["labels"]["component"] == (
+        "hosted-operator"
+    )
     assert all(
         rule["dashboardUid"] == "foehncast-monitoring" for rule in rules.values()
     )
@@ -136,7 +152,22 @@ def test_grafana_alerting_provisions_contact_point_and_policy_tree() -> None:
     contact_point = contact_points["contactPoints"][0]
     receiver = contact_point["receivers"][0]
     policy = policies["policies"][0]
-    route = policy["routes"][0]
+    routes = policy["routes"]
+    inference_route = next(
+        route
+        for route in routes
+        if route["object_matchers"] == [["component", "=", "inference-monitoring"]]
+    )
+    feature_route = next(
+        route
+        for route in routes
+        if route["object_matchers"] == [["component", "=", "feature-pipeline"]]
+    )
+    hosted_route = next(
+        route
+        for route in routes
+        if route["object_matchers"] == [["component", "=", "hosted-operator"]]
+    )
 
     assert contact_points["apiVersion"] == 1
     assert contact_point["name"] == "foehncast-email"
@@ -147,9 +178,27 @@ def test_grafana_alerting_provisions_contact_point_and_policy_tree() -> None:
     assert policies["apiVersion"] == 1
     assert policy["receiver"] == "foehncast-email"
     assert policy["group_by"] == ["alertname", "severity"]
-    assert route["receiver"] == "foehncast-email"
-    assert route["object_matchers"] == [["component", "=", "inference-monitoring"]]
-    assert route["group_by"] == ["alertname", "endpoint", "severity"]
+    assert inference_route["receiver"] == "foehncast-email"
+    assert inference_route["object_matchers"] == [
+        ["component", "=", "inference-monitoring"]
+    ]
+    assert inference_route["group_by"] == ["alertname", "endpoint", "severity"]
+    assert feature_route["receiver"] == "foehncast-email"
+    assert feature_route["object_matchers"] == [["component", "=", "feature-pipeline"]]
+    assert feature_route["group_by"] == [
+        "alertname",
+        "dataset",
+        "storage_backend",
+        "stage",
+        "severity",
+    ]
+    assert hosted_route["receiver"] == "foehncast-email"
+    assert hosted_route["group_by"] == [
+        "alertname",
+        "git_ref",
+        "compose_deploy_mode",
+        "severity",
+    ]
 
 
 def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None:
@@ -197,10 +246,36 @@ def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None
         == 'sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="failed"}[15m]))'
     )
     assert (
+        panels["Engineered Spots"]["targets"][0]["expr"]
+        == "sum by (dataset, storage_backend) (foehncast_feature_pipeline_engineered_spot_count)"
+    )
+    assert (
+        panels["Validated Spots"]["targets"][0]["expr"]
+        == "sum by (dataset, storage_backend) (foehncast_feature_pipeline_validated_spot_count)"
+    )
+    assert (
+        panels["Feature Stage Duration"]["targets"][0]["expr"]
+        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_duration_seconds)"
+    )
+    assert (
+        panels["Feature Stage Failures"]["targets"][0]["expr"]
+        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)"
+    )
+    assert (
+        panels["Seconds Since Last Hosted Sync"]["targets"][0]["expr"]
+        == "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
+    )
+    assert (
         panels["Prediction Monitoring Schedule Failures (15m)"]["fieldConfig"][
             "defaults"
         ]["thresholds"]["steps"][1]["value"]
         == 0.5
+    )
+    assert (
+        panels["Seconds Since Last Hosted Sync"]["fieldConfig"]["defaults"][
+            "thresholds"
+        ]["steps"][1]["value"]
+        == 900
     )
     assert (
         panels["Prediction Monitoring Execution Failures (15m)"]["targets"][0]["expr"]
@@ -239,8 +314,12 @@ def test_local_bootstrap_verifies_grafana_provisioning() -> None:
     assert "foehncast_predmon_schedule_fail" in bootstrap
     assert "foehncast_predmon_execution_fail" in bootstrap
     assert "foehncast_predmon_stale_success" in bootstrap
+    assert "foehncast_feature_stage_failures" in bootstrap
+    assert "foehncast_hosted_sync_stale" in bootstrap
     assert "/api/v1/provisioning/contact-points?name=foehncast-email" in bootstrap
     assert "/api/v1/provisioning/policies" in bootstrap
+    assert '"feature-pipeline"' in bootstrap
+    assert '"hosted-operator"' in bootstrap
 
 
 def test_app_compose_routes_monitoring_metrics_to_statsd_service() -> None:
@@ -269,6 +348,31 @@ def test_local_bootstrap_waits_for_app_health_after_training_pipeline() -> None:
     assert bootstrap.index(
         'echo "Running training pipeline for ${TRAINING_DATE}..."'
     ) < bootstrap.index('echo "Waiting for app health..."')
+
+
+def test_local_bootstrap_seeds_hosted_sync_status_before_stack_start() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "seed_local_online_compose_sync_status" in bootstrap
+    assert 'sync_status_file="$sync_dir/last-success.json"' in bootstrap
+    assert bootstrap.rindex("seed_local_online_compose_sync_status") < bootstrap.index(
+        'echo "Starting local stack..."'
+    )
+
+
+def test_local_bootstrap_verifies_hosted_sync_metrics_after_app_health() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert (
+        'APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"'
+        in bootstrap
+    )
+    assert "verify_hosted_sync_metrics" in bootstrap
+    assert "foehncast_online_compose_sync_status_file_present" in bootstrap
+    assert "foehncast_online_compose_sync_last_success_timestamp_seconds" in bootstrap
+    assert bootstrap.index('echo "Waiting for app health..."') < bootstrap.rindex(
+        "verify_hosted_sync_metrics"
+    )
 
 
 def test_local_bootstrap_starts_monitoring_services_without_development_env() -> None:

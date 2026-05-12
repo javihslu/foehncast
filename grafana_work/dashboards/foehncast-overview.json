@@ -136,6 +136,169 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
+      "id": 15,
+      "targets": [
+        {
+          "expr": "sum by (dataset, storage_backend) (foehncast_feature_pipeline_engineered_spot_count)",
+          "legendFormat": "{{dataset}} / {{storage_backend}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Engineered Spots",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "id": 16,
+      "targets": [
+        {
+          "expr": "sum by (dataset, storage_backend) (foehncast_feature_pipeline_validated_spot_count)",
+          "legendFormat": "{{dataset}} / {{storage_backend}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Validated Spots",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 17,
+      "targets": [
+        {
+          "expr": "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_duration_seconds)",
+          "legendFormat": "{{dataset}} / {{storage_backend}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Feature Stage Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "id": 18,
+      "targets": [
+        {
+          "expr": "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)",
+          "legendFormat": "{{dataset}} / {{storage_backend}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Feature Stage Failures",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)",
+          "legendFormat": "{{git_ref}} / {{compose_deploy_mode}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Seconds Since Last Hosted Sync",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -448,6 +611,6 @@
   "timezone": "browser",
   "title": "FoehnCast Monitoring",
   "uid": "foehncast-monitoring",
-  "version": 5,
+  "version": 9,
   "weekStart": ""
 }

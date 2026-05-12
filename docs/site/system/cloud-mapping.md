@@ -4,9 +4,9 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 
 !!! note "What this page does and does not claim"
 
-    The shared GCP baseline and the hosted entry points exist today.
-    Not every longer-term managed service is finished yet, so this page distinguishes between what is implemented now and what remains a transition target.
-    The current shared environment uses the hosted full-stack target. The inference-only Cloud Run path is implemented, but it is not the active shared deployment surface today.
+    The shared GCP baseline and the hosted entry points already exist.
+    Some longer-term managed services are still future work.
+    The current shared environment uses the hosted full-stack target. The inference-only Cloud Run path exists, but it is not the active shared deployment path today.
 
 ## Cloud Paths In One View
 
@@ -22,11 +22,11 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 </li>
 <li>
 <p><strong>Hosted inference target</strong></p>
-<p>The FastAPI inference service can also be deployed as an inference-only Cloud Run surface.</p>
+<p>The FastAPI inference service can also run as an inference-only Cloud Run target.</p>
 </li>
 <li>
 <p><strong>Managed direction</strong></p>
-<p>Later milestones can replace parts of the host-based path with more managed orchestration and monitoring services.</p>
+<p>Future work can replace parts of the host-based path with more managed services.</p>
 </li>
 </ul>
 </div>
@@ -58,15 +58,15 @@ flowchart LR
 
 | Surface | Deploys | Leaves out | Current state |
 |--------|---------|------------|---------------|
-| Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented as Terraform inputs and resources |
-| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform path and active in the shared environment |
-| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as a Terraform and image-delivery path, currently disabled in the shared environment |
+| Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented through Terraform |
+| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and active in the shared environment |
+| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented, but not active in the shared environment |
 | GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
+| BigQuery backend support | support for a BigQuery storage backend in the app | none | available in both local and hosted runtimes |
 
 The hosted paths deploy runtime services only. Development assets stay local or CI-only.
-| BigQuery backend support | implemented in the application | local and hosted runtimes can point the storage backend at BigQuery |
 
-Today the shared environment uses the hosted full-stack target because it keeps Airflow and MLflow co-located with the API. The Cloud Run path remains the smaller optional API-only surface for a later or separate deployment slice.
+The shared environment uses the hosted full-stack target because it keeps Airflow, MLflow, and the API together. The Cloud Run path stays available as a smaller API-only option.
 
 ## Honest Mapping From Local To Cloud
 
@@ -106,7 +106,7 @@ flowchart TD
 
 ## Storage Layering In Cloud
 
-The current cloud direction works best when storage is split by role rather than by forcing every layer into one system.
+The current cloud design works best when storage is split by role instead of forcing every layer into one system.
 
 | Data role | Recommended cloud surface | Why |
 |----------|---------------------------|-----|
@@ -115,11 +115,11 @@ The current cloud direction works best when storage is split by role rather than
 | Feast registry and staging | GCS | metadata and staging artifacts fit object storage better than warehouse tables |
 | Feast offline source | BigQuery table or view | same curated layer used by analytics and training |
 
-External tables still have a place for raw or staging access, but they are not the preferred primary store for repeatedly queried curated features.
+External tables still make sense for raw or staging access, but they are not the preferred main store for curated features that are queried often.
 
 ## Cloud Storage Control Surface
 
-The cloud path stays coherent because it is driven by explicit application and infrastructure surfaces rather than by a vague translation of the local setup.
+The cloud path stays clear because it is built from explicit application and infrastructure surfaces, not from a loose translation of the local setup.
 
 | Surface | Cloud-facing implementation | Why it matters |
 |------|-----------------------------|----------------|
@@ -133,7 +133,7 @@ The cloud path stays coherent because it is driven by explicit application and i
 | Terraform baseline | Terraform-managed GCS, BigQuery, and Datastore-mode Firestore surfaces | supplies the bucket and warehouse baseline without taking ownership of feature semantics |
 | Local object-store baseline | S3-compatible backend plus the bundled MinIO service back the local operator path | keeps the local object-access layer aligned with the cloud bucket/artifact pattern |
 
-In practical terms, GCS owns raw landing and registry-style metadata for the cloud path, BigQuery owns the curated analytical layer for the cloud path, and Feast reads the curated layer instead of redefining it. The local path uses the bundled MinIO surface as its default object-access layer while keeping the hosted-only BigQuery and Datastore roles separate.
+In practice, GCS stores raw landing data and registry-style metadata for the cloud path. BigQuery stores the curated analytical layer. Feast reads that curated layer instead of creating a separate one. The local path uses the bundled MinIO service as its default object-access layer, while BigQuery and Datastore stay hosted-only surfaces.
 
 ## Runtime Differences That Matter
 
@@ -155,12 +155,12 @@ In practical terms, GCS owns raw landing and registry-style metadata for the clo
 ## Current Gaps
 
 - The current online path still keeps MLflow on the compose host rather than a separate managed service.
-- Managed Airflow provisioning and DAG deployment are not yet fully automated in the same way as the local stack.
-- Monitoring is still lighter than the final MS4 target.
+- Airflow is still running on the host, not in a managed Composer-style service. The hosted compose path does keep the repo in sync, write the last successful refresh to the host, and show that timestamp in Prometheus and Grafana.
+- Monitoring is still lighter than the long-term target.
 - The two hosted paths solve different needs today: one keeps the full stack online, the other isolates inference as a service.
 
 ## Why This Fits The Project Brief
 
-The project brief asks for cloud-ready pipelines and cloud orchestration. This mapping keeps the backend already validated in MS2, but replaces the local support stack with cloud services that can run autonomously after deployment.
+The goal is cloud-ready pipelines and cloud orchestration. This mapping keeps the validated backend design, but replaces the local support stack with cloud services that can run after deployment.
 
 See [Architecture](architecture.md) for the current runtime view. The repository root also includes a Terraform README with the deployment details.

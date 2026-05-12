@@ -20,3 +20,26 @@ policies:
         group_wait: 0s
         group_interval: 15m
         repeat_interval: 4h
+      - receiver: foehncast-email
+        object_matchers:
+          - [component, "=", feature-pipeline]
+        group_by:
+          - alertname
+          - dataset
+          - storage_backend
+          - stage
+          - severity
+        group_wait: 0s
+        group_interval: 15m
+        repeat_interval: 4h
+      - receiver: foehncast-email
+        object_matchers:
+          - [component, "=", hosted-operator]
+        group_by:
+          - alertname
+          - git_ref
+          - compose_deploy_mode
+          - severity
+        group_wait: 0s
+        group_interval: 15m
+        repeat_interval: 4h

@@ -57,6 +57,30 @@ def build_feature_pipeline_prometheus_registry(
         labelnames=("dataset", "storage_backend"),
         registry=registry,
     )
+    engineered_spots = Gauge(
+        "foehncast_feature_pipeline_engineered_spot_count",
+        "Engineered spot count for the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    validated_spots = Gauge(
+        "foehncast_feature_pipeline_validated_spot_count",
+        "Validated spot count for the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    stage_duration = Gauge(
+        "foehncast_feature_pipeline_stage_duration_seconds",
+        "Stage duration in seconds for the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend", "stage"),
+        registry=registry,
+    )
+    stage_failure_count = Gauge(
+        "foehncast_feature_pipeline_stage_failure_count",
+        "Stage failure count for the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend", "stage"),
+        registry=registry,
+    )
     stored_spots = Gauge(
         "foehncast_feature_pipeline_stored_spot_count",
         "Stored spot count for the latest feature-pipeline summary.",
@@ -150,6 +174,20 @@ def build_feature_pipeline_prometheus_registry(
         fetched_spots.labels(*run_labels).set(
             float(summary.get("fetched_spot_count", 0))
         )
+        engineered_spots.labels(*run_labels).set(
+            float(summary.get("engineered_spot_count", 0))
+        )
+        validated_spots.labels(*run_labels).set(
+            float(summary.get("validated_spot_count", 0))
+        )
+        for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
+            stage_duration.labels(dataset, storage_backend, str(stage)).set(
+                float(duration)
+            )
+        for stage, count in dict(summary.get("stage_failure_counts", {})).items():
+            stage_failure_count.labels(dataset, storage_backend, str(stage)).set(
+                float(count)
+            )
         stored_spots.labels(*run_labels).set(float(summary.get("stored_spot_count", 0)))
         skipped_spots.labels(*run_labels).set(
             float(summary.get("skipped_spot_count", 0))

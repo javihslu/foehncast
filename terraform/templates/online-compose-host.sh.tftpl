@@ -35,7 +35,7 @@ git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"
 git -C /opt/foehncast checkout --force FETCH_HEAD
 
 install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports
-install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast
+install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync
 install -d -m 0755 /opt/foehncast/grafana_work/data
 
 chown -R $${airflow_uid}:0 /opt/foehncast/airflow
@@ -55,8 +55,76 @@ ${key}=${value}
 %{ endfor ~}
 EOF
 
+cat > /opt/foehncast/.state/online-compose-sync/last-success.json <<'EOF'
+{
+  "state": "pending",
+  "git_ref": "${git_ref}",
+  "last_successful_sync_at": null,
+  "last_successful_commit": null,
+  "compose_deploy_mode": null
+}
+EOF
+chmod 0644 /opt/foehncast/.state/online-compose-sync/last-success.json
+
+cat > /usr/local/bin/foehncast-online-compose-sync <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+sync_status_file="/opt/foehncast/.state/online-compose-sync/last-success.json"
+compose_deploy_mode="build"
+
+git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"
+git -C /opt/foehncast checkout --force FETCH_HEAD
+
 if docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer; then
+  compose_deploy_mode="pull"
   docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build
 else
   docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --build
 fi
+
+sync_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+sync_commit="$(git -C /opt/foehncast rev-parse HEAD)"
+
+cat > "$${sync_status_file}.tmp" <<STATUS
+{
+  "state": "succeeded",
+  "git_ref": "${git_ref}",
+  "last_successful_sync_at": "$${sync_timestamp}",
+  "last_successful_commit": "$${sync_commit}",
+  "compose_deploy_mode": "$${compose_deploy_mode}"
+}
+STATUS
+mv "$${sync_status_file}.tmp" "$${sync_status_file}"
+chmod 0644 "$${sync_status_file}"
+EOF
+chmod 0755 /usr/local/bin/foehncast-online-compose-sync
+
+cat > /etc/systemd/system/foehncast-online-compose-sync.service <<'EOF'
+[Unit]
+Description=Synchronize the FoehnCast online compose checkout and runtime stack
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/foehncast-online-compose-sync
+EOF
+
+cat > /etc/systemd/system/foehncast-online-compose-sync.timer <<'EOF'
+[Unit]
+Description=Refresh the FoehnCast online compose checkout and runtime stack
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now foehncast-online-compose-sync.timer
+systemctl start foehncast-online-compose-sync.service

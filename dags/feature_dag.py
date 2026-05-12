@@ -15,12 +15,15 @@ except ModuleNotFoundError:  # pragma: no cover - Airflow is container-only
     dag = None
 else:
     from foehncast.orchestration import (
+        engineer_feature_pipeline_context,
         evaluate_training_run,
+        fetch_feature_pipeline_context,
         register_training_run,
         resolve_auto_retraining_mode,
         resolve_airflow_schedule,
-        run_feature_pipeline_job_context,
+        store_feature_pipeline_job_context,
         should_auto_retrain,
+        validate_feature_pipeline_context,
     )
     from foehncast.training_pipeline.train import run_training_pipeline
 
@@ -37,8 +40,8 @@ else:
     with DAG(
         dag_id="feature_pipeline",
         description=(
-            "Fetch forecasts, engineer features, validate and store them, "
-            "and optionally continue into retraining."
+            "Fetch forecasts, engineer features, validate them, persist curated "
+            "slices, and optionally continue into retraining."
         ),
         start_date=datetime(2024, 1, 1),
         schedule=feature_schedule,
@@ -46,10 +49,28 @@ else:
         is_paused_upon_creation=False,
         tags=["foehncast", "feature"],
     ) as dag:
-        run_feature_refresh = PythonOperator(
-            task_id="run_feature_pipeline",
-            python_callable=run_feature_pipeline_job_context,
-            op_kwargs={"dataset": feature_dataset},
+        fetch_feature_inputs = PythonOperator(
+            task_id="fetch_feature_inputs",
+            python_callable=fetch_feature_pipeline_context,
+            op_kwargs={"dataset": feature_dataset, "run_key": "{{ run_id }}"},
+        )
+
+        engineer_feature_set = PythonOperator(
+            task_id="engineer_feature_set",
+            python_callable=engineer_feature_pipeline_context,
+            op_args=[fetch_feature_inputs.output],
+        )
+
+        validate_feature_set = PythonOperator(
+            task_id="validate_feature_set",
+            python_callable=validate_feature_pipeline_context,
+            op_args=[engineer_feature_set.output],
+        )
+
+        store_feature_set = PythonOperator(
+            task_id="store_feature_set",
+            python_callable=store_feature_pipeline_job_context,
+            op_args=[validate_feature_set.output],
         )
 
         if auto_retrain_mode is not None:
@@ -57,7 +78,7 @@ else:
                 task_id="check_retraining_trigger",
                 python_callable=should_auto_retrain,
                 op_kwargs={
-                    "feature_result": run_feature_refresh.output,
+                    "feature_result": store_feature_set.output,
                     "mode": auto_retrain_mode,
                 },
             )
@@ -82,9 +103,20 @@ else:
             )
 
             (
-                run_feature_refresh
+                fetch_feature_inputs
+                >> engineer_feature_set
+                >> validate_feature_set
+                >> store_feature_set
                 >> retraining_gate
                 >> train_model
                 >> evaluate_model_task
                 >> register_model_task
+            )
+
+        else:
+            (
+                fetch_feature_inputs
+                >> engineer_feature_set
+                >> validate_feature_set
+                >> store_feature_set
             )
