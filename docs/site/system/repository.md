@@ -29,13 +29,13 @@ docs/
 - `scripts/`: local bootstrap, cloud bootstrap, remote Terraform, and helper scripts.
 - `terraform/`: hosted infrastructure definition plus operator-facing notes.
 - `feature_repo/`: the Feast integration repo and configuration surface.
-- `prometheus_config/` and `grafana_work/`: the checked-in monitoring stack configuration for Prometheus and Grafana.
+- `prometheus_config/` and `grafana_work/`: the checked-in operator-monitoring configuration for Prometheus and Grafana, not a separate product UI.
 - `tests/`: regression coverage for the core pipeline logic and API behavior.
 - `docs/`: the public documentation site and system notes.
 
 One local workload data root lives under `data/`, while local runtime state stays separate. For example, curated feature rows and Feast offline parquet belong under `data/`, but local Feast registry, rendered runtime config, and inference prediction logs belong under `.state/` instead of mixing service state into the workload dataset tree.
 
-Airflow also writes operator-facing artifacts under `airflow/reports/`. That directory now includes the latest feature-pipeline run summary JSON and evaluation markdown outputs, and the local app mounts it so Prometheus and Grafana can expose the latest feature-pipeline monitoring panels.
+Airflow also writes operator-facing artifacts under `airflow/reports/`. That directory now includes the latest feature-pipeline run summary JSON and evaluation markdown outputs, and the local app mounts it so Prometheus and Grafana can expose the latest feature-pipeline monitoring panels. When those artifacts appear in public docs, prefer rendered markdown excerpts, static charts, or screenshots over live embeds of private operator tools.
 
 ## Why The Layout Matters
 
@@ -45,7 +45,7 @@ Central configuration lives in `config.yaml` and `src/foehncast/config.py`, so t
 
 Feature engineering starts in `feature_pipeline/engineer.py`, where raw weather inputs are turned into the engineered feature vector shared by training and inference.
 
-There is currently no separate product UI package in the repository. The optional interactive demo surface that does exist lives inside the inference pipeline, for example `src/foehncast/inference_pipeline/demo.py`, rather than in a separate top-level app tree.
+There is currently no separate product UI package in the repository. The optional interactive demo surface that does exist lives inside the inference pipeline, for example `src/foehncast/inference_pipeline/demo.py`, rather than in a separate top-level app tree. Grafana does not fill that role; it remains an operator dashboard surface.
 
 ## Configuration Ownership
 
@@ -54,7 +54,8 @@ There is currently no separate product UI package in the repository. The optiona
 - `terraform/terraform.tfvars`: infrastructure desired state such as regions, buckets, service names, machine shape, and deployment toggles.
 - `feature_repo/feature_store*.yaml`: checked-in Feast reference configs that stay separate from the base application config.
 - `.state/feast/feature_store.runtime.yaml`: the rendered runtime Feast binding generated from environment and used by the app and host-side Feast CLI commands.
-- `.state/monitoring/prediction-log.jsonl`: the local inference monitoring log used to compare current model outputs against earlier outputs from the same model version.
+- `.state/monitoring/prediction-log.jsonl`: the bounded local inference-monitoring working set used for request-side drift checks.
+- `.state/monitoring/prediction-events.jsonl`: the retained local prediction-event history contract used by monitoring readers and promotable to shared storage through environment wiring.
 - `airflow/reports/feature-pipeline-*-latest.json`: the persisted feature-pipeline summary files that the local monitoring path republishes through the app `/metrics` endpoint.
 
 The supported curated-storage backends are intentionally narrow: `s3` for the local MinIO-backed baseline and `bigquery` for the hosted analytical surface. The older file-backed curated-store compatibility path is no longer part of the runtime contract.

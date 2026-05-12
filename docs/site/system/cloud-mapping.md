@@ -40,6 +40,17 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 - Hosted deployment keeps development-only assets, notebooks, docs build tooling, and local emulators out of the runtime surface.
 - The app remains a deployable container because inference is a service, not a DAG.
 
+## Surface Exposure In Cloud
+
+| Surface | Intended audience | Default exposure |
+|------|-------------------|------------------|
+| FastAPI app routes | riders, service clients, smoke tests | exposed by the active hosted app target |
+| `/metrics` and scrape targets | Prometheus and operators | service-only |
+| Airflow, MLflow, Prometheus, and Grafana | operators | private by default |
+| Public docs and review artifacts | reviewer, course audience, fork reader | public-safe when rendered from snapshots, markdown, or screenshots |
+
+This boundary matters because the hosted app is the product and service surface. Grafana remains an operator dashboard, and public docs should prefer rendered evidence over live embeds of private hosted tools.
+
 ## Current Hosted Topology
 
 <div class="mermaid">
@@ -64,7 +75,7 @@ flowchart LR
 | GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
 | BigQuery backend support | support for a BigQuery storage backend in the app | none | available in both local and hosted runtimes |
 
-The hosted paths deploy runtime services only. Development assets stay local or CI-only.
+The hosted paths deploy runtime services only. Development assets stay local or CI-only. The hosted full-stack target keeps Airflow, MLflow, Prometheus, and Grafana on the operator side unless you intentionally publish them yourself.
 
 The shared environment uses the hosted full-stack target because it keeps Airflow, MLflow, and the API together. The Cloud Run path stays available as a smaller API-only option.
 
@@ -143,7 +154,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Artifacts | MinIO-backed MLflow artifact path | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
-| Public exposure | local ports on the developer machine | the hosted full-stack target exposes only the app by default; Cloud Run exposes only the inference service |
+| Public exposure | local ports on the developer machine | the hosted full-stack target exposes only the app by default; Cloud Run exposes only the inference service; operator dashboards stay private unless you deliberately publish them |
 
 ## What Is Already In Place
 
