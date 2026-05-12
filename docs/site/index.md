@@ -2,6 +2,8 @@
 
 FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, system notes, and operator guidance.
 
+This site keeps rider-facing demo surfaces, service APIs, operator dashboards, and public-safe rendered evidence separate on purpose. Grafana belongs to the operator layer here. It is not the primary product UI and the public docs do not depend on live private dashboard embeds.
+
 ## Start Here
 
 | Need | Read this |
@@ -21,6 +23,17 @@ FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live
 | GitHub automation | Repository maintainer or fork owner | Image publishing, Terraform workflows, and docs publishing |
 
 Public images are convenience artifacts, not a shared hosting promise. If you want a running online environment, deploy it in infrastructure you control.
+
+## Surface Guide
+
+| Surface | Primary audience | Exposure | Current examples |
+|------|------------------|----------|------------------|
+| Rider-facing demo surfaces | rider, reviewer, contributor | public-safe when shown as screenshots or rendered outputs | Streamlit demo, ranking examples, and the online-features demo page |
+| Service APIs | clients, smoke tests, support services | service-only | `/health`, `/spots`, `/predict`, `/rank`, `/features/online`, and `/metrics` |
+| Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, Prometheus, and Grafana |
+| Public-safe docs and evidence | reviewer, course audience, fork reader | public-safe | docs pages, rendered evaluation markdown, summary JSON-derived charts, and screenshots |
+
+Use the rider demo or API examples to explain the product surface. Use rendered artifacts or screenshots to explain operations in public docs. Keep live operator dashboards private unless you are intentionally running your own environment.
 
 ## System In One View
 

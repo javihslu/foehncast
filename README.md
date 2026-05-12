@@ -53,8 +53,10 @@ This is the default path for a fresh machine.
 3. Run `./scripts/bootstrap-local.sh`.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
-The local bootstrap uses the bundled MinIO service for curated features and MLflow artifacts. It prepares Feast with the bundled Datastore-mode emulator, runs the training DAG with the serving alias path so the app comes up healthy on a real registry version, and checks that Grafana loaded the checked-in dashboard and alerts before it reports the stack ready. If the default ports are busy, it moves to the next free ports and prints the resolved endpoints.
-On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically. When the retraining gate passes, it triggers the separate `training_pipeline` DAG instead of embedding train, evaluate, and register steps inside the feature flow. The `training_pipeline` DAG itself stays unscheduled and paused by default for manual reruns.
+The local bootstrap uses the bundled MinIO service for curated features and MLflow artifacts. It prepares Feast with the bundled Datastore-mode emulator, runs Airflow against a bundled Postgres metadata database, waits for the feature pipeline to publish a real training-request asset, waits for the resulting asset-triggered training run to finish on a real registry version, and checks that Grafana loaded the checked-in dashboard and alerts before it reports the stack ready. If the default ports are busy, it moves to the next free ports and prints the resolved endpoints.
+The checked-in Grafana configuration disables anonymous access, public dashboard sharing, and embedding by default. The local bootstrap applies local-only access overrides so a fresh local run can still verify Grafana provisioning without extra manual setup.
+The Streamlit demo and the FastAPI prediction and ranking routes are the rider-facing and service-facing surfaces. Airflow, MLflow, Prometheus, and Grafana are operator surfaces used for validation and monitoring, not the primary product UI.
+On a fresh local Airflow state, the scheduled `feature_pipeline` DAG starts unpaused so recurring ingest and preprocessing can run automatically. When the retraining gate passes, it publishes a training-request asset instead of embedding train, evaluate, and register steps inside the feature flow. The `training_pipeline` DAG is scheduled from that asset, so the Airflow Assets view exposes the curated-feature, Feast-sync, training-request, MLflow training, evaluation, and registry hand-offs directly.
 The optional `development_env` notebook container is not part of the default path. Start it only when you need notebook or dev-shell Makefile commands.
 
 After bootstrap completes, the main local endpoints are:
@@ -70,13 +72,16 @@ After bootstrap completes, the main local endpoints are:
 
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
-Feature-pipeline Grafana panels are backed by the latest summary JSON written under `airflow/reports/`. The app mounts that directory and republishes the summary as Prometheus metrics through `/metrics`, so local dashboard plots and Prometheus queries follow the same contract.
+Feature-pipeline Grafana panels are backed by the latest summary JSON written under `airflow/reports/`. The app mounts that directory and republishes the summary as Prometheus metrics through `/metrics`, so local dashboard plots and Prometheus queries follow the same contract. The bootstrap also validates the Airflow health payload itself, not just the HTTP status code returned by the webserver.
 
-Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`. That log lets the monitoring layer compare recent model outputs with earlier outputs from the same model version without mixing temporary service state into `data/`.
+Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl` as a bounded working set and to `.state/monitoring/prediction-events.jsonl` as the retained history contract. The retained history path can be redirected with `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` when multiple runtimes should contribute to one shared monitoring history.
+Public docs should prefer rendered screenshots or exported evidence over live embeds of private operator dashboards.
+
+When the feature-storage backend is BigQuery, FoehnCast treats it as the offline warehouse layer rather than a live serving shortcut. Curated features are written with an explicit table contract: day partitioning on `forecast_time`, clustering on `dataset_name` and `spot_id`, and a retained table lifecycle policy. Longer-horizon monitoring facts belong in retained event history and warehouse tables, not in request handlers or restart-sensitive `/metrics` counters.
 
 Grafana also creates a starter email contact point for the checked-in alert rules. In the local Docker path, that route uses the built-in placeholder address.
 
-The local bootstrap resets Docker volumes, local Airflow metadata, and temporary runtime artifacts, then checks the live `/features/online` route and the Grafana provisioning API before it reports the stack ready.
+The local bootstrap resets Docker volumes, local Airflow metadata, and temporary runtime artifacts, then checks the live `/features/online` route, waits for the asset-triggered training run to succeed, and verifies the Grafana provisioning API before it reports the stack ready.
 
 Example check:
 

@@ -12,14 +12,25 @@ This is the default path for a fresh machine.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
-The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. The same local stack now includes Prometheus, a StatsD exporter, and Grafana from checked-in monitoring config, the bootstrap helper runs the training DAG with the serving-alias path so the API comes up healthy on a real registry version, and it verifies that Grafana loaded its starter resources before reporting success. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
+The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. The same local stack now includes Prometheus, a StatsD exporter, and Grafana from checked-in monitoring config, Airflow uses a bundled Postgres metadata database instead of a host-mounted SQLite file, the bootstrap helper waits for the feature DAG to publish a training-request asset and for the resulting asset-triggered training run to finish on a real registry version, and it verifies that Grafana loaded its starter resources before reporting success. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
 The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
 
-Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl`, so the monitoring layer can compare recent model outputs against earlier outputs from the same model version without mixing runtime state into `data/`.
+## Surface Roles
 
-Feature-pipeline dashboard panels are driven from the latest summary JSON under `airflow/reports/`. The app republishes that summary through `/metrics`, so Prometheus and Grafana read the same persisted run summary that the bootstrap path produces.
+| Surface | Use it for | Do not treat it as |
+|------|------------|--------------------|
+| Streamlit demo and prediction responses | rider-facing evaluation and public-safe screenshots | an operator dashboard |
+| FastAPI routes such as `/predict`, `/rank`, and `/features/online` | service integration, smoke checks, and demo calls | a documentation publishing surface |
+| `/metrics`, Prometheus, Grafana, Airflow, and MLflow | operator validation, monitoring, and debugging | the product UI or a public embed target |
+| Docs pages and rendered evidence | public-safe explanation and review material | a live runtime control plane |
 
-The bootstrap reset also removes the local Airflow metadata database and logs, so the UI reflects the current DAG boundary instead of older task graphs from previous local runs.
+Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl` as a bounded working set and to `.state/monitoring/prediction-events.jsonl` as the retained history contract. That keeps restart-sensitive runtime counters separate from the retained monitoring history and keeps both out of `data/`.
+
+Feature-pipeline dashboard panels are driven from the latest summary JSON under `airflow/reports/`. The app republishes that summary through `/metrics`, so Prometheus and Grafana read the same persisted run summary that the bootstrap path produces. The Airflow Assets view also shows the current local hand-off graph: curated feature rows, Feast synchronization, the training request, the MLflow training run, the evaluation report, and the registry update.
+
+Grafana is present in the local stack so the bootstrap can verify provisioning and so operators can inspect metrics and alert rules. It is not the primary rider-facing interface, and the docs site should prefer screenshots or rendered artifacts over live Grafana embeds.
+
+The bootstrap reset also removes stale local Airflow metadata files and logs, and the bootstrap verifies the Airflow health payload itself instead of treating a `200 OK` response from `/api/v2/monitor/health` as sufficient.
 
 After bootstrap completes, the main local endpoints are:
 
@@ -31,6 +42,8 @@ After bootstrap completes, the main local endpoints are:
 - Grafana: `http://127.0.0.1:3000`
 - Objectstore UI: printed by the bootstrap helper when the stack comes up
 - Feast online store emulator: printed by the bootstrap helper when the stack comes up
+
+The app and app-metrics routes are service surfaces. Airflow, MLflow, Prometheus, and Grafana are operator surfaces in this local evaluator path.
 
 Example check:
 
