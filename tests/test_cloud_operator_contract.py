@@ -598,6 +598,182 @@ def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> N
     )
 
 
+def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotion() -> (
+    None
+):
+    workflow = _workflow_yaml(".github/workflows/promote-candidate.yml")
+    config_job = workflow["jobs"]["config"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
+    assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
+    assert dispatch_inputs["target_alias"]["default"] == "champion"
+
+    assert (
+        config_job["outputs"]["cloud_run_service"]
+        == "${{ steps.repo_config.outputs.cloud_run_service }}"
+    )
+    assert (
+        config_job["outputs"]["mlflow_tracking_uri"]
+        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
+    )
+    assert (
+        config_job["outputs"]["candidate_revision_tag"]
+        == "${{ steps.derived.outputs.candidate_revision_tag }}"
+    )
+    assert (
+        config_job["outputs"]["candidate_alias"]
+        == "${{ steps.derived.outputs.candidate_alias }}"
+    )
+    assert (
+        config_job["outputs"]["target_alias"]
+        == "${{ steps.derived.outputs.target_alias }}"
+    )
+    assert (
+        config_job["outputs"]["promote_ready"]
+        == "${{ steps.derived.outputs.promote_ready }}"
+    )
+
+    derived_step = _workflow_step(workflow, "config", "derived")
+    assert (
+        derived_step["env"]["MLFLOW_TRACKING_URI"]
+        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
+    )
+    assert (
+        derived_step["env"]["CANDIDATE_REVISION_TAG_INPUT"]
+        == "${{ github.event.inputs.candidate_revision_tag }}"
+    )
+    assert (
+        derived_step["env"]["CANDIDATE_ALIAS_INPUT"]
+        == "${{ github.event.inputs.candidate_alias }}"
+    )
+    assert (
+        derived_step["env"]["TARGET_ALIAS_INPUT"]
+        == "${{ github.event.inputs.target_alias }}"
+    )
+    assert "promote_ready=true" in derived_step["run"]
+    assert "candidate_revision_tag='candidate'" in derived_step["run"]
+    assert "candidate_alias='candidate'" in derived_step["run"]
+    assert "target_alias='champion'" in derived_step["run"]
+
+    promote_job = workflow["jobs"]["promote"]
+    assert promote_job["environment"] == "cloud-run-production"
+    assert (
+        promote_job["env"]["MLFLOW_TRACKING_URI"]
+        == "${{ needs.config.outputs.mlflow_tracking_uri }}"
+    )
+    assert (
+        promote_job["env"]["CANDIDATE_REVISION_TAG"]
+        == "${{ needs.config.outputs.candidate_revision_tag }}"
+    )
+    assert (
+        promote_job["env"]["CANDIDATE_ALIAS"]
+        == "${{ needs.config.outputs.candidate_alias }}"
+    )
+    assert (
+        promote_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
+    )
+
+    install_step = _workflow_step(workflow, "promote", "Install runtime dependencies")
+    assert install_step["run"] == "uv sync --frozen --no-default-groups"
+
+    resolve_step = _workflow_step(workflow, "promote", "Resolve candidate revision")
+    resolve_script = resolve_step["run"]
+    assert 'gcloud run services describe "$CLOUD_RUN_SERVICE"' in resolve_script
+    assert 'gcloud run revisions describe "$candidate_revision_name"' in resolve_script
+    assert (
+        "Candidate revision must remain at 0% traffic before promotion."
+        in resolve_script
+    )
+    assert 'echo "candidate_image=${candidate_image}"' in resolve_script
+
+    verify_candidate_step = _workflow_step(
+        workflow, "promote", "Verify candidate Cloud Run runtime"
+    )
+    verify_candidate_script = verify_candidate_step["run"]
+    assert (
+        verify_candidate_step["env"]["SERVICE_URL"]
+        == "${{ steps.resolve_candidate.outputs.candidate_url }}"
+    )
+    assert (
+        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
+        in verify_candidate_script
+    )
+    assert (
+        "Candidate health verification did not report serving alias ${CANDIDATE_ALIAS}."
+        in verify_candidate_script
+    )
+    assert "candidate_model_version" in verify_candidate_script
+
+    promote_model_step = _workflow_step(
+        workflow, "promote", "Promote candidate model version to champion"
+    )
+    promote_model_script = promote_model_step["run"]
+    assert (
+        promote_model_step["env"]["CANDIDATE_MODEL_VERSION"]
+        == "${{ steps.verify_candidate.outputs.candidate_model_version }}"
+    )
+    assert (
+        'uv run python -m foehncast.training_pipeline.promote --version "$CANDIDATE_MODEL_VERSION" --target-stage Production'
+        in promote_model_script
+    )
+    assert (
+        "Promoted model version does not match the validated candidate model version."
+        in promote_model_script
+    )
+
+    deploy_live_step = _workflow_step(
+        workflow, "promote", "Deploy promoted image to live Cloud Run service"
+    )
+    deploy_live_script = deploy_live_step["run"]
+    assert (
+        deploy_live_step["env"]["CANDIDATE_IMAGE"]
+        == "${{ steps.resolve_candidate.outputs.candidate_image }}"
+    )
+    assert 'gcloud run services update "$CLOUD_RUN_SERVICE"' in deploy_live_script
+    assert ' --image "$CANDIDATE_IMAGE"' in deploy_live_script
+    assert "FOEHNCAST_MLFLOW_SERVING_ALIAS=$TARGET_ALIAS" in deploy_live_script
+
+    verify_live_step = _workflow_step(
+        workflow, "promote", "Verify promoted live Cloud Run runtime"
+    )
+    verify_live_script = verify_live_step["run"]
+    assert (
+        verify_live_step["env"]["SERVICE_URL"]
+        == "${{ steps.deploy_live.outputs.service_url }}"
+    )
+    assert (
+        verify_live_step["env"]["PROMOTED_MODEL_VERSION"]
+        == "${{ steps.promote_model.outputs.promoted_model_version }}"
+    )
+    assert (
+        "Live health verification did not report serving alias ${TARGET_ALIAS}."
+        in verify_live_script
+    )
+    assert (
+        "Live service model version does not match the promoted model version."
+        in verify_live_script
+    )
+    assert (
+        'echo "Checking live Cloud Run spots endpoint at ${spots_url}..."'
+        in verify_live_script
+    )
+
+    summary_step = _workflow_step(workflow, "promote", "Summarize promotion")
+    assert 'echo "## Candidate promotion"' in summary_step["run"]
+    assert 'echo "- Candidate tag: $CANDIDATE_REVISION_TAG"' in summary_step["run"]
+    assert (
+        'echo "- Promoted model version: ${{ steps.promote_model.outputs.promoted_model_version }}"'
+        in summary_step["run"]
+    )
+
+    blocked_step = _workflow_step(
+        workflow, "blocked", "Explain blocked promotion workflow"
+    )
+    assert "GCP_CLOUD_RUN_SERVICE" in blocked_step["run"]
+    assert "GCP_MLFLOW_TRACKING_URI" in blocked_step["run"]
+
+
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
     push_paths = workflow["on"]["push"]["paths"]
