@@ -9,6 +9,7 @@ This site keeps rider-facing demo surfaces, service APIs, operator dashboards, a
 | Need | Read this |
 |------|-----------|
 | Run the project locally with the default evaluator workflow | [Getting Started](getting-started.md) |
+| Understand what stays in package config versus runtime wiring | [Configuration and Contracts](system/configuration-and-contracts.md) |
 | Understand the Feature-Training-Inference split | [Architecture](system/architecture.md) |
 | See how the hosted path maps onto GCP | [Cloud Mapping](system/cloud-mapping.md) |
 | Understand the main code and folder layout | [Repository](system/repository.md) |
@@ -70,6 +71,7 @@ flowchart LR
 - [Getting Started](getting-started.md): choose the right setup path and run the first commands.
 - [Use Case and Data](system/use-case.md): the rider profile, spot set, and data sources behind the ranking.
 - [Repository](system/repository.md): where the code, orchestration, tests, docs, and demo live.
+- [Configuration and Contracts](system/configuration-and-contracts.md): what belongs in `config.yaml`, what runtime env resolves, and what infrastructure keeps outside the package.
 
 ### Runtime and Deployment
 

@@ -49,6 +49,8 @@ There is currently no separate product UI package in the repository. The optiona
 
 ## Configuration Ownership
 
+See [Configuration and Contracts](configuration-and-contracts.md) for the dedicated public overview of this boundary.
+
 - `config.yaml`: workload defaults and app-facing contracts such as rider, spots, API fields, validation, model settings, the default storage mode, and MLflow naming.
 - `.env` and environment variables: runtime-instance wiring such as bind hosts, selected backend, MLflow tracking URI, objectstore identifiers, BigQuery identifiers, and service URIs for a concrete local or hosted environment.
 - `terraform/terraform.tfvars`: infrastructure desired state such as regions, buckets, service names, machine shape, and deployment toggles.
