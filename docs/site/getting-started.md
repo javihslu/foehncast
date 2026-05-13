@@ -81,6 +81,7 @@ Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtim
 
 - [Use Case and Data](system/use-case.md)
 - [Repository](system/repository.md)
+- [Configuration and Contracts](system/configuration-and-contracts.md)
 
 ### Runtime and Deployment
 
