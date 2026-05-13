@@ -59,6 +59,7 @@ nav:
       - Local Evaluator: system/local-evaluator.md
       - Hosted Full-Stack: system/hosted-full-stack.md
       - Cloud Mapping: system/cloud-mapping.md
+      - Delivery and Operator Workflow: system/delivery-and-operator-workflow.md
   - Pipelines and Modeling:
       - Feature Pipeline: system/feature-pipeline.md
       - Training Pipeline: system/training-pipeline.md

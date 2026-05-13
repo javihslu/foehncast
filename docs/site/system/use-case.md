@@ -80,15 +80,15 @@ These are not example rows. They are the actual fixed spot set used in the curre
 |--------|---------------------|----------------|
 | Open-Meteo | primary forecast and archive weather source | implemented |
 | OSRM | drive-time personalization for ranking | implemented |
-| MeteoSwiss | possible observation reference for later validation | planned |
+| MeteoSwiss | not part of the current runtime contract | not active |
 
-Open-Meteo supplies the forecast data, OSRM already contributes travel-time ranking inputs, and MeteoSwiss remains a possible future reference source rather than an active dependency in the current stack.
+Open-Meteo supplies the forecast data and OSRM contributes travel-time ranking inputs. MeteoSwiss is not part of the current stack.
 
 ## Why The Scope Is Fixed
 
 - It keeps the labeling and ranking problem aligned with one real rider scenario.
 - It makes route-time personalization meaningful instead of theoretical.
 - It avoids turning the course project into a generic weather portal with weak decision support.
-- It keeps later changes focused on implementation maturity rather than on changing the product question.
+- It keeps implementation work focused on one concrete product question.
 
 See [Architecture](architecture.md) for the current system structure and [Feature Pipeline](feature-pipeline.md) for how the data moves through the stack.

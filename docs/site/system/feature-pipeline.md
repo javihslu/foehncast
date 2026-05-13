@@ -1,6 +1,6 @@
 # Feature Pipeline
 
-FoehnCast keeps the feature pipeline as a clear set of boundaries. Forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for Feast serving use without changing the meaning of the feature set.
+FoehnCast keeps the feature pipeline as a clear set of boundaries. The same curated feature contract drives the local evaluator and the hosted paths: forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for Feast serving use without changing the meaning of the feature set.
 
 This page records the current design that has been validated in the local stack and in the review notebook. It focuses on what each stage owns today and what stays outside its scope.
 
@@ -33,6 +33,14 @@ The key point is that each stage has one clear job:
 - Feast preparation consumes curated rows instead of reimplementing the feature pipeline
 - Airflow publishes the downstream asset hand-offs after persistence and Feast preparation succeed
 
+## Runtime Role
+
+| Runtime mode | What the feature path does today |
+|------|-----------------------------|
+| Local evaluator | Airflow writes curated rows to the MinIO-backed baseline, exports local Feast parquet, and materializes the Datastore-mode emulator |
+| Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through BigQuery, GCS, and Datastore |
+| Hosted inference target | consumes the curated layer through the app and Feast; it does not run the feature DAG itself |
+
 ## Stage Responsibilities
 
 | Stage | Main responsibility | Must not become |
@@ -58,7 +66,7 @@ The validated ingest assumptions are:
 
 For this project, raw weather features stay in source weather units, which currently means km/h for wind speed and gusts. That is separate from domain-facing rideability thresholds, which remain configured in knots and are converted at scoring time instead of changing the stored feature contract.
 
-If the project grows a more formal landing layer, ingest should still preserve the upstream payload faithfully instead of mixing raw capture with curated enrichment.
+Ingest keeps the upstream payload boundary explicit instead of mixing raw capture with curated enrichment.
 
 ## Curated Feature Boundary
 
@@ -71,9 +79,7 @@ The engineering layer creates the project's curated feature frame. The current f
 - raw columns remain available alongside engineered columns so downstream validation and storage operate on one complete curated frame
 - the datetime index and time basis are preserved so later storage and Feast preparation can add persistence and serving context without redefining the feature set
 
-The current training path is tree-based, so the design priority is feature representation quality rather than blanket feature scaling. Circular wind-direction encoding and the shift from ratio-heavy gustiness toward `gust_excess_10m` are part of that same representation choice, not a generic normalization layer.
-
-The engineering stage should also stay narrow. It creates the curated feature frame, but it should not add serving metadata or turn into a Feast-specific layer. That downstream hand-off remains intentional: engineer first, then validate, store, and only later project into Feast-friendly shapes.
+The current training path is tree-based, so feature representation quality matters more than blanket scaling. Circular wind-direction encoding and the shift toward `gust_excess_10m` follow that same choice. The engineering stage stays narrow: create curated rows first, then let validation, storage, and Feast-specific projection happen downstream.
 
 ## Validation Boundary
 

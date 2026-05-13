@@ -1,6 +1,6 @@
 # Training Pipeline
 
-FoehnCast keeps training downstream from the curated feature store. The training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline.
+FoehnCast keeps training downstream from the curated feature store. The same training contract runs in the local evaluator and in the active shared environment: the training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline.
 
 This page records the current training design that is validated in the local stack and in regression tests. It focuses on what each stage owns today and what remains an explicit operator control rather than an automatic side effect.
 
@@ -31,6 +31,14 @@ The key point is that the training path stays explicit:
 - evaluation owns reviewable reporting
 - registration owns versioning and alias assignment in MLflow
 - promotion and rollback stay separate operator controls even though they reuse the same registry aliases
+
+## Runtime Role
+
+| Runtime mode | Training role today |
+|------|---------------------|
+| Local evaluator | local Airflow and MLflow run labeling, training, evaluation, and registration |
+| Active shared environment | the hosted full-stack target runs the same Airflow and MLflow contract online |
+| Hosted inference target | serves a registered alias; it does not run training |
 
 ## Stage Responsibilities
 
@@ -65,7 +73,7 @@ This means labeling is part of the training contract, not part of the inference 
 
 ## Training Boundary
 
-Training reads stored feature rows by spot and dataset, then rebuilds schema-derived time, direction, and gust features before labeling. That compatibility step matters because the training path is expected to keep working even when stored datasets predate a later feature-schema expansion.
+Training reads stored feature rows by spot and dataset, then rebuilds schema-derived time, direction, and gust features before labeling. That compatibility step keeps older stored slices usable when the curated schema gains new derived fields.
 
 The current training contract is:
 
@@ -101,7 +109,7 @@ The current registry contract is:
 - the live-serving alias is `champion`
 - training summaries persist run-level metrics, row counts, report paths, stage durations, and the registered version so the monitoring surface can expose the latest training state
 
-Manual training runs default to the `Candidate` stage. Asset-triggered runs from the feature pipeline can request `Production`, which lets the asset flow produce a candidate-ready or live-ready registration path without changing the training code itself.
+Manual training runs default to the `Candidate` stage. Asset-triggered runs from the feature pipeline can request `Production`, which lets the asset flow produce a live-ready registration path without changing the training code itself.
 
 ## Airflow Hand-Off
 
@@ -135,4 +143,4 @@ That separation is deliberate. Training can succeed without immediately changing
 - it keeps candidate and champion semantics explicit in the registry rather than buried in deployment scripts
 - it makes automatic retraining visible in Airflow through asset hand-offs instead of opaque trigger chains
 
-See [Architecture](architecture.md), [Feature Pipeline](feature-pipeline.md), and [Monitoring](monitoring.md) for the surrounding system boundaries.
+See [Architecture](architecture.md), [Feature Pipeline](feature-pipeline.md), [Monitoring](monitoring.md), and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the surrounding system boundaries.

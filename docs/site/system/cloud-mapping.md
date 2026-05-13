@@ -1,11 +1,10 @@
 # Cloud Mapping
 
-FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and an inference-only Cloud Run target. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
+FoehnCast has two hosted targets, but the active shared environment uses the hosted full-stack target on one GCP host. The inference-only Cloud Run target remains available as a smaller alternative. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
 
 !!! note "What this page does and does not claim"
 
     The shared GCP baseline and the hosted entry points already exist.
-    Some longer-term managed services are still future work.
     The current shared environment uses the hosted full-stack target. The inference-only Cloud Run path exists, but it is not the active shared deployment path today.
 
 ## Cloud Paths In One View
@@ -18,15 +17,15 @@ FoehnCast has two hosted targets: a hosted full-stack target on one GCP host and
 </li>
 <li>
 <p><strong>Hosted full-stack target</strong></p>
-<p>A single Compute Engine host can run Airflow, MLflow, and the API from the same repository.</p>
+<p>A single Compute Engine host can run Airflow, MLflow, and the API from the same repository. This is the active shared deployment path today.</p>
 </li>
 <li>
 <p><strong>Hosted inference target</strong></p>
-<p>The FastAPI inference service can also run as an inference-only Cloud Run target.</p>
+<p>The FastAPI inference service can also run as an inference-only Cloud Run target when a smaller API-only surface is enough.</p>
 </li>
 <li>
-<p><strong>Managed direction</strong></p>
-<p>Future work can replace parts of the host-based path with more managed services.</p>
+<p><strong>Operator delivery</strong></p>
+<p>Maintainers bootstrap once, then GitHub Actions advances the shared cloud path.</p>
 </li>
 </ul>
 </div>
@@ -59,7 +58,7 @@ flowchart LR
     GCP --> HOST[Hosted full-stack target]
     GCP -. optional .-> RUN[Hosted inference target]
     TF --> GH[GitHub OIDC delivery]
-    HOST --> STACK[Airflow + MLflow + API]
+    HOST --> STACK[Airflow + MLflow + API + monitoring]
     RUN --> API[Inference API only]
     GH --> HOST
     GH -. app image publish .-> RUN
@@ -79,17 +78,28 @@ The hosted paths deploy runtime services only. Development assets stay local or 
 
 The shared environment uses the hosted full-stack target because it keeps Airflow, MLflow, and the API together. The Cloud Run path stays available as a smaller API-only option.
 
+## Active Shared Deployment Path
+
+The shared environment currently follows one hosted lane:
+
+- maintainers bootstrap once from Google Cloud Shell and seed the remote Terraform plus repository-variable contract
+- GitHub Actions remote Terraform applies handle day-2 infrastructure changes after bootstrap
+- one Compute Engine host keeps Airflow, MLflow, the API, and the monitoring stack online together
+- the inference-only Cloud Run target remains implemented, but it is not the main shared deployment target today
+
+This is why the shared environment docs keep centering the compose-host path even though the Cloud Run path is real and supported.
+
 ## Honest Mapping From Local To Cloud
 
-| Local component | Current hosted path | Longer-term managed direction |
-|----------------|---------------------|-------------------------------|
-| `app` container | hosted full-stack target or hosted inference target | keep inference as a deployable service |
-| Airflow containers | hosted full-stack target today | managed Airflow / Cloud Composer later |
-| MLflow local service | hosted full-stack target today with GCS-backed artifacts | possibly a separate hosted MLflow service later |
-| Local feature storage | BigQuery backend already available | BigQuery remains the cloud data target |
-| Local MLflow artifact volume | GCS artifact destination on the hosted compose path | GCS-backed artifacts stay the direction |
-| `development_env` container | local and CI only | not intended as a cloud runtime |
-| Feast serving path | sits on top of the same curated data | can point the feature view at BigQuery |
+| Local component | Current hosted path |
+|----------------|---------------------|
+| `app` container | hosted full-stack target today, or the hosted inference target when a smaller API-only surface is enough |
+| Airflow containers | hosted full-stack target today |
+| MLflow local service | hosted full-stack target today with GCS-backed artifacts |
+| Local feature storage | BigQuery backend already available |
+| Local MLflow artifact volume | GCS artifact destination on the hosted compose path |
+| `development_env` container | local and CI only |
+| Feast serving path | sits on top of the same curated data |
 
 ## Cloud Pipeline Shape
 
@@ -100,11 +110,15 @@ flowchart TD
     FEAT --> BQ[(BigQuery curated features)]
     BQ --> TRAIN[Training job]
     TRAIN --> MLF[(MLflow)]
-    MLF --> RUN[Hosted inference target]
+    MLF --> HOST[Hosted full-stack target today]
+    MLF -. optional smaller target .-> RUN[Hosted inference target]
+    OME --> HOST
     OME --> RUN
-    OSRM[OSRM] --> RUN
+    OSRM[OSRM] --> HOST
+    OSRM --> RUN
     BQ --> FEAST[Feast view]
-    FEAST --> RUN
+    FEAST --> HOST
+    FEAST -. optional .-> RUN
 </div>
 
 | Layer | Cloud direction |
@@ -112,7 +126,7 @@ flowchart TD
 | Raw landing | keep immutable API payloads in GCS when a landing layer is needed |
 | Feature pipeline | transform landed or live inputs and write curated rows to BigQuery |
 | Training pipeline | read curated rows, train, evaluate, and register through MLflow |
-| Inference pipeline | serve the API on the hosted full-stack target or through the inference-only Cloud Run target |
+| Inference pipeline | serve the API on the active hosted full-stack target, or optionally through the inference-only Cloud Run target for a smaller surface |
 | Feast serving path | point the same logical feature view at BigQuery instead of local parquet |
 
 ## Storage Layering In Cloud
@@ -154,7 +168,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Artifacts | MinIO-backed MLflow artifact path | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
-| Public exposure | local ports on the developer machine | the hosted full-stack target exposes only the app by default; Cloud Run exposes only the inference service; operator dashboards stay private unless you deliberately publish them |
+| Public exposure | local ports on the developer machine | the active shared environment uses the hosted full-stack target and exposes only the app by default; Cloud Run exposes only the inference service when used; operator dashboards stay private unless you deliberately publish them |
 
 ## What Is Already In Place
 
@@ -163,15 +177,15 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 - The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
 - Local container runs can already mount ADC for BigQuery-based checks.
 
-## Current Gaps
+## Current Tradeoffs
 
-- The current online path still keeps MLflow on the compose host rather than a separate managed service.
-- Airflow is still running on the host, not in a managed Composer-style service. The hosted compose path does keep the repo in sync, write the last successful refresh to the host, and show that timestamp in Prometheus and Grafana.
-- Monitoring is still lighter than the long-term target.
-- The two hosted paths solve different needs today: one keeps the full stack online, the other isolates inference as a service.
+- MLflow stays on the compose host in the active shared environment.
+- Airflow also stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
+- The two hosted paths solve different needs: one keeps the full stack online, the other narrows hosting to the API.
+- The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief
 
 The goal is cloud-ready pipelines and cloud orchestration. This mapping keeps the validated backend design, but replaces the local support stack with cloud services that can run after deployment.
 
-See [Architecture](architecture.md) for the current runtime view. The repository root also includes a Terraform README with the deployment details.
+See [Architecture](architecture.md) for the current runtime view and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the maintainer path that bootstraps and advances these hosted targets. The repository root also includes a Terraform README with the deployment details.

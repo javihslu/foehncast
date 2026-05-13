@@ -91,7 +91,7 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 | Monitoring history path | `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` |
 | Feast runtime binding | `FOEHNCAST_FEAST_SOURCE`, `FOEHNCAST_FEAST_REPO_PATH`, `FOEHNCAST_FEAST_CONFIG_PATH`, `FOEHNCAST_FEAST_BIGQUERY_*`, `FOEHNCAST_FEAST_DATASTORE_*` |
 
-These values describe one concrete runtime instance. They should stay overridable because the local evaluator, hosted full-stack target, and hosted inference target do not all bind to the same services.
+These values describe one concrete runtime instance. They should stay overridable because the local evaluator, hosted full-stack target, and hosted inference target do not all bind to the same services. The maintainer rollout split for `terraform.tfvars` versus GitHub delivery variables is described in [Delivery and Operator Workflow](delivery-and-operator-workflow.md).
 
 ## Storage And Warehouse Contract
 
@@ -145,4 +145,4 @@ Those values belong in runtime env, Terraform inputs, or GitHub delivery variabl
 - Feast stays downstream from the curated feature contract instead of becoming a shadow settings system
 - operator state stays inspectable under `.state/` and `airflow/reports/` without pretending to be workload source data
 
-See [Repository](repository.md), [Feature Pipeline](feature-pipeline.md), [Inference Pipeline](inference-pipeline.md), [Local Evaluator](local-evaluator.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding runtime and deployment boundaries.
+See [Repository](repository.md), [Feature Pipeline](feature-pipeline.md), [Inference Pipeline](inference-pipeline.md), [Local Evaluator](local-evaluator.md), [Cloud Mapping](cloud-mapping.md), and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the surrounding runtime and deployment boundaries.

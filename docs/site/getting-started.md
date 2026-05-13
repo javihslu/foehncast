@@ -1,6 +1,6 @@
 # Getting Started
 
-This page keeps setup intentionally simple. The supported contributor path is the local evaluator flow with Docker.
+This page keeps setup intentionally simple. The supported contributor path is the local evaluator flow with Docker. The shared cloud path is maintainer-only and documented separately.
 
 ## Local Evaluator
 
@@ -14,6 +14,8 @@ You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compil
 
 The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. The same local stack now includes Prometheus, a StatsD exporter, and Grafana from checked-in monitoring config, Airflow uses a bundled Postgres metadata database instead of a host-mounted SQLite file, the bootstrap helper waits for the feature DAG to publish a training-request asset and for the resulting asset-triggered training run to finish on a real registry version, and it verifies that Grafana loaded its starter resources before reporting success. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
 The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
+
+If you maintain the shared cloud environment, use [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). Contributors do not need the cloud path for normal work.
 
 ## Surface Roles
 
@@ -59,9 +61,11 @@ The shared hosted environment is maintained separately from normal contributor s
 
 - Contributors only need Docker and the local evaluator bootstrap.
 - Contributors do not need local Terraform, `gcloud`, or `gh`.
-- Maintainers use a one-time Cloud Shell bootstrap and then let GitHub Actions own the shared cloud path.
+- Maintainers start in Google Cloud Shell and run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions` once.
+- After bootstrap, GitHub Actions owns the normal shared cloud Terraform flow.
+- The current shared environment uses the hosted full-stack target, while the inference-only Cloud Run target remains an optional smaller hosted surface.
 
-See `terraform/README.md` only if you maintain the shared cloud environment.
+See [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) for the maintainer path. Use `terraform/README.md` only if you maintain the shared cloud environment.
 
 Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtime services only; `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
 
@@ -90,6 +94,7 @@ Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtim
 - [Local Evaluator](system/local-evaluator.md)
 - [Hosted Full-Stack](system/hosted-full-stack.md)
 - [Cloud Mapping](system/cloud-mapping.md)
+- [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md)
 
 ### Pipelines and Modeling
 

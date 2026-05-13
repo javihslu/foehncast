@@ -28,6 +28,16 @@ flowchart LR
 
 The important split is that monitoring consumes persisted or runtime monitoring state after the pipeline and serving paths run. It does not own feature engineering, model scoring, or orchestration itself.
 
+## Monitoring By Runtime Mode
+
+| Runtime mode | What is monitored | What stays private |
+|------|-------------------|--------------------|
+| Local evaluator | app `/metrics`, StatsD drift export, local pipeline summaries, and local Grafana dashboards | local Airflow, MLflow, Prometheus, and Grafana remain operator tools |
+| Active shared environment | app `/metrics`, hosted sync state, and the hosted monitoring stack on the compose host | Airflow, MLflow, Prometheus, and Grafana stay private by default |
+| Public docs | rendered metrics snippets, screenshots, checked-in configs, and summary artifacts | no live control planes |
+
+This keeps the public explanation clear: operators use the monitoring stack directly, while the docs site uses rendered evidence.
+
 ## Surface Roles
 
 | Surface | What it exposes | Why it matters |
@@ -105,6 +115,8 @@ Grafana is provisioned from repository-owned dashboards and alert rules. The val
 
 That makes the dashboard a view over checked-in metrics contracts rather than a manually assembled local-only artifact.
 
+The same dashboard contract works in the local evaluator and in the active shared environment. What changes is the runtime around it, not the meaning of the monitored signals.
+
 ## Alert Rules
 
 The checked-in alert rules cover the main operator failure modes.
@@ -141,4 +153,4 @@ This keeps the public docs understandable in review while leaving live Grafana, 
 - it keeps alerting reviewable because dashboards, rules, and scrape config live in git
 - it lets one `/metrics` surface describe the app-owned monitoring contract while StatsD handles Evidently drift export
 
-See [Architecture](architecture.md), [Feature Pipeline](feature-pipeline.md), and [Getting Started](../getting-started.md) for the surrounding system and local operator path.
+See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Feature Pipeline](feature-pipeline.md), and [Getting Started](../getting-started.md) for the surrounding system and local operator path.

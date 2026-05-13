@@ -22,6 +22,19 @@ tests/
 docs/
 ```
 
+## Repository Roles
+
+<div class="mermaid">
+flowchart LR
+  CODE[src/foehncast] --> APP[Feature + Training + Inference + Monitoring code]
+  DAGS[dags] --> ORCH[Airflow orchestration]
+  OPS[scripts + terraform] --> DELIV[Bootstrap and hosted delivery]
+  FEAST[feature_repo] --> STORE[Feast integration contract]
+  MON[prometheus_config + grafana_work] --> OBS[Checked-in operator monitoring]
+  TESTS[tests] --> VERIFY[Regression validation]
+  DOCS[docs] --> SITE[Public documentation]
+</div>
+
 ## Where To Start
 
 - `src/foehncast/`: the application modules for configuration, feature engineering, training, inference, monitoring, and spot metadata.
@@ -45,7 +58,7 @@ Central configuration lives in `config.yaml` and `src/foehncast/config.py`, so t
 
 Feature engineering starts in `feature_pipeline/engineer.py`, where raw weather inputs are turned into the engineered feature vector shared by training and inference.
 
-There is currently no separate product UI package in the repository. The optional interactive demo surface that does exist lives inside the inference pipeline, for example `src/foehncast/inference_pipeline/demo.py`, rather than in a separate top-level app tree. Grafana does not fill that role; it remains an operator dashboard surface.
+There is no separate product UI package in the repository. The interactive demo surface lives inside the inference pipeline, for example `src/foehncast/inference_pipeline/demo.py`, rather than in a separate top-level app tree. Grafana does not fill that role; it remains an operator dashboard surface.
 
 ## Configuration Ownership
 
