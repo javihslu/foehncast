@@ -127,6 +127,30 @@ def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
     assert "Local evaluator smoke passed." in bootstrap
 
 
+def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_writes() -> (
+    None
+):
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "prepare_bind_mounted_runtime_paths" in bootstrap
+    assert 'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"' in bootstrap
+    assert 'chmod 0777 "$path"' in bootstrap
+    assert 'rm -rf "$ROOT_DIR/grafana_work/data"' in bootstrap
+    assert '"$ROOT_DIR/airflow"' in bootstrap
+    assert '"$ROOT_DIR/.state/airflow"' in bootstrap
+    assert '"$ROOT_DIR/.state/monitoring"' in bootstrap
+    assert '"$ROOT_DIR/.state/online-compose-sync"' in bootstrap
+    assert '"$ROOT_DIR/data/$dataset"' in bootstrap
+    assert '"$ROOT_DIR/.state/feast"' in bootstrap
+    assert '"$ROOT_DIR/data/feast"' in bootstrap
+    assert '"$ROOT_DIR/grafana_work/data"' in bootstrap
+    assert bootstrap.index(
+        'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"'
+    ) < bootstrap.index(
+        'compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"'
+    )
+
+
 def test_local_evaluator_smoke_wrapper_delegates_to_ci_smoke_bootstrap() -> None:
     smoke = _read_text("scripts/smoke-local-evaluator.sh")
 

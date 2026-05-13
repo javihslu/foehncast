@@ -227,6 +227,31 @@ cleanup_local_runtime_state() {
   rm -rf "$ROOT_DIR/.state/online-compose-sync"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
+  rm -rf "$ROOT_DIR/grafana_work/data"
+}
+
+prepare_bind_mounted_runtime_paths() {
+  local dataset="$1"
+  local path
+  local runtime_paths=(
+    "$ROOT_DIR/airflow"
+    "$ROOT_DIR/airflow/logs"
+    "$ROOT_DIR/airflow/reports"
+    "$ROOT_DIR/.state"
+    "$ROOT_DIR/.state/airflow"
+    "$ROOT_DIR/.state/feast"
+    "$ROOT_DIR/.state/monitoring"
+    "$ROOT_DIR/.state/online-compose-sync"
+    "$ROOT_DIR/data/$dataset"
+    "$ROOT_DIR/data/feast"
+    "$ROOT_DIR/grafana_work/data"
+    "$ROOT_DIR/.state/feast"
+  )
+
+  for path in "${runtime_paths[@]}"; do
+    mkdir -p "$path"
+    chmod 0777 "$path"
+  done
 }
 
 seed_local_online_compose_sync_status() {
@@ -530,6 +555,7 @@ echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
 cleanup_local_runtime_state "$FEAST_DATASET"
+prepare_bind_mounted_runtime_paths "$FEAST_DATASET"
 seed_local_online_compose_sync_status
 
 echo "Starting local stack..."
