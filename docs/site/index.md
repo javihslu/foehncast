@@ -1,6 +1,6 @@
 # FoehnCast Docs
 
-FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, system notes, and operator guidance.
+FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, product scope, runtime notes, and operator guidance.
 
 This site keeps rider-facing demo surfaces, service APIs, operator dashboards, and public-safe rendered evidence separate on purpose. Grafana belongs to the operator layer here. It is not the primary product UI and the public docs do not depend on live private dashboard embeds.
 
@@ -65,9 +65,26 @@ flowchart LR
 
 ## Documentation Map
 
-- [Getting Started](getting-started.md): choose the right operator path and run the first commands.
-- [Architecture](system/architecture.md): the stable Feature-Training-Inference split and runtime surfaces.
-- [Feature Pipeline](system/feature-pipeline.md): how data moves from forecast ingestion to curated features.
-- [Cloud Mapping](system/cloud-mapping.md): how local boundaries map onto hosted storage and runtime choices.
-- [Repository](system/repository.md): where the code, orchestration, tests, docs, and demo live.
+### Overview
+
+- [Getting Started](getting-started.md): choose the right setup path and run the first commands.
 - [Use Case and Data](system/use-case.md): the rider profile, spot set, and data sources behind the ranking.
+- [Repository](system/repository.md): where the code, orchestration, tests, docs, and demo live.
+
+### Runtime and Deployment
+
+- [Architecture](system/architecture.md): the stable Feature-Training-Inference split and runtime surfaces.
+- [Local Evaluator](system/local-evaluator.md): the default local runtime contract for contributors.
+- [Hosted Full-Stack](system/hosted-full-stack.md): the active shared hosted runtime target and sync contract.
+- [Cloud Mapping](system/cloud-mapping.md): how local boundaries map onto hosted storage and runtime choices.
+
+### Pipelines and Modeling
+
+- [Feature Pipeline](system/feature-pipeline.md): how data moves from forecast ingestion to curated features.
+- [Training Pipeline](system/training-pipeline.md): how labeled data becomes a registered serving model.
+- [Inference Pipeline](system/inference-pipeline.md): how prediction, ranking, and online feature lookup are served.
+- [Seasonality](system/seasonality.md): how cyclical time features capture recurring daily and yearly structure.
+
+### Operations
+
+- [Monitoring](system/monitoring.md): how Prometheus, Grafana, alerts, and runtime evidence stay on the operator side.

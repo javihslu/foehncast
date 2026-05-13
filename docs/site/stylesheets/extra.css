@@ -66,3 +66,7 @@
     height: auto;
     max-width: 100%;
 }
+
+.md-sidebar--primary .md-nav--primary > .md-nav__list > .md-nav__item + .md-nav__item {
+    margin-top: 0.45rem;
+}
