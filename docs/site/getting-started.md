@@ -79,6 +79,7 @@ Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtim
 
 - [Architecture](system/architecture.md)
 - [Local Evaluator](system/local-evaluator.md)
+- [Hosted Full-Stack](system/hosted-full-stack.md)
 - [Feature Pipeline](system/feature-pipeline.md)
 - [Training Pipeline](system/training-pipeline.md)
 - [Inference Pipeline](system/inference-pipeline.md)
