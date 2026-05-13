@@ -51,6 +51,7 @@ nav:
   - Getting Started: getting-started.md
   - System:
       - Architecture: system/architecture.md
+      - Local Evaluator: system/local-evaluator.md
       - Feature Pipeline: system/feature-pipeline.md
       - Training Pipeline: system/training-pipeline.md
       - Inference Pipeline: system/inference-pipeline.md
