@@ -81,6 +81,9 @@ def export_offline_store(
     destination = Path(output_path) if output_path else feast_offline_path(dataset)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
+    if destination.exists() and not os.access(destination, os.W_OK):
+        destination.unlink()
+
     offline_frame = build_offline_store_frame(dataset=dataset)
     offline_frame.to_parquet(destination, index=False)
     return destination

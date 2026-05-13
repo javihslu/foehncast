@@ -92,3 +92,71 @@ def test_render_runtime_config_allows_datastore_overrides(
         "database": "custom-feast-db",
         "namespace": "serving",
     }
+
+
+def test_render_runtime_config_replaces_non_writable_existing_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+
+    monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
+    monkeypatch.delenv("FOEHNCAST_FEAST_SOURCE", raising=False)
+    monkeypatch.delenv("FOEHNCAST_FEAST_CONFIG_PATH", raising=False)
+
+    destination = tmp_path / ".state" / "feast" / "feature_store.runtime.yaml"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("stale: true\n", encoding="utf-8")
+    destination.chmod(0o444)
+
+    rendered_path = feast_runtime.render_runtime_config()
+
+    assert rendered_path == destination
+    assert yaml.safe_load(rendered_path.read_text()) == {
+        "project": "foehncast",
+        "entity_key_serialization_version": 3,
+        "registry": "../.state/feast/registry.db",
+        "provider": "gcp",
+        "offline_store": {"type": "file"},
+        "online_store": {
+            "type": "datastore",
+            "project_id": "foehncast-local",
+        },
+    }
+    assert rendered_path.stat().st_mode & 0o222
+
+
+def test_render_runtime_config_tolerates_permission_error_on_chmod(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+
+    monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
+    monkeypatch.delenv("FOEHNCAST_FEAST_SOURCE", raising=False)
+    monkeypatch.delenv("FOEHNCAST_FEAST_CONFIG_PATH", raising=False)
+
+    destination = tmp_path / ".state" / "feast" / "feature_store.runtime.yaml"
+    real_chmod = Path.chmod
+
+    def fail_chmod(self: Path, mode: int, *, follow_symlinks: bool = True) -> None:
+        if self == destination:
+            raise PermissionError("operation not permitted")
+        real_chmod(self, mode, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "chmod", fail_chmod)
+
+    rendered_path = feast_runtime.render_runtime_config()
+
+    assert rendered_path == destination
+    assert yaml.safe_load(rendered_path.read_text()) == {
+        "project": "foehncast",
+        "entity_key_serialization_version": 3,
+        "registry": "../.state/feast/registry.db",
+        "provider": "gcp",
+        "offline_store": {"type": "file"},
+        "online_store": {
+            "type": "datastore",
+            "project_id": "foehncast-local",
+        },
+    }
