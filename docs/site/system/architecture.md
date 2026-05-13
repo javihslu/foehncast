@@ -44,6 +44,8 @@ flowchart LR
 
 ## Surface Boundaries
 
+See [Interfaces and Surfaces](interfaces-and-surfaces.md) for the dedicated public overview of this boundary.
+
 | Surface class | Primary audience | Exposure | Current examples |
 |------|------------------|----------|------------------|
 | Rider-facing demo surface | rider, reviewer, contributor | public-safe when shown as screenshots or rendered examples | Streamlit rider console and the online-features demo page |

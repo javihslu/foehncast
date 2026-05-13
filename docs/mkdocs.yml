@@ -53,6 +53,7 @@ nav:
       - Use Case and Data: system/use-case.md
       - Repository: system/repository.md
       - Configuration and Contracts: system/configuration-and-contracts.md
+      - Interfaces and Surfaces: system/interfaces-and-surfaces.md
   - Runtime and Deployment:
       - Architecture: system/architecture.md
       - Local Evaluator: system/local-evaluator.md
