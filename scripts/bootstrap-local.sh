@@ -13,6 +13,7 @@ APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
 GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-http://127.0.0.1:3000}"
 GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
+CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 
@@ -581,7 +582,15 @@ verify_airflow_api_health 60 2
 verify_grafana_provisioning
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
-compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
+if [[ "$CI_SMOKE" == "true" ]]; then
+  compose exec -T \
+    -e AIRFLOW_AUTO_RETRAIN_MODE=off \
+    -e FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR" \
+    airflow-webserver \
+    airflow dags test feature_pipeline "$FEATURE_DATE"
+else
+  compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
+fi
 
 if [[ "$CI_SMOKE" != "true" ]]; then
   echo "Waiting for asset-triggered training pipeline..."

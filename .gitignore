@@ -21,10 +21,13 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Data (tracked via DVC)
-data/
+# Data (tracked via DVC, except committed CI smoke fixtures)
+data/*
+!data/unit_contract_eval/
+data/unit_contract_eval/*
 *.parquet
 *.csv
+!data/unit_contract_eval/*.parquet
 
 # Keys and secrets
 keys/

@@ -118,7 +118,13 @@ def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
     assert "Usage: $0 [--ci-smoke] [env-file]" in bootstrap
     assert "--ci-smoke)" in bootstrap
     assert "CI_SMOKE=true" in bootstrap
+    assert (
+        'CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"'
+        in bootstrap
+    )
     assert 'if [[ "$CI_SMOKE" != "true" ]]; then' in bootstrap
+    assert "AIRFLOW_AUTO_RETRAIN_MODE=off" in bootstrap
+    assert 'FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR"' in bootstrap
     assert (
         "Skipping asset-triggered training pipeline wait in CI smoke mode." in bootstrap
     )
@@ -155,6 +161,20 @@ def test_local_evaluator_smoke_wrapper_delegates_to_ci_smoke_bootstrap() -> None
     smoke = _read_text("scripts/smoke-local-evaluator.sh")
 
     assert 'exec "${ROOT_DIR}/scripts/bootstrap-local.sh" --ci-smoke "$@"' in smoke
+
+
+def test_local_evaluator_smoke_uses_committed_ingest_fixtures() -> None:
+    fixture_dir = REPO_ROOT / "data" / "unit_contract_eval"
+    fixtures = {path.name for path in fixture_dir.glob("*.parquet")}
+
+    assert fixtures == {
+        "bodensee.parquet",
+        "neuchatel.parquet",
+        "silvaplana.parquet",
+        "thunersee.parquet",
+        "urnersee.parquet",
+        "walensee.parquet",
+    }
 
 
 def test_airflow_init_uses_simple_auth_password_file() -> None:

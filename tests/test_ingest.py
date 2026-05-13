@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -138,3 +139,30 @@ class TestFetchSpot:
         mock_fetch.return_value = pd.DataFrame()
         df = fetch_spot(MOCK_SPOT)
         assert df.empty
+
+    @patch("foehncast.feature_pipeline.ingest.fetch_forecast")
+    def test_reads_local_fixture_when_configured(
+        self,
+        mock_fetch,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        fixture_df = pd.DataFrame(
+            {
+                "wind_speed_10m": [15.0],
+                "wind_gusts_10m": [22.5],
+                "wind_direction_10m": [220.0],
+            },
+            index=pd.DatetimeIndex(["2026-04-12T00:00:00+02:00"], name="time"),
+        )
+        fixture_df.to_parquet(tmp_path / "silvaplana.parquet")
+        monkeypatch.setenv("FOEHNCAST_INGEST_FIXTURE_DIR", str(tmp_path))
+
+        df = fetch_spot(MOCK_SPOT)
+
+        mock_fetch.assert_not_called()
+        assert df.index.name == "time"
+        assert df.attrs["hourly_units"]["wind_speed_10m"] == "km/h"
+        assert df.attrs["hourly_units"]["wind_gusts_10m"] == "km/h"
+        assert df["spot_id"].iloc[0] == "silvaplana"
+        assert df["spot_name"].iloc[0] == "Silvaplana"

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -14,6 +16,7 @@ from foehncast.http_client import ca_bundle
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 30  # seconds
+_INGEST_FIXTURE_DIR_ENV = "FOEHNCAST_INGEST_FIXTURE_DIR"
 _EXPECTED_HOURLY_UNITS = {
     "wind_speed_10m": "km/h",
     "wind_speed_80m": "km/h",
@@ -27,6 +30,14 @@ def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
     resp = requests.get(url, params=params, timeout=_TIMEOUT, verify=ca_bundle())
     resp.raise_for_status()
     return resp.json()
+
+
+def _ingest_fixture_dir() -> Path | None:
+    fixture_dir = os.getenv(_INGEST_FIXTURE_DIR_ENV, "").strip()
+    if not fixture_dir:
+        return None
+
+    return Path(fixture_dir)
 
 
 def _validate_hourly_units(
@@ -118,7 +129,34 @@ def fetch_archive(
 
 def fetch_spot(spot: dict[str, Any]) -> pd.DataFrame:
     """Fetch forecast data for a single spot, adding spot metadata columns."""
-    df = fetch_forecast(spot["lat"], spot["lon"])
+    fixture_dir = _ingest_fixture_dir()
+    if fixture_dir is not None:
+        fixture_path = fixture_dir / f"{spot['id']}.parquet"
+        if not fixture_path.is_file():
+            raise FileNotFoundError(
+                f"Missing ingest fixture for {spot['id']}: {fixture_path}"
+            )
+
+        df = pd.read_parquet(fixture_path)
+        if not isinstance(df.index, pd.DatetimeIndex):
+            raise ValueError(
+                f"Ingest fixture for {spot['id']} must use a DatetimeIndex"
+            )
+
+        if df.index.name is None:
+            df.index.name = "time"
+
+        hourly_units = {
+            key: str(value)
+            for key, value in dict(df.attrs.get("hourly_units", {})).items()
+        }
+        for field, expected_unit in _EXPECTED_HOURLY_UNITS.items():
+            if field in df.columns:
+                hourly_units.setdefault(field, expected_unit)
+        df.attrs["hourly_units"] = hourly_units
+    else:
+        df = fetch_forecast(spot["lat"], spot["lon"])
+
     if df.empty:
         return df
     df["spot_id"] = spot["id"]
