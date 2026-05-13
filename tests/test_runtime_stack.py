@@ -112,6 +112,27 @@ def test_local_bootstrap_handles_missing_docker_desktop_helper() -> None:
     assert 'export DOCKER_CONFIG="$TEMP_DOCKER_CONFIG"' in bootstrap
 
 
+def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "Usage: $0 [--ci-smoke] [env-file]" in bootstrap
+    assert "--ci-smoke)" in bootstrap
+    assert "CI_SMOKE=true" in bootstrap
+    assert 'if [[ "$CI_SMOKE" != "true" ]]; then' in bootstrap
+    assert (
+        "Skipping asset-triggered training pipeline wait in CI smoke mode." in bootstrap
+    )
+    assert "Stopping CI smoke stack..." in bootstrap
+    assert "compose down -v --remove-orphans >/dev/null 2>&1 || true" in bootstrap
+    assert "Local evaluator smoke passed." in bootstrap
+
+
+def test_local_evaluator_smoke_wrapper_delegates_to_ci_smoke_bootstrap() -> None:
+    smoke = _read_text("scripts/smoke-local-evaluator.sh")
+
+    assert 'exec "${ROOT_DIR}/scripts/bootstrap-local.sh" --ci-smoke "$@"' in smoke
+
+
 def test_airflow_init_uses_simple_auth_password_file() -> None:
     init_script = _read_text("containers/airflow/init-airflow.sh")
 

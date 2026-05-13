@@ -21,6 +21,7 @@ jobs:
       - run: docker compose -f docker-compose.yml -f docker-compose.cloud.yml config
       - run: docker compose -f docker-compose.yml build model-registry app
           airflow-webserver
+      - run: make smoke-local-evaluator
 
   shell:
     if: ${{ github.actor == github.repository_owner && (github.event_name ==

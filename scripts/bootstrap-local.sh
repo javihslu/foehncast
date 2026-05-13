@@ -17,15 +17,34 @@ GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
 source "${ROOT_DIR}/scripts/cli-common.sh"
 
 usage() {
-  echo "Usage: $0 [env-file]" >&2
+  echo "Usage: $0 [--ci-smoke] [env-file]" >&2
 }
 
+CI_SMOKE=false
+SMOKE_STACK_STARTED=false
 TEMP_DOCKER_CONFIG=""
 
 cleanup_temporary_docker_config() {
   if [[ -n "$TEMP_DOCKER_CONFIG" && -d "$TEMP_DOCKER_CONFIG" ]]; then
     rm -rf "$TEMP_DOCKER_CONFIG"
   fi
+}
+
+cleanup_ci_smoke_stack() {
+  if [[ "$CI_SMOKE" != "true" || "$SMOKE_STACK_STARTED" != "true" ]]; then
+    return
+  fi
+
+  echo "Stopping CI smoke stack..."
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+on_exit() {
+  local status=$?
+
+  cleanup_ci_smoke_stack || true
+  cleanup_temporary_docker_config
+  exit "$status"
 }
 
 
@@ -82,6 +101,9 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    --ci-smoke)
+      CI_SMOKE=true
+      ;;
     --*)
       echo "Unknown option: $1" >&2
       usage
@@ -99,7 +121,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-trap cleanup_temporary_docker_config EXIT
+trap on_exit EXIT
 configure_docker_client_for_bootstrap
 
 require_docker_compose
@@ -512,6 +534,7 @@ seed_local_online_compose_sync_status
 
 echo "Starting local stack..."
 compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"
+SMOKE_STACK_STARTED=true
 
 echo "Waiting for Feast Datastore emulator..."
 wait_for_service_health feast-online-store 90 2
@@ -534,8 +557,12 @@ verify_grafana_provisioning
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 
-echo "Waiting for asset-triggered training pipeline..."
-wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
+if [[ "$CI_SMOKE" != "true" ]]; then
+  echo "Waiting for asset-triggered training pipeline..."
+  wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
+else
+  echo "Skipping asset-triggered training pipeline wait in CI smoke mode."
+fi
 
 echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 "${ROOT_DIR}/scripts/prepare-feast-local.sh" --reset-state "$FEAST_DATASET"
@@ -549,6 +576,13 @@ curl --retry 30 --retry-all-errors --retry-delay 2 -fsS \
   -X POST "$ONLINE_FEATURES_URL" \
   -H 'content-type: application/json' \
   -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m"]}' >/dev/null
+
+if [[ "$CI_SMOKE" == "true" ]]; then
+  echo "Local evaluator smoke passed."
+  echo "Verified Airflow health, Grafana provisioning, feature pipeline execution, Feast serving state, app health, hosted sync metrics, and /features/online."
+  echo "The stack will be torn down automatically."
+  exit 0
+fi
 
 echo "Local stack is ready."
 echo "Runtime env: $ENV_FILE"
