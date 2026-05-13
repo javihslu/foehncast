@@ -136,4 +136,4 @@ The shared hosted environment keeps the same rule as the docs: the app is the pr
 - it leaves orchestration, tracking, monitoring, and alerting on the operator side
 - it gives the public docs stable evidence sources that do not depend on exposing private hosted dashboards
 
-See [Architecture](architecture.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), [Local Evaluator](local-evaluator.md), and [Hosted Full-Stack](hosted-full-stack.md) for the surrounding runtime contracts.
+See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), [Local Evaluator](local-evaluator.md), and [Hosted Full-Stack](hosted-full-stack.md) for the surrounding runtime contracts.

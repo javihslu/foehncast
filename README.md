@@ -30,16 +30,30 @@ flowchart LR
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 | Monitoring | Working | Docker Compose runs Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; feature panels are derived from persisted Airflow report summaries; and Grafana loads starter dashboards and alert rules from checked-in config |
 
-## Default Setup
+## Setup Paths
 
-FoehnCast has one supported contributor setup path: run everything locally with Docker.
+FoehnCast has one supported contributor setup path: run everything locally with Docker. The shared cloud path is a separate maintainer workflow.
 
 ```mermaid
 flowchart TB
-    Local[Local setup] --> Compose[Airflow + MLflow + FastAPI]
-  Main[Push to main] --> Cloud[GitHub-managed shared cloud automation]
-  Cloud --> Host[Hosted full-stack target today]
-  Cloud -. optional .-> Run[Inference-only Cloud Run target]
+  subgraph Contributor[Contributor path]
+    Clone[Clone repo]
+    Local[./scripts/bootstrap-local.sh]
+    Compose[Local evaluator stack]
+  end
+
+  subgraph Maintainer[Maintainer path]
+    Shell[Google Cloud Shell]
+    Bootstrap[./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions]
+    Cloud[GitHub Actions + remote Terraform]
+    Host[Hosted full-stack target today]
+    Run[Inference-only Cloud Run target]
+  end
+
+  Clone --> Local --> Compose
+  Shell --> Bootstrap --> Cloud
+  Cloud --> Host
+  Cloud -. optional .-> Run
 ```
 
 ## Quick Start
@@ -72,6 +86,8 @@ After bootstrap completes, the main local endpoints are:
 
 The bootstrap summary also prints the resolved objectstore and Feast online-store emulator endpoints.
 
+If you maintain the shared cloud environment, use the separate workflow in [docs/site/system/delivery-and-operator-workflow.md](docs/site/system/delivery-and-operator-workflow.md). Contributors do not need that path for normal work.
+
 Feature-pipeline Grafana panels are backed by the latest summary JSON written under `airflow/reports/`. The app mounts that directory and republishes the summary as Prometheus metrics through `/metrics`, so local dashboard plots and Prometheus queries follow the same contract. The bootstrap also validates the Airflow health payload itself, not just the HTTP status code returned by the webserver.
 The pipeline summary writers also keep timestamped history copies under `airflow/reports/history/`, so operator review does not depend on a single mutable latest-summary file.
 
@@ -99,12 +115,13 @@ For the rider-facing demo, run `uv run streamlit run ui/app.py` from the repo ro
 The shared hosted environment is not part of normal contributor setup.
 
 - Contributors only need Docker and the local bootstrap path.
-- The shared cloud environment is maintained through GitHub Actions after a one-time maintainer bootstrap.
+- Maintainers start in Google Cloud Shell and run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions` once.
+- After bootstrap, GitHub Actions owns the normal remote Terraform plan, apply, destroy, and cleanup flow for the shared environment.
 - Contributors do not need local Terraform, `gcloud`, or `gh` for normal work.
 
 The current shared environment uses the hosted full-stack target so Airflow, MLflow, and the API stay online together. The Cloud Run path is still available as an inference-only option, but it is not the active shared deployment target today.
 
-Maintainer-only cloud bootstrap and operator details live in `terraform/README.md`.
+Start with [docs/site/system/delivery-and-operator-workflow.md](docs/site/system/delivery-and-operator-workflow.md) for the maintainer workflow split and use `terraform/README.md` for operator detail.
 
 Hosted deployment keeps a narrow scope. The cloud targets deploy runtime services only. `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
 
@@ -125,6 +142,7 @@ Hosted deployment keeps a narrow scope. The cloud targets deploy runtime service
 - Docs home: <https://javihslu.github.io/foehncast/>
 - Getting started: <https://javihslu.github.io/foehncast/getting-started/>
 - Architecture: <https://javihslu.github.io/foehncast/system/architecture/>
+- Delivery and operator workflow: <https://javihslu.github.io/foehncast/system/delivery-and-operator-workflow/>
 - Cloud mapping: <https://javihslu.github.io/foehncast/system/cloud-mapping/>
 - Feature pipeline: <https://javihslu.github.io/foehncast/system/feature-pipeline/>
 - Terraform operator detail: `terraform/README.md`

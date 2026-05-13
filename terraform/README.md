@@ -4,6 +4,8 @@ This directory defines one shared GCP baseline and two hosted runtime targets.
 
 This is maintainer/operator reference material. Default contributor setup stays local with Docker and does not require Terraform, `gcloud`, or `gh`.
 
+Start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md) for the high-level contributor-versus-maintainer split. Use this file when you need the maintainer-specific platform inputs, bootstrap steps, and remote Terraform behavior.
+
 ## Terraform In One View
 
 | Surface | Purpose | Deploys |
@@ -231,8 +233,9 @@ Automatic Terraform apply on `main` is no longer paused behind a GitHub environm
 ## Recommended Reading Order
 
 1. Read the root `README.md` for the runtime overview.
-2. Use this file when you need the Terraform-specific deployment inputs and teardown steps.
-3. Use `docs/site/system/cloud-mapping.md` when you want the higher-level architecture explanation.
+2. Read `../docs/site/system/delivery-and-operator-workflow.md` for the shared cloud operator flow.
+3. Use this file when you need the Terraform-specific deployment inputs and teardown steps.
+4. Use `../docs/site/system/cloud-mapping.md` when you want the higher-level architecture explanation.
 
 ## Cloud Operator Bootstrap
 

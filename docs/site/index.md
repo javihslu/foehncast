@@ -2,6 +2,8 @@
 
 FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, product scope, runtime notes, and operator guidance.
 
+The default contributor path stays local with Docker. The shared cloud path is maintainer-owned and documented separately.
+
 This site keeps rider-facing demo surfaces, service APIs, operator dashboards, and public-safe rendered evidence separate on purpose. Grafana belongs to the operator layer here. It is not the primary product UI and the public docs do not depend on live private dashboard embeds.
 
 ## Start Here
@@ -9,6 +11,7 @@ This site keeps rider-facing demo surfaces, service APIs, operator dashboards, a
 | Need | Read this |
 |------|-----------|
 | Run the project locally with the default evaluator workflow | [Getting Started](getting-started.md) |
+| Maintain the shared cloud environment or understand the setup split | [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) |
 | Understand what stays in package config versus runtime wiring | [Configuration and Contracts](system/configuration-and-contracts.md) |
 | Understand which routes and tools are rider-facing, service-only, or operator-only | [Interfaces and Surfaces](system/interfaces-and-surfaces.md) |
 | Understand the Feature-Training-Inference split | [Architecture](system/architecture.md) |
@@ -21,8 +24,8 @@ This site keeps rider-facing demo surfaces, service APIs, operator dashboards, a
 | Mode | Who runs it | Purpose |
 |------|-------------|---------|
 | Local stack | Any reader or contributor | Development, evaluation, and reproducible validation |
-| Online stack | The operator of a fork or a personal cloud setup | Full hosted deployment of Airflow, MLflow, and the API |
-| GitHub automation | Repository maintainer or fork owner | Image publishing, Terraform workflows, and docs publishing |
+| Shared cloud environment | Repository maintainer or fork owner after one-time bootstrap | Full hosted deployment of Airflow, MLflow, and the API |
+| GitHub automation | Repository maintainer or fork owner after bootstrap | Image publishing, Terraform workflows, and docs publishing |
 
 Public images are convenience artifacts, not a shared hosting promise. If you want a running online environment, deploy it in infrastructure you control.
 
@@ -79,6 +82,7 @@ flowchart LR
 
 - [Architecture](system/architecture.md): the stable Feature-Training-Inference split and runtime surfaces.
 - [Local Evaluator](system/local-evaluator.md): the default local runtime contract for contributors.
+- [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md): the maintainer path for shared cloud bootstrap and day-2 delivery.
 - [Hosted Full-Stack](system/hosted-full-stack.md): the active shared hosted runtime target and sync contract.
 - [Cloud Mapping](system/cloud-mapping.md): how local boundaries map onto hosted storage and runtime choices.
 

@@ -1,6 +1,16 @@
 # Feast Repo
 
-This Feast repo sits on top of the curated features that FoehnCast already writes. It does not replace the main feature pipeline or the local bootstrap path; it is the serving layer bound to that curated contract.
+This Feast repo sits downstream from the curated features that FoehnCast already writes. It does not replace the main feature pipeline or the default contributor path. It is the serving layer bound to that curated contract.
+
+## Path Split
+
+| Path | Who uses it | Main entrypoint | What happens |
+|------|-------------|-----------------|--------------|
+| Local evaluator | contributor or reviewer | `./scripts/bootstrap-local.sh` | prepares Feast automatically and verifies `/features/online` |
+| Manual local Feast prep | contributor troubleshooting the serving layer | `./scripts/prepare-feast-local.sh` | renders the local runtime config, applies the repo, and materializes the emulator-backed online store |
+| Shared cloud path | maintainer | `./scripts/prepare-feast-cloud.sh` after remote apply | applies the same Feast contract to curated BigQuery rows and the hosted Datastore online store |
+
+Use [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md) for the maintainer workflow split. This README stays focused on the Feast serving layer itself.
 
 ## When To Use It
 
@@ -25,21 +35,21 @@ The runtime contract now renders the active Feast config from environment into `
 
 ## Local Path
 
+The normal local path is still `./scripts/bootstrap-local.sh`. Use the manual Feast steps only when you want to inspect or rerun the serving layer yourself.
+
 1. Sync the Feast dependency group for host-side CLI commands if needed:
    `uv sync --group feast`
-2. Export the current stored features, render the active Feast runtime config, apply the repo, and materialize the local online store:
+2. Render the active Feast runtime config, apply the repo, and materialize the local online store:
    `./scripts/prepare-feast-local.sh`
-3. Read features back through the application-side helper:
-   `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_excess_10m']))"`
-4. Or use the API endpoint if the app is already running:
-   `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_excess_10m"]}'`
-5. Or open the built-in demo page in the running app:
-   `http://127.0.0.1:8000/features/online/demo`
+3. Verify through one of these surfaces:
 
-The local repo keeps using the default local stack. It does not replace the existing feature pipeline or the local bootstrap path.
-The online read should return a dictionary with `rows`, `returned_features`, and the requested spot values when materialization has already run.
-The app runtime image includes Feast support and the bundled repo path; the generated config under `.state/feast/feature_store.runtime.yaml` binds the local resources to that shared contract.
-The default `./scripts/bootstrap-local.sh` path runs this preparation step and verifies `/features/online` automatically.
+| Surface | Example |
+|---------|---------|
+| Python helper | `uv run --group feast python -c "from foehncast.inference_pipeline.online_features import get_online_spot_features; print(get_online_spot_features(['silvaplana'], ['wind_speed_10m', 'gust_excess_10m']))"` |
+| API route | `curl -fsS -X POST http://127.0.0.1:8000/features/online -H 'content-type: application/json' -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m","gust_excess_10m"]}'` |
+| Demo page | `http://127.0.0.1:8000/features/online/demo` |
+
+The local repo keeps using the default local stack. The app runtime image includes Feast support and the bundled repo path, the generated config under `.state/feast/feature_store.runtime.yaml` binds the local resources to that shared contract, and `./scripts/bootstrap-local.sh` already runs this preparation step for the supported contributor path.
 
 The default local stack uses the bundled MinIO surface for curated feature storage and MLflow artifacts. Feast still reads an exported parquet offline source built from those curated rows, while the registry and runtime config stay under `.state/feast/` and the online store runs through the bundled Datastore-mode emulator.
 
@@ -58,16 +68,16 @@ That keeps the derived offline source separate from local registry and runtime c
 
 ## Cloud Path
 
-1. Set `FOEHNCAST_FEAST_SOURCE=bigquery`.
-2. Set `GCP_PROJECT_ID` and `GCP_BUCKET_NAME`, or the Feast-specific overrides `FOEHNCAST_FEAST_PROJECT_ID`, `FOEHNCAST_FEAST_REGISTRY`, and `FOEHNCAST_FEAST_GCS_STAGING_LOCATION`.
-3. Set `FOEHNCAST_FEAST_BIGQUERY_TABLE` to a BigQuery table or view that exposes curated rows with `spot_id`, `forecast_time`, and the same curated feature columns defined in `features.py`.
-4. Optionally set `FOEHNCAST_FEAST_BIGQUERY_DATASET` and `FOEHNCAST_FEAST_BIGQUERY_LOCATION` if the defaults do not fit the target environment.
-5. Set `FOEHNCAST_FEAST_DATASTORE_DATABASE` when the hosted environment uses a named Datastore-mode database for Feast online serving.
-6. Run `./scripts/prepare-feast-cloud.sh` after curated BigQuery rows are available. It renders the active Feast runtime config, applies the repo, and materializes the Datastore online store.
+This is the maintainer path. Start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md), then use this repo after curated BigQuery rows are available.
 
-The cloud bootstrap and Terraform-managed hosted runtimes populate this same Feast env contract automatically. You do not need to keep a separate handwritten cloud YAML in sync for normal operator flows.
+The current cloud contract is:
 
-The simplest cloud hand-off from the current storage layer is a BigQuery view that filters the curated feature table to the split or dataset you want Feast to read.
+- `FOEHNCAST_FEAST_SOURCE=bigquery`
+- `FOEHNCAST_FEAST_BIGQUERY_TABLE` points at a BigQuery table or view with `spot_id`, `forecast_time`, and the curated feature columns defined in `features.py`
+- the bootstrap and Terraform-managed hosted runtimes normally populate the project, registry, staging, and Datastore settings for the shared environment
+- `./scripts/prepare-feast-cloud.sh` renders the active runtime config, applies the repo, and materializes the hosted online store
+
+If another environment needs different defaults, override the Feast-specific BigQuery, registry, staging, or Datastore settings through the corresponding environment variables.
 
 Keep the storage roles separate:
 

@@ -122,4 +122,4 @@ The local evaluator applies local-only access overrides so a fresh Docker run ca
 - it keeps the online feature contract real by preparing Feast state and calling the live route
 - it keeps optional notebook tooling outside the default path so the supported baseline stays smaller and easier to reproduce
 
-See [Architecture](architecture.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding runtime and deployment boundaries.
+See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding runtime and deployment boundaries.

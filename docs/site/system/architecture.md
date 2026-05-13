@@ -5,6 +5,8 @@ FoehnCast keeps the same Feature-Training-Inference split in every runtime mode.
 !!! note "How to read this page"
 
     The validated baseline is the local Compose stack.
+    The active shared environment uses the hosted full-stack target.
+    The hosted inference target remains a smaller optional path.
     The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
     The rider-facing demo and prediction outputs are not the same thing as operator dashboards, and Grafana is not treated as the main product UI.
 
@@ -73,18 +75,20 @@ The orchestration layer now models the main data products as Airflow assets inst
 flowchart LR
     CORE[Shared Feature-Training-Inference boundaries]
     CORE --> LOCAL[Local evaluator target]
-    CORE --> HOST[Hosted full-stack target]
-    CORE --> RUN[Hosted inference target]
+    CORE --> HOST[Hosted full-stack target today]
+    CORE -. optional .-> RUN[Hosted inference target]
 </div>
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
-| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep the whole stack online |
-| Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | publish the inference API as a smaller hosted surface |
-| GitHub automation | image publishing and Terraform workflows | runtime services | repeatable delivery, not a runtime target |
+| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | active shared environment |
+| Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | smaller API-only hosted surface |
+| GitHub automation | image publishing and Terraform workflows | runtime services | shared cloud day-2 delivery, not a runtime target |
 
 The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target exposes only the app on port `8000` by default. Airflow, MLflow, Prometheus, and Grafana stay private unless you open them on purpose for your own operator workflow.
+
+The active shared environment uses the hosted full-stack target today. The hosted inference target stays available when only the API needs to be online.
 
 ## Current Local Architecture
 
@@ -111,7 +115,7 @@ The Airflow control plane reflects those hand-offs directly. The feature pipelin
 
 <div class="mermaid">
 flowchart LR
-    subgraph Host[Hosted full-stack target]
+    subgraph Host[Hosted full-stack target today]
         HAF[Airflow]
         HML[MLflow]
         HAPI[FastAPI]
@@ -126,7 +130,7 @@ flowchart LR
 
 <div class="mermaid">
 flowchart LR
-    subgraph Run[Hosted inference target]
+    subgraph Run[Hosted inference target optional]
         RAPI[FastAPI]
     end
     BQ2[(BigQuery curated features)] --> RAPI
@@ -136,7 +140,7 @@ flowchart LR
     OSRM2[OSRM] --> RAPI
 </div>
 
-The hosted targets reuse the same application boundaries, but they deploy different runtime surfaces. The cloud path does not ship the local development container, local objectstore, notebooks, docs build tooling, or the Datastore emulator.
+The hosted targets reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram matches the active shared environment. The second remains the smaller optional API-only path. The cloud path does not ship the local development container, local objectstore, notebooks, docs build tooling, or the Datastore emulator.
 
 ## Representative Validation
 
@@ -164,4 +168,4 @@ The hosted targets reuse the same application boundaries, but they deploy differ
 - Retained prediction-event history is a monitoring fact store, not a rider-facing page or a substitute for live dashboards.
 - Feast stays attached to the curated layer rather than becoming the primary ingestion or archive system.
 
-See [Use Case and Data](use-case.md) for the rider-focused problem framing and [Cloud Mapping](cloud-mapping.md) for the hosted path details.
+See [Use Case and Data](use-case.md) for the rider-focused problem framing, [Cloud Mapping](cloud-mapping.md) for the hosted path details, and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the contributor and maintainer rollout split.
