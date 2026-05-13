@@ -79,6 +79,7 @@ Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtim
 
 - [Architecture](system/architecture.md)
 - [Feature Pipeline](system/feature-pipeline.md)
+- [Training Pipeline](system/training-pipeline.md)
 - [Monitoring](system/monitoring.md)
 - [Cloud Mapping](system/cloud-mapping.md)
 - [Repository](system/repository.md)
