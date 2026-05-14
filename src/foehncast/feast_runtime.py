@@ -14,7 +14,7 @@ from foehncast.paths import project_root
 _DEFAULT_PROJECT = "foehncast"
 _DEFAULT_LOCAL_REGISTRY = "../.state/feast/registry.db"
 _DEFAULT_LOCAL_DATASTORE_PROJECT_ID = "foehncast-local"
-_DEFAULT_BIGQUERY_DATASET = "feast"
+_DEFAULT_BIGQUERY_DATASET = "foehncast"
 _DEFAULT_BIGQUERY_LOCATION = "EU"
 _DEFAULT_DATASTORE_DATABASE = "feast-online"
 
