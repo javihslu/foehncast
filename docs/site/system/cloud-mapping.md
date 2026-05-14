@@ -113,6 +113,8 @@ The current delivery story is split intentionally:
 
 For this horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. That means Cloud Run is the serving surface, not the scheduler, and GitHub Actions is the delivery plane, not the runtime orchestrator.
 
+That same split is also the current ownership boundary for cloud-facing values. Terraform inputs and GitHub repository variables carry the structural delivery contract, while secret-bearing runtime values stay on the runtime side through hosted environment injection or a managed secret path. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
+
 ## Operator Recovery Lane
 
 The active shared environment now has one reviewed recovery split:

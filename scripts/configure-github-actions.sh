@@ -97,6 +97,8 @@ fi
 
 REPOSITORY_PATH="$(resolve_repo)"
 
+echo "GitHub repository variables carry the structural delivery contract only; keep runtime secrets in the runtime environment or a managed secret path."
+
 if [[ "$CLEAR" == "true" ]]; then
   while IFS= read -r variable_name; do
     delete_variable "$REPOSITORY_PATH" "$variable_name"
