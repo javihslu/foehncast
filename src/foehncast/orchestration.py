@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 import logging
 from pathlib import Path
@@ -862,6 +863,40 @@ def _emit_training_summary(
     emit_training_pipeline_run_summary(summary)
 
 
+def _run_training_stage(
+    training_state: TrainingPipelineState,
+    *,
+    stage: str,
+    success_status: str,
+    action: Callable[[], Any],
+) -> Any:
+    started_at = perf_counter()
+
+    try:
+        result = action()
+    except Exception as exc:
+        increment_stage_failure(
+            training_state,
+            stage=stage,
+            stage_names=TRAINING_PIPELINE_STAGES,
+        )
+        record_stage_duration(
+            training_state,
+            stage=stage,
+            started_at=started_at,
+        )
+        _emit_training_summary(training_state, run_status="failed", error=str(exc))
+        raise
+
+    record_stage_duration(
+        training_state,
+        stage=stage,
+        started_at=started_at,
+    )
+    _emit_training_summary(training_state, run_status=success_status)
+    return result
+
+
 def _training_run_metrics_and_params(
     training_run_id: str,
 ) -> tuple[dict[str, float], dict[str, str]]:
@@ -899,32 +934,19 @@ def run_training_pipeline_step(
         dataset=dataset,
         requested_stage=requested_stage,
     )
-    started_at = perf_counter()
 
-    try:
+    def _run() -> str:
         training_run_id = run_training_pipeline(dataset=dataset)
         training_state.merge_run_snapshot(_training_run_snapshot(training_run_id))
         training_state.training_run_id = training_run_id
-        record_stage_duration(
-            training_state,
-            stage="train",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="running")
         return training_run_id
-    except Exception as exc:
-        increment_stage_failure(
-            training_state,
-            stage="train",
-            stage_names=TRAINING_PIPELINE_STAGES,
-        )
-        record_stage_duration(
-            training_state,
-            stage="train",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="failed", error=str(exc))
-        raise
+
+    return _run_training_stage(
+        training_state,
+        stage="train",
+        success_status="running",
+        action=_run,
+    )
 
 
 def evaluate_training_run(
@@ -938,9 +960,8 @@ def evaluate_training_run(
         requested_stage=requested_stage,
         training_run_id=training_run_id,
     )
-    started_at = perf_counter()
 
-    try:
+    def _run() -> str:
         mlflow.set_tracking_uri(get_mlflow_tracking_uri())
         metrics, _ = _training_run_metrics_and_params(training_run_id)
         if not metrics:
@@ -956,26 +977,14 @@ def evaluate_training_run(
         training_state.run_metrics = metrics
         training_state.evaluation_report_path = resolved_report_path
         training_state.evaluation_report_exists = Path(resolved_report_path).exists()
-        record_stage_duration(
-            training_state,
-            stage="evaluate",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="running")
         return resolved_report_path
-    except Exception as exc:
-        increment_stage_failure(
-            training_state,
-            stage="evaluate",
-            stage_names=TRAINING_PIPELINE_STAGES,
-        )
-        record_stage_duration(
-            training_state,
-            stage="evaluate",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="failed", error=str(exc))
-        raise
+
+    return _run_training_stage(
+        training_state,
+        stage="evaluate",
+        success_status="running",
+        action=_run,
+    )
 
 
 def register_training_run(
@@ -989,31 +998,18 @@ def register_training_run(
         requested_stage=stage,
         training_run_id=training_run_id,
     )
-    started_at = perf_counter()
 
-    try:
+    def _run() -> str:
         model_version = register_model(training_run_id)
         promote_model(None, model_version.version, stage=stage)
         training_state.training_run_id = training_run_id
         training_state.registered_model_name = get_mlflow_config()["model_name"]
         training_state.registered_model_version = str(model_version.version)
-        record_stage_duration(
-            training_state,
-            stage="register",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="succeeded")
         return str(model_version.version)
-    except Exception as exc:
-        increment_stage_failure(
-            training_state,
-            stage="register",
-            stage_names=TRAINING_PIPELINE_STAGES,
-        )
-        record_stage_duration(
-            training_state,
-            stage="register",
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="failed", error=str(exc))
-        raise
+
+    return _run_training_stage(
+        training_state,
+        stage="register",
+        success_status="succeeded",
+        action=_run,
+    )

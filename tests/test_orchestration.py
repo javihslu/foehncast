@@ -731,6 +731,30 @@ def test_register_training_run_registers_and_promotes(
     assert emitted["summary"]["registered_model_version"] == "7"
 
 
+def test_register_training_run_emits_failed_summary_on_registration_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: dict[str, object] = {}
+
+    def _raise_registration_error(run_id: str) -> SimpleNamespace:
+        raise ValueError("registration failed")
+
+    monkeypatch.setattr(orchestration, "register_model", _raise_registration_error)
+    _capture_emitted_summary(
+        monkeypatch,
+        "emit_training_pipeline_run_summary",
+        emitted,
+    )
+
+    with pytest.raises(ValueError, match="registration failed"):
+        orchestration.register_training_run("run-456", stage="Production")
+
+    assert emitted["summary"]["run_status"] == "failed"
+    assert emitted["summary"]["requested_stage"] == "Production"
+    assert emitted["summary"]["training_run_id"] == "run-456"
+    assert emitted["summary"]["stage_failure_counts"]["register"] == 1
+
+
 def test_run_training_pipeline_step_emits_training_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
