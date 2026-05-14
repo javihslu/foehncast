@@ -30,7 +30,7 @@ flowchart LR
         PUSH[Push to main or manual workflow dispatch]
         TFWF[.github/workflows/terraform.yml]
         HOST[Hosted full-stack target]
-        RUN[Optional Cloud Run target]
+        RUN[Primary Cloud Run target]
     end
 
     CLONE --> LOCAL --> LSTACK --> LVERIFY
@@ -41,7 +41,7 @@ flowchart LR
     BACKEND --> TFWF
     VARS --> TFWF
     TFWF --> HOST
-    TFWF -. when enabled .-> RUN
+    TFWF --> RUN
 </div>
 
 The split matters because the local path is the supported public onboarding path, while the cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
@@ -87,7 +87,7 @@ The script is interactive by design. It asks the operator to:
 
 In `--bootstrap-only` mode, the script prepares the remote Terraform control plane and leaves the broader hosted apply to the remote workflow. It also writes `.env` and `terraform/terraform.tfvars` in the working tree so the local repository reflects the selected project and platform identifiers.
 
-When the script runs a normal apply instead of bootstrap-only mode, it also verifies the hosted runtime surfaces that Terraform exposed. The promoted Cloud Run path checks `/health`, `/spots`, and `/metrics`, including the served alias and model version in the health payload. The retained hosted full-stack path keeps its `/health` plus sync-metrics verification when the compose host is enabled.
+When the script runs a normal apply instead of bootstrap-only mode, it also verifies the hosted runtime surfaces that Terraform exposed. The promoted Cloud Run path checks `/health`, `/spots`, and `/metrics`, including the served alias and model version in the health payload. The retained hosted full-stack path is expected to stay private; if its app URL is public, bootstrap fails fast instead of treating that as a supported fallback.
 
 ## Day-2 Delivery Contract
 
@@ -98,7 +98,7 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/terraform.yml` | primary Terraform operator path | pushes to `main` automatically resolve to `apply` after bootstrap; manual dispatch stays available for `plan`, `destroy`, `cleanup`, and explicit overrides |
 | `scripts/configure-github-actions.sh` | repo-variable sync | Terraform outputs are copied into GitHub repository variables so the remote workflow reads one shared contract |
 | `terraform/terraform.tfvars` | bootstrap input | used during the interactive bootstrap path, not as the day-2 source of truth for remote applies |
-| runtime image workflows | primary hosted API delivery follow-up | when Terraform has already provisioned `GCP_CLOUD_RUN_SERVICE`, publish automation updates the existing Cloud Run service with new images |
+| runtime image workflows | app delivery follow-up | when Terraform has already provisioned `GCP_CLOUD_RUN_SERVICE`, publish automation updates the existing Cloud Run service with new images |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
 This contract is deliberate. The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming more manual workflow inputs.
@@ -109,6 +109,17 @@ The promoted hosted runtime story is now:
 - the hosted full-stack VM remains online for Airflow, MLflow, and monitoring, not as a second public API path.
 - both surfaces still read the same Terraform-managed storage, Feast, and MLflow contract.
 
+## Rollback And Retirement Coordinates
+
+The shared API rollback path now lives entirely on Cloud Run.
+
+- `.github/workflows/publish-app-image.yml` can deploy a candidate tagged revision with zero traffic or a live revision directly
+- `.github/workflows/promote-candidate.yml` verifies the candidate runtime, captures the current live Cloud Run revision and model version as rollback inputs, and only then promotes the candidate image
+- `.github/workflows/rollback-live-release.yml` uses those explicit inputs to restore live traffic to an exact revision and model version
+- reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
+
+The remaining VM-retirement gate is separate from serving rollback. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator-plane scope is reduced explicitly.
+
 ## What The Cloud-Operator Tests Enforce
 
 The cloud-operator tests keep the delivery path honest in a few specific ways:
@@ -116,6 +127,7 @@ The cloud-operator tests keep the delivery path honest in a few specific ways:
 - Terraform output names and GitHub repository variable names must stay in one shared mapping
 - the remote workflow must read the repository-backed contract instead of requiring operators to re-enter the same platform values on every run
 - pushes to `main` only become automatic remote applies after bootstrap has populated the required repository variables; before that, push runs explain the skip and manual runs fail fast
+- hosted verification fails if Cloud Run is not provisioned or if the VM app is public, because Cloud Run is the only supported public API path in this configuration
 - repository-variable resync after apply is best effort, so a GitHub token limitation does not invalidate a successful Terraform apply
 - destroy and cleanup remain explicit maintainer actions with project-id confirmation checks
 

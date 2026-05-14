@@ -143,6 +143,22 @@ These surfaces stay local or CI-only:
 
 The hosted target also does not remain a second public API path. Cloud Run carries the promoted serving role, while the VM keeps the broader operator stack online.
 
+## Rollback And Retirement Gate
+
+The remaining gate is not whether the VM should keep a public serving fallback. That fallback is already retired. Cloud Run is the only supported public API path in the shared environment.
+
+The current rollback contract is:
+
+- `.github/workflows/promote-candidate.yml` captures the current live Cloud Run revision and model version before promotion so operators have explicit rollback inputs
+- `.github/workflows/rollback-live-release.yml` restores live traffic to an exact Cloud Run revision and MLflow model version after the tagged rollback target passes `/health`
+- bootstrap and Terraform verification fail if the VM app becomes public again instead of treating that as rollback
+
+The remaining retirement decision is narrower:
+
+- the VM stays online while Airflow, MLflow, sync status, and operator monitoring still need the retained control plane
+- the VM can lose its remaining private app role only after the operator stack no longer needs host-local app checks and the orchestration surface of record is explicit
+- when that gate is met, retiring or slimming the VM should be handled as operator-plane cleanup, not as public-serving rollback
+
 ## Why This Target Works
 
 - it keeps the full operator stack online in the active shared environment without forcing Airflow into Cloud Run

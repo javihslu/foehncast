@@ -129,6 +129,8 @@ That rule keeps the docs understandable in review without leaking a live control
 
 The shared hosted environment keeps the same rule as the docs: the app is the product and service surface, while operator tools stay private unless an operator intentionally publishes them.
 
+In the shared hosted lane, Cloud Run owns the public product and service surface. The hosted full-stack VM remains private and operator-only, and reopening its app route is a configuration error rather than a rollback step. The remaining VM gate is therefore about control-plane retirement, not about keeping a second public serving path alive.
+
 ## Why This Boundary Works
 
 - it lets the rider-facing demo reuse the real serving path without turning the product into an admin console
