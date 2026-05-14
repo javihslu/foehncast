@@ -1,6 +1,6 @@
 # Inference Pipeline
 
-FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs in the local evaluator, in the active hosted full-stack environment, and in the optional inference-only Cloud Run target. The serving path resolves the live MLflow alias, fetches fresh forecasts for configured spots, rebuilds the shared engineered feature vector, returns per-spot quality predictions, and optionally exposes the Feast-backed online lookup without pulling training or operator concerns into the request path.
+FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs in the local evaluator, in the promoted Cloud Run hosted API path, and in the retained hosted full-stack control plane. The serving path resolves the live MLflow alias, fetches fresh forecasts for configured spots, rebuilds the shared engineered feature vector, returns per-spot quality predictions, and optionally exposes the Feast-backed online lookup without pulling training or operator concerns into the request path.
 
 This page records the current serving contract that is validated in the local stack and in endpoint, dashboard, and cloud-runtime tests. It focuses on what the running app owns today and what stays optional or operator-controlled.
 
@@ -131,8 +131,8 @@ This keeps the inference service responsible for request-side facts while leavin
 <div class="mermaid">
 flowchart LR
     APP[Same FastAPI app] --> LOCAL[Local evaluator target]
-    APP --> HOST[Hosted full-stack target today]
-    APP -. optional smaller path .-> RUN[Hosted inference target]
+    APP --> RUN[Hosted inference target today]
+    APP --> HOST[Hosted full-stack control plane]
 </div>
 
 The same FastAPI app runs across the supported serving targets.
@@ -140,9 +140,9 @@ The same FastAPI app runs across the supported serving targets.
 The current hosted contract is:
 
 - the local evaluator target serves the full app inside the Compose stack
-- the active shared environment uses the hosted full-stack target and keeps the app online next to the other runtime services on one GCP host
-- the hosted inference target publishes the same FastAPI inference surface on Cloud Run without shipping Airflow, notebooks, docs tooling, or local emulators when a smaller API-only surface is enough
-- cloud bootstrap and operator checks verify the live `/health` and `/spots` routes when the hosted inference path is enabled
+- the shared cloud path promotes the hosted inference target on Cloud Run as the primary hosted API surface
+- the hosted full-stack target keeps the same app online next to the operator runtime services on one GCP host as part of the retained control plane, not as a second public API path
+- cloud bootstrap and operator checks verify the promoted Cloud Run `/health`, `/spots`, and `/metrics` routes when that path is enabled
 
 That boundary matters because the app is the product and service surface. Grafana remains an operator surface, not the rider product UI.
 
@@ -151,7 +151,7 @@ That boundary matters because the app is the product and service surface. Grafan
 - it keeps live requests narrow enough to verify through simple route and dashboard tests
 - it reuses the shared feature contract instead of inventing a serving-only schema
 - it ties responses back to a concrete registry version without giving the app promotion authority
-- it lets one FastAPI contract run locally, in the active shared environment, and in the optional Cloud Run path
+- it lets one FastAPI contract run locally, on the promoted Cloud Run path, and on the retained hosted full-stack surface
 - it keeps the Feast lookup path useful for integration checks while leaving prediction and ranking available from the core app alone
 
 See [Architecture](architecture.md), [Training Pipeline](training-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding system boundaries.

@@ -1,11 +1,11 @@
 # Cloud Mapping
 
-FoehnCast has two hosted targets, but the active shared environment uses the hosted full-stack target on one GCP host. The inference-only Cloud Run target remains available as a smaller alternative. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
+FoehnCast has two hosted targets. The shared environment uses the inference-only Cloud Run target as the only promoted public API path, while the hosted full-stack target stays online on one GCP host for operator tooling. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
 
 !!! note "What this page does and does not claim"
 
     The shared GCP baseline and the hosted entry points already exist.
-    The current shared environment uses the hosted full-stack target. The inference-only Cloud Run path exists, but it is not the active shared deployment path today.
+    The current shared environment uses Cloud Run as the shared hosted API path while retaining the hosted full-stack target for operator tooling.
 
 ## Cloud Paths In One View
 
@@ -17,11 +17,11 @@ FoehnCast has two hosted targets, but the active shared environment uses the hos
 </li>
 <li>
 <p><strong>Hosted full-stack target</strong></p>
-<p>A single Compute Engine host can run Airflow, MLflow, and the API from the same repository. This is the active shared deployment path today.</p>
+<p>A single Compute Engine host runs Airflow, MLflow, monitoring, and the retained operator stack from the same repository.</p>
 </li>
 <li>
 <p><strong>Hosted inference target</strong></p>
-<p>The FastAPI inference service can also run as an inference-only Cloud Run target when a smaller API-only surface is enough.</p>
+<p>The FastAPI inference service runs as the promoted primary hosted API path on Cloud Run.</p>
 </li>
 <li>
 <p><strong>Operator delivery</strong></p>
@@ -69,39 +69,31 @@ flowchart LR
 | Surface | Deploys | Leaves out | Current state |
 |--------|---------|------------|---------------|
 | Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented through Terraform |
-| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and active in the shared environment |
-| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented, but not active in the shared environment |
+| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and retained for operator control-plane duties |
+| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and promoted as the primary hosted API path |
 | GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
 | BigQuery backend support | support for a BigQuery storage backend in the app | none | available in both local and hosted runtimes |
 
 The hosted paths deploy runtime services only. Development assets stay local or CI-only. The hosted full-stack target keeps Airflow, MLflow, Prometheus, and Grafana on the operator side unless you intentionally publish them yourself.
 
-The shared environment uses the hosted full-stack target because it keeps Airflow, MLflow, and the API together. The Cloud Run path stays available as a smaller API-only option.
-
-## Shared Hosted App Contract
-
-The two hosted targets differ in runtime size, not in their core app surface.
-
-- both hosted targets serve the same FastAPI routes for `/health`, `/spots`, and `/metrics`
-- both hosted targets rely on the same app-side storage and Feast runtime assumptions injected by Terraform
-- the compose-host path adds extra sync-freshness signals to `/metrics` because it owns the repo-sync timer, but that is an operator extension on top of the same app contract
+The shared environment uses Cloud Run as the only promoted public API path. The hosted full-stack target stays online because it keeps Airflow, MLflow, and monitoring together.
 
 ## Active Shared Deployment Path
 
-The shared environment currently follows one hosted lane:
+The shared environment currently follows one promoted hosted lane plus one retained operator lane:
 
 - maintainers bootstrap once from Google Cloud Shell and seed the remote Terraform plus repository-variable contract
 - GitHub Actions remote Terraform applies handle day-2 infrastructure changes after bootstrap
-- one Compute Engine host keeps Airflow, MLflow, the API, and the monitoring stack online together
-- the inference-only Cloud Run target remains implemented, but it is not the main shared deployment target today
+- Cloud Run carries the primary shared hosted API URL
+- one Compute Engine host keeps Airflow, MLflow, the API, and the monitoring stack online together as the retained operator surface
 
-This is why the shared environment docs keep centering the compose-host path even though the Cloud Run path is real and supported.
+This is why the shared environment docs now center Cloud Run as the first hosted API URL while still keeping the compose-host path visible as the retained control plane.
 
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
 |----------------|---------------------|
-| `app` container | hosted full-stack target today, or the hosted inference target when a smaller API-only surface is enough |
+| `app` container | hosted inference target for the primary shared API, plus the retained hosted full-stack app surface for control-plane duties |
 | Airflow containers | hosted full-stack target today |
 | MLflow local service | hosted full-stack target today with GCS-backed artifacts |
 | Local feature storage | BigQuery backend already available |
@@ -134,7 +126,7 @@ flowchart TD
 | Raw landing | keep immutable API payloads in GCS when a landing layer is needed |
 | Feature pipeline | transform landed or live inputs and write curated rows to BigQuery |
 | Training pipeline | read curated rows, train, evaluate, and register through MLflow |
-| Inference pipeline | serve the API on the active hosted full-stack target, or optionally through the inference-only Cloud Run target for a smaller surface |
+| Inference pipeline | serve the primary hosted API on Cloud Run while retaining the hosted full-stack app surface for operator duties |
 | Feast serving path | point the same logical feature view at BigQuery instead of local parquet |
 
 ## Storage Layering In Cloud
@@ -176,7 +168,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Artifacts | MinIO-backed MLflow artifact path | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
-| Public exposure | local ports on the developer machine | the active shared environment uses the hosted full-stack target and exposes only the app by default; Cloud Run exposes only the inference service when used; operator dashboards stay private unless you deliberately publish them |
+| Public exposure | local ports on the developer machine | Cloud Run is the shared hosted API surface; the retained hosted full-stack target stays private by default; operator dashboards stay private unless you deliberately publish them |
 
 ## What Is Already In Place
 
@@ -188,8 +180,8 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 ## Current Tradeoffs
 
 - MLflow stays on the compose host in the active shared environment.
-- Airflow also stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
-- The two hosted paths solve different needs: one keeps the full stack online, the other narrows hosting to the API.
+- Airflow stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
+- The two hosted paths now solve different roles: Cloud Run is the API surface, and the compose host keeps the broader operator stack online.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief

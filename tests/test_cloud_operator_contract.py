@@ -375,7 +375,15 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
 
     assert "always()" in summary_step["if"]
     assert (
-        'echo "- App verification: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"'
+        'echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"'
+        in summary_script
+    )
+    assert (
+        'echo "- Primary hosted API URL: $(render_output primary_hosted_api_url not-provisioned)"'
+        in summary_script
+    )
+    assert (
+        'echo "- Primary hosted API verification: ${{ steps.verify_hosted_runtimes.outputs.primary_hosted_api_verification_status }}"'
         in summary_script
     )
     assert (
@@ -384,6 +392,10 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     )
     assert (
         'echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"'
+        in summary_script
+    )
+    assert (
+        'echo "- Hosted VM public app surface: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"'
         in summary_script
     )
 
@@ -414,6 +426,32 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     )
 
 
+def test_terraform_outputs_expose_primary_hosted_api_contract() -> None:
+    outputs = _read_text("terraform/outputs.tf")
+
+    assert 'output "primary_hosted_api_target"' in outputs
+    assert 'output "primary_hosted_api_url"' in outputs
+    assert '"cloud-run"' in outputs
+    assert "google_cloud_run_v2_service.app[0].uri" in outputs
+
+
+def test_terraform_online_compose_public_ports_default_to_private_control_plane() -> (
+    None
+):
+    variables = _read_text("terraform/variables.tf")
+
+    assert 'variable "online_compose_public_ports"' in variables
+    assert "default     = []" in variables
+
+
+def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
+    tfvars = _read_text("terraform/terraform.tfvars.example")
+
+    assert "provision_cloud_run_service    = true" in tfvars
+    assert "provision_online_compose_host  = true" in tfvars
+    assert "online_compose_public_ports    = []" in tfvars
+
+
 def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> None:
     workflow = _workflow_yaml(".github/workflows/terraform.yml")
 
@@ -422,25 +460,19 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
 
     assert verify_step["id"] == "verify_hosted_runtimes"
     assert (
+        "if [[ \"${TF_VAR_provision_cloud_run_service}\" != 'true' ]]; then"
+        in verify_script
+    )
+    assert (
         'online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"'
         in verify_script
     )
-    assert 'echo "Waiting for hosted app health at ${health_url}..."' in verify_script
-    assert 'spots_url="${online_compose_app_url%/}/spots"' in verify_script
-    assert 'echo "Checking hosted spots endpoint at ${spots_url}..."' in verify_script
-    assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in verify_script
-    assert '"model_alias"[[:space:]]*:' in verify_script
-    assert '"model_version"[[:space:]]*:' in verify_script
     assert (
-        "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
+        'echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."'
         in verify_script
     )
     assert (
-        "foehncast_online_compose_sync_last_success_timestamp_seconds\\{"
-        in verify_script
-    )
-    assert (
-        'echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."'
+        'echo "Hosted runtime verification failed: online compose app URL is public (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2'
         in verify_script
     )
     assert (
@@ -467,11 +499,18 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert '"id"[[:space:]]*:' in verify_script
     assert "foehncast_online_compose_sync_status_file_present" in verify_script
     assert (
-        'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
+        'echo "Cloud Run runtime verification failed: Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
         in verify_script
     )
     assert (
         'echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"' in verify_script
+    )
+    assert (
+        'echo "primary_hosted_api_target=${primary_hosted_api_target}"' in verify_script
+    )
+    assert (
+        'echo "primary_hosted_api_verification_status=${primary_hosted_api_verification_status}"'
+        in verify_script
     )
     assert '} >> "$GITHUB_OUTPUT"' in verify_script
 
@@ -1227,6 +1266,11 @@ def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> 
         'docker compose "$${compose_args[@]}" pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer'
         in template
     )
+    assert (
+        "docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build"
+        in template
+    )
+    assert "--build" not in template
 
 
 def test_online_compose_startup_template_configures_docker_log_rotation() -> None:
@@ -1319,6 +1363,7 @@ def test_online_compose_sync_template_records_last_success_status_file() -> None
     assert '"last_successful_sync_at": "$${sync_timestamp}"' in template
     assert '"last_successful_commit": "$${sync_commit}"' in template
     assert '"compose_deploy_mode": "$${compose_deploy_mode}"' in template
+    assert 'compose_deploy_mode="pull"' in template
 
 
 def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access() -> (
@@ -1452,6 +1497,18 @@ def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -
 def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
     bootstrap = _read_text("scripts/bootstrap-gcp.sh")
 
+    assert "require_primary_hosted_api_configuration()" in bootstrap
+    assert "print_primary_hosted_api_summary()" in bootstrap
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target'
+        in bootstrap
+    )
+    assert (
+        'optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url'
+        in bootstrap
+    )
+    assert 'echo "Primary hosted API target: ${primary_target}"' in bootstrap
+    assert 'echo "Primary hosted API URL: ${primary_url}"' in bootstrap
     assert "print_cloud_run_summary()" in bootstrap
     assert (
         'optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url'
@@ -1491,23 +1548,12 @@ def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply()
     bootstrap = _read_text("scripts/bootstrap-gcp.sh")
 
     assert "verify_online_compose_runtime()" in bootstrap
-    assert 'health_url="${app_url%/}/health"' in bootstrap
-    assert 'spots_url="${app_url%/}/spots"' in bootstrap
-    assert 'metrics_url="${app_url%/}/metrics"' in bootstrap
-    assert 'echo "Waiting for hosted app health at ${health_url}..."' in bootstrap
-    assert 'echo "Checking hosted spots endpoint at ${spots_url}..."' in bootstrap
-    assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in bootstrap
-    assert '"model_alias"[[:space:]]*:' in bootstrap
-    assert '"model_version"[[:space:]]*:' in bootstrap
     assert (
-        "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
+        'echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."'
         in bootstrap
     )
     assert (
-        "foehncast_online_compose_sync_last_success_timestamp_seconds\\{" in bootstrap
-    )
-    assert (
-        'echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."'
+        'echo "Hosted online compose app URL is public (${app_url}), but this configuration requires Cloud Run to remain the only public API path." >&2'
         in bootstrap
     )
     assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
@@ -1539,12 +1585,27 @@ def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
     assert '"id"[[:space:]]*:' in bootstrap
     assert "foehncast_online_compose_sync_status_file_present" in bootstrap
     assert (
-        'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
+        'echo "Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
         in bootstrap
     )
     assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
         "verify_cloud_run_runtime"
     )
+
+
+def test_bootstrap_gcp_prompts_for_primary_cloud_run_and_retained_vm() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert (
+        "Provision Cloud Run as the primary hosted API now? This needs a reachable MLflow endpoint."
+        in bootstrap
+    )
+    assert (
+        "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM."
+        in bootstrap
+    )
+    assert 'replace_or_append_line "$TFVARS_FILE"' in bootstrap
+    assert "online_compose_public_ports = []" in bootstrap
 
 
 def test_prepare_feast_cloud_requires_bigquery_runtime_contract() -> None:

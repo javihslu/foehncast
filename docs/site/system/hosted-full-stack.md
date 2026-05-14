@@ -1,6 +1,6 @@
 # Hosted Full-Stack
 
-FoehnCast uses the hosted full-stack target as the active shared deployment path. This target keeps Airflow, MLflow, the FastAPI app, and the operator monitoring stack online from one Compute Engine host while reusing the shared GCP baseline for storage, identity, and image-delivery dependencies.
+FoehnCast keeps the hosted full-stack target as the retained operator control plane. This target keeps Airflow, MLflow, the FastAPI app, and the operator monitoring stack online from one Compute Engine host while Cloud Run carries the only promoted public API path.
 
 This page records the current hosted full-stack contract that is described by the cloud bootstrap, Terraform reference, and cloud-operator tests. It focuses on the active shared runtime target, not on future migrations.
 
@@ -36,7 +36,7 @@ The important boundary is that the hosted full-stack target stays a runtime targ
 - the same repository owns the running Airflow, MLflow, app, and monitoring surfaces
 - the host depends on shared GCP storage and identity surfaces instead of local emulators
 - GitHub Actions remote Terraform plus the host sync timer update the target after the one-time maintainer bootstrap
-- only the app is public by default, while operator tools stay private unless deliberately exposed
+- Cloud Run is the only promoted public API path, while this VM keeps the retained operator stack available
 
 ## Surface Responsibilities
 
@@ -52,14 +52,15 @@ This keeps the current shared environment honest. The runtime lives on the host,
 
 ## Shared Environment Today
 
-The shared environment uses this target today:
+The shared environment keeps this target online today:
 
-- one Compute Engine host runs Airflow, MLflow, the FastAPI app, Prometheus, the StatsD exporter, and Grafana together
+- Cloud Run is the primary hosted API surface for shared serving traffic
+- one Compute Engine host still runs Airflow, MLflow, the FastAPI app, Prometheus, the StatsD exporter, and Grafana together
 - maintainers bootstrap the shared GCP baseline and remote Terraform control plane once from Google Cloud Shell
 - GitHub Actions remote Terraform applies advance the shared environment after bootstrap
-- the inference-only Cloud Run target remains available, but it is not the main shared deployment target today
+- the VM-hosted app remains part of the operator runtime on the host, but it is not treated as a second public API path
 
-That keeps the current deployment story concrete: the shared environment is the compose-host path, while Cloud Run stays the smaller optional API-only path.
+That keeps the deployment story concrete: Cloud Run is the one promoted shared hosted API URL, while the compose host remains the retained full-stack operator path.
 
 ## Runtime Contract
 
@@ -92,10 +93,11 @@ The current bootstrap and host contract is:
 
 - Terraform can provision the Compute Engine host, static IP, network, and cloud data surfaces
 - day-2 remote applies read synced GitHub repository variables instead of treating `terraform.tfvars` as the ongoing source of truth
-- the host clones the repository, writes a runtime `.env`, and tries to pull the published images
-- if those images are not available yet, the host can build them locally as a fallback
-- bootstrap prints the host, app, Airflow, and MLflow URLs when those outputs exist
-- bootstrap can verify the hosted app through `/health` and `/metrics` when the app URL is publicly exposed
+- the host clones the repository, writes a runtime `.env`, and pulls the published images
+- if those images are not available, the sync fails fast so the image contract stays simple and reviewable
+- bootstrap prints the primary hosted API target first, then the Cloud Run, host, app, Airflow, and MLflow URLs when those outputs exist
+- bootstrap verifies the promoted Cloud Run path through `/health`, `/spots`, and `/metrics` when it is enabled
+- bootstrap fails if the retained VM app is publicly exposed, because Cloud Run is the only supported public API path in this configuration
 
 That split keeps one-time environment setup separate from normal day-2 delivery.
 
@@ -119,11 +121,11 @@ The shared hosted target keeps exposure narrow by default.
 
 The current contract is:
 
-- `online_compose_public_ports = [8000]` keeps only the app internet-reachable by default
+- `online_compose_public_ports = []` keeps the operator host private by default
 - Airflow and MLflow stay private unless you intentionally expose their ports
 - operator monitoring surfaces remain on the operator side unless you deliberately publish them yourself
-- `bootstrap-gcp` waits for the hosted `/health` endpoint and checks `/metrics` for the online compose sync metrics when the app URL is public
-- if the hosted app URL is not publicly exposed, bootstrap skips that runtime verification instead of pretending the route was checked
+- `bootstrap-gcp` treats Cloud Run as the primary hosted API path and verifies its `/health`, `/spots`, and `/metrics` routes when enabled
+- `bootstrap-gcp` expects the retained VM app to stay private and fails if port `8000` is still exposed publicly
 
 This preserves the same public-surface rule used across the rest of the docs: the app is the product and service surface, while operator tools remain private by default.
 
@@ -139,7 +141,7 @@ These surfaces stay local or CI-only:
 - the local MinIO objectstore
 - the local Datastore emulator
 
-The hosted target also does not replace the separate Cloud Run path. The inference-only target still exists as the smaller hosted option when the whole stack does not need to stay online together.
+The hosted target also does not remain a second public API path. Cloud Run carries the promoted serving role, while the VM keeps the broader operator stack online.
 
 ## Why This Target Works
 
