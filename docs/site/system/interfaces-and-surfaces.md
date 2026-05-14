@@ -1,6 +1,6 @@
 # Interfaces and Surfaces
 
-FoehnCast exposes several different kinds of surfaces, but they do not all serve the same audience or carry the same exposure expectations. This page records the current boundary between rider-facing demos, service endpoints, operator tools, and public-safe docs evidence so readers do not have to reconstruct that split from the landing page, architecture page, inference page, and monitoring page.
+FoehnCast exposes several different kinds of surfaces, but they do not all serve the same audience or carry the same exposure expectations. This page records the current boundary between rider-facing demos, service endpoints, operator tools, delivery surfaces, and public-safe docs evidence so readers do not have to reconstruct that split from the landing page, architecture page, inference page, workflow docs, and monitoring page.
 
 !!! note "Scope"
 
@@ -33,6 +33,12 @@ flowchart LR
         GRAF[Grafana]
     end
 
+    subgraph Delivery["Delivery surfaces"]
+        GHA[GitHub Actions]
+        TF[Terraform]
+        BSTR[Bootstrap scripts]
+    end
+
     subgraph PublicSafe["Public-safe docs and evidence"]
         DOCS[Docs pages]
         EVID[Rendered summaries and screenshots]
@@ -45,6 +51,7 @@ flowchart LR
     RANK --> MET
     MET --> PROM
     PROM --> GRAF
+    GHA --> TF
 </div>
 
 The important split is that not every HTTP route is rider-facing, and not every visible screen is safe to treat as public documentation.
@@ -56,6 +63,7 @@ The important split is that not every HTTP route is rider-facing, and not every 
 | Rider-facing demo surfaces | Streamlit live demo and `/features/online/demo` | rider, reviewer, contributor | public-safe when shown as screenshots, rendered examples, or a deliberate local demo |
 | Service endpoints | `/health`, `/spots`, `/predict`, `/rank`, and `/features/online` | clients, smoke tests, support services, and app-side integrations | service-only |
 | Operator dashboards and control planes | `/metrics`, Airflow, MLflow, Prometheus, and Grafana | maintainer or deployment operator | private by default, except for the hosted app route itself |
+| Delivery surfaces | GitHub Actions workflows, Terraform apply paths, and bootstrap helpers | maintainer | review-controlled and not runtime-facing |
 | Public-safe docs and evidence | docs pages, rendered markdown, summary JSON-derived charts, and screenshots | reviewer, fork reader, course audience | public-safe |
 
 This means a surface can be technically reachable without being part of the rider-facing product boundary. The clearest example is `/metrics`: it is an application endpoint, but it belongs to the operator monitoring contract rather than to the public product surface.
@@ -99,6 +107,18 @@ The operator layer is where orchestration, tracking, monitoring, and review live
 
 This operator layer stays separate from the rider-facing and public-docs layers on purpose. The checked-in monitoring config disables anonymous Grafana access, public dashboards, and embedding by default. The local bootstrap applies local-only overrides only so a local run can verify provisioning without changing the hosted policy.
 
+## Delivery Surfaces
+
+The delivery layer is separate from the runtime operator layer.
+
+| Surface | Current role |
+|------|--------------|
+| GitHub Actions | lint, test, build, publish, and reviewed deploy or Terraform workflows |
+| Terraform | declare the cloud contract and apply reviewed infrastructure changes |
+| Bootstrap helpers | perform one-time environment setup and repository-variable seeding |
+
+These surfaces are not the runtime orchestrator. For the current horizon, GitHub Actions advances reviewed delivery, while hosted Airflow on GCP remains the runtime scheduling, retry, and backfill surface.
+
 ## Public-Safe Docs And Evidence
 
 The public docs site is a separate surface class, not a mirror of the live control plane.
@@ -130,6 +150,8 @@ That rule keeps the docs understandable in review without leaking a live control
 The shared hosted environment keeps the same rule as the docs: the app is the product and service surface, while operator tools stay private unless an operator intentionally publishes them.
 
 In the shared hosted lane, Cloud Run owns the public product and service surface. The hosted full-stack VM remains private and operator-only, and reopening its app route is a configuration error rather than a rollback step. The remaining VM gate is therefore about control-plane retirement, not about keeping a second public serving path alive.
+
+GitHub Actions and Terraform sit outside those runtime modes as delivery surfaces. They publish reviewed artifacts and infrastructure changes, but they do not become a public product surface or a runtime orchestration plane.
 
 ## Why This Boundary Works
 

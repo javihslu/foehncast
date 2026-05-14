@@ -103,6 +103,16 @@ The runtime orchestration surface of record is the current hosted Airflow contro
 
 GitHub therefore remains the delivery plane, while hosted Airflow remains the runtime scheduling plane. The later retry and backfill runbooks should assume Airflow as the operator surface until a future decision changes that explicitly.
 
+## GitHub Versus GCP Delivery Boundary
+
+The current delivery story is split intentionally:
+
+- GitHub owns reviewed artifacts, CI validation, image publication, and Terraform-driven infrastructure changes.
+- GCP owns runtime execution: Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime secrets and identities, and hosted telemetry.
+- Terraform outputs, repository variables, and published images form the handoff contract between the two planes.
+
+For this horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. That means Cloud Run is the serving surface, not the scheduler, and GitHub Actions is the delivery plane, not the runtime orchestrator.
+
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
