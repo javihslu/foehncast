@@ -81,6 +81,13 @@ The identity split around this target is deliberate:
 
 That online compose runtime identity is the current transition contract, not the preferred steady-state shape for every managed runtime. It remains broader than the Cloud Run identity only because the host still owns more responsibilities today.
 
+For Feast specifically, the hosted full-stack target is expected to stay aligned with the Cloud Run path on one logical contract:
+
+- both hosted targets render `.state/feast/feature_store.runtime.yaml` from environment instead of carrying separate handwritten hosted configs
+- both hosted targets use the same registry and staging layout under `gs://<artifact-bucket>/feast/`
+- both hosted targets point Feast offline reads at the same curated BigQuery table contract
+- both hosted targets point Feast online serving at the same named Datastore-mode database unless an environment override is intentional
+
 ## Bootstrap And Day-2 Delivery
 
 The hosted full-stack target is not part of the default contributor path. Its lifecycle is split into two layers:

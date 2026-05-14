@@ -77,6 +77,20 @@ The current cloud contract is:
 - the bootstrap and Terraform-managed hosted runtimes normally populate the project, registry, staging, and Datastore settings for the shared environment
 - `./scripts/prepare-feast-cloud.sh` renders the active runtime config, applies the repo, and materializes the hosted online store
 
+The hosted VM and Cloud Run targets are expected to share these bindings:
+
+| Binding | Shared hosted value |
+|------|----------------------|
+| runtime source | `FOEHNCAST_FEAST_SOURCE=bigquery` |
+| rendered config path | `.state/feast/feature_store.runtime.yaml` |
+| registry | `gs://<artifact-bucket>/feast/registry.db` |
+| staging | `gs://<artifact-bucket>/feast/staging` |
+| offline source | curated BigQuery table `<project>.<dataset>.<table>` |
+| default curated dataset | `foehncast` unless the environment overrides it |
+| online store | Datastore-mode database `feast-online` unless the environment overrides it |
+
+The checked-in `feature_store.gcp.yaml.example` is a reference for that same hosted contract. The running hosted targets do not consume it directly; they consume the rendered runtime config produced from environment.
+
 If another environment needs different defaults, override the Feast-specific BigQuery, registry, staging, or Datastore settings through the corresponding environment variables.
 
 Keep the storage roles separate:

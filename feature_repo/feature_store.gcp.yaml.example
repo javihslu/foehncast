@@ -4,7 +4,7 @@ provider: gcp
 offline_store:
   type: bigquery
   project_id: your-gcp-project
-  dataset: feast
+  dataset: foehncast
   location: EU
   gcs_staging_location: gs://your-gcp-bucket/feast/staging
 online_store:
@@ -17,3 +17,6 @@ entity_key_serialization_version: 3
 # BigQuery table or view that exposes curated feature rows with spot_id and
 # forecast_time. A filtered view for the intended dataset split is the simplest
 # cloud hand-off from the current storage layer.
+# This checked-in example mirrors the shared hosted contract defaults. The
+# active hosted VM and Cloud Run targets render their real runtime config from
+# environment into .state/feast/feature_store.runtime.yaml instead.

@@ -70,6 +70,38 @@ def test_render_runtime_config_uses_bigquery_bindings(
     }
 
 
+def test_render_runtime_config_uses_hosted_contract_defaults(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+
+    monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
+    monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
+    monkeypatch.setenv("GCP_PROJECT_ID", "demo-project")
+    monkeypatch.setenv("GCP_BUCKET_NAME", "demo-bucket")
+    monkeypatch.delenv("FOEHNCAST_FEAST_BIGQUERY_DATASET", raising=False)
+    monkeypatch.delenv("FOEHNCAST_FEAST_BIGQUERY_LOCATION", raising=False)
+    monkeypatch.delenv("FOEHNCAST_FEAST_DATASTORE_DATABASE", raising=False)
+
+    destination = feast_runtime.render_runtime_config()
+
+    rendered = yaml.safe_load(destination.read_text())
+    assert rendered["registry"] == "gs://demo-bucket/feast/registry.db"
+    assert rendered["offline_store"] == {
+        "type": "bigquery",
+        "project_id": "demo-project",
+        "dataset": "foehncast",
+        "location": "EU",
+        "gcs_staging_location": "gs://demo-bucket/feast/staging",
+    }
+    assert rendered["online_store"] == {
+        "type": "datastore",
+        "project_id": "demo-project",
+        "database": "feast-online",
+    }
+
+
 def test_render_runtime_config_allows_datastore_overrides(
     monkeypatch, tmp_path: Path
 ) -> None:
