@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 import json
 from pathlib import Path
-import sys
 from typing import Any
 
 from foehncast._json import json_object_mapping, read_json_file, write_pretty_json
@@ -38,6 +37,8 @@ def runtime_release_summary_history_paths() -> list[Path]:
     return sorted(
         (runtime_release_report_dir() / "history").glob("runtime-release-*.json")
     )
+
+
 def _write_runtime_release_history(summary: dict[str, Any]) -> Path:
     history_path = (
         runtime_release_report_dir()
@@ -186,7 +187,9 @@ def write_runtime_release_summary(summary: dict[str, Any]) -> Path:
 def _resolved_runtime_release_summary_path(
     report_path: str | Path | None = None,
 ) -> Path:
-    return Path(report_path) if report_path is not None else runtime_release_summary_path()
+    return (
+        Path(report_path) if report_path is not None else runtime_release_summary_path()
+    )
 
 
 def read_runtime_release_summary(

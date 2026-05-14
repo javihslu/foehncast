@@ -105,6 +105,8 @@ FEAST_CLOUD_ENV_KEYS = {
     "FOEHNCAST_FEAST_BIGQUERY_TABLE",
     "FOEHNCAST_FEAST_DATASTORE_DATABASE",
 }
+
+
 def _function_body(relative_path: str, function_name: str) -> str:
     match = re.search(
         rf"^{function_name}\(\) \{{\n(?P<body>.*?)^\}}",
@@ -821,17 +823,23 @@ def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
     assert 'AIRFLOW_API_BASE_URL="http://127.0.0.1:8080/api/v2"' in script
     assert 'source "${ROOT_DIR}/scripts/cli-common.sh"' in script
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in script
-    assert '${AIRFLOW_API_BASE_URL}/monitor/health' in script
+    assert "${AIRFLOW_API_BASE_URL}/monitor/health" in script
     assert "python3 -m foehncast.airflow_api" in helper
-    assert '${airflow_api_base_url}/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date' in helper
+    assert (
+        "${airflow_api_base_url}/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date"
+        in helper
+    )
     assert "run_airflow_api_helper" in script
-    assert 'airflow_api_verify_health \\' in script
-    assert 'airflow_api_wait_for_dag_run_state \\' in script
+    assert "airflow_api_verify_health \\" in script
+    assert "airflow_api_wait_for_dag_run_state \\" in script
     assert "python3 -m foehncast.runtime_release" in script
     assert "run_runtime_release_helper" in script
     assert 'PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in helper
     assert "normalize-request" in script
-    assert 'REQUEST_FILE="$(require_cli_option_value "--request-file" "${1:-}" usage)"' in script
+    assert (
+        'REQUEST_FILE="$(require_cli_option_value "--request-file" "${1:-}" usage)"'
+        in script
+    )
     assert 'airflow dags trigger "$DAG_ID"' in script
     assert (
         'wait_for_airflow_dag_run_state "$DAG_ID" "$dag_run_id" success 120 2' in script
@@ -1244,10 +1252,18 @@ def test_bootstrap_gcp_normalizes_custom_env_and_tfvars_paths() -> None:
 
     assert "require_cli_option_value()" in cli_common
     assert "default_terraform_tfvars_file()" in state_helper
-    assert 'TFVARS_FILE="$(default_terraform_tfvars_file "$TERRAFORM_DIR")"' in bootstrap
+    assert (
+        'TFVARS_FILE="$(default_terraform_tfvars_file "$TERRAFORM_DIR")"' in bootstrap
+    )
     assert "resolve_invocation_path()" in bootstrap
-    assert 'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"' in bootstrap
-    assert 'TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"' in bootstrap
+    assert (
+        'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"'
+        in bootstrap
+    )
+    assert (
+        'TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"'
+        in bootstrap
+    )
     assert 'ENV_FILE="$(resolve_invocation_path "$ENV_FILE")"' in bootstrap
     assert 'TFVARS_FILE="$(resolve_invocation_path "$TFVARS_FILE")"' in bootstrap
 
@@ -1280,10 +1296,22 @@ def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -
     assert "terraform_platform_value_present()" in state_helper
     assert "print_terraform_summary_line_if_present()" in state_helper
     assert "print_trimmed_terraform_output_summary()" in state_helper
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose host IP" online_compose_host_ip' in bootstrap
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url' in bootstrap
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url' in bootstrap
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url' in bootstrap
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose host IP" online_compose_host_ip'
+        in bootstrap
+    )
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url'
+        in bootstrap
+    )
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url'
+        in bootstrap
+    )
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url'
+        in bootstrap
+    )
 
 
 def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
@@ -1291,11 +1319,20 @@ def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
 
     assert "require_primary_hosted_api_configuration()" in bootstrap
     assert "print_primary_hosted_api_summary()" in bootstrap
-    assert 'primary_target="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"' in bootstrap
+    assert (
+        'primary_target="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"'
+        in bootstrap
+    )
     assert 'echo "Primary hosted API target: ${primary_target}"' in bootstrap
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Primary hosted API URL" primary_hosted_api_url' in bootstrap
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Primary hosted API URL" primary_hosted_api_url'
+        in bootstrap
+    )
     assert "print_cloud_run_summary()" in bootstrap
-    assert 'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Run service URL" cloud_run_service_url' in bootstrap
+    assert (
+        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Run service URL" cloud_run_service_url'
+        in bootstrap
+    )
     assert (
         'echo "Cloud Run allows unauthenticated access: ${FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED}"'
         in bootstrap
@@ -1312,13 +1349,16 @@ def test_bootstrap_gcp_reports_split_runtime_identities() -> None:
         'echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"'
         in bootstrap
     )
-    assert 'print_bootstrap_identity_summary' in bootstrap
+    assert "print_bootstrap_identity_summary" in bootstrap
     assert (
         'print_terraform_summary_line_if_present "Online compose runtime service account" "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT"'
         in bootstrap
     )
-    assert 'if online_compose_is_enabled; then' in bootstrap
-    assert 'echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"' in bootstrap
+    assert "if online_compose_is_enabled; then" in bootstrap
+    assert (
+        'echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"'
+        in bootstrap
+    )
 
 
 def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply() -> (
@@ -1345,7 +1385,10 @@ def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
 
     assert "verify_cloud_run_runtime()" in bootstrap
     assert "require_curl_payload_patterns()" in bootstrap
-    assert 'service_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"' in bootstrap
+    assert (
+        'service_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"'
+        in bootstrap
+    )
     assert 'if ! terraform_platform_value_present "$service_url"; then' in bootstrap
     assert 'health_url="${service_url%/}/health"' in bootstrap
     assert 'spots_url="${service_url%/}/spots"' in bootstrap
@@ -1367,7 +1410,7 @@ def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
         'echo "Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
         in bootstrap
     )
-    assert 'require_curl_payload_patterns \\' in bootstrap
+    assert "require_curl_payload_patterns \\" in bootstrap
     assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
         "verify_cloud_run_runtime"
     )
@@ -1385,8 +1428,14 @@ def test_bootstrap_gcp_prompts_for_primary_cloud_run_and_retained_vm() -> None:
     assert "foehncast_default_feast_online_store_database()" in state_helper
     assert "foehncast_default_cloud_run_service_name()" in state_helper
     assert "foehncast_default_online_compose_host_name()" in state_helper
-    assert 'cloud_run_default="$(tfvars_yes_no_default provision_cloud_run_service)"' in bootstrap
-    assert 'cloud_run_service="$(prompt_tfvars_value cloud_run_service_name "Cloud Run service name" "$(foehncast_default_cloud_run_service_name)")"' in bootstrap
+    assert (
+        'cloud_run_default="$(tfvars_yes_no_default provision_cloud_run_service)"'
+        in bootstrap
+    )
+    assert (
+        'cloud_run_service="$(prompt_tfvars_value cloud_run_service_name "Cloud Run service name" "$(foehncast_default_cloud_run_service_name)")"'
+        in bootstrap
+    )
     assert (
         "Provision Cloud Run as the primary hosted API now? This needs a reachable MLflow endpoint."
         in bootstrap
@@ -1395,7 +1444,10 @@ def test_bootstrap_gcp_prompts_for_primary_cloud_run_and_retained_vm() -> None:
         "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM."
         in bootstrap
     )
-    assert 'provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"' in bootstrap
+    assert (
+        'provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"'
+        in bootstrap
+    )
     assert 'replace_or_append_line "$TFVARS_FILE"' in bootstrap
     assert "online_compose_public_ports = []" in bootstrap
 
@@ -1405,7 +1457,10 @@ def test_prepare_feast_cloud_requires_bigquery_runtime_contract() -> None:
     cli_common = _read_text("scripts/cli-common.sh")
 
     assert "require_cli_option_value()" in cli_common
-    assert 'MATERIALIZE_TS="$(require_cli_option_value "--materialize-to" "${1:-}" usage)"' in script
+    assert (
+        'MATERIALIZE_TS="$(require_cli_option_value "--materialize-to" "${1:-}" usage)"'
+        in script
+    )
     assert "require_any_env_value()" in script
     assert (
         'export FOEHNCAST_FEAST_SOURCE="${FOEHNCAST_FEAST_SOURCE:-bigquery}"' in script
@@ -1446,7 +1501,10 @@ def test_prepare_feast_local_uses_resolved_env_helpers() -> None:
     assert "ensure_env_default()" in helper
     assert "export_local_feast_datastore_env()" in helper
     assert 'for file_path in "$@"; do' in helper
-    assert 'export_local_feast_datastore_env "$DEFAULT_ENV_FILE" "$EXAMPLE_ENV_FILE"' in script
+    assert (
+        'export_local_feast_datastore_env "$DEFAULT_ENV_FILE" "$EXAMPLE_ENV_FILE"'
+        in script
+    )
     assert 'CONFIG_PATH="$(render_feast_runtime_config_path "$ROOT_DIR")"' in script
     assert (
         'run_feast_repo_apply_and_maybe_materialize "$ROOT_DIR/feature_repo" "$MATERIALIZE" "$MATERIALIZE_TS"'
@@ -1467,7 +1525,7 @@ def test_prepare_feast_cloud_renders_runtime_config_and_applies_repo() -> None:
     assert "export_feast_runtime_config_path()" in cli_common
     assert "run_feast_repo_apply_and_maybe_materialize()" in cli_common
     assert 'export_feast_runtime_config_path "$CONFIG_PATH"' in script
-    assert 'uv run python -m foehncast.feast_runtime' in cli_common
+    assert "uv run python -m foehncast.feast_runtime" in cli_common
     assert "uv run --group feast feast apply >/dev/null" in cli_common
     assert (
         'run_feast_repo_apply_and_maybe_materialize "$ROOT_DIR/feature_repo" "$MATERIALIZE" "$MATERIALIZE_TS"'
@@ -1499,19 +1557,26 @@ def test_smoke_bootstrap_only_seeds_hosted_feast_defaults() -> None:
     script = _read_text("scripts/smoke-bootstrap-only.sh")
 
     assert 'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in script
-    assert 'PROJECT_ID="$(require_cli_option_value "--project-id" "${1:-}" usage)"' in script
+    assert (
+        'PROJECT_ID="$(require_cli_option_value "--project-id" "${1:-}" usage)"'
+        in script
+    )
     assert 'REGION="$(require_cli_option_value "--region" "${1:-}" usage)"' in script
     assert "smoke_feast_bigquery_table()" in script
     assert "print_smoke_feast_summary()" in script
     assert (
-        'printf \'%s.%s.%s\\n\' "$PROJECT_ID" "$(foehncast_default_bigquery_dataset)" "$(foehncast_default_bigquery_table)"' in script
+        'printf \'%s.%s.%s\\n\' "$PROJECT_ID" "$(foehncast_default_bigquery_dataset)" "$(foehncast_default_bigquery_table)"'
+        in script
     )
     assert 'echo "- hosted Feast source: bigquery"' in script
     assert (
         'echo "- hosted Feast offline source table: $(smoke_feast_bigquery_table)"'
         in script
     )
-    assert 'echo "- hosted Feast online store database: $(foehncast_default_feast_online_store_database)"' in script
+    assert (
+        'echo "- hosted Feast online store database: $(foehncast_default_feast_online_store_database)"'
+        in script
+    )
     assert '"$(foehncast_default_bigquery_dataset)" \\' in script
     assert '"$(foehncast_default_bigquery_table)" \\' in script
     assert '"$(foehncast_default_feast_online_store_database)" \\' in script
@@ -1539,17 +1604,9 @@ def test_terraform_remote_reports_hosted_feast_follow_up_for_apply() -> None:
     assert "foehncast_default_bigquery_table()" in state_helper
     assert "foehncast_default_feast_online_store_database()" in state_helper
     assert "remote_feast_bigquery_dataset()" in script
-    assert (
-        'resolved_repo_backed_value \\' in script
-    )
-    assert (
-        '"${INPUT_BIGQUERY_DATASET_ID:-}" \\'
-        in script
-    )
-    assert (
-        'GCP_BIGQUERY_DATASET \\'
-        in script
-    )
+    assert "resolved_repo_backed_value \\" in script
+    assert '"${INPUT_BIGQUERY_DATASET_ID:-}" \\' in script
+    assert "GCP_BIGQUERY_DATASET \\" in script
     assert (
         '"${GCP_BIGQUERY_DATASET:-${STORAGE_BIGQUERY_DATASET:-${FOEHNCAST_FEAST_BIGQUERY_DATASET:-$(foehncast_default_bigquery_dataset)}}}"'
         in script
@@ -1565,20 +1622,20 @@ def test_terraform_remote_reports_hosted_feast_follow_up_for_apply() -> None:
         in script
     )
     assert 'project_id="${PROJECT_ID:-<project_id>}"' in script
-    assert (
-        '"${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-}" \\'
-        in script
-    )
-    assert (
-        'GCP_FEAST_ONLINE_STORE_DATABASE_NAME \\'
-        in script
-    )
+    assert '"${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-}" \\' in script
+    assert "GCP_FEAST_ONLINE_STORE_DATABASE_NAME \\" in script
     assert (
         '"${GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-${FOEHNCAST_FEAST_DATASTORE_DATABASE:-$(foehncast_default_feast_online_store_database)}}"'
         in script
     )
-    assert 'PROJECT_ID="$(resolved_repo_backed_value "$PROJECT_ID" GCP_PROJECT_ID "${GCP_PROJECT_ID:-}")"' in script
-    assert 'REGION="$(resolved_repo_backed_value "$REGION" GCP_LOCATION "${GCP_LOCATION:-}")"' in script
+    assert (
+        'PROJECT_ID="$(resolved_repo_backed_value "$PROJECT_ID" GCP_PROJECT_ID "${GCP_PROJECT_ID:-}")"'
+        in script
+    )
+    assert (
+        'REGION="$(resolved_repo_backed_value "$REGION" GCP_LOCATION "${GCP_LOCATION:-}")"'
+        in script
+    )
     assert "bigquery_dataset_id)" in script
     assert 'INPUT_BIGQUERY_DATASET_ID="$value"' in script
     assert "bigquery_feature_table_id)" in script
@@ -1678,18 +1735,35 @@ def test_cloud_scripts_share_github_repo_helpers() -> None:
     assert "resolve_repo()" not in configure
     assert "gh auth status" not in configure
     assert "require_github_auth" in configure
-    assert 'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in configure
-    assert 'TERRAFORM_DIR="$(require_cli_option_value "--terraform-dir" "${1:-}" usage)"' in configure
-    assert 'REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"' in configure
+    assert (
+        'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in configure
+    )
+    assert (
+        'TERRAFORM_DIR="$(require_cli_option_value "--terraform-dir" "${1:-}" usage)"'
+        in configure
+    )
+    assert (
+        'REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"'
+        in configure
+    )
 
     assert "repo_variable_value()" not in remote
     assert "gh auth status" not in remote
     assert "require_github_auth" in remote
     assert 'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in remote
-    assert 'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"' in remote
-    assert 'record_input "$(require_cli_option_value "--input" "${1:-}" usage)"' in remote
-    assert 'WATCH_INTERVAL="$(require_cli_option_value "--watch-interval" "${1:-}" usage)"' in remote
-    assert 'REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"' in remote
+    assert (
+        'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"' in remote
+    )
+    assert (
+        'record_input "$(require_cli_option_value "--input" "${1:-}" usage)"' in remote
+    )
+    assert (
+        'WATCH_INTERVAL="$(require_cli_option_value "--watch-interval" "${1:-}" usage)"'
+        in remote
+    )
+    assert (
+        'REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"' in remote
+    )
 
 
 def test_local_and_runtime_release_scripts_share_airflow_shell_helper() -> None:
@@ -1705,10 +1779,10 @@ def test_local_and_runtime_release_scripts_share_airflow_shell_helper() -> None:
 
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in bootstrap
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in trigger
-    assert 'airflow_api_verify_health \\' in bootstrap
-    assert 'airflow_api_wait_for_dag_run_state \\' in bootstrap
-    assert 'airflow_api_verify_health \\' in trigger
-    assert 'airflow_api_wait_for_dag_run_state \\' in trigger
+    assert "airflow_api_verify_health \\" in bootstrap
+    assert "airflow_api_wait_for_dag_run_state \\" in bootstrap
+    assert "airflow_api_verify_health \\" in trigger
+    assert "airflow_api_wait_for_dag_run_state \\" in trigger
 
 
 def test_local_scripts_share_env_file_helper() -> None:
@@ -1735,9 +1809,18 @@ def test_bootstrap_scripts_share_payload_check_helper() -> None:
     assert "payload_check_require_patterns()" in helper
     assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in local_bootstrap
     assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in cloud_bootstrap
-    assert 'payload_check_require_pattern "Grafana provisioning check failed"' in local_bootstrap
-    assert 'payload_check_require_pattern "Hosted bootstrap verification failed"' in cloud_bootstrap
-    assert 'payload_check_require_patterns "Hosted bootstrap verification failed"' in cloud_bootstrap
+    assert (
+        'payload_check_require_pattern "Grafana provisioning check failed"'
+        in local_bootstrap
+    )
+    assert (
+        'payload_check_require_pattern "Hosted bootstrap verification failed"'
+        in cloud_bootstrap
+    )
+    assert (
+        'payload_check_require_patterns "Hosted bootstrap verification failed"'
+        in cloud_bootstrap
+    )
 
 
 def test_cloud_operator_scripts_share_gcp_project_access_helper() -> None:
@@ -1751,20 +1834,39 @@ def test_cloud_operator_scripts_share_gcp_project_access_helper() -> None:
     assert 'gcloud projects describe "$GCP_PROJECT_ID" >/dev/null' in helper
     assert 'source "${ROOT_DIR}/scripts/gcp-common.sh"' in bootstrap
     assert 'source "${ROOT_DIR}/scripts/gcp-common.sh"' in teardown
-    assert 'verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"' in bootstrap
-    assert 'verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"' in teardown
-    assert 'echo "Authenticating with Google Cloud via browser if needed..."' not in bootstrap
+    assert (
+        'verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"'
+        in bootstrap
+    )
+    assert (
+        'verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"'
+        in teardown
+    )
+    assert (
+        'echo "Authenticating with Google Cloud via browser if needed..."'
+        not in bootstrap
+    )
     assert 'echo "Checking access to GCP project ${GCP_PROJECT_ID}..."' not in bootstrap
-    assert 'echo "Authenticating with Google Cloud via browser if needed..."' not in teardown
+    assert (
+        'echo "Authenticating with Google Cloud via browser if needed..."'
+        not in teardown
+    )
     assert 'echo "Checking access to GCP project ${GCP_PROJECT_ID}..."' not in teardown
 
 
 def test_teardown_gcp_uses_small_summary_helpers() -> None:
     teardown = _read_text("scripts/teardown-gcp.sh")
 
-    assert 'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"' in teardown
-    assert 'TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"' in teardown
-    assert 'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in teardown
+    assert (
+        'ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"' in teardown
+    )
+    assert (
+        'TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"'
+        in teardown
+    )
+    assert (
+        'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in teardown
+    )
     assert "require_destroy_tfvars_file()" in teardown
     assert "print_enabled_message()" in teardown
     assert "print_state_message()" in teardown
@@ -1772,10 +1874,28 @@ def test_teardown_gcp_uses_small_summary_helpers() -> None:
     assert "print_no_local_terraform_state_message()" in teardown
     assert "print_missing_destroy_tfvars_preview_message()" in teardown
     assert "trim_whitespace()" not in teardown
-    assert 'require_destroy_tfvars_file' in teardown
-    assert 'print_no_local_terraform_state_message "Nothing to preview in this working copy."' in teardown
-    assert 'print_no_local_terraform_state_message "Nothing to destroy in this working copy."' in teardown
-    assert 'print_no_local_terraform_state_message "Skipping Terraform destroy path."' in teardown
-    assert 'print_enabled_message "$CLEAR_GITHUB_ACTIONS" "GitHub Actions variables were not changed because --plan-only was set."' in teardown
-    assert 'print_state_message "$TERRAFORM_DESTROYED" "Terraform destroy completed using ${TFVARS_FILE}." "Terraform-managed resources were left unchanged."' in teardown
-    assert 'print_state_message "$DELETE_PROJECT" "The GCP project delete path was executed." "The GCP project was left unchanged."' in teardown
+    assert "require_destroy_tfvars_file" in teardown
+    assert (
+        'print_no_local_terraform_state_message "Nothing to preview in this working copy."'
+        in teardown
+    )
+    assert (
+        'print_no_local_terraform_state_message "Nothing to destroy in this working copy."'
+        in teardown
+    )
+    assert (
+        'print_no_local_terraform_state_message "Skipping Terraform destroy path."'
+        in teardown
+    )
+    assert (
+        'print_enabled_message "$CLEAR_GITHUB_ACTIONS" "GitHub Actions variables were not changed because --plan-only was set."'
+        in teardown
+    )
+    assert (
+        'print_state_message "$TERRAFORM_DESTROYED" "Terraform destroy completed using ${TFVARS_FILE}." "Terraform-managed resources were left unchanged."'
+        in teardown
+    )
+    assert (
+        'print_state_message "$DELETE_PROJECT" "The GCP project delete path was executed." "The GCP project was left unchanged."'
+        in teardown
+    )

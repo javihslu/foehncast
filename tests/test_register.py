@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from foehncast.training_pipeline import register
-from tests.mlflow_fixtures import clear_tracking_uri as _clear_tracking_uri
 
 
 @pytest.fixture()

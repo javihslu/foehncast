@@ -69,9 +69,8 @@ def _prediction_log_max_rows(configured: int | None = None) -> int:
     if configured is not None:
         return max(int(configured), 2)
 
-    raw_value = (
-        env_value("FOEHNCAST_PREDICTION_LOG_MAX_ROWS")
-        or str(_DEFAULT_PREDICTION_LOG_MAX_ROWS)
+    raw_value = env_value("FOEHNCAST_PREDICTION_LOG_MAX_ROWS") or str(
+        _DEFAULT_PREDICTION_LOG_MAX_ROWS
     )
     try:
         parsed = int(raw_value)

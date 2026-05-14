@@ -108,9 +108,9 @@ def _objectstore_credentials() -> tuple[str | None, str | None]:
 
 
 def _s3_endpoint(storage_config: dict[str, Any]) -> str | None:
-    return env_value("OBJECTSTORE_ENDPOINT", "FSSPEC_S3_ENDPOINT_URL") or storage_config.get(
-        "s3_endpoint"
-    )
+    return env_value(
+        "OBJECTSTORE_ENDPOINT", "FSSPEC_S3_ENDPOINT_URL"
+    ) or storage_config.get("s3_endpoint")
 
 
 def _s3_storage_options(storage_config: dict[str, Any]) -> dict[str, Any]:

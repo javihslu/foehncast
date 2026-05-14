@@ -71,15 +71,17 @@ def test_build_feature_pipeline_spot_summary_normalizes_validation_fields() -> N
             is_valid=False,
             missing_columns=("shore_alignment",),
             null_fractions={"gust_factor": 0.25},
-            range_violations=pd.DataFrame([
-                {
-                    "column": "wind_speed_10m",
-                    "index": "row-1",
-                    "value": 300.0,
-                    "min": 0.0,
-                    "max": 200.0,
-                }
-            ]),
+            range_violations=pd.DataFrame(
+                [
+                    {
+                        "column": "wind_speed_10m",
+                        "index": "row-1",
+                        "value": 300.0,
+                        "min": 0.0,
+                        "max": 200.0,
+                    }
+                ]
+            ),
         ),
         status="validated",
     )

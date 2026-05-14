@@ -218,7 +218,9 @@ def test_prepare_feature_store_requires_existing_repo_before_export(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _missing_repo() -> Path:
-        raise RuntimeError("Configured Feast repo not found at /tmp/missing-feature-repo")
+        raise RuntimeError(
+            "Configured Feast repo not found at /tmp/missing-feature-repo"
+        )
 
     def _unexpected_export(*args: object, **kwargs: object) -> Path:
         raise AssertionError("offline export should not start before repo validation")

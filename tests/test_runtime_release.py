@@ -111,7 +111,9 @@ def test_write_runtime_release_summary_persists_latest_and_history(
     assert (
         latest_path == tmp_path / "airflow" / "reports" / "runtime-release-latest.json"
     )
-    assert _read_json(latest_path)["dag_run_id"] == "runtime_release__2026-05-14T11-00-00Z"
+    assert (
+        _read_json(latest_path)["dag_run_id"] == "runtime_release__2026-05-14T11-00-00Z"
+    )
     history_paths = runtime_release.runtime_release_summary_history_paths()
     assert len(history_paths) == 1
     assert history_paths[0].name == "runtime-release-20260514T110000000000Z.json"

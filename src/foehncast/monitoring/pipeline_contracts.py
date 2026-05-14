@@ -106,6 +106,8 @@ TRAINING_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
         "requested_stage",
     ),
 }
+
+
 def _stage_states(
     *,
     stage_names: tuple[str, ...],

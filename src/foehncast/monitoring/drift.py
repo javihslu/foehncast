@@ -356,6 +356,8 @@ def _parse_column_metrics(
         share_of_drifted_columns = float(drifted_column_count / divisor)
 
     return tuple(column_metrics), drifted_column_count, share_of_drifted_columns
+
+
 def _is_drift_detected(
     score: float | None,
     threshold: float | None,

@@ -202,6 +202,8 @@ def read_training_pipeline_run_summary_history(
             report_dir=report_dir,
         )
     ]
+
+
 def _write_summary_history(
     summary: dict[str, Any],
     *,

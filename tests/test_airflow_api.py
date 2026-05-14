@@ -52,7 +52,11 @@ def test_airflow_dag_run_status_reports_terminal_failure() -> None:
     result = airflow_api.airflow_dag_run_status(
         {
             "dag_runs": [
-                {"dag_run_id": "runtime_release__1", "state": "failed", "run_type": "manual"}
+                {
+                    "dag_run_id": "runtime_release__1",
+                    "state": "failed",
+                    "run_type": "manual",
+                }
             ]
         },
         expected_state="success",

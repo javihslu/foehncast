@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from foehncast.training_pipeline import promote
-from tests.mlflow_fixtures import clear_tracking_uri as _clear_tracking_uri
 
 
 @pytest.fixture()

@@ -97,13 +97,16 @@ def _datastore_online_store_config(
 
 
 def _local_datastore_online_store_config() -> dict[str, Any]:
-    project_id = env_value(
-        "FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID",
-        "FOEHNCAST_FEAST_PROJECT_ID",
-        "GCP_PROJECT_ID",
-        "DATASTORE_PROJECT_ID",
-        "GOOGLE_CLOUD_PROJECT",
-    ) or _DEFAULT_LOCAL_DATASTORE_PROJECT_ID
+    project_id = (
+        env_value(
+            "FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID",
+            "FOEHNCAST_FEAST_PROJECT_ID",
+            "GCP_PROJECT_ID",
+            "DATASTORE_PROJECT_ID",
+            "GOOGLE_CLOUD_PROJECT",
+        )
+        or _DEFAULT_LOCAL_DATASTORE_PROJECT_ID
+    )
 
     return _datastore_online_store_config(
         project_id=project_id,

@@ -484,9 +484,7 @@ def test_read_features_bigquery_restores_time_index(
             captured["table_id"] = table_id
             return object()
 
-        def query(
-            self, query: str, job_config: object | None = None
-        ) -> _FrameQueryJob:
+        def query(self, query: str, job_config: object | None = None) -> _FrameQueryJob:
             captured["query"] = query
             captured["job_config"] = job_config
             return _FrameQueryJob(restored_frame)
@@ -677,9 +675,7 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
         def get_table(self, table_id: str) -> object:
             return object()
 
-        def query(
-            self, query: str, job_config: object | None = None
-        ) -> _FrameQueryJob:
+        def query(self, query: str, job_config: object | None = None) -> _FrameQueryJob:
             return _FrameQueryJob()
 
     monkeypatch.setattr(

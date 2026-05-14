@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from tests.repo_helpers import (
-    read_repo_text as _read_text,
-    read_repo_yaml as _read_yaml,
     read_workflow_yaml as _workflow_yaml,
 )
 

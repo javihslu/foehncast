@@ -112,7 +112,10 @@ def test_local_bootstrap_uses_shared_env_file_helpers() -> None:
     assert "env_file_value()" not in bootstrap
     assert 'export_local_feast_datastore_env "$ENV_FILE"' in bootstrap
     assert "ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin" in bootstrap
-    assert 'FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"' in bootstrap
+    assert (
+        'FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"'
+        in bootstrap
+    )
 
 
 def test_local_bootstrap_uses_shared_payload_check_helpers() -> None:
@@ -123,7 +126,7 @@ def test_local_bootstrap_uses_shared_payload_check_helpers() -> None:
     assert "payload_check_require_pattern()" in helper
     assert "payload_check_require_patterns()" in helper
     assert "require_payload_patterns()" in bootstrap
-    assert 'require_payload_patterns \\' in bootstrap
+    assert "require_payload_patterns \\" in bootstrap
 
 
 def test_local_bootstrap_handles_missing_docker_desktop_helper() -> None:

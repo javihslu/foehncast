@@ -23,6 +23,8 @@ _DEFAULT_PREDICTION_EVENT_DATASET = "foehncast_monitoring"
 _DEFAULT_PREDICTION_EVENT_TABLE = "prediction_events"
 _DEFAULT_PREDICTION_EVENT_RETENTION_DAYS = 180
 _DEFAULT_MLFLOW_TRACKING_URI = "http://localhost:5001"
+
+
 def _resolved_dict_section(name: str) -> dict[str, Any]:
     section = load_config().get(name, {})
     if not isinstance(section, dict):

@@ -24,6 +24,8 @@ _execution_timestamps: dict[tuple[str, str], float] = {}
 
 def _normalized_label(value: str | None) -> str:
     return str(value or "unknown").strip() or "unknown"
+
+
 def record_prediction_monitoring_schedule(
     endpoint: str,
     result: str,

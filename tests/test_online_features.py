@@ -29,6 +29,8 @@ def test_load_feature_store_raises_runtime_error_when_feast_dependency_is_missin
         match="Feast runtime dependency is missing from this environment",
     ):
         online_features._load_feature_store()
+
+
 def test_get_online_spot_features_uses_feature_service(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
