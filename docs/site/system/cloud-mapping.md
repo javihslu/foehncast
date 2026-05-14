@@ -56,7 +56,7 @@ This boundary matters because the hosted app is the product and service surface.
 flowchart LR
     TF[Terraform baseline] --> GCP[Shared GCP resources]
     GCP --> HOST[Hosted full-stack target]
-    GCP -. optional .-> RUN[Hosted inference target]
+    GCP --> RUN[Hosted inference target]
     TF --> GH[GitHub OIDC delivery]
     HOST --> STACK[Airflow + MLflow + API + monitoring]
     RUN --> API[Inference API only]
@@ -89,6 +89,8 @@ The shared environment currently follows one promoted hosted lane plus one retai
 
 This is why the shared environment docs now center Cloud Run as the first hosted API URL while still keeping the compose-host path visible as the retained control plane.
 
+Rollback for the shared API now means Cloud Run rollback, not reopening the VM app publicly. Candidate promotion captures rollback inputs, and `.github/workflows/rollback-live-release.yml` restores live traffic to a known Cloud Run revision and model version when the promoted path regresses. The remaining retirement gate is whether the operator lane can later shrink without blurring the Airflow and MLflow control-plane boundary.
+
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
@@ -111,14 +113,14 @@ flowchart TD
     BQ --> TRAIN[Training job]
     TRAIN --> MLF[(MLflow)]
     MLF --> HOST[Hosted full-stack target today]
-    MLF -. optional smaller target .-> RUN[Hosted inference target]
+    MLF --> RUN[Hosted inference target]
     OME --> HOST
     OME --> RUN
     OSRM[OSRM] --> HOST
     OSRM --> RUN
     BQ --> FEAST[Feast view]
     FEAST --> HOST
-    FEAST -. optional .-> RUN
+    FEAST --> RUN
 </div>
 
 | Layer | Cloud direction |
@@ -182,6 +184,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 - MLflow stays on the compose host in the active shared environment.
 - Airflow stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
 - The two hosted paths now solve different roles: Cloud Run is the API surface, and the compose host keeps the broader operator stack online.
+- The remaining hosted-VM gate is operator-plane retirement, not public serving fallback retention.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief

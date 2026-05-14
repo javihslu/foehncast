@@ -53,7 +53,7 @@ flowchart TB
   Clone --> Local --> Compose
   Shell --> Bootstrap --> Cloud
   Cloud --> Host
-  Cloud -. optional .-> Run
+  Cloud --> Run
 ```
 
 ## Quick Start
