@@ -78,6 +78,14 @@ The hosted paths deploy runtime services only. Development assets stay local or 
 
 The shared environment uses the hosted full-stack target because it keeps Airflow, MLflow, and the API together. The Cloud Run path stays available as a smaller API-only option.
 
+## Shared Hosted App Contract
+
+The two hosted targets differ in runtime size, not in their core app surface.
+
+- both hosted targets serve the same FastAPI routes for `/health`, `/spots`, and `/metrics`
+- both hosted targets rely on the same app-side storage and Feast runtime assumptions injected by Terraform
+- the compose-host path adds extra sync-freshness signals to `/metrics` because it owns the repo-sync timer, but that is an operator extension on top of the same app contract
+
 ## Active Shared Deployment Path
 
 The shared environment currently follows one hosted lane:

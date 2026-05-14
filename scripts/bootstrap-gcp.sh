@@ -300,7 +300,7 @@ read_tfvars_value() {
   }
 
   verify_online_compose_runtime() {
-    local app_url health_url metrics_url metrics_payload
+    local app_url health_url health_payload spots_url spots_payload metrics_url metrics_payload
 
     FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
 
@@ -317,13 +317,37 @@ read_tfvars_value() {
     fi
 
     health_url="${app_url%/}/health"
+    spots_url="${app_url%/}/spots"
     metrics_url="${app_url%/}/metrics"
 
     echo "Waiting for hosted app health at ${health_url}..."
-    curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url" >/dev/null
+    health_payload="$(curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url")"
+    require_payload_pattern \
+      "$health_payload" \
+      '"status"[[:space:]]*:[[:space:]]*"healthy"' \
+      'hosted health payload status'
+    require_payload_pattern \
+      "$health_payload" \
+      '"model_alias"[[:space:]]*:' \
+      'hosted health payload model alias'
+    require_payload_pattern \
+      "$health_payload" \
+      '"model_version"[[:space:]]*:' \
+      'hosted health payload model version'
+
+    echo "Checking hosted spots endpoint at ${spots_url}..."
+    spots_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$spots_url")"
+    require_payload_pattern \
+      "$spots_payload" \
+      '"id"[[:space:]]*:' \
+      'hosted spots payload'
 
     echo "Checking hosted sync metrics at ${metrics_url}..."
     metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"
+    require_payload_pattern \
+      "$metrics_payload" \
+      'foehncast_online_compose_sync_status_file_present' \
+      'hosted metrics payload'
     require_payload_pattern \
       "$metrics_payload" \
       'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
@@ -335,7 +359,7 @@ read_tfvars_value() {
   }
 
   verify_cloud_run_runtime() {
-    local service_url health_url spots_url spots_payload identity_token
+    local service_url health_url health_payload spots_url spots_payload metrics_url metrics_payload identity_token
     local -a curl_args
 
     FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
@@ -354,6 +378,7 @@ read_tfvars_value() {
 
     health_url="${service_url%/}/health"
     spots_url="${service_url%/}/spots"
+  metrics_url="${service_url%/}/metrics"
     curl_args=(--retry 90 --retry-all-errors --retry-delay 10 -fsS)
 
     if [[ "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED" != "true" ]]; then
@@ -363,7 +388,19 @@ read_tfvars_value() {
     fi
 
     echo "Waiting for Cloud Run health at ${health_url}..."
-    curl "${curl_args[@]}" "$health_url" >/dev/null
+    health_payload="$(curl "${curl_args[@]}" "$health_url")"
+    require_payload_pattern \
+      "$health_payload" \
+      '"status"[[:space:]]*:[[:space:]]*"healthy"' \
+      'Cloud Run health payload status'
+    require_payload_pattern \
+      "$health_payload" \
+      '"model_alias"[[:space:]]*:' \
+      'Cloud Run health payload model alias'
+    require_payload_pattern \
+      "$health_payload" \
+      '"model_version"[[:space:]]*:' \
+      'Cloud Run health payload model version'
 
     echo "Checking Cloud Run spots endpoint at ${spots_url}..."
     spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
@@ -371,6 +408,13 @@ read_tfvars_value() {
       "$spots_payload" \
       '"id"[[:space:]]*:' \
       'Cloud Run spots payload'
+
+    echo "Checking Cloud Run metrics at ${metrics_url}..."
+    metrics_payload="$(curl "${curl_args[@]}" "$metrics_url")"
+    require_payload_pattern \
+      "$metrics_payload" \
+      'foehncast_online_compose_sync_status_file_present' \
+      'Cloud Run metrics payload'
   }
 
   print_bootstrap_only_summary() {
