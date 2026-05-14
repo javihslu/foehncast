@@ -5,8 +5,8 @@ FoehnCast keeps the same Feature-Training-Inference split in every runtime mode.
 !!! note "How to read this page"
 
     The validated baseline is the local Compose stack.
-    The active shared environment uses the hosted full-stack target.
-    The hosted inference target remains a smaller optional path.
+    The shared cloud path now promotes the hosted inference target as the primary API surface.
+    The hosted full-stack target remains online as the retained operator control plane.
     The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
     The rider-facing demo and prediction outputs are not the same thing as operator dashboards, and Grafana is not treated as the main product UI.
 
@@ -75,20 +75,20 @@ The orchestration layer now models the main data products as Airflow assets inst
 flowchart LR
     CORE[Shared Feature-Training-Inference boundaries]
     CORE --> LOCAL[Local evaluator target]
-    CORE --> HOST[Hosted full-stack target today]
-    CORE -. optional .-> RUN[Hosted inference target]
+    CORE --> HOST[Hosted full-stack control plane]
+    CORE --> RUN[Hosted inference target today]
 </div>
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
-| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | active shared environment |
-| Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | smaller API-only hosted surface |
+| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane |
+| Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | primary hosted API surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | shared cloud day-2 delivery, not a runtime target |
 
-The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target exposes only the app on port `8000` by default. Airflow, MLflow, Prometheus, and Grafana stay private unless you open them on purpose for your own operator workflow.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target stays private by default. Airflow, MLflow, Prometheus, and Grafana stay private unless you open them on purpose for your own operator workflow.
 
-The active shared environment uses the hosted full-stack target today. The hosted inference target stays available when only the API needs to be online.
+The shared cloud path now promotes Cloud Run as the primary hosted API. The hosted full-stack target remains available when the operator stack needs to stay online together.
 
 ## Current Local Architecture
 
@@ -115,7 +115,7 @@ The Airflow control plane reflects those hand-offs directly. The feature pipelin
 
 <div class="mermaid">
 flowchart LR
-    subgraph Host[Hosted full-stack target today]
+    subgraph Host[Hosted full-stack control plane]
         HAF[Airflow]
         HML[MLflow]
         HAPI[FastAPI]
@@ -130,7 +130,7 @@ flowchart LR
 
 <div class="mermaid">
 flowchart LR
-    subgraph Run[Hosted inference target optional]
+    subgraph Run[Hosted inference target primary]
         RAPI[FastAPI]
     end
     BQ2[(BigQuery curated features)] --> RAPI
@@ -140,7 +140,7 @@ flowchart LR
     OSRM2[OSRM] --> RAPI
 </div>
 
-The hosted targets reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram matches the active shared environment. The second remains the smaller optional API-only path. The cloud path does not ship the local development container, local objectstore, notebooks, docs build tooling, or the Datastore emulator.
+The hosted targets reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the retained hosted control plane. The second shows the promoted primary API path. The cloud path does not ship the local development container, local objectstore, notebooks, docs build tooling, or the Datastore emulator.
 
 ## Representative Validation
 

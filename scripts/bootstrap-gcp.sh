@@ -236,6 +236,53 @@ read_tfvars_value() {
     fi
   }
 
+  print_primary_hosted_api_summary() {
+    local primary_target primary_url
+
+    primary_target="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
+    primary_target="$(trim_whitespace "$primary_target")"
+    primary_url="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
+    primary_url="$(trim_whitespace "$primary_url")"
+
+    if [[ -z "$primary_target" || "$primary_target" == "null" || "$primary_target" == "none" ]]; then
+      return
+    fi
+
+    echo "Primary hosted API target: ${primary_target}"
+
+    if [[ -n "$primary_url" && "$primary_url" != "null" ]]; then
+      echo "Primary hosted API URL: ${primary_url}"
+    fi
+  }
+
+  require_primary_hosted_api_configuration() {
+    local primary_target primary_url online_compose_app_url
+
+    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+
+    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+      echo "Hosted bootstrap requires provision_cloud_run_service=true. Cloud Run is the only supported public API path in this configuration." >&2
+      exit 1
+    fi
+
+    primary_target="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
+    primary_target="$(trim_whitespace "$primary_target")"
+    primary_url="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
+    primary_url="$(trim_whitespace "$primary_url")"
+    online_compose_app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
+    online_compose_app_url="$(trim_whitespace "$online_compose_app_url")"
+
+    if [[ "$primary_target" != "cloud-run" || -z "$primary_url" || "$primary_url" == "null" ]]; then
+      echo "Hosted bootstrap could not resolve the promoted Cloud Run API URL. Fix the Cloud Run configuration instead of falling back to the VM app surface." >&2
+      exit 1
+    fi
+
+    if [[ -n "$online_compose_app_url" && "$online_compose_app_url" != "null" ]]; then
+      echo "Hosted bootstrap found a public online compose app URL (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2
+      exit 1
+    fi
+  }
+
   print_cloud_run_summary() {
     local service_url
 
@@ -300,7 +347,7 @@ read_tfvars_value() {
   }
 
   verify_online_compose_runtime() {
-    local app_url health_url health_payload spots_url spots_payload metrics_url metrics_payload
+    local app_url
 
     FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
 
@@ -312,50 +359,12 @@ read_tfvars_value() {
     app_url="$(trim_whitespace "$app_url")"
 
     if [[ -z "$app_url" || "$app_url" == "null" ]]; then
-      echo "Hosted online compose app URL is not publicly exposed; skipping hosted runtime verification."
+      echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."
       return
     fi
 
-    health_url="${app_url%/}/health"
-    spots_url="${app_url%/}/spots"
-    metrics_url="${app_url%/}/metrics"
-
-    echo "Waiting for hosted app health at ${health_url}..."
-    health_payload="$(curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url")"
-    require_payload_pattern \
-      "$health_payload" \
-      '"status"[[:space:]]*:[[:space:]]*"healthy"' \
-      'hosted health payload status'
-    require_payload_pattern \
-      "$health_payload" \
-      '"model_alias"[[:space:]]*:' \
-      'hosted health payload model alias'
-    require_payload_pattern \
-      "$health_payload" \
-      '"model_version"[[:space:]]*:' \
-      'hosted health payload model version'
-
-    echo "Checking hosted spots endpoint at ${spots_url}..."
-    spots_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$spots_url")"
-    require_payload_pattern \
-      "$spots_payload" \
-      '"id"[[:space:]]*:' \
-      'hosted spots payload'
-
-    echo "Checking hosted sync metrics at ${metrics_url}..."
-    metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"
-    require_payload_pattern \
-      "$metrics_payload" \
-      'foehncast_online_compose_sync_status_file_present' \
-      'hosted metrics payload'
-    require_payload_pattern \
-      "$metrics_payload" \
-      'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
-      'hosted sync status-file-present metric'
-    require_payload_pattern \
-      "$metrics_payload" \
-      'foehncast_online_compose_sync_last_success_timestamp_seconds\{' \
-      'hosted sync last-success timestamp metric'
+    echo "Hosted online compose app URL is public (${app_url}), but this configuration requires Cloud Run to remain the only public API path." >&2
+    exit 1
   }
 
   verify_cloud_run_runtime() {
@@ -372,8 +381,8 @@ read_tfvars_value() {
     service_url="$(trim_whitespace "$service_url")"
 
     if [[ -z "$service_url" || "$service_url" == "null" ]]; then
-      echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."
-      return
+      echo "Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2
+      exit 1
     fi
 
     health_url="${service_url%/}/health"
@@ -689,7 +698,7 @@ read_tfvars_value() {
       cloud_run_default=y
     fi
 
-    if prompt_yes_no "Provision Cloud Run service now? This needs a reachable MLflow endpoint." "$cloud_run_default"; then
+    if prompt_yes_no "Provision Cloud Run as the primary hosted API now? This needs a reachable MLflow endpoint." "$cloud_run_default"; then
       provision_cloud_run=true
     else
       provision_cloud_run=false
@@ -724,7 +733,7 @@ read_tfvars_value() {
       provision_online_compose_host_default=y
     fi
 
-    if prompt_yes_no "Provision the full online compose host now? This creates the hosted Airflow, MLflow, and app stack on one VM." "$provision_online_compose_host_default"; then
+    if prompt_yes_no "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM." "$provision_online_compose_host_default"; then
       provision_online_compose_host=true
     else
       provision_online_compose_host=false
@@ -755,6 +764,7 @@ read_tfvars_value() {
       online_compose_host_zone="$(prompt_with_default "Online compose host zone" "$online_compose_host_zone")"
       online_compose_machine_type="$(prompt_with_default "Online compose machine type" "$online_compose_machine_type")"
       online_compose_disk_size_gb="$(prompt_with_default "Online compose disk size in GB" "$online_compose_disk_size_gb")"
+      replace_or_append_line "$TFVARS_FILE" '^[[:space:]]*online_compose_public_ports[[:space:]]*=' 'online_compose_public_ports = []'
     fi
 
     if [[ "$CONFIGURE_GITHUB" != "true" && "$INTERACTIVE" == "true" ]]; then
@@ -950,7 +960,9 @@ else
   else
     echo "Syncing local cloud identifiers into .env..."
     sync_env_from_terraform_outputs
+    require_primary_hosted_api_configuration
     print_auth_summary
+    print_primary_hosted_api_summary
     print_cloud_run_summary
     print_online_compose_summary
     print_feast_runtime_summary

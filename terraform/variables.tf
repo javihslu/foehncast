@@ -162,7 +162,7 @@ variable "online_compose_subnet_cidr" {
 variable "online_compose_public_ports" {
   description = "TCP ports exposed publicly by the online Docker host."
   type        = list(number)
-  default     = [8000]
+  default     = []
 }
 
 variable "online_compose_git_ref" {

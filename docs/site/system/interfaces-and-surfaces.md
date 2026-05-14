@@ -123,7 +123,7 @@ That rule keeps the docs understandable in review without leaking a live control
 | Runtime mode | Product or service surface | Operator-only surface |
 |------|-----------------------------|-----------------------|
 | Local evaluator | local app routes, local Streamlit demo, optional online-features demo | local Airflow, MLflow, Prometheus, and Grafana |
-| Hosted full-stack target | FastAPI app on port `8000` by default | Airflow, MLflow, Prometheus, and Grafana stay private unless deliberately exposed |
+| Hosted full-stack target | no public app route by default | Airflow, MLflow, Prometheus, and Grafana stay private unless deliberately exposed |
 | Hosted inference target | hosted inference API only | no hosted Airflow or MLflow container in that target |
 | Public docs site | rendered docs and evidence only | no live control planes |
 

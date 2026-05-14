@@ -26,7 +26,7 @@ flowchart LR
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
 | Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers fresh versions in MLflow under the requested registry alias |
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit demo |
-| Hosted runtime | Working | The shared environment runs the hosted full-stack target on one GCP host; the inference-only Cloud Run target is available but not enabled there |
+| Hosted runtime | Working | The shared environment uses Cloud Run as the only promoted public API path while keeping the hosted full-stack target online for operator tooling |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 | Monitoring | Working | Docker Compose runs Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; feature panels are derived from persisted Airflow report summaries; and Grafana loads starter dashboards and alert rules from checked-in config |
 
@@ -46,8 +46,8 @@ flowchart TB
     Shell[Google Cloud Shell]
     Bootstrap[./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions]
     Cloud[GitHub Actions + remote Terraform]
-    Host[Hosted full-stack target today]
-    Run[Inference-only Cloud Run target]
+    Host[Hosted full-stack control plane]
+    Run[Primary Cloud Run API]
   end
 
   Clone --> Local --> Compose
@@ -119,7 +119,7 @@ The shared hosted environment is not part of normal contributor setup.
 - After bootstrap, GitHub Actions owns the normal remote Terraform plan, apply, destroy, and cleanup flow for the shared environment.
 - Contributors do not need local Terraform, `gcloud`, or `gh` for normal work.
 
-The current shared environment uses the hosted full-stack target so Airflow, MLflow, and the API stay online together. The Cloud Run path is still available as an inference-only option, but it is not the active shared deployment target today.
+The current shared environment uses Cloud Run as the only promoted public API path. The hosted full-stack target stays online for Airflow, MLflow, and operator monitoring, but it is not treated as a second public serving surface.
 
 Start with [docs/site/system/delivery-and-operator-workflow.md](docs/site/system/delivery-and-operator-workflow.md) for the maintainer workflow split and use `terraform/README.md` for operator detail.
 

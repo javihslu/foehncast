@@ -63,7 +63,7 @@ The shared hosted environment is maintained separately from normal contributor s
 - Contributors do not need local Terraform, `gcloud`, or `gh`.
 - Maintainers start in Google Cloud Shell and run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions` once.
 - After bootstrap, GitHub Actions owns the normal shared cloud Terraform flow.
-- The current shared environment uses the hosted full-stack target, while the inference-only Cloud Run target remains an optional smaller hosted surface.
+- The current shared environment uses Cloud Run as the only promoted public API path, while the hosted full-stack target stays online for operator tooling.
 
 See [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) for the maintainer path. Use `terraform/README.md` only if you maintain the shared cloud environment.
 

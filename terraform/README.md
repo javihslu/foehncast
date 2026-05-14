@@ -42,7 +42,7 @@ Terraform can provision:
 - an inference-only Cloud Run service
 - an optional Compute Engine host for the full online container stack
 
-The Cloud Run service remains inference-only. The full online stack is the compose-host path.
+The Cloud Run service remains inference-only and is now the promoted hosted API surface. The full online stack remains the compose-host operator path.
 
 ## Deployment Scope Rule
 
@@ -57,8 +57,8 @@ Deploy only runtime surfaces in cloud environments.
 | Target | Use it when | What deploys |
 |--------|-------------|--------------|
 | Shared GCP baseline | you need the cloud data and identity foundation | no containers |
-| Hosted full-stack target | you want Airflow, MLflow, and the API online together | runtime services only |
-| Hosted inference target | you only need the inference API | FastAPI only |
+| Hosted full-stack target | you want Airflow, MLflow, and monitoring online together on the retained operator host | runtime services only |
+| Hosted inference target | you want the primary hosted API surface | FastAPI only |
 
 ## Hosted Inference Target Inputs
 
@@ -107,7 +107,7 @@ The online host starts:
 - Airflow on port `8080` only if you explicitly expose it
 - MLflow on port `5001` only if you explicitly expose it
 
-By default, `online_compose_public_ports = [8000]`, so only the app is internet-reachable. If you want public admin UIs, add `8080` or `5001` deliberately.
+By default, `online_compose_public_ports = []`, so the retained operator host stays private. If you need a public operator UI, add the specific port deliberately.
 
 The compose-host path is the simplest way to keep the whole stack online without forcing Airflow into Cloud Run.
 
@@ -115,8 +115,8 @@ The compose-host path is the simplest way to keep the whole stack online without
 
 | Path | Public surface by default | Notes |
 |------|---------------------------|-------|
-| Hosted full-stack target | app on port `8000` | Airflow and MLflow stay private unless explicitly exposed |
-| Cloud Run | inference API URL | app-only deployment |
+| Hosted full-stack target | no public app surface by default | Airflow and MLflow stay private unless explicitly exposed |
+| Cloud Run | inference API URL | promoted primary hosted API surface |
 
 ## Teardown
 
@@ -188,8 +188,7 @@ If the shared cloud runtime later needs secret-bearing values beyond local-safe 
 
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
-When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
-The hosted serving contract is shared with the compose-host path: both hosted targets should answer `/health`, `/spots`, and `/metrics`. The compose-host path keeps additional sync-freshness metrics on `/metrics`, while Cloud Run keeps the same app route without that host-specific expectation.
+When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health`, `/spots`, and `/metrics`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
 Manual workflow dispatch also supports `deploy_mode=candidate`. That path deploys a tagged no-traffic Cloud Run revision, sets `FOEHNCAST_MLFLOW_SERVING_ALIAS` for that revision, and smoke-checks the tagged URL before any later traffic shift.
 After a candidate revision has been validated, `.github/workflows/promote-candidate.yml` promotes the exact validated model version to the live `champion` alias, redeploys the live Cloud Run service with the validated candidate image, and verifies the live `/health` response reports `champion` plus the promoted model version.
 That promotion summary also records the pre-promotion live revision and model version so operators can feed those exact values into `.github/workflows/rollback-live-release.yml` if the release needs to be reversed later.
@@ -269,11 +268,11 @@ The bootstrap script will:
 
 After bootstrap, run the Terraform workflow with `apply` if you want to provision the shared environment right away. After that, pushes to `main` keep it up to date automatically.
 
-If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks `/health`, `/spots`, and `/metrics`. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling those routes.
+If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` treats it as the primary hosted API path and checks `/health`, `/spots`, and `/metrics`. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling it.
 
-If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` checks the same `/health`, `/spots`, and `/metrics` app contract, then confirms that `/metrics` also contains the online compose sync metrics.
+If a normal apply leaves the hosted online compose app publicly exposed on port `8000`, `./scripts/bootstrap-gcp.sh` now fails fast because Cloud Run is the only supported public API path in this configuration.
 
-The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target or the full online compose host target.
+The script writes `.env` and `terraform/terraform.tfvars` during setup. The checked-in example defaults now bias toward enabling the primary Cloud Run API path together with the retained online compose control plane, while the prompts still let the maintainer override either target explicitly.
 
 Authentication stays in the active `gcloud` application default credentials for the shell you used. Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
 

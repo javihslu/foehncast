@@ -87,7 +87,7 @@ The script is interactive by design. It asks the operator to:
 
 In `--bootstrap-only` mode, the script prepares the remote Terraform control plane and leaves the broader hosted apply to the remote workflow. It also writes `.env` and `terraform/terraform.tfvars` in the working tree so the local repository reflects the selected project and platform identifiers.
 
-When the script runs a normal apply instead of bootstrap-only mode, it also verifies the hosted runtime surfaces that Terraform exposed. Both hosted targets are expected to answer the same app contract on `/health`, `/spots`, and `/metrics`. The hosted full-stack path additionally proves that `/metrics` includes the hosted sync freshness signals when the compose host is enabled.
+When the script runs a normal apply instead of bootstrap-only mode, it also verifies the hosted runtime surfaces that Terraform exposed. The promoted Cloud Run path checks `/health`, `/spots`, and `/metrics`, including the served alias and model version in the health payload. The retained hosted full-stack path keeps its `/health` plus sync-metrics verification when the compose host is enabled.
 
 ## Day-2 Delivery Contract
 
@@ -98,22 +98,16 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/terraform.yml` | primary Terraform operator path | pushes to `main` automatically resolve to `apply` after bootstrap; manual dispatch stays available for `plan`, `destroy`, `cleanup`, and explicit overrides |
 | `scripts/configure-github-actions.sh` | repo-variable sync | Terraform outputs are copied into GitHub repository variables so the remote workflow reads one shared contract |
 | `terraform/terraform.tfvars` | bootstrap input | used during the interactive bootstrap path, not as the day-2 source of truth for remote applies |
-| runtime image workflows | app delivery follow-up | when Terraform has already provisioned `GCP_CLOUD_RUN_SERVICE`, publish automation updates the existing Cloud Run service with new images |
+| runtime image workflows | primary hosted API delivery follow-up | when Terraform has already provisioned `GCP_CLOUD_RUN_SERVICE`, publish automation updates the existing Cloud Run service with new images |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
 This contract is deliberate. The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming more manual workflow inputs.
 
-That same split is also the current ownership boundary for cloud-facing values. Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables remain structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
+The promoted hosted runtime story is now:
 
-## Hosted Serving Contract
-
-The hosted full-stack target and the Cloud Run target should read as one serving story, not two ad hoc ones.
-
-- `/health` is the shared readiness route on both hosted targets and should report `status`, `model_alias`, and `model_version`.
-- `/spots` is the shared service-facing catalog route on both hosted targets.
-- `/metrics` is the shared operator-facing scrape route on both hosted targets.
-- both hosted targets rely on the same Terraform-managed app wiring for storage, Feast, and MLflow inputs.
-- the hosted full-stack target adds one operator-only extension on `/metrics`: the online-compose sync freshness signals that do not exist on Cloud Run.
+- Cloud Run is the primary hosted API path that operators should treat as the shared serving URL.
+- the hosted full-stack VM remains online for Airflow, MLflow, and monitoring, not as a second public API path.
+- both surfaces still read the same Terraform-managed storage, Feast, and MLflow contract.
 
 ## What The Cloud-Operator Tests Enforce
 
