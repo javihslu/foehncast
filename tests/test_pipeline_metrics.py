@@ -8,7 +8,11 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from foehncast.monitoring import pipeline_metrics
+from foehncast.monitoring import (
+    pipeline_metric_export,
+    pipeline_metrics,
+    pipeline_summary_store,
+)
 
 
 class _ArtifactLoggingMlflow:
@@ -232,6 +236,64 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
     )
     assert len(history_paths) == 1
     assert _read_json(history_paths[0])["training_run_id"] == "run-123"
+
+
+def test_compatibility_monitoring_modules_delegate_to_pipeline_metrics(
+    tmp_path: Path,
+) -> None:
+    logged: dict[str, object] = {}
+    summary = {
+        "dataset": "train",
+        "generated_at": "2026-05-12T10:00:00+00:00",
+        "run_status": "succeeded",
+        "storage_backend": "feast",
+        "expected_spot_count": 1,
+        "fetched_spot_count": 1,
+        "engineered_spot_count": 1,
+        "validated_spot_count": 1,
+        "stored_spot_count": 1,
+        "stage_durations_seconds": {"fetch": 12.5},
+        "stage_failure_counts": {"fetch": 0},
+        "skipped_spot_count": 0,
+        "failed_spot_count": 0,
+        "spots": [
+            {
+                "spot_id": "silvaplana",
+                "ingest": {"rows": 168, "source_unit_contract_confirmed": True},
+                "engineering": {"rows": 168},
+                "validation": {"is_valid": True, "range_violation_count": 0},
+                "storage": {"stored_rows": 168, "max_numeric_abs_delta": 0.0},
+                "feast": {"projection_ready": True},
+            }
+        ],
+    }
+
+    summary_path = pipeline_metric_export.emit_feature_pipeline_run_summary(
+        summary,
+        writer=lambda payload: (
+            pipeline_summary_store.write_feature_pipeline_run_summary(
+                payload,
+                report_dir=lambda: tmp_path,
+            )
+        ),
+        mlflow_module=_ArtifactLoggingMlflow(logged),
+    )
+
+    assert summary_path == pipeline_metrics.feature_pipeline_summary_path(
+        "train",
+        report_dir=lambda: tmp_path,
+    )
+    assert _read_json(summary_path) == summary
+    assert (
+        pipeline_summary_store.read_feature_pipeline_run_summary(
+            report_dir=lambda: tmp_path,
+        )
+        == summary
+    )
+    assert logged["metrics"] == pipeline_metrics.feature_pipeline_summary_metrics(
+        summary
+    )
+    assert logged["artifact"] == (str(summary_path), "monitoring/feature_pipeline")
 
 
 def test_feature_pipeline_summary_history_preserves_latest_contract(
