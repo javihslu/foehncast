@@ -90,14 +90,14 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "## Candidate promotion moved out of GitHub"
+            echo "## Candidate promotion moved behind Trigger Runtime Release"
             echo
             echo "- Candidate tag: $CANDIDATE_REVISION_TAG"
             echo "- Candidate alias: $CANDIDATE_ALIAS"
             echo "- Target alias: $TARGET_ALIAS"
             echo
             echo "GitHub Actions no longer promotes live runtime state directly."
-            echo "Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract lands."
+            echo "Use Trigger Runtime Release with action promote_candidate so GitHub sends one reviewed request into hosted Airflow."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'Candidate promotion is no longer executed directly from GitHub Actions. Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract is implemented.' >&2
+          echo 'Candidate promotion is no longer executed directly from GitHub Actions. Use Trigger Runtime Release with action promote_candidate instead.' >&2
           exit 1

@@ -89,7 +89,7 @@ The shared environment currently follows one promoted hosted lane plus one retai
 
 This is why the shared environment docs now center Cloud Run as the first hosted API URL while still keeping the compose-host path visible as the retained control plane.
 
-Rollback for the shared API now means Cloud Run rollback, not reopening the VM app publicly. Candidate promotion captures rollback inputs, and `.github/workflows/rollback-live-release.yml` restores live traffic to a known Cloud Run revision and model version when the promoted path regresses. The remaining retirement gate is whether the operator lane can later shrink without blurring the Airflow and MLflow control-plane boundary.
+Rollback for the shared API now means retrying the reviewed runtime release handoff, not reopening the VM app publicly or mutating runtime state directly from GitHub. `.github/workflows/publish-app-image.yml` stops at image publication, `.github/workflows/trigger-runtime-release.yml` sends the reviewed deploy, promote, or rollback request into the hosted Airflow receiver, and the runtime side records the acknowledgement under `airflow/reports/runtime-release-latest.json`. The remaining retirement gate is whether the operator lane can later shrink without blurring the Airflow and MLflow control-plane boundary.
 
 ## Orchestration Surface Of Record
 

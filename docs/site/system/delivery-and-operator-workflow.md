@@ -98,10 +98,13 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/terraform.yml` | primary Terraform operator path | pushes to `main` automatically resolve to `apply` after bootstrap; manual dispatch stays available for `plan`, `destroy`, `cleanup`, and explicit overrides |
 | `scripts/configure-github-actions.sh` | repo-variable sync | Terraform outputs are copied into GitHub repository variables so the remote workflow reads one shared contract |
 | `terraform/terraform.tfvars` | bootstrap input | used during the interactive bootstrap path, not as the day-2 source of truth for remote applies |
-| runtime image workflows | app delivery follow-up | when Terraform has already provisioned `GCP_CLOUD_RUN_SERVICE`, publish automation updates the existing Cloud Run service with new images |
+| runtime image workflows | reviewed artifact publishing | publish automation builds and publishes runtime images, but it does not deploy Cloud Run, shift traffic, or mutate MLflow aliases directly |
+| `.github/workflows/trigger-runtime-release.yml` | reviewed runtime handoff | GitHub sends one explicit runtime release request into hosted Airflow after the retained operator host refreshes to the reviewed git ref |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
 This contract is deliberate. The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming more manual workflow inputs.
+
+GitHub-hosted workflows now stop at reviewed infrastructure change, artifact publication, and one explicit runtime release request. GitHub does not mutate live runtime state directly; the request is handed to hosted Airflow on the retained operator host.
 
 The promoted hosted runtime story is now:
 
@@ -134,17 +137,35 @@ The reviewed delivery plane and the runtime execution plane have different respo
 |------|---------------|--------------|----------------------|
 | Reviewed delivery | GitHub Actions plus Terraform | lint, test, build, image publish, Terraform plan/apply/destroy, and reviewed deploy workflows | runtime scheduling, retries, backfills, and long-lived operator state |
 | Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
-| Shared handoff | repository variables, published images, and Terraform outputs | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
+| Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
 
 For the next delivery horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. GitHub Actions may trigger reviewed delivery workflows, but it is not the runtime orchestrator.
 
+## Runtime Release Trigger Contract
+
+GitHub now has exactly one reviewed handoff into runtime execution.
+
+- signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
+- receiver: `./scripts/trigger-runtime-release.sh` runs on the retained operator host and triggers the hosted Airflow `runtime_release` DAG locally
+- auth path: GitHub Actions uses OIDC into the deployer service account and Compute Engine SSH; GitHub does not store Airflow credentials or call a public Airflow endpoint
+- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures `airflow/reports/runtime-release-latest.json`
+
+The current action set is deliberately small:
+
+- `deploy_candidate`
+- `promote_candidate`
+- `rollback_live`
+
+This keeps the handoff explicit before deeper runtime automation is added behind the Airflow side of the boundary.
+
 ## Rollback And Retirement Coordinates
 
-The shared API rollback path now lives entirely on Cloud Run.
+The reviewed rollback handoff now runs through the runtime trigger contract instead of direct GitHub runtime mutation.
 
-- `.github/workflows/publish-app-image.yml` can deploy a candidate tagged revision with zero traffic or a live revision directly
-- `.github/workflows/promote-candidate.yml` verifies the candidate runtime, captures the current live Cloud Run revision and model version as rollback inputs, and only then promotes the candidate image
-- `.github/workflows/rollback-live-release.yml` uses those explicit inputs to restore live traffic to an exact revision and model version
+- `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
+- `.github/workflows/trigger-runtime-release.yml` is the single reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
+- `.github/workflows/promote-candidate.yml` and `.github/workflows/rollback-live-release.yml` stay as blocked redirect workflows so the old entry points do not continue mutating runtime state directly
+- `airflow/reports/runtime-release-latest.json` and its history files record the acknowledged handoff on the runtime side
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
 The remaining VM-retirement gate is separate from serving rollback. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator-plane scope is reduced explicitly.
@@ -170,6 +191,7 @@ Several boundaries stay explicit across the scripts, Terraform reference, and te
 - the shared cloud environment stays operator-owned, even though the repository and images are public
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
 - runtime scheduling, retries, and backfills belong to hosted Airflow for this horizon rather than to GitHub Actions
+- runtime promotion, rollback, and live traffic control do not run inside GitHub workflows; GitHub only sends the reviewed runtime release request
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 

@@ -149,8 +149,9 @@ The remaining gate is not whether the VM should keep a public serving fallback. 
 
 The current rollback contract is:
 
-- `.github/workflows/promote-candidate.yml` captures the current live Cloud Run revision and model version before promotion so operators have explicit rollback inputs
-- `.github/workflows/rollback-live-release.yml` restores live traffic to an exact Cloud Run revision and MLflow model version after the tagged rollback target passes `/health`
+- `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
+- `.github/workflows/trigger-runtime-release.yml` is the reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
+- `airflow/reports/runtime-release-latest.json` records the latest acknowledged serving rollout request on the runtime side
 - bootstrap and Terraform verification fail if the VM app becomes public again instead of treating that as rollback
 
 The remaining retirement decision is narrower:
