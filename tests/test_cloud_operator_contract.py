@@ -569,7 +569,7 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
         in summary_step["run"]
     )
     assert (
-        'echo "- Next step: use the runtime-side trigger contract or operator path to deploy this image"'
+        'echo "- Next step: run Trigger Runtime Release with action deploy_candidate and this immutable image URI"'
         in summary_step["run"]
     )
 
@@ -584,9 +584,96 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
     assert "GCP_CLOUD_RUN_SERVICE" not in skipped_step["run"]
 
 
-def test_promote_candidate_workflow_is_blocked_pending_runtime_trigger_contract() -> (
+def test_trigger_runtime_release_workflow_uses_hosted_airflow_handoff_contract() -> (
     None
 ):
+    workflow = _workflow_yaml(".github/workflows/trigger-runtime-release.yml")
+    config_job = workflow["jobs"]["config"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
+    assert dispatch_inputs["action"]["default"] == "deploy_candidate"
+    assert dispatch_inputs["action"]["type"] == "choice"
+    assert dispatch_inputs["action"]["options"] == [
+        "deploy_candidate",
+        "promote_candidate",
+        "rollback_live",
+    ]
+    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
+    assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
+    assert dispatch_inputs["target_alias"]["default"] == "champion"
+    assert dispatch_inputs["rollback_revision_tag"]["default"] == "rollback"
+
+    assert set(config_job["outputs"]) == {
+        "owner_allowed",
+        "project_id",
+        "workload_identity_provider",
+        "service_account_email",
+        "online_compose_host_name",
+        "online_compose_host_zone",
+        "action",
+        "image_uri",
+        "candidate_revision_tag",
+        "candidate_alias",
+        "target_alias",
+        "rollback_revision",
+        "rollback_model_version",
+        "rollback_revision_tag",
+        "trigger_ready",
+    }
+
+    repo_config_step = _workflow_step(workflow, "config", "repo_config")
+    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
+
+    derived_step = _workflow_step(workflow, "config", "derived")
+    assert derived_step["env"]["ACTION_INPUT"] == "${{ github.event.inputs.action }}"
+    assert (
+        derived_step["env"]["PROVISION_ONLINE_COMPOSE_HOST"]
+        == "${{ steps.repo_config.outputs.provision_online_compose_host }}"
+    )
+    assert "deploy_candidate|promote_candidate|rollback_live" in derived_step["run"]
+    assert "trigger_ready=false" in derived_step["run"]
+    assert 'echo "trigger_ready=$trigger_ready"' in derived_step["run"]
+
+    trigger_job = workflow["jobs"]["trigger"]
+    assert (
+        trigger_job["if"]
+        == "${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready == 'true' }}"
+    )
+    assert (
+        trigger_job["env"]["HOST_NAME"]
+        == "${{ needs.config.outputs.online_compose_host_name }}"
+    )
+    assert (
+        trigger_job["env"]["HOST_ZONE"]
+        == "${{ needs.config.outputs.online_compose_host_zone }}"
+    )
+
+    payload_step = _workflow_step(workflow, "trigger", "Build runtime release request")
+    assert "runtime-release-request.json" in payload_step["run"]
+    assert "github_run_url" in payload_step["run"]
+
+    refresh_step = _workflow_step(workflow, "trigger", "Refresh operator host checkout")
+    assert "gcloud compute ssh" in refresh_step["run"]
+    assert "foehncast-online-compose-sync.service" in refresh_step["run"]
+    assert "--wait" in refresh_step["run"]
+
+    copy_step = _workflow_step(workflow, "trigger", "Copy runtime release request")
+    assert "gcloud compute scp" in copy_step["run"]
+    assert "/tmp/runtime-release-request.json" in copy_step["run"]
+
+    handoff_step = _workflow_step(
+        workflow, "trigger", "Trigger runtime release handoff"
+    )
+    assert (
+        "./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json"
+        in handoff_step["run"]
+    )
+    assert 'echo "- Airflow DAG: runtime_release"' in handoff_step["run"]
+    assert 'echo "## Runtime release handoff"' in handoff_step["run"]
+
+
+def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
     workflow = _workflow_yaml(".github/workflows/promote-candidate.yml")
     config_job = workflow["jobs"]["config"]
     dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
@@ -645,20 +732,21 @@ def test_promote_candidate_workflow_is_blocked_pending_runtime_trigger_contract(
     blocked_step = _workflow_step(
         workflow, "blocked", "Explain blocked promotion workflow"
     )
-    assert "Candidate promotion moved out of GitHub" in blocked_step["run"]
+    assert (
+        "Candidate promotion moved behind Trigger Runtime Release"
+        in blocked_step["run"]
+    )
     assert (
         "Candidate promotion is no longer executed directly from GitHub Actions."
         in blocked_step["run"]
     )
     assert (
-        "explicit GitHub-to-runtime trigger contract is implemented"
+        "Use Trigger Runtime Release with action promote_candidate"
         in blocked_step["run"]
     )
 
 
-def test_rollback_live_release_workflow_is_blocked_pending_runtime_trigger_contract() -> (
-    None
-):
+def test_rollback_live_release_workflow_redirects_to_runtime_trigger_contract() -> None:
     workflow = _workflow_yaml(".github/workflows/rollback-live-release.yml")
     config_job = workflow["jobs"]["config"]
     dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
@@ -730,15 +818,28 @@ def test_rollback_live_release_workflow_is_blocked_pending_runtime_trigger_contr
     blocked_step = _workflow_step(
         workflow, "blocked", "Explain blocked rollback workflow"
     )
-    assert "Live rollback moved out of GitHub" in blocked_step["run"]
+    assert "Live rollback moved behind Trigger Runtime Release" in blocked_step["run"]
     assert (
         "Live rollback is no longer executed directly from GitHub Actions."
         in blocked_step["run"]
     )
     assert (
-        "explicit GitHub-to-runtime trigger contract is implemented"
-        in blocked_step["run"]
+        "Use Trigger Runtime Release with action rollback_live" in blocked_step["run"]
     )
+
+
+def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
+    script = _read_text("scripts/trigger-runtime-release.sh")
+
+    assert "Usage: $0 --request-file path" in script
+    assert "http://127.0.0.1:8080/api/v2/monitor/health" in script
+    assert "deploy_candidate, promote_candidate, or rollback_live" in script
+    assert 'airflow dags trigger "$DAG_ID"' in script
+    assert (
+        'wait_for_airflow_dag_run_state "$DAG_ID" "$dag_run_id" success 120 2' in script
+    )
+    assert "runtime-release-latest.json" in script
+    assert 'report["report_path"] = report_path' in script
 
 
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:

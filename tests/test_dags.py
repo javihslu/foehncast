@@ -264,3 +264,22 @@ def test_training_dag_supports_dataset_override(
         "dataset": expected_dataset_template,
         "requested_stage": expected_stage_template,
     }
+
+
+def test_runtime_release_dag_accepts_manual_handoff_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, operators = _load_dag_module(monkeypatch, "dags/runtime_release_dag.py")
+
+    assert module.dag.kwargs["schedule"] is None
+    assert module.dag.kwargs["catchup"] is False
+    assert module.dag.kwargs["is_paused_upon_creation"] is False
+    assert module.dag.kwargs["tags"] == ["foehncast", "runtime"]
+    assert [operator.kwargs["task_id"] for operator in operators] == [
+        "record_runtime_release_request",
+    ]
+    assert operators[0].kwargs["op_kwargs"] == {
+        "request_json": "{{ dag_run.conf | tojson if dag_run and dag_run.conf else '{}' }}",
+        "dag_run_id": "{{ run_id }}",
+        "dag_id": "runtime_release",
+    }

@@ -139,7 +139,7 @@ jobs:
             echo "- Immutable: ${{ steps.image.outputs.immutable_tag }}"
             echo "- Floating: ${{ steps.image.outputs.latest_tag }}"
             echo "- Runtime handoff: not executed from GitHub in this workflow"
-            echo "- Next step: use the runtime-side trigger contract or operator path to deploy this image"
+            echo "- Next step: run Trigger Runtime Release with action deploy_candidate and this immutable image URI"
           } >> "$GITHUB_STEP_SUMMARY"
 
   skipped:

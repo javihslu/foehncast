@@ -104,7 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "## Live rollback moved out of GitHub"
+            echo "## Live rollback moved behind Trigger Runtime Release"
             echo
             echo "- Rollback revision: $ROLLBACK_REVISION"
             echo "- Rollback model version: $ROLLBACK_MODEL_VERSION"
@@ -112,7 +112,7 @@ jobs:
             echo "- Target alias: $TARGET_ALIAS"
             echo
             echo "GitHub Actions no longer restores live runtime state directly."
-            echo "Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract lands."
+            echo "Use Trigger Runtime Release with action rollback_live so GitHub sends one reviewed request into hosted Airflow."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'Live rollback is no longer executed directly from GitHub Actions. Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract is implemented.' >&2
+          echo 'Live rollback is no longer executed directly from GitHub Actions. Use Trigger Runtime Release with action rollback_live instead.' >&2
           exit 1
