@@ -197,6 +197,7 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER="$(optional_terraform_output_value "$terraform_dir" github_workload_identity_provider)"
   FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL="$(optional_terraform_output_value "$terraform_dir" github_deployer_service_account)"
   FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
+  FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"
   FOEHNCAST_TF_CLOUD_RUN_CONTAINER_PORT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_container_port cloud_run_container_port)"

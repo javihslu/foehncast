@@ -215,6 +215,9 @@ read_tfvars_value() {
 
     echo "Local auth: browser-based gcloud ADC on this machine"
     echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"
+    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" && -n "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" ]]; then
+      echo "Online compose runtime service account: ${FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT}"
+    fi
     echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
 
     if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
@@ -368,6 +371,9 @@ read_tfvars_value() {
 
     echo "Bootstrap-only remote state bucket: gs://${state_bucket}"
     echo "Bootstrap-only remote state prefix: ${state_prefix}"
+    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" && -n "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" ]]; then
+      echo "Online compose runtime service account: ${FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT}"
+    fi
     echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
     echo "GitHub workload identity provider: ${FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER}"
     echo "Next step: run ./scripts/terraform-remote.sh apply to provision the broader platform through the remote backend."

@@ -72,6 +72,8 @@ Terraform already injects the default BigQuery storage environment for the Cloud
 That runtime service account includes both BigQuery job access and BigQuery Storage API read-session access so pandas-backed BigQuery reads can succeed without falling back to mounted credentials.
 Terraform also injects the Feast runtime env contract for the hosted app path: the service gets `FOEHNCAST_FEAST_SOURCE=bigquery`, the managed bucket-backed registry and staging paths, the fully-qualified curated BigQuery table reference used by the rendered Feast runtime config, and the named Datastore-mode database used for Feast online serving.
 
+This Cloud Run runtime identity is intentionally narrower than the other hosted identities. It exists to serve the inference API, not to act as the general operator or deployment account.
+
 ## Hosted Full-Stack Target Inputs
 
 When `provision_online_compose_host = true`, provide:
@@ -91,6 +93,8 @@ The app exposes that status through Prometheus `/metrics`, and Grafana shows it 
 Terraform also creates a Firestore Datastore-mode database for Feast online serving. Using a named database keeps this setup separate from any default Firestore state in the project.
 
 The VM uses a dedicated service account with access to BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
+
+That broader VM identity is transitional by design. GitHub delivery uses the separate `github-actions-deployer` identity, and Cloud Run uses the separate `foehncast-cloud-run` runtime identity. The online compose host keeps the broader `foehncast-online-compose` identity only because the current VM still combines operator, training, and serving responsibilities on one machine.
 
 When curated BigQuery rows are ready, run `./scripts/prepare-feast-cloud.sh` on the host, or from another shell with ADC, to apply the Feast repo and materialize the hosted online store.
 
