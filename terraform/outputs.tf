@@ -63,6 +63,11 @@ output "cloud_run_runtime_service_account" {
   value       = try(google_service_account.cloud_run_runtime.email, "foehncast-cloud-run@${var.project_id}.iam.gserviceaccount.com")
 }
 
+output "online_compose_runtime_service_account" {
+  description = "Service account intended for the online compose host runtime when that target is enabled."
+  value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null
+}
+
 output "provision_cloud_run_service" {
   description = "Whether Terraform is configured to provision the Cloud Run inference service."
   value       = var.provision_cloud_run_service

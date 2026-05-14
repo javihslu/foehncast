@@ -1099,6 +1099,37 @@ def test_terraform_forecast_feature_schema_tracks_direction_encoding_columns() -
     )
 
 
+def test_terraform_outputs_split_runtime_identity_contract() -> None:
+    outputs = _read_text("terraform/outputs.tf")
+
+    assert 'output "github_deployer_service_account"' in outputs
+    assert 'output "cloud_run_runtime_service_account"' in outputs
+    assert 'output "online_compose_runtime_service_account"' in outputs
+    assert (
+        'value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null'
+        in outputs
+    )
+
+
+def test_platform_state_tracks_online_compose_identity_without_repo_var_sync() -> None:
+    load_body = _function_body(
+        "scripts/terraform-platform-state.sh", "load_terraform_platform_state"
+    )
+    names_body = _function_body(
+        "scripts/terraform-platform-state.sh", "terraform_repo_variable_names"
+    )
+    pairs_body = _function_body(
+        "scripts/terraform-platform-state.sh", "terraform_repo_variable_pairs"
+    )
+
+    assert (
+        'FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"'
+        in load_body
+    )
+    assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in names_body
+    assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
+
+
 def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> None:
     template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
 
@@ -1420,6 +1451,27 @@ def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
     assert 'echo "Cloud Run service URL: ${service_url}"' in bootstrap
     assert (
         'echo "Cloud Run allows unauthenticated access: ${FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED}"'
+        in bootstrap
+    )
+
+
+def test_bootstrap_gcp_reports_split_runtime_identities() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert (
+        'echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"'
+        in bootstrap
+    )
+    assert (
+        'echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"'
+        in bootstrap
+    )
+    assert (
+        'echo "Online compose runtime service account: ${FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT}"'
+        in bootstrap
+    )
+    assert (
+        'if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" && -n "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" ]]; then'
         in bootstrap
     )
 

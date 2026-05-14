@@ -73,6 +73,14 @@ The hosted full-stack target currently relies on these shared runtime dependenci
 
 That service account is expected to cover BigQuery jobs, BigQuery Storage API read sessions, bucket object access for MLflow and Feast, and Datastore access. The goal is to let the hosted containers read the shared cloud surfaces directly without inventing a separate credential path.
 
+The identity split around this target is deliberate:
+
+- GitHub Actions uses the deployer identity for Terraform apply, image publish, and Cloud Run rollout work.
+- Cloud Run uses its own narrower runtime identity for the inference-only service.
+- the online compose host uses a separate runtime identity because it still bundles Airflow, training, MLflow, Feast preparation, and the app on one VM.
+
+That online compose runtime identity is the current transition contract, not the preferred steady-state shape for every managed runtime. It remains broader than the Cloud Run identity only because the host still owns more responsibilities today.
+
 ## Bootstrap And Day-2 Delivery
 
 The hosted full-stack target is not part of the default contributor path. Its lifecycle is split into two layers:
