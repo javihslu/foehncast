@@ -121,6 +121,8 @@ The shared hosted environment is not part of normal contributor setup.
 
 The current shared environment uses Cloud Run as the only promoted public API path. The hosted full-stack target stays online for Airflow, MLflow, and operator monitoring, but it is not treated as a second public serving surface.
 
+The delivery boundary is explicit: GitHub Actions handles reviewed delivery and infrastructure change, while GCP runtime surfaces handle serving, scheduling, retries, and backfills.
+
 Start with [docs/site/system/delivery-and-operator-workflow.md](docs/site/system/delivery-and-operator-workflow.md) for the maintainer workflow split and use `terraform/README.md` for operator detail.
 
 Hosted deployment keeps a narrow scope. The cloud targets deploy runtime services only. `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.

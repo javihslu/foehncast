@@ -126,6 +126,18 @@ This means:
 - Cloud Run stays responsible for serving the public API, not for taking over orchestration duties.
 - Composer or a lighter managed alternative can be revisited later only if the operator-plane reduction justifies the migration.
 
+## GitHub Versus GCP Boundary
+
+The reviewed delivery plane and the runtime execution plane have different responsibilities.
+
+| Plane | Current owner | What it owns | What it must not own |
+|------|---------------|--------------|----------------------|
+| Reviewed delivery | GitHub Actions plus Terraform | lint, test, build, image publish, Terraform plan/apply/destroy, and reviewed deploy workflows | runtime scheduling, retries, backfills, and long-lived operator state |
+| Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
+| Shared handoff | repository variables, published images, and Terraform outputs | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
+
+For the next delivery horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. GitHub Actions may trigger reviewed delivery workflows, but it is not the runtime orchestrator.
+
 ## Rollback And Retirement Coordinates
 
 The shared API rollback path now lives entirely on Cloud Run.
@@ -157,7 +169,7 @@ Several boundaries stay explicit across the scripts, Terraform reference, and te
 - the local Docker evaluator remains the only default contributor path
 - the shared cloud environment stays operator-owned, even though the repository and images are public
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
-- runtime scheduling, retry, and backfill belong to hosted Airflow for this horizon rather than to GitHub Actions
+- runtime scheduling, retries, and backfills belong to hosted Airflow for this horizon rather than to GitHub Actions
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 
