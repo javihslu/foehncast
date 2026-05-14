@@ -244,8 +244,13 @@ def test_write_features_bigquery_uses_load_job(
             captured["table_id"] = table_id
             captured["frame"] = frame.copy()
             captured["write_disposition"] = job_config.write_disposition
-            captured["time_partitioning"] = job_config.time_partitioning
-            captured["clustering_fields"] = job_config.clustering_fields
+            captured["time_partitioning"] = getattr(
+                job_config, "time_partitioning", None
+            )
+            captured["clustering_fields"] = getattr(
+                job_config, "clustering_fields", None
+            )
+            captured["schema_update_options"] = job_config.schema_update_options
             return FakeLoadJob()
 
         def query(self, query: str, job_config: object | None = None) -> FakeDeleteJob:
@@ -291,6 +296,9 @@ def test_write_features_bigquery_uses_load_job(
             LoadJobConfig=FakeLoadJobConfig,
             QueryJobConfig=FakeQueryJobConfig,
             ScalarQueryParameter=FakeScalarQueryParameter,
+            SchemaUpdateOption=types.SimpleNamespace(
+                ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
+            ),
             TimePartitioning=FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
@@ -322,11 +330,9 @@ def test_write_features_bigquery_uses_load_job(
     assert captured["project"] == "demo-project"
     assert captured["table_id"] == "demo-project.foehncast.forecast_features"
     assert captured["write_disposition"] == "WRITE_APPEND"
-    assert captured["time_partitioning"].field == "forecast_time"
-    assert captured["time_partitioning"].type_ == "DAY"
-    assert captured["time_partitioning"].expiration_ms == 63072000000
-    assert captured["time_partitioning"].require_partition_filter is False
-    assert captured["clustering_fields"] == ["dataset_name", "spot_id"]
+    assert captured["time_partitioning"] is None
+    assert captured["clustering_fields"] is None
+    assert captured["schema_update_options"] == ["ALLOW_FIELD_ADDITION"]
     assert captured["delete_completed"] is True
     assert captured["job_completed"] is True
     assert (
@@ -341,6 +347,111 @@ def test_write_features_bigquery_uses_load_job(
     assert list(written["spot_id"]) == ["silvaplana", "silvaplana"]
     assert list(written["dataset_name"]) == ["train", "train"]
     assert "forecast_time" in written.columns
+
+
+def test_write_features_bigquery_applies_contract_when_table_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_store_env: None,
+    sample_features: pd.DataFrame,
+):
+    captured: dict[str, object] = {}
+
+    class FakeLoadJob:
+        def result(self) -> None:
+            captured["job_completed"] = True
+
+    class FakeClient:
+        def __init__(self, project: str) -> None:
+            captured["project"] = project
+
+        def get_table(self, table_id: str) -> object:
+            captured["missing_table_id"] = table_id
+            raise KeyError(table_id)
+
+        def load_table_from_dataframe(
+            self, frame: pd.DataFrame, table_id: str, job_config: object
+        ) -> FakeLoadJob:
+            captured["table_id"] = table_id
+            captured["frame"] = frame.copy()
+            captured["write_disposition"] = job_config.write_disposition
+            captured["time_partitioning"] = job_config.time_partitioning
+            captured["clustering_fields"] = job_config.clustering_fields
+            captured["schema_update_options"] = job_config.schema_update_options
+            return FakeLoadJob()
+
+        def query(self, query: str, job_config: object | None = None) -> object:
+            captured["unexpected_delete_query"] = query
+            raise AssertionError(
+                "delete should not run when the BigQuery table is absent"
+            )
+
+    class FakeLoadJobConfig:
+        def __init__(self, write_disposition: str, **kwargs: object) -> None:
+            self.write_disposition = write_disposition
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+    class FakeTimePartitioning:
+        def __init__(
+            self,
+            *,
+            type_: object,
+            field: str,
+            expiration_ms: int,
+            require_partition_filter: bool,
+        ) -> None:
+            self.type_ = type_
+            self.field = field
+            self.expiration_ms = expiration_ms
+            self.require_partition_filter = require_partition_filter
+
+    monkeypatch.setattr(
+        store,
+        "_bigquery_module",
+        lambda: types.SimpleNamespace(
+            Client=FakeClient,
+            LoadJobConfig=FakeLoadJobConfig,
+            SchemaUpdateOption=types.SimpleNamespace(
+                ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
+            ),
+            TimePartitioning=FakeTimePartitioning,
+            TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
+        ),
+    )
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+    frame = sample_features.copy()
+    frame.index = pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"])
+    frame.index.name = "time"
+    frame["spot_name"] = ["Silvaplana", "Silvaplana"]
+
+    store.write_features(frame, spot_id="silvaplana", dataset="train")
+
+    assert captured["project"] == "demo-project"
+    assert captured["missing_table_id"] == "demo-project.foehncast.forecast_features"
+    assert captured["table_id"] == "demo-project.foehncast.forecast_features"
+    assert captured["write_disposition"] == "WRITE_APPEND"
+    assert captured["time_partitioning"].field == "forecast_time"
+    assert captured["time_partitioning"].type_ == "DAY"
+    assert captured["time_partitioning"].expiration_ms == 63072000000
+    assert captured["time_partitioning"].require_partition_filter is False
+    assert captured["clustering_fields"] == ["dataset_name", "spot_id"]
+    assert captured["schema_update_options"] == ["ALLOW_FIELD_ADDITION"]
+    assert captured["job_completed"] is True
 
 
 def test_read_features_bigquery_restores_time_index(

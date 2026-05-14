@@ -126,6 +126,62 @@ def test_render_runtime_config_replaces_non_writable_existing_file(
     assert rendered_path.stat().st_mode & 0o222
 
 
+def test_render_runtime_config_reuses_matching_non_writable_existing_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+
+    monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
+    monkeypatch.delenv("FOEHNCAST_FEAST_SOURCE", raising=False)
+    monkeypatch.delenv("FOEHNCAST_FEAST_CONFIG_PATH", raising=False)
+
+    destination = tmp_path / ".state" / "feast" / "feature_store.runtime.yaml"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        yaml.safe_dump(
+            {
+                "project": "foehncast",
+                "entity_key_serialization_version": 3,
+                "registry": "../.state/feast/registry.db",
+                "provider": "gcp",
+                "offline_store": {"type": "file"},
+                "online_store": {
+                    "type": "datastore",
+                    "project_id": "foehncast-local",
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    destination.chmod(0o444)
+
+    real_unlink = Path.unlink
+
+    def fail_unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == destination:
+            raise AssertionError("matching runtime config should not be unlinked")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    rendered_path = feast_runtime.render_runtime_config()
+
+    assert rendered_path == destination
+    assert yaml.safe_load(rendered_path.read_text()) == {
+        "project": "foehncast",
+        "entity_key_serialization_version": 3,
+        "registry": "../.state/feast/registry.db",
+        "provider": "gcp",
+        "offline_store": {"type": "file"},
+        "online_store": {
+            "type": "datastore",
+            "project_id": "foehncast-local",
+        },
+    }
+
+
 def test_render_runtime_config_tolerates_permission_error_on_chmod(
     monkeypatch, tmp_path: Path
 ) -> None:

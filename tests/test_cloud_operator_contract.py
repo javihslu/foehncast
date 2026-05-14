@@ -1059,8 +1059,17 @@ def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_
         'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
         in terraform
     )
+    assert (
+        'resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader"'
+        in terraform
+    )
+    assert (
+        'resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader"'
+        in terraform
+    )
     assert 'role    = "roles/bigquery.readSessionUser"' in terraform
     assert 'role   = "roles/storage.objectAdmin"' in terraform
+    assert 'role   = "roles/storage.legacyBucketReader"' in terraform
     assert (
         "google_project_iam_member.cloud_run_bigquery_read_session_user," in terraform
     )
@@ -1069,6 +1078,25 @@ def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_
         in terraform
     )
     assert "google_storage_bucket_iam_member.online_compose_bucket_admin," in terraform
+    assert (
+        "google_storage_bucket_iam_member.cloud_run_bucket_metadata_reader,"
+        in terraform
+    )
+    assert (
+        "google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,"
+        in terraform
+    )
+
+
+def test_terraform_forecast_feature_schema_tracks_direction_encoding_columns() -> None:
+    terraform = _read_text("terraform/main.tf")
+
+    assert 'name        = "wind_direction_10m_sin"' in terraform
+    assert 'description = "Cyclical sine encoding of 10 m wind direction."' in terraform
+    assert 'name        = "wind_direction_10m_cos"' in terraform
+    assert (
+        'description = "Cyclical cosine encoding of 10 m wind direction."' in terraform
+    )
 
 
 def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> None:
@@ -1082,12 +1110,16 @@ def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> Non
         in template
     )
     assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/airflow /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
         in template
     )
+    assert "install -d -m 0775 /opt/foehncast/data/feast" in template
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
     assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
     assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/airflow" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/feast" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/data/feast" in template
     assert (
         "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
         in template
@@ -1112,12 +1144,16 @@ def test_online_compose_startup_template_prepares_writable_runtime_directories()
         in template
     )
     assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
+        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/airflow /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
         in template
     )
+    assert "install -d -m 0775 /opt/foehncast/data/feast" in template
     assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
     assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
     assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/airflow" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/feast" in template
+    assert "chown -R $${airflow_uid}:0 /opt/foehncast/data/feast" in template
     assert (
         "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
         in template
@@ -1143,10 +1179,84 @@ def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> 
     assert "OnBootSec=2m" in template
     assert "OnUnitActiveSec=5m" in template
     assert "Persistent=true" in template
+    assert "compose_args=(" in template
+    assert "-f /opt/foehncast/docker-compose.yml" in template
+    assert "-f /opt/foehncast/docker-compose.cloud.yml" in template
+    assert "--env-file /opt/foehncast/.env" in template
     assert (
-        "docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env pull"
+        'docker compose "$${compose_args[@]}" pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer'
         in template
     )
+
+
+def test_online_compose_startup_template_configures_docker_log_rotation() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert template.index("journalctl --vacuum-size=100M") < template.index(
+        "apt-get update"
+    )
+    assert "install -d -m 0755 /etc/docker" in template
+    assert "cat > /etc/docker/daemon.json <<'EOF'" in template
+    assert '"log-driver": "json-file"' in template
+    assert '"max-size": "10m"' in template
+    assert '"max-file": "3"' in template
+    assert "journalctl --vacuum-size=100M" in template
+    assert (
+        r"find /var/lib/docker/containers -name '*-json.log' -type f -size +50M -exec truncate -s 0 {} \;"
+        in template
+    )
+    assert "systemctl restart docker" in template
+
+
+def test_online_compose_sync_template_repairs_serving_surface_when_cold() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert (
+        'feature_logical_date="$${FEATURE_LOGICAL_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"'
+        in template
+    )
+    assert (
+        'feature_run_id="$${FEATURE_RUN_ID:-hosted_sync__$(date -u +"%Y-%m-%dT%H-%M-%SZ")}"'
+        in template
+    )
+    assert (
+        'airflow_health_url="http://127.0.0.1:8080/api/v2/monitor/health"' in template
+    )
+    assert 'app_health_url="http://127.0.0.1:8000/health"' in template
+    assert 'online_features_url="http://127.0.0.1:8000/features/online"' in template
+    assert "verify_airflow_api_health() {" in template
+    assert "wait_for_airflow_dag_run_state() {" in template
+    assert "serving_surface_ready() {" in template
+    assert "bootstrap_serving_surface() {" in template
+    assert "verify_serving_surface() {" in template
+    assert (
+        "airflow dags trigger feature_pipeline \\\n"
+        '    --logical-date "$${feature_logical_date}" \\\n'
+        '    --run-id "$${feature_run_id}" >/dev/null' in template
+    )
+    assert (
+        'curl --retry 1 --retry-all-errors --retry-delay 0 -fsS -X POST -H "Content-Type: application/json" -d \'{}\' "$${online_features_url}" >/dev/null 2>&1'
+        in template
+    )
+    assert (
+        'curl --retry 30 --retry-all-errors --retry-delay 2 -fsS -X POST -H "Content-Type: application/json" -d \'{}\' "$${online_features_url}" >/dev/null'
+        in template
+    )
+    assert (
+        "wait_for_airflow_dag_run_state feature_pipeline success manual 120 2"
+        in template
+    )
+    assert (
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
+        in template
+    )
+    assert (
+        'echo "Hosted runtime not ready; triggering feature and training convergence."'
+        in template
+    )
+    assert 'echo "Waiting for hosted feature pipeline..."' in template
+    assert "if ! serving_surface_ready; then" in template
+    assert 'echo "Checking hosted online features..."' in template
 
 
 def test_online_compose_sync_template_records_last_success_status_file() -> None:
@@ -1189,6 +1299,14 @@ def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access()
         'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
         in terraform
     )
+    assert (
+        'resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader"'
+        in terraform
+    )
+    assert (
+        'resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader"'
+        in terraform
+    )
 
 
 def test_terraform_grants_github_deployer_firestore_admin() -> None:
@@ -1203,6 +1321,10 @@ def test_terraform_grants_github_deployer_firestore_admin() -> None:
         in terraform
     )
     assert "google_storage_bucket_iam_member.online_compose_bucket_admin" in terraform
+    assert (
+        "google_storage_bucket_iam_member.online_compose_bucket_metadata_reader"
+        in terraform
+    )
 
 
 def test_bootstrap_gcp_reports_hosted_feast_follow_up_step() -> None:
@@ -1222,6 +1344,46 @@ def test_bootstrap_gcp_requires_curl_for_hosted_runtime_verification() -> None:
     bootstrap = _read_text("scripts/bootstrap-gcp.sh")
 
     assert "require_command curl" in bootstrap
+
+
+def test_bootstrap_gcp_initializes_terraform_with_derived_remote_backend() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "terraform_init_args=(" in bootstrap
+    assert '-backend-config="bucket=$(terraform_remote_state_bucket)"' in bootstrap
+    assert '-backend-config="prefix=$(terraform_remote_state_prefix)"' in bootstrap
+    assert (
+        'if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then'
+        in bootstrap
+    )
+    assert "  ensure_remote_state_bucket" in bootstrap
+
+
+def test_bootstrap_gcp_normalizes_custom_env_and_tfvars_paths() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert "resolve_invocation_path()" in bootstrap
+    assert 'ENV_FILE="$(resolve_invocation_path "$ENV_FILE")"' in bootstrap
+    assert 'TFVARS_FILE="$(resolve_invocation_path "$TFVARS_FILE")"' in bootstrap
+
+
+def test_bootstrap_gcp_uses_isolated_terraform_dir_for_remote_backend() -> None:
+    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
+
+    assert (
+        'TEMP_TERRAFORM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/foehncast-terraform.XXXXXX")"'
+        in bootstrap
+    )
+    assert 'cp -R "${ROOT_DIR}/terraform/." "$TEMP_TERRAFORM_DIR/"' in bootstrap
+    assert 'rm -rf "$TEMP_TERRAFORM_DIR/.terraform"' in bootstrap
+    assert (
+        'rm -f "$TEMP_TERRAFORM_DIR/terraform.tfstate" "$TEMP_TERRAFORM_DIR/terraform.tfstate.backup"'
+        in bootstrap
+    )
+    assert (
+        'echo "Using an isolated Terraform working directory so local state files do not interfere with remote backend initialization."'
+        in bootstrap
+    )
 
 
 def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -> None:

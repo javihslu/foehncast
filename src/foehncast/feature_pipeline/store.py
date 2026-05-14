@@ -247,6 +247,16 @@ def _bigquery_time_partitioning(bigquery: Any, contract: dict[str, Any]) -> Any:
     )
 
 
+def _bigquery_schema_update_options(bigquery: Any) -> list[Any]:
+    schema_update_option = getattr(bigquery, "SchemaUpdateOption", None)
+    allow_field_addition = getattr(
+        schema_update_option,
+        "ALLOW_FIELD_ADDITION",
+        "ALLOW_FIELD_ADDITION",
+    )
+    return [allow_field_addition]
+
+
 def _validate_bigquery_contract_frame(
     frame: pd.DataFrame,
     contract: dict[str, Any],
@@ -332,12 +342,22 @@ def _write_features_bigquery(
     write_frame = _bigquery_write_frame(df, spot_id=spot_id, dataset=dataset)
     contract = _bigquery_curated_feature_contract(storage_config)
     _validate_bigquery_contract_frame(write_frame, contract)
-    _delete_features_bigquery(storage_config, spot_id=spot_id, dataset=dataset)
-    job_config = bigquery.LoadJobConfig(
-        write_disposition="WRITE_APPEND",
-        time_partitioning=_bigquery_time_partitioning(bigquery, contract),
-        clustering_fields=contract["cluster_fields"],
-    )
+    table_missing = _bigquery_not_found(storage_config)
+    if not table_missing:
+        _delete_features_bigquery(storage_config, spot_id=spot_id, dataset=dataset)
+
+    job_config_kwargs: dict[str, Any] = {
+        "write_disposition": "WRITE_APPEND",
+        "schema_update_options": _bigquery_schema_update_options(bigquery),
+    }
+    if table_missing:
+        job_config_kwargs["time_partitioning"] = _bigquery_time_partitioning(
+            bigquery,
+            contract,
+        )
+        job_config_kwargs["clustering_fields"] = contract["cluster_fields"]
+
+    job_config = bigquery.LoadJobConfig(**job_config_kwargs)
     client.load_table_from_dataframe(
         write_frame,
         _bigquery_table_id(storage_config),

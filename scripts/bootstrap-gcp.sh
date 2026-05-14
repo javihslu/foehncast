@@ -44,6 +44,19 @@ in_cloud_shell() {
   [[ -n "${CLOUD_SHELL:-}" || -n "${DEVSHELL_PROJECT_ID:-}" ]]
 }
 
+resolve_invocation_path() {
+  local path_value="$1"
+
+  case "$path_value" in
+    /*)
+      printf '%s\n' "$path_value"
+      ;;
+    *)
+      printf '%s/%s\n' "$PWD" "$path_value"
+      ;;
+  esac
+}
+
 cleanup_bootstrap_terraform_dir() {
   if [[ -n "$TEMP_TERRAFORM_DIR" && -d "$TEMP_TERRAFORM_DIR" ]]; then
     rm -rf "$TEMP_TERRAFORM_DIR"
@@ -51,7 +64,7 @@ cleanup_bootstrap_terraform_dir() {
 }
 
 prepare_bootstrap_terraform_dir() {
-  if [[ "$BOOTSTRAP_ONLY" != "true" || -n "$TEMP_TERRAFORM_DIR" ]]; then
+  if [[ -n "$TEMP_TERRAFORM_DIR" ]]; then
     return
   fi
 
@@ -61,9 +74,7 @@ prepare_bootstrap_terraform_dir() {
   rm -f "$TEMP_TERRAFORM_DIR/terraform.tfstate" "$TEMP_TERRAFORM_DIR/terraform.tfstate.backup"
   TERRAFORM_DIR="$TEMP_TERRAFORM_DIR"
 
-  if [[ -f "${ROOT_DIR}/terraform/terraform.tfstate" || -d "${ROOT_DIR}/terraform/.terraform" ]]; then
-    echo "Using an isolated Terraform working directory for bootstrap-only so local state files do not interfere with remote backend initialization."
-  fi
+  echo "Using an isolated Terraform working directory so local state files do not interfere with remote backend initialization."
 }
 
 trap cleanup_bootstrap_terraform_dir EXIT
@@ -799,6 +810,9 @@ if [[ -n "$TARGET_REPO" ]]; then
   CONFIGURE_GITHUB=true
 fi
 
+ENV_FILE="$(resolve_invocation_path "$ENV_FILE")"
+TFVARS_FILE="$(resolve_invocation_path "$TFVARS_FILE")"
+
 print_bootstrap_context
 
 require_command gcloud
@@ -829,14 +843,15 @@ echo "Checking access to GCP project ${GCP_PROJECT_ID}..."
 gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
 
 echo "Initializing Terraform..."
-terraform_init_args=(init -reconfigure)
+terraform_init_args=(
+  init
+  -reconfigure
+  -backend-config="bucket=$(terraform_remote_state_bucket)"
+  -backend-config="prefix=$(terraform_remote_state_prefix)"
+)
 
 if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
   ensure_remote_state_bucket
-  terraform_init_args+=(
-    -backend-config="bucket=$(terraform_remote_state_bucket)"
-    -backend-config="prefix=$(terraform_remote_state_prefix)"
-  )
 fi
 
 run_terraform -chdir="$TERRAFORM_DIR" "${terraform_init_args[@]}"

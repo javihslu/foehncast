@@ -175,6 +175,20 @@ def render_runtime_config(output_path: str | Path | None = None) -> Path:
         Path(output_path) if output_path else feast_runtime_config_path(repo_path)
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
+    desired_config = resolve_runtime_config()
+
+    if destination.exists():
+        try:
+            with destination.open("r", encoding="utf-8") as handle:
+                current_config = yaml.safe_load(handle)
+        except (OSError, yaml.YAMLError):
+            current_config = None
+
+        # The app and Airflow containers may share this file through a bind
+        # mount while running under different UIDs. If the rendered config is
+        # already correct, reuse it instead of forcing another rewrite.
+        if current_config == desired_config:
+            return destination
 
     # In the local stack multiple containers may render the same runtime file.
     # If another container created it with a restrictive mode, remove it first
@@ -183,7 +197,7 @@ def render_runtime_config(output_path: str | Path | None = None) -> Path:
         destination.unlink()
 
     with destination.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(resolve_runtime_config(), handle, sort_keys=False)
+        yaml.safe_dump(desired_config, handle, sort_keys=False)
 
     # A different container UID may still be able to rewrite the file through
     # the shared bind mount while not being allowed to change its mode.
