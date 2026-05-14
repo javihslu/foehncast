@@ -584,7 +584,6 @@ verify_grafana_provisioning
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 if [[ "$CI_SMOKE" == "true" ]]; then
   compose exec -T \
-    -e AIRFLOW_AUTO_RETRAIN_MODE=off \
     -e FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR" \
     airflow-webserver \
     airflow dags test feature_pipeline "$FEATURE_DATE"
@@ -592,12 +591,8 @@ else
   compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 fi
 
-if [[ "$CI_SMOKE" != "true" ]]; then
-  echo "Waiting for asset-triggered training pipeline..."
-  wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
-else
-  echo "Skipping asset-triggered training pipeline wait in CI smoke mode."
-fi
+echo "Waiting for asset-triggered training pipeline..."
+wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
 
 echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 "${ROOT_DIR}/scripts/prepare-feast-local.sh" --reset-state "$FEAST_DATASET"

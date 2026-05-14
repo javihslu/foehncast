@@ -46,6 +46,9 @@ terraform/terraform.tfvars
 mlruns/
 mlartifacts/
 
+# Grafana runtime state
+grafana_work/data/
+
 # Airflow
 airflow/logs/
 airflow/airflow.db

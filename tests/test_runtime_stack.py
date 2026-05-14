@@ -122,11 +122,17 @@ def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
         'CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"'
         in bootstrap
     )
-    assert 'if [[ "$CI_SMOKE" != "true" ]]; then' in bootstrap
-    assert "AIRFLOW_AUTO_RETRAIN_MODE=off" in bootstrap
+    assert 'if [[ "$CI_SMOKE" != "true" ]]; then' not in bootstrap
+    assert "AIRFLOW_AUTO_RETRAIN_MODE=off" not in bootstrap
     assert 'FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR"' in bootstrap
+    assert "Waiting for asset-triggered training pipeline..." in bootstrap
     assert (
-        "Skipping asset-triggered training pipeline wait in CI smoke mode." in bootstrap
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
+        in bootstrap
+    )
+    assert (
+        "Skipping asset-triggered training pipeline wait in CI smoke mode."
+        not in bootstrap
     )
     assert "Stopping CI smoke stack..." in bootstrap
     assert "compose down -v --remove-orphans >/dev/null 2>&1 || true" in bootstrap
