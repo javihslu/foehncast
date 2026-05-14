@@ -74,24 +74,6 @@ locals {
       description = "Hourly forecast timestamp."
     },
     {
-      name        = "spot_id"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Stable spot identifier from config.yaml."
-    },
-    {
-      name        = "spot_name"
-      type        = "STRING"
-      mode        = "NULLABLE"
-      description = "Human-readable spot name."
-    },
-    {
-      name        = "dataset_name"
-      type        = "STRING"
-      mode        = "REQUIRED"
-      description = "Logical dataset partition such as train or forecast."
-    },
-    {
       name        = "wind_speed_10m"
       type        = "FLOAT"
       mode        = "NULLABLE"
@@ -170,6 +152,18 @@ locals {
       description = "Lifted index from Open-Meteo."
     },
     {
+      name        = "spot_id"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Stable spot identifier from config.yaml."
+    },
+    {
+      name        = "spot_name"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Human-readable spot name."
+    },
+    {
       name        = "hour_of_day_sin"
       type        = "FLOAT"
       mode        = "NULLABLE"
@@ -194,6 +188,18 @@ locals {
       description = "Cyclical encoding of the day of year."
     },
     {
+      name        = "wind_direction_10m_sin"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Cyclical sine encoding of 10 m wind direction."
+    },
+    {
+      name        = "wind_direction_10m_cos"
+      type        = "FLOAT"
+      mode        = "NULLABLE"
+      description = "Cyclical cosine encoding of 10 m wind direction."
+    },
+    {
       name        = "wind_steadiness"
       type        = "FLOAT"
       mode        = "NULLABLE"
@@ -216,6 +222,12 @@ locals {
       type        = "FLOAT"
       mode        = "NULLABLE"
       description = "Cosine similarity of wind direction to shore orientation."
+    },
+    {
+      name        = "dataset_name"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Logical dataset partition such as train or forecast."
     },
   ]
 
@@ -383,6 +395,12 @@ resource "google_storage_bucket_iam_member" "cloud_run_bucket_reader" {
   member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.legacyBucketReader"
+  member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_project_iam_member" "cloud_run_bigquery_job_user" {
   project = var.project_id
   role    = "roles/bigquery.jobUser"
@@ -436,6 +454,14 @@ resource "google_storage_bucket_iam_member" "online_compose_bucket_admin" {
 
   bucket = google_storage_bucket.artifacts.name
   role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.legacyBucketReader"
   member = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
@@ -497,6 +523,7 @@ resource "google_cloud_run_v2_service" "app" {
     google_firestore_database.feast_online_store,
     google_artifact_registry_repository_iam_member.cloud_run_reader,
     google_storage_bucket_iam_member.cloud_run_bucket_reader,
+    google_storage_bucket_iam_member.cloud_run_bucket_metadata_reader,
     google_project_iam_member.cloud_run_bigquery_job_user,
     google_project_iam_member.cloud_run_bigquery_read_session_user,
     google_project_iam_member.cloud_run_datastore_user,
@@ -591,6 +618,7 @@ resource "google_compute_instance" "online_compose" {
     google_project_iam_member.online_compose_bigquery_read_session_user,
     google_project_iam_member.online_compose_datastore_user,
     google_storage_bucket_iam_member.online_compose_bucket_admin,
+    google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,
     google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
   ]
 }
