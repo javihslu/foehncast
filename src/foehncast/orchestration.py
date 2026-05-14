@@ -862,12 +862,19 @@ def _emit_training_summary(
     emit_training_pipeline_run_summary(summary)
 
 
-def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
+def _training_run_metrics_and_params(
+    training_run_id: str,
+) -> tuple[dict[str, float], dict[str, str]]:
     run = mlflow.MlflowClient().get_run(training_run_id)
-    metrics = {
-        str(name): float(value) for name, value in dict(run.data.metrics).items()
-    }
-    params = {str(name): str(value) for name, value in dict(run.data.params).items()}
+    raw_metrics = dict(getattr(run.data, "metrics", {}))
+    raw_params = dict(getattr(run.data, "params", {}))
+    metrics = {str(name): float(value) for name, value in raw_metrics.items()}
+    params = {str(name): str(value) for name, value in raw_params.items()}
+    return metrics, params
+
+
+def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
+    metrics, params = _training_run_metrics_and_params(training_run_id)
 
     def _metric_count(name: str) -> int | None:
         value = metrics.get(name)
@@ -935,10 +942,7 @@ def evaluate_training_run(
 
     try:
         mlflow.set_tracking_uri(get_mlflow_tracking_uri())
-        run = mlflow.MlflowClient().get_run(training_run_id)
-        metrics = {
-            str(name): float(value) for name, value in dict(run.data.metrics).items()
-        }
+        metrics, _ = _training_run_metrics_and_params(training_run_id)
         if not metrics:
             raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
 

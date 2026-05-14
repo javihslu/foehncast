@@ -676,6 +676,29 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     )
 
 
+def test_training_run_metrics_and_params_normalize_mlflow_run_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: dict[str, object] = {}
+    run = SimpleNamespace(
+        data=SimpleNamespace(
+            metrics={"mae": 0.5, "training_input_row_count": 240},
+            params={"model_name": "foehncast", "candidate_alias": "candidate"},
+        )
+    )
+
+    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+
+    metrics, params = orchestration._training_run_metrics_and_params("run-123")
+
+    assert logged["queried_run_id"] == "run-123"
+    assert metrics == {"mae": 0.5, "training_input_row_count": 240.0}
+    assert params == {
+        "model_name": "foehncast",
+        "candidate_alias": "candidate",
+    }
+
+
 def test_register_training_run_registers_and_promotes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
