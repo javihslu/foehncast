@@ -113,6 +113,17 @@ The current delivery story is split intentionally:
 
 For this horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. That means Cloud Run is the serving surface, not the scheduler, and GitHub Actions is the delivery plane, not the runtime orchestrator.
 
+## Operator Recovery Lane
+
+The active shared environment now has one reviewed recovery split:
+
+- delivery failures before runtime execution stay on the GitHub plus Terraform side
+- serving rollout retries use the explicit runtime trigger contract, not ad hoc SSH-only release changes
+- feature retries and backfills stay on hosted Airflow on the retained operator host
+- replaying one logical date starts with `feature_pipeline`; the downstream `training_pipeline` run should remain asset-triggered when the replay is meant to refresh production training state
+
+This keeps the recovery story aligned with the topology: GitHub advances reviewed delivery, Cloud Run serves the public API, and hosted Airflow on the retained host owns runtime replay work.
+
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
@@ -193,6 +204,18 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
 | Public exposure | local ports on the developer machine | Cloud Run is the shared hosted API surface; the retained hosted full-stack target stays private by default; operator dashboards stay private unless you deliberately publish them |
+
+## Recovery Evidence In Cloud
+
+Operators should be able to prove what changed after a retry, replay, or rollback request.
+
+The stable evidence surfaces are:
+
+- `airflow/reports/feature-pipeline-<dataset>-latest.json` and its history copy for feature retries or backfills
+- `airflow/reports/training-pipeline-<dataset>-latest.json` and its history copy for training follow-up
+- `airflow/reports/runtime-release-latest.json` and its history copy for reviewed deploy, promote, or rollback handoffs
+- `.state/online-compose-sync/last-success.json` for the retained host refresh state
+- `/metrics` and the checked-in Grafana panels for post-recovery operator verification
 
 ## What Is Already In Place
 
