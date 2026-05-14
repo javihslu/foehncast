@@ -1,414 +1,118 @@
 name: Roll Back Live Release
 
 on:
-    workflow_dispatch:
-        inputs:
-            rollback_revision:
-                description: Exact Cloud Run revision to restore live traffic to
-                required: true
-                type: string
-            rollback_model_version:
-                description: Exact MLflow model version to restore to the live alias
-                required: true
-                type: string
-            rollback_revision_tag:
-                description: Temporary tag used to verify the rollback target before traffic is restored
-                required: false
-                default: rollback
-                type: string
-            target_alias:
-                description: MLflow alias the live service should use after rollback
-                required: false
-                default: champion
-                type: string
+  workflow_dispatch:
+    inputs:
+      rollback_revision:
+        description: Exact Cloud Run revision to restore live traffic to
+        required: true
+        type: string
+      rollback_model_version:
+        description: Exact MLflow model version to restore to the live alias
+        required: true
+        type: string
+      rollback_revision_tag:
+        description: Temporary tag used to verify the rollback target before traffic is restored
+        required: false
+        default: rollback
+        type: string
+      target_alias:
+        description: MLflow alias the live service should use after rollback
+        required: false
+        default: champion
+        type: string
 
 permissions:
-    contents: read
-    id-token: write
+  contents: read
 
 jobs:
-    config:
-        runs-on: ubuntu-latest
-        outputs:
-            owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
-            project_id: ${{ steps.repo_config.outputs.project_id }}
-            location: ${{ steps.repo_config.outputs.location }}
-            cloud_run_service: ${{ steps.repo_config.outputs.cloud_run_service }}
-            cloud_run_allow_unauthenticated: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
-            mlflow_tracking_uri: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-            workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
-            service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
-            rollback_revision: ${{ steps.derived.outputs.rollback_revision }}
-            rollback_model_version: ${{ steps.derived.outputs.rollback_model_version }}
-            rollback_revision_tag: ${{ steps.derived.outputs.rollback_revision_tag }}
-            target_alias: ${{ steps.derived.outputs.target_alias }}
-            rollback_ready: ${{ steps.derived.outputs.rollback_ready }}
-        steps:
-            - uses: actions/checkout@v6.0.2
-
-            - id: flags
-              env:
-                  ACTOR: ${{ github.actor }}
-                  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
-                  REPOSITORY_OWNER: ${{ github.repository_owner }}
-              run: |
-                  set -euo pipefail
-
-                  owner_allowed=false
-                  if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
-                    owner_allowed=true
-                  fi
-
-                  echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
-
-            - id: repo_config
-              uses: ./.github/actions/load-gcp-repo-config
-              with:
-                  repo-vars-json: ${{ toJson(vars) }}
-
-            - id: derived
-              env:
-                  CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
-                  MLFLOW_TRACKING_URI: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-                  WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
-                  SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
-                  ROLLBACK_REVISION_INPUT: ${{ github.event.inputs.rollback_revision }}
-                  ROLLBACK_MODEL_VERSION_INPUT: ${{ github.event.inputs.rollback_model_version }}
-                  ROLLBACK_REVISION_TAG_INPUT: ${{ github.event.inputs.rollback_revision_tag }}
-                  TARGET_ALIAS_INPUT: ${{ github.event.inputs.target_alias }}
-              run: |
-                  set -euo pipefail
-
-                  rollback_ready=false
-                  if [[ -n "$CLOUD_RUN_SERVICE" && -n "$MLFLOW_TRACKING_URI" && -n "$WORKLOAD_IDENTITY_PROVIDER" && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
-                    rollback_ready=true
-                  fi
-
-                  rollback_revision="$(printf '%s' "${ROLLBACK_REVISION_INPUT:-}" | tr -d '[:space:]')"
-                  if [[ -z "$rollback_revision" ]]; then
-                    echo "rollback_revision is required." >&2
-                    exit 1
-                  fi
-
-                  rollback_model_version="$(printf '%s' "${ROLLBACK_MODEL_VERSION_INPUT:-}" | tr -d '[:space:]')"
-                  if [[ -z "$rollback_model_version" ]]; then
-                    echo "rollback_model_version is required." >&2
-                    exit 1
-                  fi
-
-                  rollback_revision_tag="$(printf '%s' "${ROLLBACK_REVISION_TAG_INPUT:-rollback}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-                  rollback_revision_tag="${rollback_revision_tag#-}"
-                  rollback_revision_tag="${rollback_revision_tag%-}"
-                  if [[ -z "$rollback_revision_tag" ]]; then
-                    rollback_revision_tag='rollback'
-                  fi
-
-                  target_alias="$(printf '%s' "${TARGET_ALIAS_INPUT:-champion}" | tr '[:upper:]' '[:lower:]')"
-                  if [[ -z "$target_alias" ]]; then
-                    target_alias='champion'
-                  fi
-
-                  {
-                    echo "rollback_revision=$rollback_revision"
-                    echo "rollback_model_version=$rollback_model_version"
-                    echo "rollback_revision_tag=$rollback_revision_tag"
-                    echo "target_alias=$target_alias"
-                    echo "rollback_ready=$rollback_ready"
-                  } >> "$GITHUB_OUTPUT"
-
-    rollback:
-        needs: config
-        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.rollback_ready == 'true' }}
-        runs-on: ubuntu-latest
-        environment: cloud-run-production
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+      rollback_revision: ${{ steps.derived.outputs.rollback_revision }}
+      rollback_model_version: ${{ steps.derived.outputs.rollback_model_version }}
+      rollback_revision_tag: ${{ steps.derived.outputs.rollback_revision_tag }}
+      target_alias: ${{ steps.derived.outputs.target_alias }}
+    steps:
+      - id: flags
         env:
-            GCP_PROJECT_ID: ${{ needs.config.outputs.project_id }}
-            GCP_LOCATION: ${{ needs.config.outputs.location }}
-            CLOUD_RUN_SERVICE: ${{ needs.config.outputs.cloud_run_service }}
-            CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ needs.config.outputs.cloud_run_allow_unauthenticated }}
-            MLFLOW_TRACKING_URI: ${{ needs.config.outputs.mlflow_tracking_uri }}
-            ROLLBACK_REVISION: ${{ needs.config.outputs.rollback_revision }}
-            ROLLBACK_MODEL_VERSION: ${{ needs.config.outputs.rollback_model_version }}
-            ROLLBACK_REVISION_TAG: ${{ needs.config.outputs.rollback_revision_tag }}
-            TARGET_ALIAS: ${{ needs.config.outputs.target_alias }}
-        steps:
-            - uses: actions/checkout@v6.0.2
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
 
-            - uses: google-github-actions/auth@v2
-              with:
-                  workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
-                  service_account: ${{ needs.config.outputs.service_account_email }}
+          owner_allowed=false
+          if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
+            owner_allowed=true
+          fi
 
-            - uses: google-github-actions/setup-gcloud@v2
+          echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
 
-            - uses: astral-sh/setup-uv@v8.1.0
+      - id: derived
+        env:
+          ROLLBACK_REVISION_INPUT: ${{ github.event.inputs.rollback_revision }}
+          ROLLBACK_MODEL_VERSION_INPUT: ${{ github.event.inputs.rollback_model_version }}
+          ROLLBACK_REVISION_TAG_INPUT: ${{ github.event.inputs.rollback_revision_tag }}
+          TARGET_ALIAS_INPUT: ${{ github.event.inputs.target_alias }}
+        run: |
+          set -euo pipefail
 
-            - name: Install runtime dependencies
-              run: uv sync --frozen --no-default-groups
+          rollback_revision="$(printf '%s' "${ROLLBACK_REVISION_INPUT:-}" | tr -d '[:space:]')"
+          if [[ -z "$rollback_revision" ]]; then
+            echo "rollback_revision is required." >&2
+            exit 1
+          fi
 
-            - name: Confirm Cloud Run service exists
-              run: |
-                  gcloud run services describe "$CLOUD_RUN_SERVICE" \
-                    --project "$GCP_PROJECT_ID" \
-                    --region "$GCP_LOCATION" \
-                    --format='value(metadata.name)' >/dev/null
+          rollback_model_version="$(printf '%s' "${ROLLBACK_MODEL_VERSION_INPUT:-}" | tr -d '[:space:]')"
+          if [[ -z "$rollback_model_version" ]]; then
+            echo "rollback_model_version is required." >&2
+            exit 1
+          fi
 
-            - id: resolve_rollback
-              name: Resolve rollback revision
-              run: |
-                  set -euo pipefail
+          rollback_revision_tag="$(printf '%s' "${ROLLBACK_REVISION_TAG_INPUT:-rollback}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          rollback_revision_tag="${rollback_revision_tag#-}"
+          rollback_revision_tag="${rollback_revision_tag%-}"
+          if [[ -z "$rollback_revision_tag" ]]; then
+            rollback_revision_tag='rollback'
+          fi
 
-                  rollback_revision_name="$(gcloud run revisions describe "$ROLLBACK_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(metadata.name)')"
-                  if [[ -z "$rollback_revision_name" ]]; then
-                    echo "Rollback revision ${ROLLBACK_REVISION} could not be resolved." >&2
-                    exit 1
-                  fi
+          target_alias="$(printf '%s' "${TARGET_ALIAS_INPUT:-champion}" | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$target_alias" ]]; then
+            target_alias='champion'
+          fi
 
-                  rollback_image="$(gcloud run revisions describe "$ROLLBACK_REVISION" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(spec.containers[0].image)')"
-                  if [[ -z "$rollback_image" ]]; then
-                    echo "Rollback revision image could not be resolved." >&2
-                    exit 1
-                  fi
+          {
+            echo "rollback_revision=$rollback_revision"
+            echo "rollback_model_version=$rollback_model_version"
+            echo "rollback_revision_tag=$rollback_revision_tag"
+            echo "target_alias=$target_alias"
+          } >> "$GITHUB_OUTPUT"
 
-                  gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
-                    --project "$GCP_PROJECT_ID" \
-                    --region "$GCP_LOCATION" \
-                    --update-tags "$ROLLBACK_REVISION_TAG=$ROLLBACK_REVISION" \
-                    --quiet
-
-                  service_description="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format=json)"
-                  rollback_tag_url="$(printf '%s' "$service_description" | jq -r --arg tag "$ROLLBACK_REVISION_TAG" '.status.traffic[] | select(.tag == $tag) | .url' | head -n1)"
-                  rollback_tag_revision="$(printf '%s' "$service_description" | jq -r --arg tag "$ROLLBACK_REVISION_TAG" '.status.traffic[] | select(.tag == $tag) | .revisionName' | head -n1)"
-
-                  if [[ -z "$rollback_tag_url" || "$rollback_tag_url" == 'null' ]]; then
-                    echo "Rollback tag URL is empty after tagging revision ${ROLLBACK_REVISION}." >&2
-                    exit 1
-                  fi
-
-                  if [[ "$rollback_tag_revision" != "$ROLLBACK_REVISION" ]]; then
-                    echo "Rollback tag does not point at the requested revision." >&2
-                    exit 1
-                  fi
-
-                  {
-                    echo "rollback_revision_name=${rollback_revision_name}"
-                    echo "rollback_image=${rollback_image}"
-                    echo "rollback_tag_url=${rollback_tag_url}"
-                  } >> "$GITHUB_OUTPUT"
-
-            - id: verify_rollback_target
-              name: Verify rollback target runtime
-              env:
-                  SERVICE_URL: ${{ steps.resolve_rollback.outputs.rollback_tag_url }}
-              run: |
-                  set -euo pipefail
-
-                  if [[ -z "$SERVICE_URL" ]]; then
-                    echo "Rollback target service URL is empty." >&2
-                    exit 1
-                  fi
-
-                  health_url="${SERVICE_URL%/}/health"
-                  allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-                  curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-                  invocation_mode="anonymous"
-
-                  if [[ "$allow_unauthenticated" != 'true' ]]; then
-                    invocation_mode="identity-token"
-                    identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
-                    curl_args+=(-H "Authorization: Bearer ${identity_token}")
-                  fi
-
-                  echo "Waiting for rollback target health at ${health_url}..."
-                  health_payload="$(curl "${curl_args[@]}" "$health_url")"
-                  if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-                    echo "Rollback target health verification failed." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
-                    echo "Rollback target health verification did not report serving alias ${TARGET_ALIAS}." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  rollback_target_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-                  if [[ -z "$rollback_target_model_version" ]]; then
-                    echo "Rollback target health payload did not include model_version." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  {
-                    echo "rollback_target_model_version=${rollback_target_model_version}"
-                    echo "rollback_target_invocation_mode=${invocation_mode}"
-                  } >> "$GITHUB_OUTPUT"
-
-            - id: restore_model
-              name: Restore champion alias to rollback model version
-              run: |
-                  set -euo pipefail
-
-                  restored_model_version="$(uv run python -m foehncast.training_pipeline.rollback --version "$ROLLBACK_MODEL_VERSION" --target-alias "$TARGET_ALIAS")"
-                  if [[ -z "$restored_model_version" ]]; then
-                    echo "Rollback helper returned an empty model version." >&2
-                    exit 1
-                  fi
-
-                  if [[ "$restored_model_version" != "$ROLLBACK_MODEL_VERSION" ]]; then
-                    echo "Rollback helper did not restore the requested model version." >&2
-                    exit 1
-                  fi
-
-                  echo "restored_model_version=${restored_model_version}" >> "$GITHUB_OUTPUT"
-
-            - id: reverify_rollback_target
-              name: Reverify rollback target with restored model version
-              env:
-                  SERVICE_URL: ${{ steps.resolve_rollback.outputs.rollback_tag_url }}
-                  RESTORED_MODEL_VERSION: ${{ steps.restore_model.outputs.restored_model_version }}
-              run: |
-                  set -euo pipefail
-
-                  if [[ -z "$SERVICE_URL" || -z "$RESTORED_MODEL_VERSION" ]]; then
-                    echo "Rollback target service URL and restored model version are required for pre-traffic revalidation." >&2
-                    exit 1
-                  fi
-
-                  health_url="${SERVICE_URL%/}/health"
-                  allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-                  curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-                  invocation_mode="anonymous"
-
-                  if [[ "$allow_unauthenticated" != 'true' ]]; then
-                    invocation_mode="identity-token"
-                    identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
-                    curl_args+=(-H "Authorization: Bearer ${identity_token}")
-                  fi
-
-                  echo "Waiting for rollback target health after alias restore at ${health_url}..."
-                  health_payload="$(curl "${curl_args[@]}" "$health_url")"
-                  if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-                    echo "Rollback target health revalidation failed after alias restore." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
-                    echo "Rollback target revalidation did not report serving alias ${TARGET_ALIAS}." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  rollback_target_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-                  if [[ "$rollback_target_model_version" != "$RESTORED_MODEL_VERSION" ]]; then
-                    echo "Rollback target revalidation did not report the restored model version." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"
-
-            - id: shift_traffic
-              name: Restore live traffic to rollback revision
-              run: |
-                  set -euo pipefail
-
-                  gcloud run services update-traffic "$CLOUD_RUN_SERVICE" \
-                    --project "$GCP_PROJECT_ID" \
-                    --region "$GCP_LOCATION" \
-                    --update-tags "$ROLLBACK_REVISION_TAG=$ROLLBACK_REVISION" \
-                    --to-revisions "$ROLLBACK_REVISION=100" \
-                    --quiet
-
-                  service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
-                  if [[ -z "$service_url" ]]; then
-                    echo "Live Cloud Run service URL is empty after rollback." >&2
-                    exit 1
-                  fi
-
-                  echo "service_url=${service_url}" >> "$GITHUB_OUTPUT"
-
-            - id: verify_live
-              name: Verify rolled back live runtime
-              env:
-                  SERVICE_URL: ${{ steps.shift_traffic.outputs.service_url }}
-                  RESTORED_MODEL_VERSION: ${{ steps.restore_model.outputs.restored_model_version }}
-              run: |
-                  set -euo pipefail
-
-                  if [[ -z "$SERVICE_URL" || -z "$RESTORED_MODEL_VERSION" ]]; then
-                    echo "Live service URL and restored model version are required for rollback verification." >&2
-                    exit 1
-                  fi
-
-                  health_url="${SERVICE_URL%/}/health"
-                  spots_url="${SERVICE_URL%/}/spots"
-                  allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-                  curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-                  invocation_mode="anonymous"
-
-                  if [[ "$allow_unauthenticated" != 'true' ]]; then
-                    invocation_mode="identity-token"
-                    identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
-                    curl_args+=(-H "Authorization: Bearer ${identity_token}")
-                  fi
-
-                  echo "Waiting for live rollback health at ${health_url}..."
-                  health_payload="$(curl "${curl_args[@]}" "$health_url")"
-                  if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-                    echo "Live rollback health verification failed." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
-                    echo "Live rollback health verification did not report serving alias ${TARGET_ALIAS}." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  live_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-                  if [[ "$live_model_version" != "$RESTORED_MODEL_VERSION" ]]; then
-                    echo "Live rollback model version does not match the restored model version." >&2
-                    printf '%s\n' "$health_payload" >&2
-                    exit 1
-                  fi
-
-                  echo "Checking live Cloud Run spots endpoint at ${spots_url}..."
-                  spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
-                  if ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
-                    echo "Live Cloud Run spots verification failed after rollback." >&2
-                    printf '%s\n' "$spots_payload" >&2
-                    exit 1
-                  fi
-
-                  echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"
-
-            - name: Summarize rollback
-              run: |
-                  {
-                    echo "## Live rollback"
-                    echo
-                    echo "- Service: $CLOUD_RUN_SERVICE"
-                    echo "- Rollback revision: $ROLLBACK_REVISION"
-                    echo "- Rollback tag: $ROLLBACK_REVISION_TAG"
-                    echo "- Rollback image: ${{ steps.resolve_rollback.outputs.rollback_image }}"
-                    echo "- Restored model version: ${{ steps.restore_model.outputs.restored_model_version }}"
-                    echo "- Live alias: $TARGET_ALIAS"
-                    echo "- URL: ${{ steps.shift_traffic.outputs.service_url }}"
-                    echo "- Tagged revalidation: passed"
-                    echo "- Invocation: ${{ steps.verify_live.outputs.invocation_mode }}"
-                  } >> "$GITHUB_STEP_SUMMARY"
-
-    blocked:
-        needs: config
-        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.rollback_ready != 'true' }}
-        runs-on: ubuntu-latest
-        steps:
-            - name: Explain blocked rollback workflow
-              run: |
-                  set -euo pipefail
-                  echo 'Live rollback requires GCP_CLOUD_RUN_SERVICE, GCP_MLFLOW_TRACKING_URI, GCP_WORKLOAD_IDENTITY_PROVIDER, and GCP_SERVICE_ACCOUNT_EMAIL repository variables.' >&2
-                  exit 1
+  blocked:
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      ROLLBACK_REVISION: ${{ needs.config.outputs.rollback_revision }}
+      ROLLBACK_MODEL_VERSION: ${{ needs.config.outputs.rollback_model_version }}
+      ROLLBACK_REVISION_TAG: ${{ needs.config.outputs.rollback_revision_tag }}
+      TARGET_ALIAS: ${{ needs.config.outputs.target_alias }}
+    steps:
+      - name: Explain blocked rollback workflow
+        run: |
+          set -euo pipefail
+          {
+            echo "## Live rollback moved out of GitHub"
+            echo
+            echo "- Rollback revision: $ROLLBACK_REVISION"
+            echo "- Rollback model version: $ROLLBACK_MODEL_VERSION"
+            echo "- Rollback tag: $ROLLBACK_REVISION_TAG"
+            echo "- Target alias: $TARGET_ALIAS"
+            echo
+            echo "GitHub Actions no longer restores live runtime state directly."
+            echo "Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract lands."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'Live rollback is no longer executed directly from GitHub Actions. Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract is implemented.' >&2
+          exit 1
