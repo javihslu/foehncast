@@ -98,6 +98,30 @@ def test_export_offline_store_uses_canonical_default_path(
     pd.testing.assert_frame_equal(result, frame)
 
 
+def test_export_offline_store_replaces_non_writable_existing_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    frame = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"],
+            "event_timestamp": pd.to_datetime(["2025-01-01T00:00:00Z"]),
+            "wind_speed_10m": [12.0],
+        }
+    )
+    destination = tmp_path / "feast" / "train.parquet"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("stale", encoding="utf-8")
+    destination.chmod(0o444)
+
+    monkeypatch.setattr(feast, "build_offline_store_frame", lambda dataset: frame)
+
+    rendered_path = feast.export_offline_store(dataset="train", output_path=destination)
+
+    assert rendered_path == destination
+    result = pd.read_parquet(rendered_path)
+    pd.testing.assert_frame_equal(result, frame)
+
+
 def test_prepare_feature_store_applies_repo_and_materializes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

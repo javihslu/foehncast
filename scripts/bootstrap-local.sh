@@ -13,19 +13,39 @@ APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
 GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-http://127.0.0.1:3000}"
 GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
+CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 
 usage() {
-  echo "Usage: $0 [env-file]" >&2
+  echo "Usage: $0 [--ci-smoke] [env-file]" >&2
 }
 
+CI_SMOKE=false
+SMOKE_STACK_STARTED=false
 TEMP_DOCKER_CONFIG=""
 
 cleanup_temporary_docker_config() {
   if [[ -n "$TEMP_DOCKER_CONFIG" && -d "$TEMP_DOCKER_CONFIG" ]]; then
     rm -rf "$TEMP_DOCKER_CONFIG"
   fi
+}
+
+cleanup_ci_smoke_stack() {
+  if [[ "$CI_SMOKE" != "true" || "$SMOKE_STACK_STARTED" != "true" ]]; then
+    return
+  fi
+
+  echo "Stopping CI smoke stack..."
+  compose down -v --remove-orphans >/dev/null 2>&1 || true
+}
+
+on_exit() {
+  local status=$?
+
+  cleanup_ci_smoke_stack || true
+  cleanup_temporary_docker_config
+  exit "$status"
 }
 
 
@@ -82,6 +102,9 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    --ci-smoke)
+      CI_SMOKE=true
+      ;;
     --*)
       echo "Unknown option: $1" >&2
       usage
@@ -99,7 +122,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-trap cleanup_temporary_docker_config EXIT
+trap on_exit EXIT
 configure_docker_client_for_bootstrap
 
 require_docker_compose
@@ -205,6 +228,31 @@ cleanup_local_runtime_state() {
   rm -rf "$ROOT_DIR/.state/online-compose-sync"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
+  rm -rf "$ROOT_DIR/grafana_work/data"
+}
+
+prepare_bind_mounted_runtime_paths() {
+  local dataset="$1"
+  local path
+  local runtime_paths=(
+    "$ROOT_DIR/airflow"
+    "$ROOT_DIR/airflow/logs"
+    "$ROOT_DIR/airflow/reports"
+    "$ROOT_DIR/.state"
+    "$ROOT_DIR/.state/airflow"
+    "$ROOT_DIR/.state/feast"
+    "$ROOT_DIR/.state/monitoring"
+    "$ROOT_DIR/.state/online-compose-sync"
+    "$ROOT_DIR/data/$dataset"
+    "$ROOT_DIR/data/feast"
+    "$ROOT_DIR/grafana_work/data"
+    "$ROOT_DIR/.state/feast"
+  )
+
+  for path in "${runtime_paths[@]}"; do
+    mkdir -p "$path"
+    chmod 0777 "$path"
+  done
 }
 
 seed_local_online_compose_sync_status() {
@@ -508,10 +556,12 @@ echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
 cleanup_local_runtime_state "$FEAST_DATASET"
+prepare_bind_mounted_runtime_paths "$FEAST_DATASET"
 seed_local_online_compose_sync_status
 
 echo "Starting local stack..."
 compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"
+SMOKE_STACK_STARTED=true
 
 echo "Waiting for Feast Datastore emulator..."
 wait_for_service_health feast-online-store 90 2
@@ -532,7 +582,14 @@ verify_airflow_api_health 60 2
 verify_grafana_provisioning
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
-compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
+if [[ "$CI_SMOKE" == "true" ]]; then
+  compose exec -T \
+    -e FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR" \
+    airflow-webserver \
+    airflow dags test feature_pipeline "$FEATURE_DATE"
+else
+  compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
+fi
 
 echo "Waiting for asset-triggered training pipeline..."
 wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2
@@ -549,6 +606,13 @@ curl --retry 30 --retry-all-errors --retry-delay 2 -fsS \
   -X POST "$ONLINE_FEATURES_URL" \
   -H 'content-type: application/json' \
   -d '{"spot_ids":["silvaplana"],"feature_names":["wind_speed_10m"]}' >/dev/null
+
+if [[ "$CI_SMOKE" == "true" ]]; then
+  echo "Local evaluator smoke passed."
+  echo "Verified Airflow health, Grafana provisioning, feature pipeline execution, Feast serving state, app health, hosted sync metrics, and /features/online."
+  echo "The stack will be torn down automatically."
+  exit 0
+fi
 
 echo "Local stack is ready."
 echo "Runtime env: $ENV_FILE"

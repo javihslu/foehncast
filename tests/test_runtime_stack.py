@@ -112,6 +112,77 @@ def test_local_bootstrap_handles_missing_docker_desktop_helper() -> None:
     assert 'export DOCKER_CONFIG="$TEMP_DOCKER_CONFIG"' in bootstrap
 
 
+def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "Usage: $0 [--ci-smoke] [env-file]" in bootstrap
+    assert "--ci-smoke)" in bootstrap
+    assert "CI_SMOKE=true" in bootstrap
+    assert (
+        'CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"'
+        in bootstrap
+    )
+    assert 'if [[ "$CI_SMOKE" != "true" ]]; then' not in bootstrap
+    assert "AIRFLOW_AUTO_RETRAIN_MODE=off" not in bootstrap
+    assert 'FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR"' in bootstrap
+    assert "Waiting for asset-triggered training pipeline..." in bootstrap
+    assert (
+        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
+        in bootstrap
+    )
+    assert (
+        "Skipping asset-triggered training pipeline wait in CI smoke mode."
+        not in bootstrap
+    )
+    assert "Stopping CI smoke stack..." in bootstrap
+    assert "compose down -v --remove-orphans >/dev/null 2>&1 || true" in bootstrap
+    assert "Local evaluator smoke passed." in bootstrap
+
+
+def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_writes() -> (
+    None
+):
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert "prepare_bind_mounted_runtime_paths" in bootstrap
+    assert 'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"' in bootstrap
+    assert 'chmod 0777 "$path"' in bootstrap
+    assert 'rm -rf "$ROOT_DIR/grafana_work/data"' in bootstrap
+    assert '"$ROOT_DIR/airflow"' in bootstrap
+    assert '"$ROOT_DIR/.state/airflow"' in bootstrap
+    assert '"$ROOT_DIR/.state/monitoring"' in bootstrap
+    assert '"$ROOT_DIR/.state/online-compose-sync"' in bootstrap
+    assert '"$ROOT_DIR/data/$dataset"' in bootstrap
+    assert '"$ROOT_DIR/.state/feast"' in bootstrap
+    assert '"$ROOT_DIR/data/feast"' in bootstrap
+    assert '"$ROOT_DIR/grafana_work/data"' in bootstrap
+    assert bootstrap.index(
+        'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"'
+    ) < bootstrap.index(
+        'compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"'
+    )
+
+
+def test_local_evaluator_smoke_wrapper_delegates_to_ci_smoke_bootstrap() -> None:
+    smoke = _read_text("scripts/smoke-local-evaluator.sh")
+
+    assert 'exec "${ROOT_DIR}/scripts/bootstrap-local.sh" --ci-smoke "$@"' in smoke
+
+
+def test_local_evaluator_smoke_uses_committed_ingest_fixtures() -> None:
+    fixture_dir = REPO_ROOT / "data" / "unit_contract_eval"
+    fixtures = {path.name for path in fixture_dir.glob("*.parquet")}
+
+    assert fixtures == {
+        "bodensee.parquet",
+        "neuchatel.parquet",
+        "silvaplana.parquet",
+        "thunersee.parquet",
+        "urnersee.parquet",
+        "walensee.parquet",
+    }
+
+
 def test_airflow_init_uses_simple_auth_password_file() -> None:
     init_script = _read_text("containers/airflow/init-airflow.sh")
 

@@ -176,8 +176,21 @@ def render_runtime_config(output_path: str | Path | None = None) -> Path:
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
 
+    # In the local stack multiple containers may render the same runtime file.
+    # If another container created it with a restrictive mode, remove it first
+    # so this process can recreate a writable copy via the shared bind mount.
+    if destination.exists() and not os.access(destination, os.W_OK):
+        destination.unlink()
+
     with destination.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(resolve_runtime_config(), handle, sort_keys=False)
+
+    # A different container UID may still be able to rewrite the file through
+    # the shared bind mount while not being allowed to change its mode.
+    try:
+        destination.chmod(0o666)
+    except PermissionError:
+        pass
 
     return destination
 

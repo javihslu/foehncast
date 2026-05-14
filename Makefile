@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare
+.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -44,6 +44,9 @@ docs-serve:  ## Serve the documentation site locally
 
 bootstrap-local:  ## Rebuild and validate the GCP-free local evaluator stack from scratch
 	cd $(ROOT_DIR) && ./scripts/bootstrap-local.sh
+
+smoke-local-evaluator:  ## Run the bounded local evaluator smoke and tear the stack down on exit
+	cd $(ROOT_DIR) && bash scripts/smoke-local-evaluator.sh
 
 bootstrap-gcp:  ## Run the cloud-operator GCP bootstrap (prefer Cloud Shell)
 	cd $(ROOT_DIR) && ./scripts/bootstrap-gcp.sh
