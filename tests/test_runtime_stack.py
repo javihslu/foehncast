@@ -149,9 +149,24 @@ def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
         'CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"'
         in bootstrap
     )
-    assert 'if [[ "$CI_SMOKE" != "true" ]]; then' not in bootstrap
     assert "AIRFLOW_AUTO_RETRAIN_MODE=off" not in bootstrap
     assert 'FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR"' in bootstrap
+    assert (
+        "Stopping background Airflow orchestration services for isolated feature DAG smoke..."
+        in bootstrap
+    )
+    assert (
+        "compose stop airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null"
+        in bootstrap
+    )
+    assert (
+        "Restarting background Airflow orchestration services for asset-triggered training..."
+        in bootstrap
+    )
+    assert (
+        "compose up -d airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null"
+        in bootstrap
+    )
     assert "Waiting for asset-triggered training pipeline..." in bootstrap
     assert (
         "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
@@ -164,6 +179,13 @@ def test_local_bootstrap_supports_ci_smoke_mode_and_teardown() -> None:
     assert "Stopping CI smoke stack..." in bootstrap
     assert "compose down -v --remove-orphans >/dev/null 2>&1 || true" in bootstrap
     assert "Local evaluator smoke passed." in bootstrap
+    assert (
+        bootstrap.index('airflow dags test feature_pipeline "$FEATURE_DATE"')
+        < bootstrap.rindex("restart_ci_smoke_airflow_orchestration_services")
+        < bootstrap.index(
+            "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
+        )
+    )
 
 
 def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_writes() -> (

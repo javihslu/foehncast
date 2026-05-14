@@ -283,6 +283,28 @@ verify_airflow_api_health() {
     "$@"
 }
 
+stop_ci_smoke_airflow_orchestration_services() {
+  if [[ "$CI_SMOKE" != "true" ]]; then
+    return
+  fi
+
+  echo "Stopping background Airflow orchestration services for isolated feature DAG smoke..."
+  compose stop airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null
+}
+
+restart_ci_smoke_airflow_orchestration_services() {
+  if [[ "$CI_SMOKE" != "true" ]]; then
+    return
+  fi
+
+  echo "Restarting background Airflow orchestration services for asset-triggered training..."
+  compose up -d airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null
+  wait_for_service_health airflow-dag-processor 90 2
+  wait_for_service_health airflow-scheduler 90 2
+  wait_for_service_health airflow-triggerer 90 2
+  verify_airflow_api_health 60 2
+}
+
 wait_for_airflow_dag_run_state() {
   local dag_id="$1"
   local expected_state="$2"
@@ -499,10 +521,12 @@ verify_grafana_provisioning
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 if [[ "$CI_SMOKE" == "true" ]]; then
+  stop_ci_smoke_airflow_orchestration_services
   compose exec -T \
     -e FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR" \
     airflow-webserver \
     airflow dags test feature_pipeline "$FEATURE_DATE"
+  restart_ci_smoke_airflow_orchestration_services
 else
   compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 fi
