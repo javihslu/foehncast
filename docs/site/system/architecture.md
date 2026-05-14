@@ -7,6 +7,7 @@ FoehnCast keeps the same Feature-Training-Inference split in every runtime mode.
     The validated baseline is the local Compose stack.
     The shared cloud path now promotes the hosted inference target as the primary API surface.
     The hosted full-stack target remains online as the retained operator control plane.
+    Hosted Airflow remains the orchestration surface of record for the next delivery horizon.
     The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
     The rider-facing demo and prediction outputs are not the same thing as operator dashboards, and Grafana is not treated as the main product UI.
 
@@ -64,6 +65,7 @@ Grafana stays on the operator side of that boundary. The rider-facing experience
 | Feature pipeline | Collect data, engineer curated rows, validate them, and store the result | local Airflow DAG plus the configured storage backend |
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
 | Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
+| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow plus the retained hosted Airflow control plane |
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
 | Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana operator stack |
 
@@ -82,13 +84,24 @@ flowchart LR
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
-| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane |
+| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane and orchestration surface of record |
 | Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | primary hosted API surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | shared cloud day-2 delivery, not a runtime target |
 
 The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target stays private by default. Airflow, MLflow, Prometheus, and Grafana stay private unless you open them on purpose for your own operator workflow.
 
 The shared cloud path now promotes Cloud Run as the primary hosted API. The hosted full-stack target remains available when the operator stack needs to stay online together.
+
+## Orchestration Surface Of Record
+
+For the next delivery horizon, the runtime orchestration surface is the current hosted Airflow control plane on the retained operator host.
+
+- It matches the validated local DAG and asset model already used for feature and training flows.
+- It keeps runtime scheduling, retries, and backfills out of GitHub Actions.
+- It avoids a Composer migration before the delivery-versus-runtime boundary cleanup is complete.
+- It avoids a lighter trigger redesign that would replace Airflow-owned behavior instead of clarifying ownership.
+
+Composer and lighter managed trigger models stay valid future options, but they are deferred until the operator-plane reduction or course-evidence needs justify the change explicitly.
 
 ## Current Local Architecture
 

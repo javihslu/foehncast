@@ -91,6 +91,18 @@ This is why the shared environment docs now center Cloud Run as the first hosted
 
 Rollback for the shared API now means Cloud Run rollback, not reopening the VM app publicly. Candidate promotion captures rollback inputs, and `.github/workflows/rollback-live-release.yml` restores live traffic to a known Cloud Run revision and model version when the promoted path regresses. The remaining retirement gate is whether the operator lane can later shrink without blurring the Airflow and MLflow control-plane boundary.
 
+## Orchestration Surface Of Record
+
+The runtime orchestration surface of record is the current hosted Airflow control plane on the retained operator host.
+
+| Option | Fit against current scope | Decision |
+|------|---------------------------|----------|
+| Current hosted Airflow control plane | Reuses the validated local Airflow DAG and asset model, keeps retries and backfills on the same operator surface, and avoids introducing another platform migration before the boundary cleanup lands | chosen now |
+| Composer | Offers a stronger managed-service story, but adds service cost, IAM work, and migration churn before the team has finished clarifying the GitHub-versus-runtime split | deferred |
+| Lighter managed trigger model | Could narrow the hosted footprint, but would replace Airflow-owned runtime behavior instead of simply clarifying ownership boundaries | not chosen for this horizon |
+
+GitHub therefore remains the delivery plane, while hosted Airflow remains the runtime scheduling plane. The later retry and backfill runbooks should assume Airflow as the operator surface until a future decision changes that explicitly.
+
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
@@ -183,8 +195,8 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 
 - MLflow stays on the compose host in the active shared environment.
 - Airflow stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
+- Hosted Airflow remains the orchestration surface of record for runtime scheduling, retries, and backfills.
 - The two hosted paths now solve different roles: Cloud Run is the API surface, and the compose host keeps the broader operator stack online.
-- The remaining hosted-VM gate is operator-plane retirement, not public serving fallback retention.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief

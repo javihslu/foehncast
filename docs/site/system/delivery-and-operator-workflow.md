@@ -109,6 +109,23 @@ The promoted hosted runtime story is now:
 - the hosted full-stack VM remains online for Airflow, MLflow, and monitoring, not as a second public API path.
 - both surfaces still read the same Terraform-managed storage, Feast, and MLflow contract.
 
+## Hosted Orchestration Surface Decision
+
+The orchestration surface of record for the next delivery horizon is the current hosted Airflow control plane on the retained operator host.
+
+| Option | Fit against current constraints | Decision |
+|------|----------------------------------|----------|
+| Current hosted Airflow control plane | Matches the validated local Airflow DAG and asset model, already exists on the retained operator host, and supports runtime scheduling, retries, backfills, and operator inspection without another platform migration | chosen now |
+| Composer / Managed Airflow | Stronger managed-service story, but adds cost, IAM surface area, and migration churn before the GitHub-versus-runtime boundary cleanup is complete | deferred |
+| Lighter managed trigger model | Could reduce infrastructure, but the current feature and training paths already depend on Airflow-owned scheduling, asset hand-offs, retries, and backfills | not chosen for this horizon |
+
+This means:
+
+- GitHub Actions stays responsible for lint, test, build, publish, and Terraform-driven delivery.
+- hosted Airflow stays responsible for runtime DAG execution, scheduling, retries, and backfills.
+- Cloud Run stays responsible for serving the public API, not for taking over orchestration duties.
+- Composer or a lighter managed alternative can be revisited later only if the operator-plane reduction justifies the migration.
+
 ## Rollback And Retirement Coordinates
 
 The shared API rollback path now lives entirely on Cloud Run.
@@ -140,6 +157,7 @@ Several boundaries stay explicit across the scripts, Terraform reference, and te
 - the local Docker evaluator remains the only default contributor path
 - the shared cloud environment stays operator-owned, even though the repository and images are public
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
+- runtime scheduling, retry, and backfill belong to hosted Airflow for this horizon rather than to GitHub Actions
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 
