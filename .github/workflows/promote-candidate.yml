@@ -21,27 +21,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   config:
     runs-on: ubuntu-latest
     outputs:
       owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
-      project_id: ${{ steps.repo_config.outputs.project_id }}
-      location: ${{ steps.repo_config.outputs.location }}
-      cloud_run_service: ${{ steps.repo_config.outputs.cloud_run_service }}
-      cloud_run_allow_unauthenticated: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
-      mlflow_tracking_uri: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-      workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
-      service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
       candidate_revision_tag: ${{ steps.derived.outputs.candidate_revision_tag }}
       candidate_alias: ${{ steps.derived.outputs.candidate_alias }}
       target_alias: ${{ steps.derived.outputs.target_alias }}
-      promote_ready: ${{ steps.derived.outputs.promote_ready }}
     steps:
-      - uses: actions/checkout@v6.0.2
-
       - id: flags
         env:
           ACTOR: ${{ github.actor }}
@@ -57,27 +46,13 @@ jobs:
 
           echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
 
-      - id: repo_config
-        uses: ./.github/actions/load-gcp-repo-config
-        with:
-          repo-vars-json: ${{ toJson(vars) }}
-
       - id: derived
         env:
-          CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
-          MLFLOW_TRACKING_URI: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
-          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
           CANDIDATE_REVISION_TAG_INPUT: ${{ github.event.inputs.candidate_revision_tag }}
           CANDIDATE_ALIAS_INPUT: ${{ github.event.inputs.candidate_alias }}
           TARGET_ALIAS_INPUT: ${{ github.event.inputs.target_alias }}
         run: |
           set -euo pipefail
-
-          promote_ready=false
-          if [[ -n "$CLOUD_RUN_SERVICE" && -n "$MLFLOW_TRACKING_URI" && -n "$WORKLOAD_IDENTITY_PROVIDER" && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
-            promote_ready=true
-          fi
 
           candidate_revision_tag="$(printf '%s' "${CANDIDATE_REVISION_TAG_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
           candidate_revision_tag="${candidate_revision_tag#-}"
@@ -100,334 +75,29 @@ jobs:
             echo "candidate_revision_tag=$candidate_revision_tag"
             echo "candidate_alias=$candidate_alias"
             echo "target_alias=$target_alias"
-            echo "promote_ready=$promote_ready"
           } >> "$GITHUB_OUTPUT"
 
-  promote:
+  blocked:
     needs: config
-    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.promote_ready == 'true' }}
+    if: ${{ needs.config.outputs.owner_allowed == 'true' }}
     runs-on: ubuntu-latest
-    environment: cloud-run-production
     env:
-      GCP_PROJECT_ID: ${{ needs.config.outputs.project_id }}
-      GCP_LOCATION: ${{ needs.config.outputs.location }}
-      CLOUD_RUN_SERVICE: ${{ needs.config.outputs.cloud_run_service }}
-      CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ needs.config.outputs.cloud_run_allow_unauthenticated }}
-      MLFLOW_TRACKING_URI: ${{ needs.config.outputs.mlflow_tracking_uri }}
       CANDIDATE_REVISION_TAG: ${{ needs.config.outputs.candidate_revision_tag }}
       CANDIDATE_ALIAS: ${{ needs.config.outputs.candidate_alias }}
       TARGET_ALIAS: ${{ needs.config.outputs.target_alias }}
     steps:
-      - uses: actions/checkout@v6.0.2
-
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
-          service_account: ${{ needs.config.outputs.service_account_email }}
-
-      - uses: google-github-actions/setup-gcloud@v2
-
-      - uses: astral-sh/setup-uv@v8.1.0
-
-      - name: Install runtime dependencies
-        run: uv sync --frozen --no-default-groups
-
-      - name: Confirm Cloud Run service exists
-        run: |
-          gcloud run services describe "$CLOUD_RUN_SERVICE" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_LOCATION" \
-            --format='value(metadata.name)' >/dev/null
-
-      - id: resolve_candidate
-        name: Resolve candidate revision
-        run: |
-          set -euo pipefail
-
-          service_description="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format=json)"
-          candidate_revision_name="$(printf '%s' "$service_description" | jq -r --arg tag "$CANDIDATE_REVISION_TAG" '.status.traffic[] | select(.tag == $tag) | .revisionName' | head -n1)"
-          candidate_url="$(printf '%s' "$service_description" | jq -r --arg tag "$CANDIDATE_REVISION_TAG" '.status.traffic[] | select(.tag == $tag) | .url' | head -n1)"
-          candidate_traffic_percent="$(printf '%s' "$service_description" | jq -r --arg tag "$CANDIDATE_REVISION_TAG" 'first(.status.traffic[] | select(.tag == $tag) | (.percent // 0))')"
-
-          if [[ -z "$candidate_revision_name" || "$candidate_revision_name" == 'null' ]]; then
-            echo "Candidate revision tag ${CANDIDATE_REVISION_TAG} was not found on the Cloud Run service." >&2
-            exit 1
-          fi
-
-          if [[ -z "$candidate_url" || "$candidate_url" == 'null' ]]; then
-            echo "Candidate revision URL is empty for tag ${CANDIDATE_REVISION_TAG}." >&2
-            exit 1
-          fi
-
-          if [[ -z "$candidate_traffic_percent" || "$candidate_traffic_percent" == 'null' ]]; then
-            candidate_traffic_percent='0'
-          fi
-
-          if [[ "$candidate_traffic_percent" != '0' ]]; then
-            echo "Candidate revision must remain at 0% traffic before promotion." >&2
-            exit 1
-          fi
-
-          candidate_image="$(gcloud run revisions describe "$candidate_revision_name" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(spec.containers[0].image)')"
-          if [[ -z "$candidate_image" ]]; then
-            echo "Candidate revision image could not be resolved." >&2
-            exit 1
-          fi
-
-          {
-            echo "candidate_revision_name=${candidate_revision_name}"
-            echo "candidate_url=${candidate_url}"
-            echo "candidate_traffic_percent=${candidate_traffic_percent}"
-            echo "candidate_image=${candidate_image}"
-          } >> "$GITHUB_OUTPUT"
-
-      - id: verify_candidate
-        name: Verify candidate Cloud Run runtime
-        env:
-          SERVICE_URL: ${{ steps.resolve_candidate.outputs.candidate_url }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$SERVICE_URL" ]]; then
-            echo "Candidate service URL is empty." >&2
-            exit 1
-          fi
-
-          health_url="${SERVICE_URL%/}/health"
-          allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-          curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-          invocation_mode="anonymous"
-
-          if [[ "$allow_unauthenticated" != 'true' ]]; then
-            invocation_mode="identity-token"
-            identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
-            curl_args+=(-H "Authorization: Bearer ${identity_token}")
-          fi
-
-          echo "Waiting for candidate health at ${health_url}..."
-          health_payload="$(curl "${curl_args[@]}" "$health_url")"
-          if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-            echo "Candidate health verification failed." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${CANDIDATE_ALIAS}"'"'; then
-            echo "Candidate health verification did not report serving alias ${CANDIDATE_ALIAS}." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          candidate_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-          if [[ -z "$candidate_model_version" ]]; then
-            echo "Candidate health payload did not include model_version." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          {
-            echo "candidate_model_version=${candidate_model_version}"
-            echo "candidate_invocation_mode=${invocation_mode}"
-          } >> "$GITHUB_OUTPUT"
-
-      - id: capture_live
-        name: Capture current live rollback inputs
-        run: |
-          set -euo pipefail
-
-          service_description="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format=json)"
-          live_service_url="$(printf '%s' "$service_description" | jq -r '.status.url // empty')"
-          if [[ -z "$live_service_url" ]]; then
-            echo "Current live service URL is empty." >&2
-            exit 1
-          fi
-
-          live_revision_name="$(printf '%s' "$service_description" | jq -r 'first(.status.traffic[] | select((.tag | not) and (.percent // 0) > 0) | .revisionName)')"
-          if [[ -z "$live_revision_name" || "$live_revision_name" == 'null' ]]; then
-            live_revision_name="$(printf '%s' "$service_description" | jq -r 'first(.status.traffic[] | select((.percent // 0) > 0) | .revisionName)')"
-          fi
-
-          if [[ -z "$live_revision_name" || "$live_revision_name" == 'null' ]]; then
-            echo "Current live revision could not be resolved before promotion." >&2
-            exit 1
-          fi
-
-          health_url="${live_service_url%/}/health"
-          allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-          curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-          invocation_mode="anonymous"
-
-          if [[ "$allow_unauthenticated" != 'true' ]]; then
-            invocation_mode="identity-token"
-            identity_token="$(gcloud auth print-identity-token --audiences="$live_service_url")"
-            curl_args+=(-H "Authorization: Bearer ${identity_token}")
-          fi
-
-          echo "Waiting for current live health at ${health_url}..."
-          health_payload="$(curl "${curl_args[@]}" "$health_url")"
-          if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-            echo "Current live health verification failed before promotion." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          live_model_alias="$(printf '%s' "$health_payload" | jq -r '.model_alias // empty')"
-          if [[ -z "$live_model_alias" ]]; then
-            echo "Current live health payload did not include model_alias." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          live_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-          if [[ -z "$live_model_version" ]]; then
-            echo "Current live health payload did not include model_version." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          {
-            echo "live_service_url=${live_service_url}"
-            echo "live_revision_name=${live_revision_name}"
-            echo "live_model_alias=${live_model_alias}"
-            echo "live_model_version=${live_model_version}"
-            echo "live_invocation_mode=${invocation_mode}"
-          } >> "$GITHUB_OUTPUT"
-
-      - id: promote_model
-        name: Promote candidate model version to champion
-        env:
-          CANDIDATE_MODEL_VERSION: ${{ steps.verify_candidate.outputs.candidate_model_version }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$MLFLOW_TRACKING_URI" || -z "$CANDIDATE_MODEL_VERSION" ]]; then
-            echo "MLflow tracking URI and candidate model version are required for promotion." >&2
-            exit 1
-          fi
-
-          promoted_model_version="$(uv run python -m foehncast.training_pipeline.promote --version "$CANDIDATE_MODEL_VERSION" --target-stage Production)"
-          if [[ -z "$promoted_model_version" ]]; then
-            echo "Promoted model version output is empty." >&2
-            exit 1
-          fi
-
-          if [[ "$promoted_model_version" != "$CANDIDATE_MODEL_VERSION" ]]; then
-            echo "Promoted model version does not match the validated candidate model version." >&2
-            exit 1
-          fi
-
-          echo "promoted_model_version=${promoted_model_version}" >> "$GITHUB_OUTPUT"
-
-      - id: deploy_live
-        name: Deploy promoted image to live Cloud Run service
-        env:
-          CANDIDATE_IMAGE: ${{ steps.resolve_candidate.outputs.candidate_image }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$CANDIDATE_IMAGE" ]]; then
-            echo "Candidate image is empty." >&2
-            exit 1
-          fi
-
-          gcloud run services update "$CLOUD_RUN_SERVICE" \
-            --project "$GCP_PROJECT_ID" \
-            --region "$GCP_LOCATION" \
-            --image "$CANDIDATE_IMAGE" \
-            --update-env-vars "FOEHNCAST_MLFLOW_SERVING_ALIAS=$TARGET_ALIAS" \
-            --quiet
-
-          live_service_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project "$GCP_PROJECT_ID" --region "$GCP_LOCATION" --format='value(status.url)')"
-          if [[ -z "$live_service_url" ]]; then
-            echo "Live Cloud Run service URL is empty after promotion deploy." >&2
-            exit 1
-          fi
-
-          echo "service_url=${live_service_url}" >> "$GITHUB_OUTPUT"
-
-      - id: verify_live
-        name: Verify promoted live Cloud Run runtime
-        env:
-          SERVICE_URL: ${{ steps.deploy_live.outputs.service_url }}
-          PROMOTED_MODEL_VERSION: ${{ steps.promote_model.outputs.promoted_model_version }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$SERVICE_URL" || -z "$PROMOTED_MODEL_VERSION" ]]; then
-            echo "Live service URL and promoted model version are required for verification." >&2
-            exit 1
-          fi
-
-          health_url="${SERVICE_URL%/}/health"
-          spots_url="${SERVICE_URL%/}/spots"
-          allow_unauthenticated="$(printf '%s' "${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}" | tr '[:upper:]' '[:lower:]')"
-          curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-          invocation_mode="anonymous"
-
-          if [[ "$allow_unauthenticated" != 'true' ]]; then
-            invocation_mode="identity-token"
-            identity_token="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
-            curl_args+=(-H "Authorization: Bearer ${identity_token}")
-          fi
-
-          echo "Waiting for live health at ${health_url}..."
-          health_payload="$(curl "${curl_args[@]}" "$health_url")"
-          if ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-            echo "Live health verification failed." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          if ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:[[:space:]]*"'"${TARGET_ALIAS}"'"'; then
-            echo "Live health verification did not report serving alias ${TARGET_ALIAS}." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          live_model_version="$(printf '%s' "$health_payload" | jq -r '.model_version // empty')"
-          if [[ "$live_model_version" != "$PROMOTED_MODEL_VERSION" ]]; then
-            echo "Live service model version does not match the promoted model version." >&2
-            printf '%s\n' "$health_payload" >&2
-            exit 1
-          fi
-
-          echo "Checking live Cloud Run spots endpoint at ${spots_url}..."
-          spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
-          if ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
-            echo "Live Cloud Run spots verification failed." >&2
-            printf '%s\n' "$spots_payload" >&2
-            exit 1
-          fi
-
-          echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"
-
-      - name: Summarize promotion
-        run: |
-          {
-            echo "## Candidate promotion"
-            echo
-            echo "- Service: $CLOUD_RUN_SERVICE"
-            echo "- Candidate tag: $CANDIDATE_REVISION_TAG"
-            echo "- Candidate revision: ${{ steps.resolve_candidate.outputs.candidate_revision_name }}"
-            echo "- Candidate image: ${{ steps.resolve_candidate.outputs.candidate_image }}"
-            echo "- Promoted model version: ${{ steps.promote_model.outputs.promoted_model_version }}"
-            echo "- Live alias: $TARGET_ALIAS"
-            echo "- URL: ${{ steps.deploy_live.outputs.service_url }}"
-            echo "- Invocation: ${{ steps.verify_live.outputs.invocation_mode }}"
-            echo
-            echo "### Rollback inputs"
-            echo "- Revision: ${{ steps.capture_live.outputs.live_revision_name }}"
-            echo "- Model alias: ${{ steps.capture_live.outputs.live_model_alias }}"
-            echo "- Model version: ${{ steps.capture_live.outputs.live_model_version }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  blocked:
-    needs: config
-    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.promote_ready != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
       - name: Explain blocked promotion workflow
         run: |
           set -euo pipefail
-          echo 'Candidate promotion requires GCP_CLOUD_RUN_SERVICE, GCP_MLFLOW_TRACKING_URI, GCP_WORKLOAD_IDENTITY_PROVIDER, and GCP_SERVICE_ACCOUNT_EMAIL repository variables.' >&2
+          {
+            echo "## Candidate promotion moved out of GitHub"
+            echo
+            echo "- Candidate tag: $CANDIDATE_REVISION_TAG"
+            echo "- Candidate alias: $CANDIDATE_ALIAS"
+            echo "- Target alias: $TARGET_ALIAS"
+            echo
+            echo "GitHub Actions no longer promotes live runtime state directly."
+            echo "Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract lands."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo 'Candidate promotion is no longer executed directly from GitHub Actions. Use the runtime-side operator path until the explicit GitHub-to-runtime trigger contract is implemented.' >&2
           exit 1

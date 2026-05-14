@@ -515,178 +515,100 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert '} >> "$GITHUB_OUTPUT"' in verify_script
 
 
-def test_publish_app_image_uses_provisioned_cloud_run_service_for_deploys() -> None:
+def test_publish_app_image_stops_at_image_publish_boundary() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
     config_job = workflow["jobs"]["config"]
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
 
-    assert dispatch_inputs["deploy_mode"]["type"] == "choice"
-    assert dispatch_inputs["deploy_mode"]["options"] == ["live", "candidate"]
-    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
-    assert dispatch_inputs["serving_alias"]["default"] == ""
-
+    assert workflow["on"]["workflow_dispatch"] == {}
     assert (
-        config_job["outputs"]["cloud_run_service"]
-        == "${{ steps.repo_config.outputs.cloud_run_service }}"
+        config_job["outputs"]["workload_identity_provider"]
+        == "${{ steps.repo_config.outputs.workload_identity_provider }}"
     )
     assert (
-        config_job["outputs"]["cloud_run_allow_unauthenticated"]
-        == "${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}"
+        config_job["outputs"]["service_account_email"]
+        == "${{ steps.repo_config.outputs.service_account_email }}"
     )
     assert (
-        config_job["outputs"]["deploy_mode"]
-        == "${{ steps.derived.outputs.deploy_mode }}"
+        config_job["outputs"]["registry_host"]
+        == "${{ steps.derived.outputs.registry_host }}"
     )
     assert (
-        config_job["outputs"]["cloud_run_revision_tag"]
-        == "${{ steps.derived.outputs.cloud_run_revision_tag }}"
+        config_job["outputs"]["image_repository"]
+        == "${{ steps.derived.outputs.image_repository }}"
     )
     assert (
-        config_job["outputs"]["serving_alias"]
-        == "${{ steps.derived.outputs.serving_alias }}"
+        config_job["outputs"]["publish_ready"]
+        == "${{ steps.derived.outputs.publish_ready }}"
     )
+    assert "cloud_run_service" not in config_job["outputs"]
+    assert "cloud_run_allow_unauthenticated" not in config_job["outputs"]
+    assert "deploy_mode" not in config_job["outputs"]
+    assert "cloud_run_revision_tag" not in config_job["outputs"]
+    assert "serving_alias" not in config_job["outputs"]
+    assert "deploy_ready" not in config_job["outputs"]
 
     derived_step = _workflow_step(workflow, "config", "derived")
-    assert (
-        derived_step["env"]["CLOUD_RUN_SERVICE"]
-        == "${{ steps.repo_config.outputs.cloud_run_service }}"
-    )
-    assert (
-        derived_step["env"]["DEPLOY_MODE_INPUT"]
-        == "${{ github.event.inputs.deploy_mode }}"
-    )
-    assert (
-        derived_step["env"]["CANDIDATE_REVISION_TAG_INPUT"]
-        == "${{ github.event.inputs.candidate_revision_tag }}"
-    )
-    assert (
-        derived_step["env"]["SERVING_ALIAS_INPUT"]
-        == "${{ github.event.inputs.serving_alias }}"
-    )
-    assert '-n "$CLOUD_RUN_SERVICE"' in derived_step["run"]
-    assert "deploy_mode='live'" in derived_step["run"]
-    assert "cloud_run_revision_tag='candidate'" in derived_step["run"]
-    assert "serving_alias='candidate'" in derived_step["run"]
-    assert "serving_alias='champion'" in derived_step["run"]
+    assert "CLOUD_RUN_SERVICE" not in derived_step["env"]
+    assert "DEPLOY_MODE_INPUT" not in derived_step["env"]
+    assert "CANDIDATE_REVISION_TAG_INPUT" not in derived_step["env"]
+    assert "SERVING_ALIAS_INPUT" not in derived_step["env"]
+    assert "deploy_ready" not in derived_step["run"]
+    assert "deploy_mode" not in derived_step["run"]
+    assert "cloud_run_revision_tag" not in derived_step["run"]
+    assert "serving_alias" not in derived_step["run"]
 
-    deploy_job = workflow["jobs"]["deploy"]
+    publish_job = workflow["jobs"]["publish"]
     assert (
-        deploy_job["env"]["CLOUD_RUN_SERVICE"]
-        == "${{ needs.config.outputs.cloud_run_service }}"
-    )
-    assert (
-        deploy_job["env"]["CLOUD_RUN_ALLOW_UNAUTHENTICATED"]
-        == "${{ needs.config.outputs.cloud_run_allow_unauthenticated }}"
-    )
-    assert deploy_job["env"]["DEPLOY_MODE"] == "${{ needs.config.outputs.deploy_mode }}"
-    assert (
-        deploy_job["env"]["CLOUD_RUN_REVISION_TAG"]
-        == "${{ needs.config.outputs.cloud_run_revision_tag }}"
-    )
-    assert (
-        deploy_job["env"]["SERVING_ALIAS"]
-        == "${{ needs.config.outputs.serving_alias }}"
+        publish_job["outputs"]["image_uri"]
+        == "${{ steps.image.outputs.immutable_tag }}"
     )
 
-    deploy_step = _workflow_step(
-        workflow, "deploy", "Deploy published image to Cloud Run"
-    )
-    deploy_script = deploy_step["run"]
-
-    assert "if [[ \"$DEPLOY_MODE\" == 'candidate' ]]; then" in deploy_script
-    assert 'gcloud run deploy "$CLOUD_RUN_SERVICE"' in deploy_script
-    assert "--no-traffic" in deploy_script
-    assert ' --tag "$CLOUD_RUN_REVISION_TAG"' in deploy_script
-    assert "FOEHNCAST_MLFLOW_SERVING_ALIAS=$SERVING_ALIAS" in deploy_script
-    assert "traffic_percent='100'" in deploy_script
-    assert 'echo "traffic_percent=${traffic_percent}"' in deploy_script
-
-    verify_step = _workflow_step(
-        workflow, "deploy", "Verify deployed Cloud Run runtime"
-    )
-    verify_script = verify_step["run"]
-
+    summary_step = _workflow_step(workflow, "publish", "Summarize published image")
     assert (
-        verify_step["env"]["SERVICE_URL"] == "${{ steps.deploy.outputs.service_url }}"
-    )
-    assert 'health_url="${SERVICE_URL%/}/health"' in verify_script
-    assert 'spots_url="${SERVICE_URL%/}/spots"' in verify_script
-    assert (
-        "allow_unauthenticated=\"$(printf '%s' \"${CLOUD_RUN_ALLOW_UNAUTHENTICATED:-}\" | tr '[:upper:]' '[:lower:]')\""
-        in verify_script
-    )
-    assert (
-        'gcloud auth print-identity-token --audiences="$SERVICE_URL"' in verify_script
-    )
-    assert (
-        'grep -Eq \x27"status"[[:space:]]*:[[:space:]]*"healthy"\x27' in verify_script
-    )
-    assert '"model_alias"' in verify_script
-    assert (
-        "Cloud Run health verification did not report serving alias ${SERVING_ALIAS}."
-        in verify_script
-    )
-    assert 'grep -Eq \x27"id"[[:space:]]*:\x27' in verify_script
-    assert (
-        'echo "invocation_mode=${invocation_mode}" >> "$GITHUB_OUTPUT"' in verify_script
-    )
-
-    summary_step = _workflow_step(workflow, "deploy", "Summarize Cloud Run deployment")
-    assert 'echo "- Mode: $DEPLOY_MODE"' in summary_step["run"]
-    assert 'echo "- Serving alias: $SERVING_ALIAS"' in summary_step["run"]
-    assert (
-        'echo "- Traffic: ${{ steps.deploy.outputs.traffic_percent }}%"'
+        'echo "- Runtime handoff: not executed from GitHub in this workflow"'
         in summary_step["run"]
     )
-    assert 'echo "- Tagged revision: $CLOUD_RUN_REVISION_TAG"' in summary_step["run"]
-    assert 'echo "- Smoke check: passed"' in summary_step["run"]
     assert (
-        'echo "- Invocation: ${{ steps.verify.outputs.invocation_mode }}"'
+        'echo "- Next step: use the runtime-side trigger contract or operator path to deploy this image"'
         in summary_step["run"]
     )
 
+    assert "deploy" not in workflow["jobs"]
+    assert "deploy_skipped" not in workflow["jobs"]
 
-def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotion() -> (
+    skipped_step = _workflow_step(workflow, "skipped", "Explain skipped publish")
+    assert (
+        "This workflow stops at image publication and does not deploy or promote runtime state."
+        in skipped_step["run"]
+    )
+    assert "GCP_CLOUD_RUN_SERVICE" not in skipped_step["run"]
+
+
+def test_promote_candidate_workflow_is_blocked_pending_runtime_trigger_contract() -> (
     None
 ):
     workflow = _workflow_yaml(".github/workflows/promote-candidate.yml")
     config_job = workflow["jobs"]["config"]
     dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    config_steps = {
+        step.get("id") or step.get("name")
+        for step in workflow["jobs"]["config"]["steps"]
+    }
 
+    assert workflow["permissions"] == {"contents": "read"}
     assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
     assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
     assert dispatch_inputs["target_alias"]["default"] == "champion"
 
-    assert (
-        config_job["outputs"]["cloud_run_service"]
-        == "${{ steps.repo_config.outputs.cloud_run_service }}"
-    )
-    assert (
-        config_job["outputs"]["mlflow_tracking_uri"]
-        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
-    )
-    assert (
-        config_job["outputs"]["candidate_revision_tag"]
-        == "${{ steps.derived.outputs.candidate_revision_tag }}"
-    )
-    assert (
-        config_job["outputs"]["candidate_alias"]
-        == "${{ steps.derived.outputs.candidate_alias }}"
-    )
-    assert (
-        config_job["outputs"]["target_alias"]
-        == "${{ steps.derived.outputs.target_alias }}"
-    )
-    assert (
-        config_job["outputs"]["promote_ready"]
-        == "${{ steps.derived.outputs.promote_ready }}"
-    )
+    assert set(config_job["outputs"]) == {
+        "owner_allowed",
+        "candidate_revision_tag",
+        "candidate_alias",
+        "target_alias",
+    }
+    assert "repo_config" not in config_steps
 
     derived_step = _workflow_step(workflow, "config", "derived")
-    assert (
-        derived_step["env"]["MLFLOW_TRACKING_URI"]
-        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
-    )
     assert (
         derived_step["env"]["CANDIDATE_REVISION_TAG_INPUT"]
         == "${{ github.event.inputs.candidate_revision_tag }}"
@@ -699,194 +621,66 @@ def test_promote_candidate_workflow_reuses_validated_candidate_for_live_promotio
         derived_step["env"]["TARGET_ALIAS_INPUT"]
         == "${{ github.event.inputs.target_alias }}"
     )
-    assert "promote_ready=true" in derived_step["run"]
     assert "candidate_revision_tag='candidate'" in derived_step["run"]
     assert "candidate_alias='candidate'" in derived_step["run"]
     assert "target_alias='champion'" in derived_step["run"]
+    assert "promote_ready" not in derived_step["run"]
 
-    promote_job = workflow["jobs"]["promote"]
-    assert promote_job["environment"] == "cloud-run-production"
+    assert "promote" not in workflow["jobs"]
+
+    blocked_job = workflow["jobs"]["blocked"]
+    assert "environment" not in blocked_job
     assert (
-        promote_job["env"]["MLFLOW_TRACKING_URI"]
-        == "${{ needs.config.outputs.mlflow_tracking_uri }}"
-    )
-    assert (
-        promote_job["env"]["CANDIDATE_REVISION_TAG"]
+        blocked_job["env"]["CANDIDATE_REVISION_TAG"]
         == "${{ needs.config.outputs.candidate_revision_tag }}"
     )
     assert (
-        promote_job["env"]["CANDIDATE_ALIAS"]
+        blocked_job["env"]["CANDIDATE_ALIAS"]
         == "${{ needs.config.outputs.candidate_alias }}"
     )
     assert (
-        promote_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
-    )
-
-    install_step = _workflow_step(workflow, "promote", "Install runtime dependencies")
-    assert install_step["run"] == "uv sync --frozen --no-default-groups"
-
-    resolve_step = _workflow_step(workflow, "promote", "Resolve candidate revision")
-    resolve_script = resolve_step["run"]
-    assert 'gcloud run services describe "$CLOUD_RUN_SERVICE"' in resolve_script
-    assert 'gcloud run revisions describe "$candidate_revision_name"' in resolve_script
-    assert (
-        "Candidate revision must remain at 0% traffic before promotion."
-        in resolve_script
-    )
-    assert 'echo "candidate_image=${candidate_image}"' in resolve_script
-
-    verify_candidate_step = _workflow_step(
-        workflow, "promote", "Verify candidate Cloud Run runtime"
-    )
-    verify_candidate_script = verify_candidate_step["run"]
-    assert (
-        verify_candidate_step["env"]["SERVICE_URL"]
-        == "${{ steps.resolve_candidate.outputs.candidate_url }}"
-    )
-    assert (
-        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
-        in verify_candidate_script
-    )
-    assert (
-        "Candidate health verification did not report serving alias ${CANDIDATE_ALIAS}."
-        in verify_candidate_script
-    )
-    assert "candidate_model_version" in verify_candidate_script
-
-    capture_live_step = _workflow_step(
-        workflow, "promote", "Capture current live rollback inputs"
-    )
-    capture_live_script = capture_live_step["run"]
-    assert 'gcloud run services describe "$CLOUD_RUN_SERVICE"' in capture_live_script
-    assert (
-        'gcloud auth print-identity-token --audiences="$live_service_url"'
-        in capture_live_script
-    )
-    assert (
-        "Current live revision could not be resolved before promotion."
-        in capture_live_script
-    )
-    assert "live_model_alias" in capture_live_script
-    assert "live_model_version" in capture_live_script
-
-    promote_model_step = _workflow_step(
-        workflow, "promote", "Promote candidate model version to champion"
-    )
-    promote_model_script = promote_model_step["run"]
-    assert (
-        promote_model_step["env"]["CANDIDATE_MODEL_VERSION"]
-        == "${{ steps.verify_candidate.outputs.candidate_model_version }}"
-    )
-    assert (
-        'uv run python -m foehncast.training_pipeline.promote --version "$CANDIDATE_MODEL_VERSION" --target-stage Production'
-        in promote_model_script
-    )
-    assert (
-        "Promoted model version does not match the validated candidate model version."
-        in promote_model_script
-    )
-
-    deploy_live_step = _workflow_step(
-        workflow, "promote", "Deploy promoted image to live Cloud Run service"
-    )
-    deploy_live_script = deploy_live_step["run"]
-    assert (
-        deploy_live_step["env"]["CANDIDATE_IMAGE"]
-        == "${{ steps.resolve_candidate.outputs.candidate_image }}"
-    )
-    assert 'gcloud run services update "$CLOUD_RUN_SERVICE"' in deploy_live_script
-    assert ' --image "$CANDIDATE_IMAGE"' in deploy_live_script
-    assert "FOEHNCAST_MLFLOW_SERVING_ALIAS=$TARGET_ALIAS" in deploy_live_script
-
-    verify_live_step = _workflow_step(
-        workflow, "promote", "Verify promoted live Cloud Run runtime"
-    )
-    verify_live_script = verify_live_step["run"]
-    assert (
-        verify_live_step["env"]["SERVICE_URL"]
-        == "${{ steps.deploy_live.outputs.service_url }}"
-    )
-    assert (
-        verify_live_step["env"]["PROMOTED_MODEL_VERSION"]
-        == "${{ steps.promote_model.outputs.promoted_model_version }}"
-    )
-    assert (
-        "Live health verification did not report serving alias ${TARGET_ALIAS}."
-        in verify_live_script
-    )
-    assert (
-        "Live service model version does not match the promoted model version."
-        in verify_live_script
-    )
-    assert (
-        'echo "Checking live Cloud Run spots endpoint at ${spots_url}..."'
-        in verify_live_script
-    )
-
-    summary_step = _workflow_step(workflow, "promote", "Summarize promotion")
-    assert 'echo "## Candidate promotion"' in summary_step["run"]
-    assert 'echo "- Candidate tag: $CANDIDATE_REVISION_TAG"' in summary_step["run"]
-    assert (
-        'echo "- Promoted model version: ${{ steps.promote_model.outputs.promoted_model_version }}"'
-        in summary_step["run"]
-    )
-    assert 'echo "### Rollback inputs"' in summary_step["run"]
-    assert (
-        'echo "- Revision: ${{ steps.capture_live.outputs.live_revision_name }}"'
-        in summary_step["run"]
-    )
-    assert (
-        'echo "- Model version: ${{ steps.capture_live.outputs.live_model_version }}"'
-        in summary_step["run"]
+        blocked_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
     )
 
     blocked_step = _workflow_step(
         workflow, "blocked", "Explain blocked promotion workflow"
     )
-    assert "GCP_CLOUD_RUN_SERVICE" in blocked_step["run"]
-    assert "GCP_MLFLOW_TRACKING_URI" in blocked_step["run"]
+    assert "Candidate promotion moved out of GitHub" in blocked_step["run"]
+    assert (
+        "Candidate promotion is no longer executed directly from GitHub Actions."
+        in blocked_step["run"]
+    )
+    assert (
+        "explicit GitHub-to-runtime trigger contract is implemented"
+        in blocked_step["run"]
+    )
 
 
-def test_rollback_live_release_workflow_restores_explicit_revision_and_model_version() -> (
+def test_rollback_live_release_workflow_is_blocked_pending_runtime_trigger_contract() -> (
     None
 ):
     workflow = _workflow_yaml(".github/workflows/rollback-live-release.yml")
     config_job = workflow["jobs"]["config"]
     dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    config_steps = {
+        step.get("id") or step.get("name")
+        for step in workflow["jobs"]["config"]["steps"]
+    }
 
+    assert workflow["permissions"] == {"contents": "read"}
     assert dispatch_inputs["rollback_revision"]["required"] is True
     assert dispatch_inputs["rollback_model_version"]["required"] is True
     assert dispatch_inputs["rollback_revision_tag"]["default"] == "rollback"
     assert dispatch_inputs["target_alias"]["default"] == "champion"
 
-    assert (
-        config_job["outputs"]["cloud_run_service"]
-        == "${{ steps.repo_config.outputs.cloud_run_service }}"
-    )
-    assert (
-        config_job["outputs"]["mlflow_tracking_uri"]
-        == "${{ steps.repo_config.outputs.mlflow_tracking_uri }}"
-    )
-    assert (
-        config_job["outputs"]["rollback_revision"]
-        == "${{ steps.derived.outputs.rollback_revision }}"
-    )
-    assert (
-        config_job["outputs"]["rollback_model_version"]
-        == "${{ steps.derived.outputs.rollback_model_version }}"
-    )
-    assert (
-        config_job["outputs"]["rollback_revision_tag"]
-        == "${{ steps.derived.outputs.rollback_revision_tag }}"
-    )
-    assert (
-        config_job["outputs"]["target_alias"]
-        == "${{ steps.derived.outputs.target_alias }}"
-    )
-    assert (
-        config_job["outputs"]["rollback_ready"]
-        == "${{ steps.derived.outputs.rollback_ready }}"
-    )
+    assert set(config_job["outputs"]) == {
+        "owner_allowed",
+        "rollback_revision",
+        "rollback_model_version",
+        "rollback_revision_tag",
+        "target_alias",
+    }
+    assert "repo_config" not in config_steps
 
     derived_step = _workflow_step(workflow, "config", "derived")
     assert (
@@ -911,140 +705,40 @@ def test_rollback_live_release_workflow_restores_explicit_revision_and_model_ver
     )
     assert "rollback_revision_tag='rollback'" in derived_step["run"]
     assert "target_alias='champion'" in derived_step["run"]
+    assert "rollback_ready" not in derived_step["run"]
 
-    rollback_job = workflow["jobs"]["rollback"]
-    assert rollback_job["environment"] == "cloud-run-production"
+    assert "rollback" not in workflow["jobs"]
+
+    blocked_job = workflow["jobs"]["blocked"]
+    assert "environment" not in blocked_job
     assert (
-        rollback_job["env"]["ROLLBACK_REVISION"]
+        blocked_job["env"]["ROLLBACK_REVISION"]
         == "${{ needs.config.outputs.rollback_revision }}"
     )
     assert (
-        rollback_job["env"]["ROLLBACK_MODEL_VERSION"]
+        blocked_job["env"]["ROLLBACK_MODEL_VERSION"]
         == "${{ needs.config.outputs.rollback_model_version }}"
     )
     assert (
-        rollback_job["env"]["ROLLBACK_REVISION_TAG"]
+        blocked_job["env"]["ROLLBACK_REVISION_TAG"]
         == "${{ needs.config.outputs.rollback_revision_tag }}"
     )
     assert (
-        rollback_job["env"]["TARGET_ALIAS"]
-        == "${{ needs.config.outputs.target_alias }}"
+        blocked_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
     )
-
-    resolve_step = _workflow_step(workflow, "rollback", "Resolve rollback revision")
-    resolve_script = resolve_step["run"]
-    assert 'gcloud run revisions describe "$ROLLBACK_REVISION"' in resolve_script
-    assert 'gcloud run services update-traffic "$CLOUD_RUN_SERVICE"' in resolve_script
-    assert (
-        ' --update-tags "$ROLLBACK_REVISION_TAG=$ROLLBACK_REVISION"' in resolve_script
-    )
-    assert "Rollback tag does not point at the requested revision." in resolve_script
-
-    verify_target_step = _workflow_step(
-        workflow, "rollback", "Verify rollback target runtime"
-    )
-    verify_target_script = verify_target_step["run"]
-    assert (
-        verify_target_step["env"]["SERVICE_URL"]
-        == "${{ steps.resolve_rollback.outputs.rollback_tag_url }}"
-    )
-    assert (
-        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
-        in verify_target_script
-    )
-    assert (
-        "Rollback target health verification did not report serving alias ${TARGET_ALIAS}."
-        in verify_target_script
-    )
-    assert "rollback_target_model_version" in verify_target_script
-
-    restore_model_step = _workflow_step(
-        workflow, "rollback", "Restore champion alias to rollback model version"
-    )
-    restore_model_script = restore_model_step["run"]
-    assert (
-        'uv run python -m foehncast.training_pipeline.rollback --version "$ROLLBACK_MODEL_VERSION" --target-alias "$TARGET_ALIAS"'
-        in restore_model_script
-    )
-    assert (
-        "Rollback helper did not restore the requested model version."
-        in restore_model_script
-    )
-
-    reverify_target_step = _workflow_step(
-        workflow, "rollback", "Reverify rollback target with restored model version"
-    )
-    reverify_target_script = reverify_target_step["run"]
-    assert (
-        reverify_target_step["env"]["SERVICE_URL"]
-        == "${{ steps.resolve_rollback.outputs.rollback_tag_url }}"
-    )
-    assert (
-        reverify_target_step["env"]["RESTORED_MODEL_VERSION"]
-        == "${{ steps.restore_model.outputs.restored_model_version }}"
-    )
-    assert (
-        'gcloud auth print-identity-token --audiences="$SERVICE_URL"'
-        in reverify_target_script
-    )
-    assert (
-        "Rollback target revalidation did not report serving alias ${TARGET_ALIAS}."
-        in reverify_target_script
-    )
-    assert (
-        "Rollback target revalidation did not report the restored model version."
-        in reverify_target_script
-    )
-
-    shift_traffic_step = _workflow_step(
-        workflow, "rollback", "Restore live traffic to rollback revision"
-    )
-    shift_traffic_script = shift_traffic_step["run"]
-    assert (
-        'gcloud run services update-traffic "$CLOUD_RUN_SERVICE"'
-        in shift_traffic_script
-    )
-    assert ' --to-revisions "$ROLLBACK_REVISION=100"' in shift_traffic_script
-
-    verify_live_step = _workflow_step(
-        workflow, "rollback", "Verify rolled back live runtime"
-    )
-    verify_live_script = verify_live_step["run"]
-    assert (
-        verify_live_step["env"]["SERVICE_URL"]
-        == "${{ steps.shift_traffic.outputs.service_url }}"
-    )
-    assert (
-        verify_live_step["env"]["RESTORED_MODEL_VERSION"]
-        == "${{ steps.restore_model.outputs.restored_model_version }}"
-    )
-    assert (
-        "Live rollback health verification did not report serving alias ${TARGET_ALIAS}."
-        in verify_live_script
-    )
-    assert (
-        "Live rollback model version does not match the restored model version."
-        in verify_live_script
-    )
-    assert (
-        'echo "Checking live Cloud Run spots endpoint at ${spots_url}..."'
-        in verify_live_script
-    )
-
-    summary_step = _workflow_step(workflow, "rollback", "Summarize rollback")
-    assert 'echo "## Live rollback"' in summary_step["run"]
-    assert 'echo "- Rollback revision: $ROLLBACK_REVISION"' in summary_step["run"]
-    assert (
-        'echo "- Restored model version: ${{ steps.restore_model.outputs.restored_model_version }}"'
-        in summary_step["run"]
-    )
-    assert 'echo "- Tagged revalidation: passed"' in summary_step["run"]
 
     blocked_step = _workflow_step(
         workflow, "blocked", "Explain blocked rollback workflow"
     )
-    assert "GCP_CLOUD_RUN_SERVICE" in blocked_step["run"]
-    assert "GCP_MLFLOW_TRACKING_URI" in blocked_step["run"]
+    assert "Live rollback moved out of GitHub" in blocked_step["run"]
+    assert (
+        "Live rollback is no longer executed directly from GitHub Actions."
+        in blocked_step["run"]
+    )
+    assert (
+        "explicit GitHub-to-runtime trigger contract is implemented"
+        in blocked_step["run"]
+    )
 
 
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:
