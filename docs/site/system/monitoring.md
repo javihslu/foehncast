@@ -132,6 +132,21 @@ The checked-in alert rules cover the main operator failure modes.
 
 The contact point and policy tree stay checked in too, so the alert routing contract is reviewable without depending on a live Grafana instance.
 
+## Recovery Evidence And Runbook Checks
+
+Retry and backfill work should leave durable evidence that operators can compare before and after the intervention.
+
+| Recovery task | Durable evidence to capture | Operator check |
+|------|-----------------------------|----------------|
+| feature retry or backfill | `airflow/reports/feature-pipeline-<dataset>-latest.json` plus the matching history file | the latest summary timestamp advances and the feature-stage failure alert clears |
+| training follow-up after a replay | `airflow/reports/training-pipeline-<dataset>-latest.json` plus the matching history file | the summary records the requested stage, registered model version, and no training-stage failure alert remains |
+| reviewed deploy, promote, or rollback handoff retry | `airflow/reports/runtime-release-latest.json` plus the matching history file | the GitHub workflow summary and the runtime-side acknowledgement describe the same action and coordinates |
+| retained operator host refresh verification | `.state/online-compose-sync/last-success.json` | the hosted-sync stale signal clears and the app republishes the updated sync state on `/metrics` |
+
+When the recovery started from reviewed delivery, capture the GitHub workflow URL too. When the recovery started from hosted Airflow, capture the logical date and DAG run id with the summary artifacts.
+
+These checks are intentionally small. They give operators one repeatable evidence pack without turning the monitoring stack into the system that performs the retry itself.
+
 ## Reading Evidence Safely
 
 The docs site should explain monitoring with rendered evidence, not live control-plane embeds.

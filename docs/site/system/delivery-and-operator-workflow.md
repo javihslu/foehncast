@@ -158,6 +158,38 @@ The current action set is deliberately small:
 
 This keeps the handoff explicit before deeper runtime automation is added behind the Airflow side of the boundary.
 
+## Retry And Backfill Runbooks
+
+The recovery lane is now explicit too. Operators should retry work on the same plane that owns it instead of jumping between GitHub and runtime surfaces.
+
+| Situation | Where to act | Normal procedure | Minimum evidence |
+|------|---------------|------------------|------------------|
+| Terraform or image publication fails before any runtime request is sent | GitHub Actions | fix the reviewed delivery input, then rerun the failed GitHub workflow | GitHub workflow URL plus the updated workflow summary |
+| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates so the retained operator host refreshes and the hosted Airflow `runtime_release` DAG records a new acknowledgement | GitHub workflow URL plus `airflow/reports/runtime-release-latest.json` |
+| a feature slice failed or needs replay for one logical date | hosted Airflow on the retained operator host | SSH to the host, verify Airflow health, trigger `feature_pipeline` with an explicit logical date, and wait for the DAG to succeed | logical date, feature DAG run id, and `airflow/reports/feature-pipeline-<dataset>-latest.json` |
+| a replayed feature slice should refresh training state too | hosted Airflow on the retained operator host | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run instead of treating training as a separate first step | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
+| training must be rerun without replaying feature ingestion | hosted Airflow on the retained operator host | use a manual `training_pipeline` run only when the curated feature slice already exists and the operator is intentionally choosing the requested stage in DAG config | training DAG run id, requested stage, model version, and training summary JSON |
+
+The retained operator host stays private by default, so the documented recovery path assumes SSH to the host rather than a public Airflow endpoint.
+
+Example feature replay on the retained host:
+
+```bash
+cd /opt/foehncast
+docker compose -f docker-compose.yml -f docker-compose.cloud.yml --env-file .env exec -T airflow-webserver \
+    airflow dags trigger feature_pipeline \
+    --logical-date "2026-05-14T00:00:00Z" \
+    --run-id "manual_backfill__2026-05-14T00-00-00Z"
+```
+
+The same host-side wait contract used by the sync path still applies after the trigger:
+
+- `feature_pipeline` should reach `success` for the chosen logical date
+- the downstream `training_pipeline` should reach `success` as an `asset_triggered` run when the replay is meant to refresh production model state
+- operators should check the latest summary JSON files under `airflow/reports/` before treating the replay as complete
+
+When the problem is serving rollout rather than data replay, do not use the backfill path. Use the runtime trigger contract instead so GitHub sends the reviewed deploy, promote, or rollback request and the runtime side records one explicit acknowledgement.
+
 ## Rollback And Retirement Coordinates
 
 The reviewed rollback handoff now runs through the runtime trigger contract instead of direct GitHub runtime mutation.
@@ -169,6 +201,12 @@ The reviewed rollback handoff now runs through the runtime trigger contract inst
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
 The remaining VM-retirement gate is separate from serving rollback. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator-plane scope is reduced explicitly.
+
+For recovery work, the practical split is:
+
+- use GitHub workflow reruns when reviewed delivery failed before runtime execution
+- use hosted Airflow retries and backfills when runtime data or orchestration work failed after delivery
+- use the runtime trigger contract when the serving release handoff itself must be retried
 
 ## What The Cloud-Operator Tests Enforce
 
