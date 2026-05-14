@@ -104,6 +104,8 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 
 This contract is deliberate. The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming more manual workflow inputs.
 
+That same split is also the current ownership boundary for cloud-facing values. Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables remain structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
+
 GitHub-hosted workflows now stop at reviewed infrastructure change, artifact publication, and one explicit runtime release request. GitHub does not mutate live runtime state directly; the request is handed to hosted Airflow on the retained operator host.
 
 The promoted hosted runtime story is now:
