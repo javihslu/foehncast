@@ -189,6 +189,7 @@ If the shared cloud runtime later needs secret-bearing values beyond local-safe 
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
 When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
+The hosted serving contract is shared with the compose-host path: both hosted targets should answer `/health`, `/spots`, and `/metrics`. The compose-host path keeps additional sync-freshness metrics on `/metrics`, while Cloud Run keeps the same app route without that host-specific expectation.
 Manual workflow dispatch also supports `deploy_mode=candidate`. That path deploys a tagged no-traffic Cloud Run revision, sets `FOEHNCAST_MLFLOW_SERVING_ALIAS` for that revision, and smoke-checks the tagged URL before any later traffic shift.
 After a candidate revision has been validated, `.github/workflows/promote-candidate.yml` promotes the exact validated model version to the live `champion` alias, redeploys the live Cloud Run service with the validated candidate image, and verifies the live `/health` response reports `champion` plus the promoted model version.
 That promotion summary also records the pre-promotion live revision and model version so operators can feed those exact values into `.github/workflows/rollback-live-release.yml` if the release needs to be reversed later.
@@ -268,9 +269,9 @@ The bootstrap script will:
 
 After bootstrap, run the Terraform workflow with `apply` if you want to provision the shared environment right away. After that, pushes to `main` keep it up to date automatically.
 
-If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks the Cloud Run `/health` endpoint and the `/spots` route. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling it.
+If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks `/health`, `/spots`, and `/metrics`. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling those routes.
 
-If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` waits for the hosted `/health` endpoint and checks that `/metrics` contains the online compose sync metrics.
+If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` checks the same `/health`, `/spots`, and `/metrics` app contract, then confirms that `/metrics` also contains the online compose sync metrics.
 
 The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target or the full online compose host target.
 

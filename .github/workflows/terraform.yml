@@ -666,31 +666,65 @@ jobs:
           if [[ -n "$online_compose_app_url" ]]; then
             online_compose_verification_status="passed"
             health_url="${online_compose_app_url%/}/health"
+            spots_url="${online_compose_app_url%/}/spots"
             metrics_url="${online_compose_app_url%/}/metrics"
 
             echo "Waiting for hosted app health at ${health_url}..."
-            if ! curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url" >/dev/null; then
+            if ! health_payload="$(curl --retry 90 --retry-all-errors --retry-delay 10 -fsS "$health_url")"; then
               echo "Hosted runtime verification failed: hosted app health check did not succeed." >&2
               online_compose_verification_status="failed"
               verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+              echo "Hosted runtime verification failed: expected healthy health payload." >&2
+              printf '%s\n' "$health_payload" >&2
+              online_compose_verification_status="failed"
+              verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:'; then
+              echo "Hosted runtime verification failed: expected health payload to report model alias." >&2
+              printf '%s\n' "$health_payload" >&2
+              online_compose_verification_status="failed"
+              verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"model_version"[[:space:]]*:'; then
+              echo "Hosted runtime verification failed: expected health payload to report model version." >&2
+              printf '%s\n' "$health_payload" >&2
+              online_compose_verification_status="failed"
+              verify_failure=true
             else
-              echo "Checking hosted sync metrics at ${metrics_url}..."
-              if ! metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"; then
-                echo "Hosted runtime verification failed: hosted sync metrics did not respond." >&2
+              echo "Checking hosted spots endpoint at ${spots_url}..."
+              if ! spots_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$spots_url")"; then
+                echo "Hosted runtime verification failed: hosted spots endpoint did not respond." >&2
+                online_compose_verification_status="failed"
+                verify_failure=true
+              elif ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
+                echo "Hosted runtime verification failed: expected spots payload with ids." >&2
+                printf '%s\n' "$spots_payload" >&2
                 online_compose_verification_status="failed"
                 verify_failure=true
               else
-                if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?'; then
-                  echo "Hosted runtime verification failed: expected hosted sync status-file-present metric." >&2
-                  printf '%s\n' "$metrics_payload" >&2
+                echo "Checking hosted sync metrics at ${metrics_url}..."
+                if ! metrics_payload="$(curl --retry 30 --retry-all-errors --retry-delay 10 -fsS "$metrics_url")"; then
+                  echo "Hosted runtime verification failed: hosted sync metrics did not respond." >&2
                   online_compose_verification_status="failed"
                   verify_failure=true
-                fi
-                if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_last_success_timestamp_seconds\{'; then
-                  echo "Hosted runtime verification failed: expected hosted sync last-success timestamp metric." >&2
-                  printf '%s\n' "$metrics_payload" >&2
-                  online_compose_verification_status="failed"
-                  verify_failure=true
+                else
+                  if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_status_file_present'; then
+                    echo "Hosted runtime verification failed: expected hosted metrics payload." >&2
+                    printf '%s\n' "$metrics_payload" >&2
+                    online_compose_verification_status="failed"
+                    verify_failure=true
+                  fi
+                  if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?'; then
+                    echo "Hosted runtime verification failed: expected hosted sync status-file-present metric." >&2
+                    printf '%s\n' "$metrics_payload" >&2
+                    online_compose_verification_status="failed"
+                    verify_failure=true
+                  fi
+                  if ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_last_success_timestamp_seconds\{'; then
+                    echo "Hosted runtime verification failed: expected hosted sync last-success timestamp metric." >&2
+                    printf '%s\n' "$metrics_payload" >&2
+                    online_compose_verification_status="failed"
+                    verify_failure=true
+                  fi
                 fi
               fi
             fi
@@ -704,6 +738,7 @@ jobs:
             cloud_run_allow_unauthenticated="$(printf '%s' "${TF_VAR_cloud_run_allow_unauthenticated}" | tr '[:upper:]' '[:lower:]')"
             health_url="${cloud_run_service_url%/}/health"
             spots_url="${cloud_run_service_url%/}/spots"
+            metrics_url="${cloud_run_service_url%/}/metrics"
             curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
 
             if [[ "$cloud_run_allow_unauthenticated" != 'true' ]]; then
@@ -725,18 +760,44 @@ jobs:
               printf '%s\n' "$health_payload" >&2
               cloud_run_verification_status="failed"
               verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:'; then
+              echo "Cloud Run runtime verification failed: expected health payload to report model alias." >&2
+              printf '%s\n' "$health_payload" >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
+            elif ! printf '%s' "$health_payload" | grep -Eq '"model_version"[[:space:]]*:'; then
+              echo "Cloud Run runtime verification failed: expected health payload to report model version." >&2
+              printf '%s\n' "$health_payload" >&2
+              cloud_run_verification_status="failed"
+              verify_failure=true
             fi
 
-            echo "Checking Cloud Run spots endpoint at ${spots_url}..."
-            if ! spots_payload="$(curl "${curl_args[@]}" "$spots_url")"; then
-              echo "Cloud Run runtime verification failed: spots endpoint did not respond." >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
-            elif ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
-              echo "Cloud Run runtime verification failed: expected spots payload with ids." >&2
-              printf '%s\n' "$spots_payload" >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
+            if [[ "$cloud_run_verification_status" == 'passed' ]]; then
+              echo "Checking Cloud Run spots endpoint at ${spots_url}..."
+              if ! spots_payload="$(curl "${curl_args[@]}" "$spots_url")"; then
+                echo "Cloud Run runtime verification failed: spots endpoint did not respond." >&2
+                cloud_run_verification_status="failed"
+                verify_failure=true
+              elif ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
+                echo "Cloud Run runtime verification failed: expected spots payload with ids." >&2
+                printf '%s\n' "$spots_payload" >&2
+                cloud_run_verification_status="failed"
+                verify_failure=true
+              fi
+            fi
+
+            if [[ "$cloud_run_verification_status" == 'passed' ]]; then
+              echo "Checking Cloud Run metrics at ${metrics_url}..."
+              if ! metrics_payload="$(curl "${curl_args[@]}" "$metrics_url")"; then
+                echo "Cloud Run runtime verification failed: metrics endpoint did not respond." >&2
+                cloud_run_verification_status="failed"
+                verify_failure=true
+              elif ! printf '%s' "$metrics_payload" | grep -Eq 'foehncast_online_compose_sync_status_file_present'; then
+                echo "Cloud Run runtime verification failed: expected metrics payload." >&2
+                printf '%s\n' "$metrics_payload" >&2
+                cloud_run_verification_status="failed"
+                verify_failure=true
+              fi
             fi
           else
             echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."

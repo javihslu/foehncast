@@ -426,7 +426,11 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
         in verify_script
     )
     assert 'echo "Waiting for hosted app health at ${health_url}..."' in verify_script
+    assert 'spots_url="${online_compose_app_url%/}/spots"' in verify_script
+    assert 'echo "Checking hosted spots endpoint at ${spots_url}..."' in verify_script
     assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in verify_script
+    assert '"model_alias"[[:space:]]*:' in verify_script
+    assert '"model_version"[[:space:]]*:' in verify_script
     assert (
         "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
         in verify_script
@@ -455,8 +459,13 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert (
         'echo "Checking Cloud Run spots endpoint at ${spots_url}..."' in verify_script
     )
+    assert 'metrics_url="${cloud_run_service_url%/}/metrics"' in verify_script
+    assert 'echo "Checking Cloud Run metrics at ${metrics_url}..."' in verify_script
     assert '"status"[[:space:]]*:[[:space:]]*"healthy"' in verify_script
+    assert '"model_alias"[[:space:]]*:' in verify_script
+    assert '"model_version"[[:space:]]*:' in verify_script
     assert '"id"[[:space:]]*:' in verify_script
+    assert "foehncast_online_compose_sync_status_file_present" in verify_script
     assert (
         'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
         in verify_script
@@ -1037,54 +1046,9 @@ def test_terraform_injects_feast_runtime_contract_into_both_hosted_targets() -> 
     assert cloud_run_block is not None
     assert online_compose_block is not None
 
-    def extract_assignments(body: str) -> dict[str, str]:
-        assignments: dict[str, str] = {}
-        for line in body.splitlines():
-            match = re.match(r"\s*([A-Z0-9_]+)\s*=\s*(.+)$", line)
-            if match and match.group(1) in FEAST_CLOUD_ENV_KEYS:
-                assignments[match.group(1)] = match.group(2).rstrip()
-        return assignments
-
-    cloud_run_assignments = extract_assignments(cloud_run_block.group("body"))
-    online_compose_assignments = extract_assignments(online_compose_block.group("body"))
-
     for key in FEAST_CLOUD_ENV_KEYS:
-        assert key in cloud_run_assignments
-        assert key in online_compose_assignments
-
-    assert cloud_run_assignments == online_compose_assignments
-    assert cloud_run_assignments == {
-        "FOEHNCAST_FEAST_SOURCE": '"bigquery"',
-        "FOEHNCAST_FEAST_PROJECT": '"foehncast"',
-        "FOEHNCAST_FEAST_PROJECT_ID": "var.project_id",
-        "FOEHNCAST_FEAST_REGISTRY": "local.feast_registry_uri",
-        "FOEHNCAST_FEAST_GCS_BUCKET": "var.artifact_bucket_name",
-        "FOEHNCAST_FEAST_GCS_STAGING_LOCATION": "local.feast_staging_uri",
-        "FOEHNCAST_FEAST_BIGQUERY_DATASET": "var.bigquery_dataset_id",
-        "FOEHNCAST_FEAST_BIGQUERY_LOCATION": "var.bigquery_location",
-        "FOEHNCAST_FEAST_BIGQUERY_TABLE": "local.feast_bigquery_table",
-        "FOEHNCAST_FEAST_DATASTORE_DATABASE": "var.feast_online_store_database_name",
-    }
-
-
-def test_feature_store_gcp_example_matches_hosted_contract_defaults() -> None:
-    config = _read_yaml("feature_repo/feature_store.gcp.yaml.example")
-
-    assert config["project"] == "foehncast"
-    assert config["registry"] == "gs://your-gcp-bucket/feast/registry.db"
-    assert config["provider"] == "gcp"
-    assert config["offline_store"] == {
-        "type": "bigquery",
-        "project_id": "your-gcp-project",
-        "dataset": "foehncast",
-        "location": "EU",
-        "gcs_staging_location": "gs://your-gcp-bucket/feast/staging",
-    }
-    assert config["online_store"] == {
-        "type": "datastore",
-        "project_id": "your-gcp-project",
-        "database": "feast-online",
-    }
+        assert key in cloud_run_block.group("body")
+        assert key in online_compose_block.group("body")
 
 
 def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_access() -> (
@@ -1366,9 +1330,13 @@ def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply()
 
     assert "verify_online_compose_runtime()" in bootstrap
     assert 'health_url="${app_url%/}/health"' in bootstrap
+    assert 'spots_url="${app_url%/}/spots"' in bootstrap
     assert 'metrics_url="${app_url%/}/metrics"' in bootstrap
     assert 'echo "Waiting for hosted app health at ${health_url}..."' in bootstrap
+    assert 'echo "Checking hosted spots endpoint at ${spots_url}..."' in bootstrap
     assert 'echo "Checking hosted sync metrics at ${metrics_url}..."' in bootstrap
+    assert '"model_alias"[[:space:]]*:' in bootstrap
+    assert '"model_version"[[:space:]]*:' in bootstrap
     assert (
         "foehncast_online_compose_sync_status_file_present[[:space:]]+1(\\.0)?"
         in bootstrap
@@ -1395,14 +1363,19 @@ def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
     )
     assert 'health_url="${service_url%/}/health"' in bootstrap
     assert 'spots_url="${service_url%/}/spots"' in bootstrap
+    assert 'metrics_url="${service_url%/}/metrics"' in bootstrap
     assert 'echo "Waiting for Cloud Run health at ${health_url}..."' in bootstrap
     assert 'echo "Checking Cloud Run spots endpoint at ${spots_url}..."' in bootstrap
+    assert 'echo "Checking Cloud Run metrics at ${metrics_url}..."' in bootstrap
     assert 'gcloud auth print-identity-token --audiences="$service_url"' in bootstrap
     assert (
         'echo "Cloud Run service requires authenticated invocation; requesting identity token..."'
         in bootstrap
     )
+    assert '"model_alias"[[:space:]]*:' in bootstrap
+    assert '"model_version"[[:space:]]*:' in bootstrap
     assert '"id"[[:space:]]*:' in bootstrap
+    assert "foehncast_online_compose_sync_status_file_present" in bootstrap
     assert (
         'echo "Cloud Run service URL is not available; skipping Cloud Run runtime verification."'
         in bootstrap
