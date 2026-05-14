@@ -7,8 +7,13 @@ from typing import Any, Callable
 
 import mlflow
 
-from foehncast._json import read_json_file, write_pretty_json
-from foehncast._time import compact_utc_timestamp
+from foehncast._report_store import (
+    history_json_paths,
+    read_json_object,
+    report_history_dir,
+    write_history_copy,
+    write_json_object,
+)
 from foehncast.monitoring._common import registered_model_version_metric_value
 from foehncast.monitoring.pipeline_contracts import (
     FEATURE_PIPELINE_METRIC_CONTRACT,
@@ -35,15 +40,18 @@ def _resolve_report_dir(report_dir: ReportDirFactory | None = None) -> Path:
 
 
 def _summary_history_dir(*, report_dir: ReportDirFactory | None = None) -> Path:
-    return _resolve_report_dir(report_dir) / "history"
+    return report_history_dir(_resolve_report_dir(report_dir))
 
 
 def _write_summary_json(path: Path, summary: dict[str, Any]) -> None:
-    write_pretty_json(path, summary)
+    write_json_object(path, summary)
 
 
 def _read_summary_json(path: Path) -> dict[str, Any]:
-    return read_json_file(path)
+    return read_json_object(
+        path,
+        error_message="Pipeline monitoring summary must decode to a JSON object.",
+    )
 
 
 def feature_pipeline_summary_path(
@@ -71,7 +79,7 @@ def feature_pipeline_summary_history_paths(
     pattern = "feature-pipeline-*.json"
     if dataset is not None:
         pattern = f"feature-pipeline-{dataset}-*.json"
-    return sorted(_summary_history_dir(report_dir=report_dir).glob(pattern))
+    return history_json_paths(_resolve_report_dir(report_dir), pattern)
 
 
 def training_pipeline_summary_path(
@@ -99,7 +107,7 @@ def training_pipeline_summary_history_paths(
     pattern = "training-pipeline-*.json"
     if dataset is not None:
         pattern = f"training-pipeline-{dataset}-*.json"
-    return sorted(_summary_history_dir(report_dir=report_dir).glob(pattern))
+    return history_json_paths(_resolve_report_dir(report_dir), pattern)
 
 
 def write_feature_pipeline_run_summary(
@@ -213,12 +221,11 @@ def _write_summary_history(
     dataset: str,
     report_dir: ReportDirFactory | None = None,
 ) -> Path:
-    history_path = (
-        _summary_history_dir(report_dir=report_dir)
-        / f"{prefix}-{dataset}-{compact_utc_timestamp(summary.get('generated_at'))}.json"
+    return write_history_copy(
+        _resolve_report_dir(report_dir),
+        prefix=f"{prefix}-{dataset}",
+        payload=summary,
     )
-    _write_summary_json(history_path, summary)
-    return history_path
 
 
 def feature_pipeline_summary_metrics(summary: dict[str, Any]) -> dict[str, float]:

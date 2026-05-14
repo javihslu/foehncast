@@ -10,8 +10,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from foehncast._json import json_object_mapping, read_json_file, write_pretty_json
-from foehncast._time import compact_utc_timestamp
+from foehncast._json import json_object_mapping
+from foehncast._report_store import (
+    history_json_paths,
+    read_json_object,
+    write_history_copy,
+    write_json_object,
+)
 from foehncast.paths import project_root
 
 
@@ -34,30 +39,26 @@ def runtime_release_summary_path() -> Path:
 
 def runtime_release_summary_history_paths() -> list[Path]:
     """Return persisted runtime release handoff history paths."""
-    return sorted(
-        (runtime_release_report_dir() / "history").glob("runtime-release-*.json")
-    )
+    return history_json_paths(runtime_release_report_dir(), "runtime-release-*.json")
 
 
 def _write_runtime_release_history(summary: dict[str, Any]) -> Path:
-    history_path = (
-        runtime_release_report_dir()
-        / "history"
-        / f"runtime-release-{compact_utc_timestamp(summary.get('generated_at'))}.json"
+    return write_history_copy(
+        runtime_release_report_dir(),
+        prefix="runtime-release",
+        payload=summary,
     )
-    _write_runtime_release_json(history_path, summary)
-    return history_path
 
 
 def _write_runtime_release_json(path: Path, payload: dict[str, Any]) -> None:
-    write_pretty_json(path, payload)
+    write_json_object(path, payload)
 
 
 def _read_runtime_release_json(path: Path) -> dict[str, Any]:
-    payload = read_json_file(path)
-    if not isinstance(payload, dict):
-        raise ValueError("Runtime release report must decode to a JSON object.")
-    return payload
+    return read_json_object(
+        path,
+        error_message="Runtime release report must decode to a JSON object.",
+    )
 
 
 def _request_mapping(request: Mapping[str, Any] | str | None) -> dict[str, Any]:
