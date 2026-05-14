@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-import json
 from pathlib import Path
 from typing import Any
 
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
+from foehncast._json import read_json_file_if_exists
+from foehncast.monitoring._common import timestamp_seconds
 from foehncast.paths import project_root
 
 
@@ -25,20 +25,7 @@ def read_online_compose_sync_status(
         if status_path is None
         else status_path
     )
-    if not resolved_path.exists():
-        return None
-    return json.loads(resolved_path.read_text())
-
-
-def _timestamp_seconds(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    text = str(value)
-    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
-    try:
-        return float(datetime.fromisoformat(normalized).timestamp())
-    except ValueError:
-        return None
+    return read_json_file_if_exists(resolved_path)
 
 
 def build_online_compose_sync_prometheus_registry(
@@ -65,7 +52,7 @@ def build_online_compose_sync_prometheus_registry(
     if resolved_status is None:
         return registry
 
-    timestamp = _timestamp_seconds(resolved_status.get("last_successful_sync_at"))
+    timestamp = timestamp_seconds(resolved_status.get("last_successful_sync_at"))
     if timestamp is None:
         return registry
 

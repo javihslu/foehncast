@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from foehncast.training_pipeline import train
+from tests.mlflow_fixtures import clear_tracking_uri_env
 
 
 @pytest.fixture()
@@ -193,7 +194,7 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
 ) -> None:
     logged: dict[str, object] = {}
 
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    clear_tracking_uri_env(monkeypatch)
 
     class FakeRun:
         def __init__(self) -> None:

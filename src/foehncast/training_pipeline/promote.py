@@ -3,28 +3,26 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any
 
 import mlflow
 
 from foehncast.config import get_mlflow_config, get_mlflow_tracking_uri
-from foehncast.training_pipeline.register import promote_model
-
-
-def _resolved_model_name(model_name: str | None, mlflow_config: dict[str, Any]) -> str:
-    return model_name or mlflow_config["model_name"]
+from foehncast.training_pipeline.register import (
+    _configured_mlflow_client,
+    _normalized_alias,
+    _normalized_version,
+    _resolved_model_name,
+    promote_model,
+)
 
 
 def resolve_model_version_by_alias(alias: str, model_name: str | None = None) -> str:
     """Return the registered model version currently assigned to an alias."""
-    normalized_alias = alias.strip()
-    if not normalized_alias:
-        raise ValueError("Model alias must be non-empty")
+    normalized_alias = _normalized_alias(alias)
 
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
-    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
-    client = mlflow.MlflowClient()
+    client = _configured_mlflow_client(mlflow, get_mlflow_tracking_uri())
     model_version = client.get_model_version_by_alias(
         resolved_model_name, normalized_alias
     )
@@ -35,9 +33,7 @@ def promote_model_version(
     version: str | int, *, stage: str = "Production", model_name: str | None = None
 ) -> str:
     """Assign the target stage alias to an explicit registered model version."""
-    normalized_version = str(version).strip()
-    if not normalized_version:
-        raise ValueError("Model version must be non-empty")
+    normalized_version = _normalized_version(version)
 
     promote_model(model_name, normalized_version, stage=stage)
     return normalized_version

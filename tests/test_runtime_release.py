@@ -10,6 +10,39 @@ import pytest
 import foehncast.runtime_release as runtime_release
 
 
+def _read_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text())
+
+
+def test_normalize_runtime_release_request_accepts_json_string_payload() -> None:
+    request = runtime_release.normalize_runtime_release_request(
+        '{"action": "PROMOTE_CANDIDATE", "candidate_alias": "Candidate"}'
+    )
+
+    assert request["action"] == "promote_candidate"
+    assert request["candidate_alias"] == "candidate"
+    assert request["target_alias"] == "champion"
+    assert request["request_source"] == "github-actions"
+    assert request["requested_at"]
+
+
+def test_normalize_runtime_release_request_rejects_non_object_json_payload() -> None:
+    with pytest.raises(
+        ValueError,
+        match="Runtime release request must decode to a JSON object.",
+    ):
+        runtime_release.normalize_runtime_release_request('["promote_candidate"]')
+
+
+def test_normalized_runtime_release_request_json_sorts_payload_keys() -> None:
+    request_json = runtime_release.normalized_runtime_release_request_json(
+        '{"action": "PROMOTE_CANDIDATE", "candidate_alias": "Candidate"}'
+    )
+
+    assert json.loads(request_json)["action"] == "promote_candidate"
+    assert request_json.index('"action"') < request_json.index('"candidate_alias"')
+
+
 def test_build_runtime_release_summary_normalizes_deploy_candidate_request() -> None:
     summary = runtime_release.build_runtime_release_summary(
         {
@@ -78,11 +111,26 @@ def test_write_runtime_release_summary_persists_latest_and_history(
     assert (
         latest_path == tmp_path / "airflow" / "reports" / "runtime-release-latest.json"
     )
-    assert (
-        json.loads(latest_path.read_text())["dag_run_id"]
-        == "runtime_release__2026-05-14T11-00-00Z"
-    )
+    assert _read_json(latest_path)["dag_run_id"] == "runtime_release__2026-05-14T11-00-00Z"
     history_paths = runtime_release.runtime_release_summary_history_paths()
     assert len(history_paths) == 1
     assert history_paths[0].name == "runtime-release-20260514T110000000000Z.json"
-    assert json.loads(history_paths[0].read_text())["action"] == "promote_candidate"
+    assert _read_json(history_paths[0])["action"] == "promote_candidate"
+
+
+def test_verify_runtime_release_summary_adds_report_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(runtime_release, "project_root", lambda: tmp_path)
+    report_path = tmp_path / "airflow" / "reports" / "runtime-release-latest.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps({"dag_run_id": "runtime_release__ok"}) + "\n",
+        encoding="utf-8",
+    )
+
+    summary = runtime_release.verify_runtime_release_summary("runtime_release__ok")
+
+    assert summary["dag_run_id"] == "runtime_release__ok"
+    assert summary["report_path"] == str(report_path)

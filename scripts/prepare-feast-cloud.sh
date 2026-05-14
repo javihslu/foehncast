@@ -20,6 +20,21 @@ usage() {
   echo "Usage: $0 [--skip-materialize] [--materialize-to timestamp]" >&2
 }
 
+require_any_env_value() {
+  local error_message="$1"
+  shift
+  local env_name
+
+  for env_name in "$@"; do
+    if [[ -n "${!env_name:-}" ]]; then
+      return
+    fi
+  done
+
+  echo "$error_message" >&2
+  exit 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-materialize)
@@ -27,12 +42,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --materialize-to)
       shift
-      if [[ $# -eq 0 ]]; then
-        echo "Missing value for --materialize-to" >&2
-        usage
-        exit 1
-      fi
-      MATERIALIZE_TS="$1"
+      MATERIALIZE_TS="$(require_cli_option_value "--materialize-to" "${1:-}" usage)"
       ;;
     --help|-h)
       usage
@@ -60,35 +70,19 @@ if [[ "$FOEHNCAST_FEAST_SOURCE" != "bigquery" ]]; then
 fi
 
 require_env_var FOEHNCAST_FEAST_BIGQUERY_TABLE "Set FOEHNCAST_FEAST_BIGQUERY_TABLE in .env or the environment."
+require_any_env_value "Set GCP_PROJECT_ID or FOEHNCAST_FEAST_PROJECT_ID in .env or the environment." \
+  FOEHNCAST_FEAST_PROJECT_ID GCP_PROJECT_ID STORAGE_BIGQUERY_PROJECT_ID GOOGLE_CLOUD_PROJECT
+require_any_env_value "Set GCP_BUCKET_NAME, FOEHNCAST_FEAST_GCS_BUCKET, or FOEHNCAST_FEAST_REGISTRY in .env or the environment." \
+  FOEHNCAST_FEAST_GCS_BUCKET GCP_BUCKET_NAME FOEHNCAST_FEAST_REGISTRY
 
-if [[ -z "${FOEHNCAST_FEAST_PROJECT_ID:-}" && -z "${GCP_PROJECT_ID:-}" && -z "${STORAGE_BIGQUERY_PROJECT_ID:-}" && -z "${GOOGLE_CLOUD_PROJECT:-}" ]]; then
-  echo "Set GCP_PROJECT_ID or FOEHNCAST_FEAST_PROJECT_ID in .env or the environment." >&2
-  exit 1
-fi
+CONFIG_PATH="$(render_feast_runtime_config_path "$ROOT_DIR")"
+export_feast_runtime_config_path "$CONFIG_PATH"
 
-if [[ -z "${FOEHNCAST_FEAST_GCS_BUCKET:-}" && -z "${GCP_BUCKET_NAME:-}" && -z "${FOEHNCAST_FEAST_REGISTRY:-}" ]]; then
-  echo "Set GCP_BUCKET_NAME, FOEHNCAST_FEAST_GCS_BUCKET, or FOEHNCAST_FEAST_REGISTRY in .env or the environment." >&2
-  exit 1
-fi
-
-CONFIG_PATH="$(cd "$ROOT_DIR" && uv run python -m foehncast.feast_runtime)"
-export FOEHNCAST_FEAST_CONFIG_PATH="$CONFIG_PATH"
-export FEAST_FS_YAML_FILE_PATH="$CONFIG_PATH"
-
-cd "$ROOT_DIR/feature_repo"
-uv run --group feast feast apply >/dev/null
-
-if [[ "$MATERIALIZE" == "true" ]]; then
-  uv run --group feast feast materialize-incremental "$MATERIALIZE_TS" >/dev/null
-fi
+run_feast_repo_apply_and_maybe_materialize "$ROOT_DIR/feature_repo" "$MATERIALIZE" "$MATERIALIZE_TS"
 
 printf 'Prepared hosted Feast runtime\n'
 printf 'Runtime config: %s\n' "$CONFIG_PATH"
 printf 'Offline source table: %s\n' "$FOEHNCAST_FEAST_BIGQUERY_TABLE"
 printf 'Online store database: %s\n' "${FOEHNCAST_FEAST_DATASTORE_DATABASE:-feast-online}"
 
-if [[ "$MATERIALIZE" == "true" ]]; then
-  printf 'Materialized through: %s\n' "$MATERIALIZE_TS"
-else
-  printf 'Next: cd %s/feature_repo && uv run --group feast feast materialize-incremental "%s"\n' "$ROOT_DIR" "$MATERIALIZE_TS"
-fi
+print_feast_materialize_status "$ROOT_DIR" "$MATERIALIZE" "$MATERIALIZE_TS"

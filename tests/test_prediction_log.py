@@ -83,6 +83,15 @@ def test_append_prediction_log_writes_durable_event_history_by_default(
     assert list(frame["quality_index"]) == [2.4, 2.8]
 
 
+def test_prediction_event_log_path_prefers_env_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    event_path = tmp_path / "shared" / "prediction-events.jsonl"
+    monkeypatch.setenv("FOEHNCAST_PREDICTION_EVENT_LOG_PATH", str(event_path))
+
+    assert prediction_log.prediction_event_log_path() == event_path
+
+
 def test_read_prediction_history_prefers_durable_event_store_when_available(
     tmp_path: Path,
 ) -> None:

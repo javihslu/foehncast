@@ -7,13 +7,7 @@ from datetime import UTC, datetime
 import pytest
 
 from foehncast.monitoring import prediction_monitoring_prometheus
-
-
-def _metric_value(payload: str, metric_prefix: str) -> float:
-    for line in payload.splitlines():
-        if line.startswith(metric_prefix):
-            return float(line.split()[-1])
-    raise AssertionError(f"Metric not found: {metric_prefix}")
+from tests.prometheus_assertions import metric_value
 
 
 @pytest.fixture(autouse=True)
@@ -67,11 +61,11 @@ def test_render_prediction_monitoring_prometheus_metrics_uses_endpoint_and_resul
         'foehncast_prediction_monitoring_execution_total{endpoint="rank",result="failed"} 1.0'
         in payload
     )
-    assert _metric_value(
+    assert metric_value(
         payload,
         'foehncast_prediction_monitoring_last_schedule_timestamp_seconds{endpoint="rank",result="failed"}',
     ) == pytest.approx(1778493900.0)
-    assert _metric_value(
+    assert metric_value(
         payload,
         'foehncast_prediction_monitoring_last_execution_timestamp_seconds{endpoint="predict",result="succeeded"}',
     ) == pytest.approx(1778494200.0)

@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from foehncast.env import env_value
 
 
 def _project_root_candidates() -> list[Path]:
     candidates: list[Path] = []
 
-    configured_root = os.getenv("FOEHNCAST_PROJECT_ROOT", "").strip()
+    configured_root = env_value("FOEHNCAST_PROJECT_ROOT")
     if configured_root:
         candidates.append(Path(configured_root).expanduser())
 

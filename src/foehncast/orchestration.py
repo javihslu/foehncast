@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import json
 import logging
-import os
 from pathlib import Path
 import re
 import shutil
@@ -16,16 +14,18 @@ from typing import Any
 import mlflow
 import pandas as pd
 
+from foehncast._json import read_json_file_if_exists, write_pretty_json
 from foehncast.config import (
     get_mlflow_config,
     get_mlflow_tracking_uri,
     get_spots,
     get_storage_config,
 )
+from foehncast.env import env_value
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import read_features, write_features
-from foehncast.feature_pipeline.validate import run_validation
+from foehncast.feature_pipeline.validate import run_validation, validation_snapshot
 from foehncast.monitoring.drift import detect_data_drift, push_drift_metrics
 from foehncast.monitoring.pipeline_metrics import (
     build_feature_pipeline_run_summary,
@@ -114,16 +114,14 @@ def _write_feature_pipeline_validation(
     destination: Path,
     validation: Any,
 ) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    range_violations = getattr(validation, "range_violations", None)
+    snapshot = validation_snapshot(validation)
+    range_violations = snapshot["range_violations"]
     payload = {
-        "is_valid": bool(getattr(validation, "is_valid", False)),
-        "missing_columns": list(getattr(validation, "missing_columns", []) or []),
+        "is_valid": snapshot["is_valid"],
+        "missing_columns": snapshot["missing_columns"],
         "null_fractions": {
             str(column): _json_safe_feature_pipeline_value(null_fraction)
-            for column, null_fraction in dict(
-                getattr(validation, "null_fractions", {}) or {}
-            ).items()
+            for column, null_fraction in snapshot["null_fractions"].items()
         },
         "range_violations": (
             [
@@ -137,14 +135,14 @@ def _write_feature_pipeline_validation(
             else []
         ),
     }
-    destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_pretty_json(destination, payload)
 
 
 def _read_feature_pipeline_validation(source: Path) -> SimpleNamespace | None:
-    if not source.exists():
+    payload = read_json_file_if_exists(source)
+    if payload is None:
         return None
 
-    payload = json.loads(source.read_text())
     return SimpleNamespace(
         is_valid=bool(payload.get("is_valid", False)),
         missing_columns=list(payload.get("missing_columns", [])),
@@ -798,7 +796,7 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
 
 
 def _scheduled_mlflow_tracking_uri() -> str | None:
-    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "").strip()
+    tracking_uri = env_value("MLFLOW_TRACKING_URI")
     return tracking_uri or None
 
 

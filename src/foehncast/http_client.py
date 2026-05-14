@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
-
 import certifi
+
+from foehncast.env import env_value
 
 
 def ca_bundle() -> str:
@@ -14,4 +14,4 @@ def ca_bundle() -> str:
     certificate bundle. This avoids machine-wide SSL_CERT_FILE or
     REQUESTS_CA_BUNDLE settings that may point to a private CA only.
     """
-    return os.getenv("FOEHNCAST_CA_BUNDLE") or certifi.where()
+    return env_value("FOEHNCAST_CA_BUNDLE") or certifi.where()

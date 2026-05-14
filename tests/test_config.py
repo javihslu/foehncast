@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from foehncast import config
+from tests.mlflow_fixtures import clear_tracking_uri_env
 
 
 @pytest.fixture(autouse=True)
@@ -116,7 +117,7 @@ def test_runtime_resolution_does_not_mutate_cached_yaml_values(
 
     monkeypatch.delenv("GCP_PROJECT_ID")
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_URI")
+    clear_tracking_uri_env(monkeypatch)
 
     reverted = config.load_config()
     assert reverted["storage"] == {"backend": "s3"}

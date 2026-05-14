@@ -38,6 +38,93 @@ def sample_features() -> pd.DataFrame:
     )
 
 
+class _FakeLoadJobConfig:
+    def __init__(self, write_disposition: str, **kwargs: object) -> None:
+        self.write_disposition = write_disposition
+        for name, value in kwargs.items():
+            setattr(self, name, value)
+
+
+class _FakeTimePartitioning:
+    def __init__(
+        self,
+        *,
+        type_: object,
+        field: str,
+        expiration_ms: int,
+        require_partition_filter: bool,
+    ) -> None:
+        self.type_ = type_
+        self.field = field
+        self.expiration_ms = expiration_ms
+        self.require_partition_filter = require_partition_filter
+
+
+class _FakeScalarQueryParameter:
+    def __init__(self, name: str, param_type: str, value: str) -> None:
+        self.name = name
+        self.param_type = param_type
+        self.value = value
+
+
+class _FakeQueryJobConfig:
+    def __init__(self, query_parameters: list[object]) -> None:
+        self.query_parameters = query_parameters
+
+
+class _CompletedJob:
+    def result(self) -> None:
+        return None
+
+
+class _FlaggingCompletedJob:
+    def __init__(self, captured: dict[str, object], key: str) -> None:
+        self._captured = captured
+        self._key = key
+
+    def result(self) -> None:
+        self._captured[self._key] = True
+
+
+class _FrameRowIterator:
+    def __init__(self, frame: pd.DataFrame | None = None) -> None:
+        self.frame = pd.DataFrame() if frame is None else frame
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return self.frame.copy()
+
+
+class _FrameQueryJob:
+    def __init__(self, frame: pd.DataFrame | None = None) -> None:
+        self.frame = frame
+
+    def result(self) -> _FrameRowIterator:
+        return _FrameRowIterator(self.frame)
+
+
+def _patch_bigquery_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        store,
+        "_google_exceptions_module",
+        lambda: types.SimpleNamespace(NotFound=KeyError),
+    )
+
+
+def _patch_default_bigquery_storage_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        store,
+        "get_storage_config",
+        lambda: {
+            "backend": "bigquery",
+            "bigquery_project_id": "demo-project",
+            "bigquery_dataset": "foehncast",
+            "bigquery_table": "forecast_features",
+        },
+    )
+
+
 def test_write_features_unsupported_backend_raises_value_error(
     monkeypatch: pytest.MonkeyPatch,
     isolated_store_env: None,
@@ -222,14 +309,6 @@ def test_write_features_bigquery_uses_load_job(
 ):
     captured: dict[str, object] = {}
 
-    class FakeLoadJob:
-        def result(self) -> None:
-            captured["job_completed"] = True
-
-    class FakeDeleteJob:
-        def result(self) -> None:
-            captured["delete_completed"] = True
-
     class FakeClient:
         def __init__(self, project: str) -> None:
             captured["project"] = project
@@ -240,7 +319,7 @@ def test_write_features_bigquery_uses_load_job(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> FakeLoadJob:
+        ) -> _FlaggingCompletedJob:
             captured["table_id"] = table_id
             captured["frame"] = frame.copy()
             captured["write_disposition"] = job_config.write_disposition
@@ -251,73 +330,32 @@ def test_write_features_bigquery_uses_load_job(
                 job_config, "clustering_fields", None
             )
             captured["schema_update_options"] = job_config.schema_update_options
-            return FakeLoadJob()
+            return _FlaggingCompletedJob(captured, "job_completed")
 
-        def query(self, query: str, job_config: object | None = None) -> FakeDeleteJob:
+        def query(
+            self, query: str, job_config: object | None = None
+        ) -> _FlaggingCompletedJob:
             captured["delete_query"] = query
             captured["delete_job_config"] = job_config
-            return FakeDeleteJob()
-
-    class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str, **kwargs: object) -> None:
-            self.write_disposition = write_disposition
-            for name, value in kwargs.items():
-                setattr(self, name, value)
-
-    class FakeTimePartitioning:
-        def __init__(
-            self,
-            *,
-            type_: object,
-            field: str,
-            expiration_ms: int,
-            require_partition_filter: bool,
-        ) -> None:
-            self.type_ = type_
-            self.field = field
-            self.expiration_ms = expiration_ms
-            self.require_partition_filter = require_partition_filter
-
-    class FakeScalarQueryParameter:
-        def __init__(self, name: str, param_type: str, value: str) -> None:
-            self.name = name
-            self.param_type = param_type
-            self.value = value
-
-    class FakeQueryJobConfig:
-        def __init__(self, query_parameters: list[object]) -> None:
-            self.query_parameters = query_parameters
+            return _FlaggingCompletedJob(captured, "delete_completed")
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=FakeLoadJobConfig,
-            QueryJobConfig=FakeQueryJobConfig,
-            ScalarQueryParameter=FakeScalarQueryParameter,
+            LoadJobConfig=_FakeLoadJobConfig,
+            QueryJobConfig=_FakeQueryJobConfig,
+            ScalarQueryParameter=_FakeScalarQueryParameter,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=FakeTimePartitioning,
+            TimePartitioning=_FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     frame = sample_features.copy()
     frame.index = pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"])
@@ -356,10 +394,6 @@ def test_write_features_bigquery_applies_contract_when_table_is_missing(
 ):
     captured: dict[str, object] = {}
 
-    class FakeLoadJob:
-        def result(self) -> None:
-            captured["job_completed"] = True
-
     class FakeClient:
         def __init__(self, project: str) -> None:
             captured["project"] = project
@@ -370,14 +404,14 @@ def test_write_features_bigquery_applies_contract_when_table_is_missing(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> FakeLoadJob:
+        ) -> _FlaggingCompletedJob:
             captured["table_id"] = table_id
             captured["frame"] = frame.copy()
             captured["write_disposition"] = job_config.write_disposition
             captured["time_partitioning"] = job_config.time_partitioning
             captured["clustering_fields"] = job_config.clustering_fields
             captured["schema_update_options"] = job_config.schema_update_options
-            return FakeLoadJob()
+            return _FlaggingCompletedJob(captured, "job_completed")
 
         def query(self, query: str, job_config: object | None = None) -> object:
             captured["unexpected_delete_query"] = query
@@ -385,54 +419,21 @@ def test_write_features_bigquery_applies_contract_when_table_is_missing(
                 "delete should not run when the BigQuery table is absent"
             )
 
-    class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str, **kwargs: object) -> None:
-            self.write_disposition = write_disposition
-            for name, value in kwargs.items():
-                setattr(self, name, value)
-
-    class FakeTimePartitioning:
-        def __init__(
-            self,
-            *,
-            type_: object,
-            field: str,
-            expiration_ms: int,
-            require_partition_filter: bool,
-        ) -> None:
-            self.type_ = type_
-            self.field = field
-            self.expiration_ms = expiration_ms
-            self.require_partition_filter = require_partition_filter
-
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=FakeLoadJobConfig,
+            LoadJobConfig=_FakeLoadJobConfig,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=FakeTimePartitioning,
+            TimePartitioning=_FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     frame = sample_features.copy()
     frame.index = pd.to_datetime(["2025-01-01T00:00:00", "2025-01-01T01:00:00"])
@@ -461,25 +462,19 @@ def test_read_features_bigquery_restores_time_index(
 ):
     captured: dict[str, object] = {}
 
-    class FakeRowIterator:
-        def to_dataframe(self) -> pd.DataFrame:
-            return pd.DataFrame(
-                {
-                    "forecast_time": pd.to_datetime(
-                        ["2025-01-01T00:00:00", "2025-01-01T01:00:00"]
-                    ),
-                    "spot_id": ["silvaplana", "silvaplana"],
-                    "spot_name": ["Silvaplana", "Silvaplana"],
-                    "dataset_name": ["train", "train"],
-                    "wind_speed_10m": [10.0, 12.5],
-                    "wind_gusts_10m": [14.0, 16.5],
-                    "wind_steadiness": [0.1, 0.2],
-                }
-            )
-
-    class FakeQueryJob:
-        def result(self) -> FakeRowIterator:
-            return FakeRowIterator()
+    restored_frame = pd.DataFrame(
+        {
+            "forecast_time": pd.to_datetime(
+                ["2025-01-01T00:00:00", "2025-01-01T01:00:00"]
+            ),
+            "spot_id": ["silvaplana", "silvaplana"],
+            "spot_name": ["Silvaplana", "Silvaplana"],
+            "dataset_name": ["train", "train"],
+            "wind_speed_10m": [10.0, 12.5],
+            "wind_gusts_10m": [14.0, 16.5],
+            "wind_steadiness": [0.1, 0.2],
+        }
+    )
 
     class FakeClient:
         def __init__(self, project: str) -> None:
@@ -489,45 +484,24 @@ def test_read_features_bigquery_restores_time_index(
             captured["table_id"] = table_id
             return object()
 
-        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+        def query(
+            self, query: str, job_config: object | None = None
+        ) -> _FrameQueryJob:
             captured["query"] = query
             captured["job_config"] = job_config
-            return FakeQueryJob()
-
-    class FakeScalarQueryParameter:
-        def __init__(self, name: str, param_type: str, value: str) -> None:
-            self.name = name
-            self.param_type = param_type
-            self.value = value
-
-    class FakeQueryJobConfig:
-        def __init__(self, query_parameters: list[object]) -> None:
-            self.query_parameters = query_parameters
+            return _FrameQueryJob(restored_frame)
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            QueryJobConfig=FakeQueryJobConfig,
-            ScalarQueryParameter=FakeScalarQueryParameter,
+            QueryJobConfig=_FakeQueryJobConfig,
+            ScalarQueryParameter=_FakeScalarQueryParameter,
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     result = store.read_features(spot_id="silvaplana", dataset="train")
 
@@ -551,46 +525,6 @@ def test_bigquery_round_trip_restores_original_feature_schema(
 ):
     written: dict[str, pd.DataFrame] = {}
 
-    class FakeLoadJob:
-        def result(self) -> None:
-            return None
-
-    class FakeDeleteJob:
-        def result(self) -> None:
-            return None
-
-    class FakeRowIterator:
-        def __init__(self, frame: pd.DataFrame) -> None:
-            self.frame = frame
-
-        def to_dataframe(self) -> pd.DataFrame:
-            return self.frame.copy()
-
-    class FakeQueryJob:
-        def __init__(self, frame: pd.DataFrame | None = None) -> None:
-            self.frame = frame
-
-        def result(self) -> FakeRowIterator:
-            if self.frame is None:
-                return FakeRowIterator(pd.DataFrame())
-            return FakeRowIterator(self.frame)
-
-    class FakeScalarQueryParameter:
-        def __init__(self, name: str, param_type: str, value: str) -> None:
-            self.name = name
-            self.param_type = param_type
-            self.value = value
-
-    class FakeQueryJobConfig:
-        def __init__(self, query_parameters: list[object]) -> None:
-            self.query_parameters = query_parameters
-
-    class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str, **kwargs: object) -> None:
-            self.write_disposition = write_disposition
-            for name, value in kwargs.items():
-                setattr(self, name, value)
-
     class FakeClient:
         def __init__(self, project: str) -> None:
             self.project = project
@@ -602,41 +536,30 @@ def test_bigquery_round_trip_restores_original_feature_schema(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> FakeLoadJob:
+        ) -> _CompletedJob:
             written["frame"] = frame.copy()
-            return FakeLoadJob()
+            return _CompletedJob()
 
-        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
+        def query(
+            self, query: str, job_config: object | None = None
+        ) -> _CompletedJob | _FrameQueryJob:
             if "DELETE FROM" in query:
                 written["frame"] = written["frame"].iloc[0:0].copy()
-                return FakeDeleteJob()
-            return FakeQueryJob(written["frame"])
+                return _CompletedJob()
+            return _FrameQueryJob(written["frame"])
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=FakeLoadJobConfig,
-            QueryJobConfig=FakeQueryJobConfig,
-            ScalarQueryParameter=FakeScalarQueryParameter,
+            LoadJobConfig=_FakeLoadJobConfig,
+            QueryJobConfig=_FakeQueryJobConfig,
+            ScalarQueryParameter=_FakeScalarQueryParameter,
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     original = pd.DataFrame(
         {
@@ -660,44 +583,6 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
 ):
     state: dict[str, object] = {"table": None, "delete_calls": 0}
 
-    class FakeLoadJob:
-        def result(self) -> None:
-            return None
-
-    class FakeDeleteJob:
-        def result(self) -> None:
-            return None
-
-    class FakeRowIterator:
-        def __init__(self, frame: pd.DataFrame) -> None:
-            self.frame = frame
-
-        def to_dataframe(self) -> pd.DataFrame:
-            return self.frame.copy()
-
-    class FakeQueryJob:
-        def __init__(self, frame: pd.DataFrame) -> None:
-            self.frame = frame
-
-        def result(self) -> FakeRowIterator:
-            return FakeRowIterator(self.frame)
-
-    class FakeScalarQueryParameter:
-        def __init__(self, name: str, param_type: str, value: str) -> None:
-            self.name = name
-            self.param_type = param_type
-            self.value = value
-
-    class FakeQueryJobConfig:
-        def __init__(self, query_parameters: list[object]) -> None:
-            self.query_parameters = query_parameters
-
-    class FakeLoadJobConfig:
-        def __init__(self, write_disposition: str, **kwargs: object) -> None:
-            self.write_disposition = write_disposition
-            for name, value in kwargs.items():
-                setattr(self, name, value)
-
     class FakeClient:
         def __init__(self, project: str) -> None:
             self.project = project
@@ -709,13 +594,13 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> FakeLoadJob:
+        ) -> _CompletedJob:
             existing = state["table"]
             if existing is None:
                 state["table"] = frame.copy()
             else:
                 state["table"] = pd.concat([existing, frame.copy()], ignore_index=True)
-            return FakeLoadJob()
+            return _CompletedJob()
 
         def query(self, query: str, job_config: object | None = None) -> object:
             parameters = {
@@ -734,10 +619,10 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
                         )
                     ].reset_index(drop=True)
                     state["table"] = filtered
-                return FakeDeleteJob()
+                return _CompletedJob()
 
             if table is None:
-                return FakeQueryJob(pd.DataFrame())
+                return _FrameQueryJob()
 
             filtered = (
                 table.loc[
@@ -747,33 +632,20 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
                 .sort_values("forecast_time")
                 .reset_index(drop=True)
             )
-            return FakeQueryJob(filtered)
+            return _FrameQueryJob(filtered)
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=FakeLoadJobConfig,
-            QueryJobConfig=FakeQueryJobConfig,
-            ScalarQueryParameter=FakeScalarQueryParameter,
+            LoadJobConfig=_FakeLoadJobConfig,
+            QueryJobConfig=_FakeQueryJobConfig,
+            ScalarQueryParameter=_FakeScalarQueryParameter,
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     first = pd.DataFrame(
         {"wind_speed_10m": [10.0, 12.5], "wind_steadiness": [0.1, 0.2]},
@@ -798,14 +670,6 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
     monkeypatch: pytest.MonkeyPatch,
     isolated_store_env: None,
 ):
-    class FakeRowIterator:
-        def to_dataframe(self) -> pd.DataFrame:
-            return pd.DataFrame()
-
-    class FakeQueryJob:
-        def result(self) -> FakeRowIterator:
-            return FakeRowIterator()
-
     class FakeClient:
         def __init__(self, project: str) -> None:
             self.project = project
@@ -813,39 +677,22 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
         def get_table(self, table_id: str) -> object:
             return object()
 
-        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
-            return FakeQueryJob()
+        def query(
+            self, query: str, job_config: object | None = None
+        ) -> _FrameQueryJob:
+            return _FrameQueryJob()
 
     monkeypatch.setattr(
         store,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            QueryJobConfig=lambda query_parameters: types.SimpleNamespace(
-                query_parameters=query_parameters
-            ),
-            ScalarQueryParameter=lambda name, param_type, value: types.SimpleNamespace(
-                name=name,
-                param_type=param_type,
-                value=value,
-            ),
+            QueryJobConfig=_FakeQueryJobConfig,
+            ScalarQueryParameter=_FakeScalarQueryParameter,
         ),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     with pytest.raises(FileNotFoundError, match="No BigQuery feature rows found"):
         store.read_features(spot_id="silvaplana", dataset="train")
@@ -881,21 +728,8 @@ def test_list_datasets_bigquery_returns_sorted_names(
         "_bigquery_module",
         lambda: types.SimpleNamespace(Client=FakeClient),
     )
-    monkeypatch.setattr(
-        store,
-        "_google_exceptions_module",
-        lambda: types.SimpleNamespace(NotFound=KeyError),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "bigquery",
-            "bigquery_project_id": "demo-project",
-            "bigquery_dataset": "foehncast",
-            "bigquery_table": "forecast_features",
-        },
-    )
+    _patch_bigquery_not_found(monkeypatch)
+    _patch_default_bigquery_storage_config(monkeypatch)
 
     assert store.list_datasets() == ["train", "validation"]
     assert captured["project"] == "demo-project"

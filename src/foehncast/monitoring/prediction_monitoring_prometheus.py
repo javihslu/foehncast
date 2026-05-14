@@ -8,10 +8,12 @@ truth.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from threading import Lock
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, generate_latest
+
+from foehncast.monitoring._common import timestamp_seconds
 
 _state_lock = Lock()
 _schedule_counts: dict[tuple[str, str], int] = {}
@@ -22,15 +24,6 @@ _execution_timestamps: dict[tuple[str, str], float] = {}
 
 def _normalized_label(value: str | None) -> str:
     return str(value or "unknown").strip() or "unknown"
-
-
-def _timestamp_seconds(when: datetime | None) -> float:
-    resolved = when or datetime.now(UTC)
-    if resolved.tzinfo is None:
-        resolved = resolved.replace(tzinfo=UTC)
-    return resolved.timestamp()
-
-
 def record_prediction_monitoring_schedule(
     endpoint: str,
     result: str,
@@ -40,7 +33,7 @@ def record_prediction_monitoring_schedule(
     key = (_normalized_label(endpoint), _normalized_label(result))
     with _state_lock:
         _schedule_counts[key] = _schedule_counts.get(key, 0) + 1
-        _schedule_timestamps[key] = _timestamp_seconds(when)
+        _schedule_timestamps[key] = float(timestamp_seconds(when, default_now=True))
 
 
 def record_prediction_monitoring_execution(
@@ -52,7 +45,7 @@ def record_prediction_monitoring_execution(
     key = (_normalized_label(endpoint), _normalized_label(result))
     with _state_lock:
         _execution_counts[key] = _execution_counts.get(key, 0) + 1
-        _execution_timestamps[key] = _timestamp_seconds(when)
+        _execution_timestamps[key] = float(timestamp_seconds(when, default_now=True))
 
 
 def _reset_prediction_monitoring_state() -> None:

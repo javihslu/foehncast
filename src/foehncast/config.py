@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import copy
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from foehncast.env import env_value
 from foehncast.paths import project_root
 
 _config: dict[str, Any] | None = None
@@ -23,19 +23,6 @@ _DEFAULT_PREDICTION_EVENT_DATASET = "foehncast_monitoring"
 _DEFAULT_PREDICTION_EVENT_TABLE = "prediction_events"
 _DEFAULT_PREDICTION_EVENT_RETENTION_DAYS = 180
 _DEFAULT_MLFLOW_TRACKING_URI = "http://localhost:5001"
-
-
-def _env_value(*names: str) -> str | None:
-    for name in names:
-        value = os.getenv(name)
-        if value is None:
-            continue
-        stripped = value.strip()
-        if stripped:
-            return stripped
-    return None
-
-
 def _resolved_dict_section(name: str) -> dict[str, Any]:
     section = load_config().get(name, {})
     if not isinstance(section, dict):
@@ -96,7 +83,7 @@ def _resolved_warehouse_contract(
 
 
 def _config_path() -> Path:
-    configured_path = _env_value("FOEHNCAST_CONFIG_PATH")
+    configured_path = env_value("FOEHNCAST_CONFIG_PATH")
     if configured_path is not None:
         return Path(configured_path).expanduser()
 
@@ -144,18 +131,18 @@ def get_storage_config() -> dict[str, Any]:
     warehouse = _resolved_dict_section("warehouse")
 
     storage["backend"] = (
-        _env_value("STORAGE_BACKEND")
+        env_value("STORAGE_BACKEND")
         or str(storage.get("backend", "")).strip()
         or _DEFAULT_STORAGE_BACKEND
     )
     storage["s3_bucket"] = (
-        _env_value("STORAGE_S3_BUCKET", "OBJECTSTORE_BUCKET")
+        env_value("STORAGE_S3_BUCKET", "OBJECTSTORE_BUCKET")
         or str(storage.get("s3_bucket", "")).strip()
         or _DEFAULT_STORAGE_S3_BUCKET
     )
 
     s3_endpoint = (
-        _env_value(
+        env_value(
             "STORAGE_S3_ENDPOINT",
             "OBJECTSTORE_ENDPOINT",
             "FSSPEC_S3_ENDPOINT_URL",
@@ -168,7 +155,7 @@ def get_storage_config() -> dict[str, Any]:
         storage.pop("s3_endpoint", None)
 
     bigquery_project_id = (
-        _env_value(
+        env_value(
             "STORAGE_BIGQUERY_PROJECT_ID",
             "GCP_PROJECT_ID",
             "GOOGLE_CLOUD_PROJECT",
@@ -181,12 +168,12 @@ def get_storage_config() -> dict[str, Any]:
         storage.pop("bigquery_project_id", None)
 
     storage["bigquery_dataset"] = (
-        _env_value("STORAGE_BIGQUERY_DATASET")
+        env_value("STORAGE_BIGQUERY_DATASET")
         or str(storage.get("bigquery_dataset", "")).strip()
         or _DEFAULT_BIGQUERY_DATASET
     )
     storage["bigquery_table"] = (
-        _env_value("STORAGE_BIGQUERY_TABLE")
+        env_value("STORAGE_BIGQUERY_TABLE")
         or str(storage.get("bigquery_table", "")).strip()
         or _DEFAULT_BIGQUERY_TABLE
     )
@@ -226,7 +213,7 @@ def get_mlflow_config() -> dict[str, Any]:
 def get_mlflow_tracking_uri() -> str:
     """Return the resolved MLflow tracking URI."""
     return (
-        _env_value("MLFLOW_TRACKING_URI")
+        env_value("MLFLOW_TRACKING_URI")
         or str(get_mlflow_config().get("tracking_uri", "")).strip()
         or _DEFAULT_MLFLOW_TRACKING_URI
     )

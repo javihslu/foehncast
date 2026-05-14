@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from foehncast.env import env_value
 from foehncast.paths import project_root
 
 _DEFAULT_PROJECT = "foehncast"
@@ -19,27 +20,23 @@ _DEFAULT_BIGQUERY_LOCATION = "EU"
 _DEFAULT_DATASTORE_DATABASE = "feast-online"
 
 
-def _env_value(*names: str) -> str | None:
-    for name in names:
-        value = os.getenv(name)
-        if value is None:
-            continue
-        stripped = value.strip()
-        if stripped:
-            return stripped
-    return None
-
-
 def feast_repo_path() -> Path:
-    configured_path = _env_value("FOEHNCAST_FEAST_REPO_PATH")
+    configured_path = env_value("FOEHNCAST_FEAST_REPO_PATH")
     if configured_path:
         return Path(configured_path).expanduser()
     return project_root() / "feature_repo"
 
 
+def require_existing_feast_repo_path() -> Path:
+    repo_path = feast_repo_path()
+    if not repo_path.exists():
+        raise RuntimeError(f"Configured Feast repo not found at {repo_path}")
+    return repo_path
+
+
 def feast_runtime_config_path(repo_path: Path | None = None) -> Path:
     repo = repo_path or feast_repo_path()
-    configured_path = _env_value("FOEHNCAST_FEAST_CONFIG_PATH")
+    configured_path = env_value("FOEHNCAST_FEAST_CONFIG_PATH")
     if configured_path:
         path = Path(configured_path).expanduser()
         if path.is_absolute():
@@ -48,52 +45,80 @@ def feast_runtime_config_path(repo_path: Path | None = None) -> Path:
     return repo.parent / ".state" / "feast" / "feature_store.runtime.yaml"
 
 
+def feast_runtime_env(config_path: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    resolved_config_path = str(config_path)
+    env["FOEHNCAST_FEAST_CONFIG_PATH"] = resolved_config_path
+    env["FEAST_FS_YAML_FILE_PATH"] = resolved_config_path
+    return env
+
+
+def remove_non_writable_existing_file(path: Path) -> None:
+    if path.exists() and not os.access(path, os.W_OK):
+        path.unlink()
+
+
 def _source_mode() -> str:
-    return (_env_value("FOEHNCAST_FEAST_SOURCE") or "local").lower()
+    return (env_value("FOEHNCAST_FEAST_SOURCE") or "local").lower()
 
 
 def _entity_key_serialization_version() -> int:
-    return int(_env_value("FOEHNCAST_FEAST_ENTITY_KEY_SERIALIZATION_VERSION") or "3")
+    return int(env_value("FOEHNCAST_FEAST_ENTITY_KEY_SERIALIZATION_VERSION") or "3")
 
 
 def _base_config() -> dict[str, Any]:
     return {
-        "project": _env_value("FOEHNCAST_FEAST_PROJECT") or _DEFAULT_PROJECT,
+        "project": env_value("FOEHNCAST_FEAST_PROJECT") or _DEFAULT_PROJECT,
         "entity_key_serialization_version": _entity_key_serialization_version(),
     }
 
 
-def _local_datastore_online_store_config() -> dict[str, Any]:
+def _datastore_online_store_config(
+    *,
+    project_id: str,
+    namespace_env_names: tuple[str, ...],
+    database_env_names: tuple[str, ...] = (),
+    default_database: str | None = None,
+) -> dict[str, Any]:
     online_store: dict[str, Any] = {
         "type": "datastore",
-        "project_id": _env_value(
-            "FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID",
-            "FOEHNCAST_FEAST_PROJECT_ID",
-            "GCP_PROJECT_ID",
-            "DATASTORE_PROJECT_ID",
-            "GOOGLE_CLOUD_PROJECT",
-        )
-        or _DEFAULT_LOCAL_DATASTORE_PROJECT_ID,
+        "project_id": project_id,
     }
 
-    namespace = _env_value("FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE")
-    if namespace:
-        online_store["namespace"] = namespace
-
-    database = _env_value("FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE")
+    database = env_value(*database_env_names) or default_database
     if database:
         online_store["database"] = database
 
+    namespace = env_value(*namespace_env_names)
+    if namespace:
+        online_store["namespace"] = namespace
+
     return online_store
+
+
+def _local_datastore_online_store_config() -> dict[str, Any]:
+    project_id = env_value(
+        "FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID",
+        "FOEHNCAST_FEAST_PROJECT_ID",
+        "GCP_PROJECT_ID",
+        "DATASTORE_PROJECT_ID",
+        "GOOGLE_CLOUD_PROJECT",
+    ) or _DEFAULT_LOCAL_DATASTORE_PROJECT_ID
+
+    return _datastore_online_store_config(
+        project_id=project_id,
+        namespace_env_names=("FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE",),
+        database_env_names=("FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE",),
+    )
 
 
 def _local_runtime_config() -> dict[str, Any]:
     config = _base_config()
     config.update(
         {
-            "registry": _env_value("FOEHNCAST_FEAST_REGISTRY")
+            "registry": env_value("FOEHNCAST_FEAST_REGISTRY")
             or _DEFAULT_LOCAL_REGISTRY,
-            "provider": _env_value("FOEHNCAST_FEAST_PROVIDER") or "gcp",
+            "provider": env_value("FOEHNCAST_FEAST_PROVIDER") or "gcp",
             "offline_store": {"type": "file"},
             "online_store": _local_datastore_online_store_config(),
         }
@@ -102,7 +127,7 @@ def _local_runtime_config() -> dict[str, Any]:
 
 
 def _cloud_runtime_config() -> dict[str, Any]:
-    project_id = _env_value(
+    project_id = env_value(
         "FOEHNCAST_FEAST_PROJECT_ID",
         "GCP_PROJECT_ID",
         "STORAGE_BIGQUERY_PROJECT_ID",
@@ -113,8 +138,8 @@ def _cloud_runtime_config() -> dict[str, Any]:
             "Feast BigQuery runtime binding requires GCP_PROJECT_ID or FOEHNCAST_FEAST_PROJECT_ID"
         )
 
-    bucket_name = _env_value("FOEHNCAST_FEAST_GCS_BUCKET", "GCP_BUCKET_NAME")
-    registry = _env_value("FOEHNCAST_FEAST_REGISTRY")
+    bucket_name = env_value("FOEHNCAST_FEAST_GCS_BUCKET", "GCP_BUCKET_NAME")
+    registry = env_value("FOEHNCAST_FEAST_REGISTRY")
     if not registry:
         if not bucket_name:
             raise ValueError(
@@ -122,7 +147,7 @@ def _cloud_runtime_config() -> dict[str, Any]:
             )
         registry = f"gs://{bucket_name}/feast/registry.db"
 
-    staging_location = _env_value("FOEHNCAST_FEAST_GCS_STAGING_LOCATION")
+    staging_location = env_value("FOEHNCAST_FEAST_GCS_STAGING_LOCATION")
     if not staging_location:
         if not bucket_name:
             raise ValueError(
@@ -130,27 +155,24 @@ def _cloud_runtime_config() -> dict[str, Any]:
             )
         staging_location = f"gs://{bucket_name}/feast/staging"
 
-    online_store: dict[str, Any] = {
-        "type": "datastore",
-        "project_id": project_id,
-        "database": _env_value("FOEHNCAST_FEAST_DATASTORE_DATABASE")
-        or _DEFAULT_DATASTORE_DATABASE,
-    }
-    namespace = _env_value("FOEHNCAST_FEAST_DATASTORE_NAMESPACE")
-    if namespace:
-        online_store["namespace"] = namespace
+    online_store = _datastore_online_store_config(
+        project_id=project_id,
+        namespace_env_names=("FOEHNCAST_FEAST_DATASTORE_NAMESPACE",),
+        database_env_names=("FOEHNCAST_FEAST_DATASTORE_DATABASE",),
+        default_database=_DEFAULT_DATASTORE_DATABASE,
+    )
 
     config = _base_config()
     config.update(
         {
             "registry": registry,
-            "provider": _env_value("FOEHNCAST_FEAST_PROVIDER") or "gcp",
+            "provider": env_value("FOEHNCAST_FEAST_PROVIDER") or "gcp",
             "offline_store": {
                 "type": "bigquery",
                 "project_id": project_id,
-                "dataset": _env_value("FOEHNCAST_FEAST_BIGQUERY_DATASET")
+                "dataset": env_value("FOEHNCAST_FEAST_BIGQUERY_DATASET")
                 or _DEFAULT_BIGQUERY_DATASET,
-                "location": _env_value("FOEHNCAST_FEAST_BIGQUERY_LOCATION")
+                "location": env_value("FOEHNCAST_FEAST_BIGQUERY_LOCATION")
                 or _DEFAULT_BIGQUERY_LOCATION,
                 "gcs_staging_location": staging_location,
             },
@@ -193,8 +215,7 @@ def render_runtime_config(output_path: str | Path | None = None) -> Path:
     # In the local stack multiple containers may render the same runtime file.
     # If another container created it with a restrictive mode, remove it first
     # so this process can recreate a writable copy via the shared bind mount.
-    if destination.exists() and not os.access(destination, os.W_OK):
-        destination.unlink()
+    remove_non_writable_existing_file(destination)
 
     with destination.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(desired_config, handle, sort_keys=False)

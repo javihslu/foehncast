@@ -22,12 +22,50 @@ optional_terraform_output_value() {
   run_terraform -chdir="$terraform_dir" output -raw "$output_name" 2>/dev/null || true
 }
 
+trimmed_terraform_output_value() {
+  local terraform_dir="$1"
+  local output_name="$2"
+  local value
+
+  value="$(optional_terraform_output_value "$terraform_dir" "$output_name")"
+  trim_terraform_platform_value "$value"
+}
+
+terraform_platform_value_present() {
+  local value="$1"
+
+  [[ -n "$value" && "$value" != "null" && "$value" != "none" ]]
+}
+
+print_terraform_summary_line_if_present() {
+  local label="$1"
+  local value="$2"
+
+  if terraform_platform_value_present "$value"; then
+    echo "${label}: ${value}"
+  fi
+}
+
+print_trimmed_terraform_output_summary() {
+  local terraform_dir="$1"
+  local label="$2"
+  local output_name="$3"
+
+  print_terraform_summary_line_if_present "$label" "$(trimmed_terraform_output_value "$terraform_dir" "$output_name")"
+}
+
 trim_terraform_platform_value() {
   local value="$1"
 
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+default_terraform_tfvars_file() {
+  local terraform_dir="$1"
+
+  printf '%s/terraform.tfvars\n' "$terraform_dir"
 }
 
 terraform_platform_tfvars_file() {
@@ -38,7 +76,7 @@ terraform_platform_tfvars_file() {
     return
   fi
 
-  printf '%s/terraform.tfvars\n' "$terraform_dir"
+  default_terraform_tfvars_file "$terraform_dir"
 }
 
 read_tfvars_value_from_file() {
@@ -73,10 +111,9 @@ terraform_output_or_tfvars_value() {
   local tfvars_key="$3"
   local output_value tfvars_file
 
-  output_value="$(optional_terraform_output_value "$terraform_dir" "$output_name")"
-  output_value="$(trim_terraform_platform_value "$output_value")"
+  output_value="$(trimmed_terraform_output_value "$terraform_dir" "$output_name")"
 
-  if [[ -n "$output_value" && "$output_value" != "null" ]]; then
+  if terraform_platform_value_present "$output_value"; then
     printf '%s\n' "$output_value"
     return
   fi
@@ -93,10 +130,40 @@ foehncast_default_cloud_run_image() {
   printf '%s-docker.pkg.dev/%s/%s/foehncast-app:latest\n' "$location" "$project_id" "$artifact_repository"
 }
 
+foehncast_default_artifact_repository() {
+  printf 'foehncast-docker\n'
+}
+
+foehncast_default_artifact_bucket_name() {
+  local project_id="$1"
+
+  printf 'foehncast-artifacts-%s\n' "$project_id"
+}
+
+foehncast_default_bigquery_dataset() {
+  printf 'foehncast\n'
+}
+
+foehncast_default_bigquery_table() {
+  printf 'forecast_features\n'
+}
+
+foehncast_default_feast_online_store_database() {
+  printf 'feast-online\n'
+}
+
+foehncast_default_cloud_run_service_name() {
+  printf 'foehncast-serve\n'
+}
+
 foehncast_default_online_compose_host_zone() {
   local location="$1"
 
   printf '%s-b\n' "$location"
+}
+
+foehncast_default_online_compose_host_name() {
+  printf 'foehncast-online\n'
 }
 
 foehncast_cloud_env_pairs() {
@@ -157,7 +224,7 @@ apply_foehncast_cloud_tfvars_values() {
   local cloud_run_service_name="${11}"
   local mlflow_tracking_uri="${12}"
   local provision_online_compose_host="${13}"
-  local online_compose_host_name="${14:-foehncast-online}"
+  local online_compose_host_name="${14:-$(foehncast_default_online_compose_host_name)}"
   local online_compose_host_zone="${15:-$(foehncast_default_online_compose_host_zone "$location")}"
   local online_compose_machine_type="${16:-e2-standard-4}"
   local online_compose_disk_size_gb="${17:-40}"
@@ -196,7 +263,9 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE="$(terraform_output_or_tfvars_value "$terraform_dir" feast_online_store_database_name feast_online_store_database_name)"
   FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER="$(optional_terraform_output_value "$terraform_dir" github_workload_identity_provider)"
   FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL="$(optional_terraform_output_value "$terraform_dir" github_deployer_service_account)"
+  # shellcheck disable=SC2034
   FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
+  # shellcheck disable=SC2034
   FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"

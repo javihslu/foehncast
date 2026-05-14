@@ -7,11 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from foehncast.training_pipeline import register
-
-
-@pytest.fixture(autouse=True)
-def _clear_tracking_uri(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+from tests.mlflow_fixtures import clear_tracking_uri as _clear_tracking_uri
 
 
 @pytest.fixture()
@@ -22,6 +18,60 @@ def mlflow_config() -> dict[str, str]:
         "candidate_alias": "candidate",
         "champion_alias": "champion",
     }
+
+
+def _patch_registry_mlflow(
+    monkeypatch: pytest.MonkeyPatch,
+    mlflow_config: dict[str, str],
+    mlflow_stub: object,
+) -> None:
+    monkeypatch.setattr(register, "mlflow", mlflow_stub)
+    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
+    monkeypatch.setattr(
+        register,
+        "get_mlflow_tracking_uri",
+        lambda: mlflow_config["tracking_uri"],
+    )
+
+
+class _AliasSettingClient:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self._logged = logged
+
+    def set_registered_model_alias(
+        self, model_name: str, alias: str, version: str
+    ) -> None:
+        self._logged["alias"] = (model_name, alias, version)
+
+
+class _AliasSettingMlflow:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self._logged = logged
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        self._logged["tracking_uri"] = tracking_uri
+
+    def MlflowClient(self) -> _AliasSettingClient:
+        return _AliasSettingClient(self._logged)
+
+
+class _ModelLoadingPyfunc:
+    def __init__(self, logged: dict[str, str], expected_model: object) -> None:
+        self._logged = logged
+        self._expected_model = expected_model
+
+    def load_model(self, model_uri: str) -> object:
+        self._logged["model_uri"] = model_uri
+        return self._expected_model
+
+
+class _ModelLoadingMlflow:
+    def __init__(self, logged: dict[str, str], expected_model: object) -> None:
+        self._logged = logged
+        self.pyfunc = _ModelLoadingPyfunc(logged, expected_model)
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        self._logged["tracking_uri"] = tracking_uri
 
 
 def test_register_model_registers_logged_model_uri_when_available(
@@ -55,11 +105,7 @@ def test_register_model_registers_logged_model_uri_when_available(
             logged["registration"] = (model_uri, model_name)
             return expected_version
 
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, FakeMlflow())
 
     model_version = register.register_model("run-123")
 
@@ -105,11 +151,7 @@ def test_register_model_allows_model_name_override(
             logged["registration"] = (model_uri, model_name)
             return object()
 
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, FakeMlflow())
 
     register.register_model("run-456", model_name="foehncast-experiment")
 
@@ -138,11 +180,7 @@ def test_register_model_falls_back_to_run_artifact_when_logged_model_lookup_is_u
             logged["registration"] = (model_uri, model_name)
             return object()
 
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, FakeMlflow())
 
     register.register_model("run-789")
 
@@ -157,24 +195,7 @@ def test_promote_model_assigns_champion_alias_for_production(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeClient:
-        def set_registered_model_alias(
-            self, model_name: str, alias: str, version: str
-        ) -> None:
-            logged["alias"] = (model_name, alias, version)
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, _AliasSettingMlflow(logged))
 
     register.promote_model(None, 7)
 
@@ -187,24 +208,7 @@ def test_promote_model_assigns_candidate_alias_for_candidate_stage(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeClient:
-        def set_registered_model_alias(
-            self, model_name: str, alias: str, version: str
-        ) -> None:
-            logged["alias"] = (model_name, alias, version)
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, _AliasSettingMlflow(logged))
 
     register.promote_model(None, 11, stage="Candidate")
 
@@ -218,21 +222,10 @@ def test_get_production_model_loads_model_from_champion_alias(
     logged: dict[str, str] = {}
     expected_model = object()
 
-    class FakePyfunc:
-        def load_model(self, model_uri: str) -> object:
-            logged["model_uri"] = model_uri
-            return expected_model
-
-    class FakeMlflow:
-        pyfunc = FakePyfunc()
-
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    _patch_registry_mlflow(
+        monkeypatch,
+        mlflow_config,
+        _ModelLoadingMlflow(logged, expected_model),
     )
 
     model = register.get_production_model()
@@ -248,21 +241,10 @@ def test_get_model_by_alias_loads_requested_alias(
     logged: dict[str, str] = {}
     expected_model = object()
 
-    class FakePyfunc:
-        def load_model(self, model_uri: str) -> object:
-            logged["model_uri"] = model_uri
-            return expected_model
-
-    class FakeMlflow:
-        pyfunc = FakePyfunc()
-
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
+    _patch_registry_mlflow(
+        monkeypatch,
+        mlflow_config,
+        _ModelLoadingMlflow(logged, expected_model),
     )
 
     model = register.get_model_by_alias("candidate")
@@ -277,26 +259,17 @@ def test_assign_model_alias_sets_explicit_alias(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeClient:
-        def set_registered_model_alias(
-            self, model_name: str, alias: str, version: str
-        ) -> None:
-            logged["alias"] = (model_name, alias, version)
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-    monkeypatch.setattr(register, "mlflow", FakeMlflow())
-    monkeypatch.setattr(register, "get_mlflow_config", lambda: mlflow_config)
-    monkeypatch.setattr(
-        register, "get_mlflow_tracking_uri", lambda: "http://localhost:5001"
-    )
+    _patch_registry_mlflow(monkeypatch, mlflow_config, _AliasSettingMlflow(logged))
 
     register.assign_model_alias("champion", 13)
 
     assert logged["tracking_uri"] == "http://localhost:5001"
     assert logged["alias"] == ("foehncast-quality", "champion", "13")
+
+
+def test_assign_model_alias_requires_non_empty_alias_and_version() -> None:
+    with pytest.raises(ValueError, match="Model alias must be non-empty"):
+        register.assign_model_alias("   ", 13)
+
+    with pytest.raises(ValueError, match="Model version must be non-empty"):
+        register.assign_model_alias("champion", "   ")

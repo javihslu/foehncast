@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 
-from foehncast.training_pipeline.register import assign_model_alias
+from foehncast.training_pipeline.register import (
+    _normalized_alias,
+    _normalized_version,
+    assign_model_alias,
+)
 
 
 def rollback_model_version(
@@ -14,13 +18,8 @@ def rollback_model_version(
     model_name: str | None = None,
 ) -> str:
     """Reassign the live alias to an explicit previous model version."""
-    normalized_version = str(version).strip()
-    if not normalized_version:
-        raise ValueError("Model version must be non-empty")
-
-    normalized_alias = target_alias.strip()
-    if not normalized_alias:
-        raise ValueError("Target alias must be non-empty")
+    normalized_version = _normalized_version(version)
+    normalized_alias = _normalized_alias(target_alias, label="Target alias")
 
     assign_model_alias(normalized_alias, normalized_version, model_name=model_name)
     return normalized_version

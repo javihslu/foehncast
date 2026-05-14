@@ -27,6 +27,16 @@ class ValidationResult:
         return self.schema_valid and self.completeness_valid and self.range_valid
 
 
+def validation_snapshot(validation: Any | None) -> dict[str, Any]:
+    """Normalize a ValidationResult-like object into safe primitive fields."""
+    return {
+        "is_valid": bool(getattr(validation, "is_valid", False)),
+        "missing_columns": list(getattr(validation, "missing_columns", []) or []),
+        "null_fractions": dict(getattr(validation, "null_fractions", {}) or {}),
+        "range_violations": getattr(validation, "range_violations", None),
+    }
+
+
 def _missing_columns(df: pd.DataFrame, expected_columns: list[str]) -> list[str]:
     return [column for column in expected_columns if column not in df.columns]
 

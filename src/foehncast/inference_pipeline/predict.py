@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import mlflow
@@ -15,6 +14,7 @@ from foehncast.config import (
     get_model_config,
     get_spots,
 )
+from foehncast.env import env_value
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.training_pipeline.register import get_model_by_alias
@@ -47,7 +47,7 @@ def list_available_spots() -> list[dict[str, Any]]:
 
 def get_serving_model_alias() -> str:
     """Return the registry alias this runtime should serve."""
-    override = os.getenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", "").strip()
+    override = env_value("FOEHNCAST_MLFLOW_SERVING_ALIAS")
     if override:
         return override
 

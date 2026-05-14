@@ -9,6 +9,19 @@ import yaml
 from foehncast import feast_runtime
 
 
+def test_feast_repo_path_uses_project_root_when_repo_override_is_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+    (tmp_path / "config.yaml").write_text("storage: {}\n")
+    (repo_path / "feature_store.yaml").write_text("project: foehncast\n")
+    monkeypatch.delenv("FOEHNCAST_FEAST_REPO_PATH", raising=False)
+    monkeypatch.setenv("FOEHNCAST_PROJECT_ROOT", str(tmp_path))
+
+    assert feast_runtime.feast_repo_path() == repo_path
+
+
 def test_render_runtime_config_uses_local_defaults(monkeypatch, tmp_path: Path) -> None:
     repo_path = tmp_path / "feature_repo"
     repo_path.mkdir()

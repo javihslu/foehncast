@@ -3,8 +3,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TERRAFORM_DIR="${ROOT_DIR}/terraform"
 ENV_FILE="${ROOT_DIR}/.env"
-TFVARS_FILE="${ROOT_DIR}/terraform/terraform.tfvars"
 TARGET_REPO=""
 CLEAR_GITHUB_ACTIONS=false
 DELETE_STATE_BUCKET=false
@@ -16,20 +16,55 @@ GCP_CONTEXT_READY=false
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 # shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/terraform-platform-state.sh"
+# shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/gcp-common.sh"
+TFVARS_FILE="$(default_terraform_tfvars_file "$TERRAFORM_DIR")"
 
 usage() {
   echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--clear-github-actions] [--delete-state-bucket] [--delete-project] [--repo owner/repo]" >&2
 }
 
-require_file() {
-  local file_path="$1"
-  local help_message="$2"
+require_destroy_tfvars_file() {
+  require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
+}
 
-  if [[ ! -f "$file_path" ]]; then
-    echo "$help_message" >&2
-    exit 1
+print_enabled_message() {
+  local flag_value="$1"
+  local enabled_message="$2"
+
+  if [[ "$flag_value" == "true" ]]; then
+    echo "$enabled_message"
   fi
+}
+
+print_state_message() {
+  local flag_value="$1"
+  local enabled_message="$2"
+  local disabled_message="$3"
+
+  if [[ "$flag_value" == "true" ]]; then
+    echo "$enabled_message"
+    return
+  fi
+
+  echo "$disabled_message"
+}
+
+print_remote_backend_destroy_guidance() {
+  echo "Use ./scripts/terraform-remote.sh destroy when the active environment is managed through the remote backend."
+}
+
+print_no_local_terraform_state_message() {
+  local state_message="$1"
+
+  echo "No local Terraform state was found in ${ROOT_DIR}/terraform. ${state_message}"
+  print_remote_backend_destroy_guidance
+}
+
+print_missing_destroy_tfvars_preview_message() {
+  echo "Terraform variables file not found: $TFVARS_FILE. Nothing to preview in this working copy."
+  echo "Reuse the file created for provisioning to preview local destroy targets, or use ./scripts/terraform-remote.sh destroy when the active environment is managed through the remote backend."
 }
 
 has_local_terraform_state() {
@@ -49,14 +84,7 @@ ensure_gcp_context() {
     require_file "$ENV_FILE" "Env file not found: $ENV_FILE. Initialize it with ./scripts/bootstrap-gcp.sh first."
   fi
 
-  load_env_file "$ENV_FILE"
-  require_gcp_project_and_location
-
-  echo "Authenticating with Google Cloud via browser if needed..."
-  "${ROOT_DIR}/scripts/gcp-auth.sh" "$ENV_FILE"
-
-  echo "Checking access to GCP project ${GCP_PROJECT_ID}..."
-  gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
+  verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"
 
   GCP_CONTEXT_READY=true
 }
@@ -116,11 +144,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --env-file)
       shift
-      ENV_FILE="${1:-}"
+      ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"
       ;;
     --tfvars-file)
       shift
-      TFVARS_FILE="${1:-}"
+      TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"
       ;;
     --plan-only)
       PLAN_ONLY=true
@@ -139,7 +167,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       shift
-      TARGET_REPO="${1:-}"
+      TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"
       ;;
     --help|-h)
       usage
@@ -166,14 +194,12 @@ fi
 
 if [[ "$PLAN_ONLY" == "true" ]]; then
   if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "false" ]]; then
-    echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to preview in this working copy."
-    echo "If this environment was provisioned through the remote Terraform backend, use ./scripts/terraform-remote.sh destroy instead."
+    print_no_local_terraform_state_message "Nothing to preview in this working copy."
   elif [[ ! -f "$TFVARS_FILE" ]]; then
-    echo "Terraform variables file not found: $TFVARS_FILE. Nothing to preview in this working copy."
-    echo "Reuse the file created for provisioning to preview local destroy targets, or use ./scripts/terraform-remote.sh destroy for remote-backend environments."
+    print_missing_destroy_tfvars_preview_message
   else
     ensure_terraform_command
-    require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
+    require_destroy_tfvars_file
     ensure_gcp_context true
 
     echo "Initializing Terraform..."
@@ -186,34 +212,23 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
   fi
 
   echo "Terraform-managed resources were not destroyed."
-
-  if [[ "$CLEAR_GITHUB_ACTIONS" == "true" ]]; then
-    echo "GitHub Actions variables were not changed because --plan-only was set."
-  fi
-
-  if [[ "$DELETE_STATE_BUCKET" == "true" ]]; then
-    echo "The Terraform state bucket was not changed because --plan-only was set."
-  fi
-
-  if [[ "$DELETE_PROJECT" == "true" ]]; then
-    echo "The GCP project was not changed because --plan-only was set."
-  fi
+  print_enabled_message "$CLEAR_GITHUB_ACTIONS" "GitHub Actions variables were not changed because --plan-only was set."
+  print_enabled_message "$DELETE_STATE_BUCKET" "The Terraform state bucket was not changed because --plan-only was set."
+  print_enabled_message "$DELETE_PROJECT" "The GCP project was not changed because --plan-only was set."
 
   exit 0
 fi
 
 if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "false" && "$CLEAR_GITHUB_ACTIONS" != "true" && "$DELETE_STATE_BUCKET" != "true" && "$DELETE_PROJECT" != "true" ]]; then
-  echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Nothing to destroy in this working copy."
-  echo "If the environment was created from the remote backend, run ./scripts/terraform-remote.sh destroy."
+  print_no_local_terraform_state_message "Nothing to destroy in this working copy."
   exit 0
 fi
 
 TERRAFORM_DESTROYED=false
-PROJECT_DELETED=false
 
 if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "true" ]]; then
   ensure_terraform_command
-  require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Reuse the file created for provisioning so destroy targets the same settings."
+  require_destroy_tfvars_file
   ensure_gcp_context true
 
   echo "Initializing Terraform..."
@@ -228,8 +243,7 @@ if [[ "$HAS_LOCAL_TERRAFORM_STATE" == "true" ]]; then
   run_terraform -chdir="${ROOT_DIR}/terraform" "${destroy_args[@]}"
   TERRAFORM_DESTROYED=true
 else
-  echo "No local Terraform state was found in ${ROOT_DIR}/terraform. Skipping Terraform destroy path."
-  echo "Use ./scripts/terraform-remote.sh when the active environment is managed through the remote backend."
+  print_no_local_terraform_state_message "Skipping Terraform destroy path."
 fi
 
 if [[ "$CLEAR_GITHUB_ACTIONS" == "true" ]]; then
@@ -251,31 +265,10 @@ if [[ "$DELETE_PROJECT" == "true" ]]; then
   ensure_gcp_context false
   confirm_project_delete
   delete_project
-  PROJECT_DELETED=true
 fi
 
 echo "Teardown complete."
-
-if [[ "$TERRAFORM_DESTROYED" == "true" ]]; then
-  echo "Terraform destroy completed using ${TFVARS_FILE}."
-else
-  echo "Terraform-managed resources were left unchanged."
-fi
-
-if [[ "$CLEAR_GITHUB_ACTIONS" == "true" ]]; then
-  echo "GitHub Actions variables were cleared."
-else
-  echo "GitHub Actions variables were left unchanged."
-fi
-
-if [[ "$DELETE_STATE_BUCKET" == "true" ]]; then
-  echo "The Terraform state bucket cleanup path was executed."
-else
-  echo "The Terraform state bucket was left unchanged."
-fi
-
-if [[ "$DELETE_PROJECT" == "true" ]]; then
-  echo "The GCP project delete path was executed."
-else
-  echo "The GCP project was left unchanged."
-fi
+print_state_message "$TERRAFORM_DESTROYED" "Terraform destroy completed using ${TFVARS_FILE}." "Terraform-managed resources were left unchanged."
+print_state_message "$CLEAR_GITHUB_ACTIONS" "GitHub Actions variables were cleared." "GitHub Actions variables were left unchanged."
+print_state_message "$DELETE_STATE_BUCKET" "The Terraform state bucket cleanup path was executed." "The Terraform state bucket was left unchanged."
+print_state_message "$DELETE_PROJECT" "The GCP project delete path was executed." "The GCP project was left unchanged."

@@ -2,24 +2,16 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
-from foehncast.feast_runtime import render_runtime_config
+from foehncast.feast_runtime import (
+    render_runtime_config,
+    require_existing_feast_repo_path,
+)
 from foehncast.inference_pipeline.predict import _resolve_spots
-from foehncast.paths import project_root
 
 _DEFAULT_FEATURE_SERVICE = "foehncast_model_v1"
 _DEFAULT_FEATURE_VIEW = "spot_forecast_features"
-
-
-def _repo_path() -> Path:
-    configured_path = os.getenv("FOEHNCAST_FEAST_REPO_PATH", "").strip()
-    if configured_path:
-        return Path(configured_path).expanduser()
-
-    return project_root() / "feature_repo"
 
 
 def _load_feature_store() -> Any:
@@ -30,9 +22,7 @@ def _load_feature_store() -> Any:
             "Feast runtime dependency is missing from this environment."
         ) from exc
 
-    repo_path = _repo_path()
-    if not repo_path.exists():
-        raise RuntimeError(f"Configured Feast repo not found at {repo_path}")
+    repo_path = require_existing_feast_repo_path()
 
     config_path = render_runtime_config()
     return FeatureStore(repo_path=str(repo_path), fs_yaml_file=config_path)

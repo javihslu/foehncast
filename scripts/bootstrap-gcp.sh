@@ -5,7 +5,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TERRAFORM_DIR="${ROOT_DIR}/terraform"
 ENV_FILE="${ROOT_DIR}/.env"
-TFVARS_FILE="${ROOT_DIR}/terraform/terraform.tfvars"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
 # shellcheck disable=SC1091
@@ -13,7 +12,10 @@ source "${ROOT_DIR}/scripts/terraform-platform-state.sh"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/gcp-common.sh"
 # shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/payload-check-common.sh"
+# shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/github-common.sh"
+TFVARS_FILE="$(default_terraform_tfvars_file "$TERRAFORM_DIR")"
 CONFIGURE_GITHUB=false
 TARGET_REPO=""
 PLAN_ONLY=false
@@ -29,13 +31,13 @@ usage() {
 }
 
 require_payload_pattern() {
-  local payload="$1"
-  local pattern="$2"
-  local description="$3"
+  if ! payload_check_require_pattern "Hosted bootstrap verification failed" "$1" "$2" "$3"; then
+    exit 1
+  fi
+}
 
-  if ! printf '%s' "$payload" | grep -Eq "$pattern"; then
-    echo "Hosted bootstrap verification failed: expected ${description}." >&2
-    printf '%s\n' "$payload" >&2
+require_payload_patterns() {
+  if ! payload_check_require_patterns "Hosted bootstrap verification failed" "$@"; then
     exit 1
   fi
 }
@@ -96,44 +98,14 @@ print_bootstrap_context() {
   fi
 }
 
-require_file() {
-  local file_path="$1"
-  local help_message="$2"
-
-  if [[ ! -f "$file_path" ]]; then
-    echo "$help_message" >&2
-    exit 1
-  fi
-}
-
-trim_whitespace() {
-  local value="$1"
-
-  value="${value#"${value%%[![:space:]]*}"}"
-  value="${value%"${value##*[![:space:]]}"}"
-  printf '%s' "$value"
-}
-
-read_tfvars_value() {
+tfvars_value_or_default() {
   local key="$1"
-  local line value
+  local fallback_value="$2"
+  local value
 
-  if [[ ! -f "$TFVARS_FILE" ]]; then
-    return
-  fi
-
-  line="$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TFVARS_FILE" | tail -n 1 || true)"
-
-  if [[ -z "$line" ]]; then
-    return
-  fi
-
-  value="${line#*=}"
-  value="$(trim_whitespace "$value")"
-
-  if [[ "$value" == \"*\" ]]; then
-    value="${value#\"}"
-    value="${value%\"}"
+  value="$(read_tfvars_value_from_file "$TFVARS_FILE" "$key")"
+  if [[ -z "$value" ]]; then
+    value="$fallback_value"
   fi
 
   printf '%s\n' "$value"
@@ -203,11 +175,11 @@ read_tfvars_value() {
   sync_env_from_terraform_outputs() {
     local cloud_run_service
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
     cloud_run_service="${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
 
     if [[ -z "$cloud_run_service" ]]; then
-      cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
+      cloud_run_service="$(read_tfvars_value_from_file "$TFVARS_FILE" cloud_run_service_name)"
     fi
 
     apply_foehncast_cloud_env_values \
@@ -221,83 +193,82 @@ read_tfvars_value() {
       "$cloud_run_service"
   }
 
-  print_auth_summary() {
+  load_bootstrap_platform_state() {
     FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+  }
+
+  cloud_run_is_enabled() {
+    [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" == "true" ]]
+  }
+
+  online_compose_is_enabled() {
+    [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" ]]
+  }
+
+  print_bootstrap_identity_summary() {
+    if online_compose_is_enabled; then
+      print_terraform_summary_line_if_present "Online compose runtime service account" "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT"
+    fi
+
+    echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
+  }
+
+  print_auth_summary() {
+    load_bootstrap_platform_state
 
     echo "Local auth: browser-based gcloud ADC on this machine"
     echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"
-    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" && -n "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" ]]; then
-      echo "Online compose runtime service account: ${FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT}"
-    fi
-    echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
+    print_bootstrap_identity_summary
 
-    if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
-      echo "Cloud Run service: ${FOEHNCAST_TF_CLOUD_RUN_SERVICE}"
-    fi
+    print_terraform_summary_line_if_present "Cloud Run service" "$FOEHNCAST_TF_CLOUD_RUN_SERVICE"
   }
 
   print_primary_hosted_api_summary() {
-    local primary_target primary_url
+    local primary_target
 
-    primary_target="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
-    primary_target="$(trim_whitespace "$primary_target")"
-    primary_url="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
-    primary_url="$(trim_whitespace "$primary_url")"
+    primary_target="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
 
-    if [[ -z "$primary_target" || "$primary_target" == "null" || "$primary_target" == "none" ]]; then
+    if ! terraform_platform_value_present "$primary_target"; then
       return
     fi
 
     echo "Primary hosted API target: ${primary_target}"
-
-    if [[ -n "$primary_url" && "$primary_url" != "null" ]]; then
-      echo "Primary hosted API URL: ${primary_url}"
-    fi
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Primary hosted API URL" primary_hosted_api_url
   }
 
   require_primary_hosted_api_configuration() {
     local primary_target primary_url online_compose_app_url
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
 
-    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+    if ! cloud_run_is_enabled; then
       echo "Hosted bootstrap requires provision_cloud_run_service=true. Cloud Run is the only supported public API path in this configuration." >&2
       exit 1
     fi
 
-    primary_target="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
-    primary_target="$(trim_whitespace "$primary_target")"
-    primary_url="$(optional_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
-    primary_url="$(trim_whitespace "$primary_url")"
-    online_compose_app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
-    online_compose_app_url="$(trim_whitespace "$online_compose_app_url")"
+    primary_target="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
+    primary_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
+    online_compose_app_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
 
-    if [[ "$primary_target" != "cloud-run" || -z "$primary_url" || "$primary_url" == "null" ]]; then
+    if [[ "$primary_target" != "cloud-run" ]] || ! terraform_platform_value_present "$primary_url"; then
       echo "Hosted bootstrap could not resolve the promoted Cloud Run API URL. Fix the Cloud Run configuration instead of falling back to the VM app surface." >&2
       exit 1
     fi
 
-    if [[ -n "$online_compose_app_url" && "$online_compose_app_url" != "null" ]]; then
+    if terraform_platform_value_present "$online_compose_app_url"; then
       echo "Hosted bootstrap found a public online compose app URL (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2
       exit 1
     fi
   }
 
   print_cloud_run_summary() {
-    local service_url
+    load_bootstrap_platform_state
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
-
-    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+    if ! cloud_run_is_enabled; then
       return
     fi
 
-    service_url="$(optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"
-    service_url="$(trim_whitespace "$service_url")"
-
-    if [[ -n "$service_url" && "$service_url" != "null" ]]; then
-      echo "Cloud Run service URL: ${service_url}"
-    fi
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Run service URL" cloud_run_service_url
 
     echo "Cloud Run allows unauthenticated access: ${FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED}"
   }
@@ -305,7 +276,7 @@ read_tfvars_value() {
   print_feast_runtime_summary() {
     local feast_bigquery_table
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
     feast_bigquery_table="${FOEHNCAST_TF_PROJECT_ID}.${FOEHNCAST_TF_BIGQUERY_DATASET}.${FOEHNCAST_TF_BIGQUERY_TABLE}"
 
     echo "Hosted Feast runtime source: bigquery"
@@ -315,50 +286,30 @@ read_tfvars_value() {
   }
 
   print_online_compose_summary() {
-    local host_ip app_url airflow_url mlflow_url
+    load_bootstrap_platform_state
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
-
-    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" != "true" ]]; then
+    if ! online_compose_is_enabled; then
       return
     fi
 
-    host_ip="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_host_ip)"
-    host_ip="$(trim_whitespace "$host_ip")"
-    app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
-    app_url="$(trim_whitespace "$app_url")"
-    airflow_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_airflow_url)"
-    airflow_url="$(trim_whitespace "$airflow_url")"
-    mlflow_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_mlflow_url)"
-    mlflow_url="$(trim_whitespace "$mlflow_url")"
-
-    if [[ -n "$host_ip" && "$host_ip" != "null" ]]; then
-      echo "Online compose host IP: ${host_ip}"
-    fi
-    if [[ -n "$app_url" && "$app_url" != "null" ]]; then
-      echo "Online compose app URL: ${app_url}"
-    fi
-    if [[ -n "$airflow_url" && "$airflow_url" != "null" ]]; then
-      echo "Online compose Airflow URL: ${airflow_url}"
-    fi
-    if [[ -n "$mlflow_url" && "$mlflow_url" != "null" ]]; then
-      echo "Online compose MLflow URL: ${mlflow_url}"
-    fi
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose host IP" online_compose_host_ip
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url
   }
 
   verify_online_compose_runtime() {
     local app_url
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
 
-    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" != "true" ]]; then
+    if ! online_compose_is_enabled; then
       return
     fi
 
-    app_url="$(optional_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
-    app_url="$(trim_whitespace "$app_url")"
+    app_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
 
-    if [[ -z "$app_url" || "$app_url" == "null" ]]; then
+    if ! terraform_platform_value_present "$app_url"; then
       echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."
       return
     fi
@@ -367,27 +318,35 @@ read_tfvars_value() {
     exit 1
   }
 
+  require_curl_payload_patterns() {
+    local endpoint_url="$1"
+    shift
+    local endpoint_payload
+
+    endpoint_payload="$(curl "${curl_args[@]}" "$endpoint_url")"
+    require_payload_patterns "$endpoint_payload" "$@"
+  }
+
   verify_cloud_run_runtime() {
-    local service_url health_url health_payload spots_url spots_payload metrics_url metrics_payload identity_token
+    local service_url health_url spots_url metrics_url identity_token
     local -a curl_args
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
 
-    if [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" != "true" ]]; then
+    if ! cloud_run_is_enabled; then
       return
     fi
 
-    service_url="$(optional_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"
-    service_url="$(trim_whitespace "$service_url")"
+    service_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" cloud_run_service_url)"
 
-    if [[ -z "$service_url" || "$service_url" == "null" ]]; then
+    if ! terraform_platform_value_present "$service_url"; then
       echo "Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2
       exit 1
     fi
 
     health_url="${service_url%/}/health"
     spots_url="${service_url%/}/spots"
-  metrics_url="${service_url%/}/metrics"
+    metrics_url="${service_url%/}/metrics"
     curl_args=(--retry 90 --retry-all-errors --retry-delay 10 -fsS)
 
     if [[ "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED" != "true" ]]; then
@@ -397,48 +356,33 @@ read_tfvars_value() {
     fi
 
     echo "Waiting for Cloud Run health at ${health_url}..."
-    health_payload="$(curl "${curl_args[@]}" "$health_url")"
-    require_payload_pattern \
-      "$health_payload" \
-      '"status"[[:space:]]*:[[:space:]]*"healthy"' \
-      'Cloud Run health payload status'
-    require_payload_pattern \
-      "$health_payload" \
-      '"model_alias"[[:space:]]*:' \
-      'Cloud Run health payload model alias'
-    require_payload_pattern \
-      "$health_payload" \
-      '"model_version"[[:space:]]*:' \
-      'Cloud Run health payload model version'
+    require_curl_payload_patterns \
+      "$health_url" \
+      '"status"[[:space:]]*:[[:space:]]*"healthy"' 'Cloud Run health payload status' \
+      '"model_alias"[[:space:]]*:' 'Cloud Run health payload model alias' \
+      '"model_version"[[:space:]]*:' 'Cloud Run health payload model version'
 
     echo "Checking Cloud Run spots endpoint at ${spots_url}..."
-    spots_payload="$(curl "${curl_args[@]}" "$spots_url")"
-    require_payload_pattern \
-      "$spots_payload" \
-      '"id"[[:space:]]*:' \
-      'Cloud Run spots payload'
+    require_curl_payload_patterns \
+      "$spots_url" \
+      '"id"[[:space:]]*:' 'Cloud Run spots payload'
 
     echo "Checking Cloud Run metrics at ${metrics_url}..."
-    metrics_payload="$(curl "${curl_args[@]}" "$metrics_url")"
-    require_payload_pattern \
-      "$metrics_payload" \
-      'foehncast_online_compose_sync_status_file_present' \
-      'Cloud Run metrics payload'
+    require_curl_payload_patterns \
+      "$metrics_url" \
+      'foehncast_online_compose_sync_status_file_present' 'Cloud Run metrics payload'
   }
 
   print_bootstrap_only_summary() {
     local state_bucket state_prefix
 
-    FOEHNCAST_TERRAFORM_TFVARS_FILE="$TFVARS_FILE" load_terraform_platform_state "$TERRAFORM_DIR"
+    load_bootstrap_platform_state
     state_bucket="$(terraform_remote_state_bucket)"
     state_prefix="$(terraform_remote_state_prefix)"
 
     echo "Bootstrap-only remote state bucket: gs://${state_bucket}"
     echo "Bootstrap-only remote state prefix: ${state_prefix}"
-    if [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" && -n "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" ]]; then
-      echo "Online compose runtime service account: ${FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT}"
-    fi
-    echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
+    print_bootstrap_identity_summary
     echo "GitHub workload identity provider: ${FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER}"
     echo "Next step: run ./scripts/terraform-remote.sh apply to provision the broader platform through the remote backend."
   }
@@ -496,6 +440,25 @@ read_tfvars_value() {
           ;;
       esac
     done
+  }
+
+  prompt_tfvars_value() {
+    local key="$1"
+    local prompt_text="$2"
+    local fallback_value="$3"
+
+    prompt_with_default "$prompt_text" "$(tfvars_value_or_default "$key" "$fallback_value")"
+  }
+
+  tfvars_yes_no_default() {
+    local key="$1"
+
+    if [[ "$(read_tfvars_value_from_file "$TFVARS_FILE" "$key")" == "true" ]]; then
+      printf 'y\n'
+      return
+    fi
+
+    printf 'n\n'
   }
 
   ensure_project_exists() {
@@ -638,8 +601,8 @@ read_tfvars_value() {
     prepare_file_from_template "${ROOT_DIR}/terraform/terraform.tfvars.example" "$TFVARS_FILE"
     load_env_file "$ENV_FILE"
 
-    current_project="${GCP_PROJECT_ID:-$(read_tfvars_value project_id)}"
-    current_region="${GCP_LOCATION:-$(read_tfvars_value region)}"
+    current_project="${GCP_PROJECT_ID:-$(read_tfvars_value_from_file "$TFVARS_FILE" project_id)}"
+    current_region="${GCP_LOCATION:-$(read_tfvars_value_from_file "$TFVARS_FILE" region)}"
 
     if [[ -z "$current_region" ]]; then
       current_region="europe-west6"
@@ -650,53 +613,19 @@ read_tfvars_value() {
     ensure_billing_linked "$current_project"
 
     current_region="$(prompt_with_default "GCP region" "$current_region")"
-    artifact_bucket="${GCP_BUCKET_NAME:-$(read_tfvars_value artifact_bucket_name)}"
+    artifact_bucket="${GCP_BUCKET_NAME:-$(read_tfvars_value_from_file "$TFVARS_FILE" artifact_bucket_name)}"
     if [[ -z "$artifact_bucket" || "$artifact_bucket" == "foehncast-data" || "$artifact_bucket" == "foehncast-artifacts-your-gcp-project" ]]; then
-      artifact_bucket="foehncast-artifacts-${current_project}"
+      artifact_bucket="$(foehncast_default_artifact_bucket_name "$current_project")"
     fi
     artifact_bucket="$(prompt_with_default "Artifact bucket name" "$artifact_bucket")"
 
-    artifact_repo="$(read_tfvars_value artifact_registry_repository_id)"
-    if [[ -z "$artifact_repo" ]]; then
-      artifact_repo="foehncast-docker"
-    fi
-    artifact_repo="$(prompt_with_default "Artifact Registry repository id" "$artifact_repo")"
-
-    dataset_id="$(read_tfvars_value bigquery_dataset_id)"
-    if [[ -z "$dataset_id" ]]; then
-      dataset_id="foehncast"
-    fi
-    dataset_id="$(prompt_with_default "BigQuery dataset id" "$dataset_id")"
-
-    table_id="$(read_tfvars_value bigquery_feature_table_id)"
-    if [[ -z "$table_id" ]]; then
-      table_id="forecast_features"
-    fi
-    table_id="$(prompt_with_default "BigQuery feature table id" "$table_id")"
-
-    bigquery_location="$(read_tfvars_value bigquery_location)"
-    if [[ -z "$bigquery_location" ]]; then
-      bigquery_location="$current_region"
-    fi
-    bigquery_location="$(prompt_with_default "BigQuery location" "$bigquery_location")"
-
-    feast_online_store_location="$(read_tfvars_value feast_online_store_location)"
-    if [[ -z "$feast_online_store_location" ]]; then
-      feast_online_store_location="$current_region"
-    fi
-
-    feast_online_store_database_name="$(read_tfvars_value feast_online_store_database_name)"
-    if [[ -z "$feast_online_store_database_name" ]]; then
-      feast_online_store_database_name="feast-online"
-    fi
-
-    provision_cloud_run="$(read_tfvars_value provision_cloud_run_service)"
-    if [[ "$provision_cloud_run" != "true" ]]; then
-      provision_cloud_run=false
-      cloud_run_default=n
-    else
-      cloud_run_default=y
-    fi
+    artifact_repo="$(prompt_tfvars_value artifact_registry_repository_id "Artifact Registry repository id" "$(foehncast_default_artifact_repository)")"
+    dataset_id="$(prompt_tfvars_value bigquery_dataset_id "BigQuery dataset id" "$(foehncast_default_bigquery_dataset)")"
+    table_id="$(prompt_tfvars_value bigquery_feature_table_id "BigQuery feature table id" "$(foehncast_default_bigquery_table)")"
+    bigquery_location="$(prompt_tfvars_value bigquery_location "BigQuery location" "$current_region")"
+    feast_online_store_location="$(tfvars_value_or_default feast_online_store_location "$current_region")"
+    feast_online_store_database_name="$(tfvars_value_or_default feast_online_store_database_name "$(foehncast_default_feast_online_store_database)")"
+    cloud_run_default="$(tfvars_yes_no_default provision_cloud_run_service)"
 
     if prompt_yes_no "Provision Cloud Run as the primary hosted API now? This needs a reachable MLflow endpoint." "$cloud_run_default"; then
       provision_cloud_run=true
@@ -704,13 +633,9 @@ read_tfvars_value() {
       provision_cloud_run=false
     fi
 
-    cloud_run_service="$(read_tfvars_value cloud_run_service_name)"
-    if [[ -z "$cloud_run_service" ]]; then
-      cloud_run_service="foehncast-serve"
-    fi
-    cloud_run_service="$(prompt_with_default "Cloud Run service name" "$cloud_run_service")"
+    cloud_run_service="$(prompt_tfvars_value cloud_run_service_name "Cloud Run service name" "$(foehncast_default_cloud_run_service_name)")"
 
-    mlflow_tracking_uri="$(read_tfvars_value mlflow_tracking_uri)"
+    mlflow_tracking_uri="$(read_tfvars_value_from_file "$TFVARS_FILE" mlflow_tracking_uri)"
     if [[ "$mlflow_tracking_uri" == "https://mlflow.example.com" ]]; then
       mlflow_tracking_uri=""
     fi
@@ -725,13 +650,7 @@ read_tfvars_value() {
       mlflow_tracking_uri=""
     fi
 
-    provision_online_compose_host="$(read_tfvars_value provision_online_compose_host)"
-    if [[ "$provision_online_compose_host" != "true" ]]; then
-      provision_online_compose_host=false
-      provision_online_compose_host_default=n
-    else
-      provision_online_compose_host_default=y
-    fi
+    provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"
 
     if prompt_yes_no "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM." "$provision_online_compose_host_default"; then
       provision_online_compose_host=true
@@ -739,25 +658,10 @@ read_tfvars_value() {
       provision_online_compose_host=false
     fi
 
-    online_compose_host_name="$(read_tfvars_value online_compose_host_name)"
-    if [[ -z "$online_compose_host_name" ]]; then
-      online_compose_host_name="foehncast-online"
-    fi
-
-    online_compose_host_zone="$(read_tfvars_value online_compose_host_zone)"
-    if [[ -z "$online_compose_host_zone" ]]; then
-      online_compose_host_zone="$(foehncast_default_online_compose_host_zone "$current_region")"
-    fi
-
-    online_compose_machine_type="$(read_tfvars_value online_compose_machine_type)"
-    if [[ -z "$online_compose_machine_type" ]]; then
-      online_compose_machine_type="e2-standard-4"
-    fi
-
-    online_compose_disk_size_gb="$(read_tfvars_value online_compose_disk_size_gb)"
-    if [[ -z "$online_compose_disk_size_gb" ]]; then
-      online_compose_disk_size_gb="40"
-    fi
+    online_compose_host_name="$(tfvars_value_or_default online_compose_host_name "$(foehncast_default_online_compose_host_name)")"
+    online_compose_host_zone="$(tfvars_value_or_default online_compose_host_zone "$(foehncast_default_online_compose_host_zone "$current_region")")"
+    online_compose_machine_type="$(tfvars_value_or_default online_compose_machine_type "e2-standard-4")"
+    online_compose_disk_size_gb="$(tfvars_value_or_default online_compose_disk_size_gb "40")"
 
     if [[ "$provision_online_compose_host" == "true" ]]; then
       online_compose_host_name="$(prompt_with_default "Online compose host name" "$online_compose_host_name")"
@@ -828,18 +732,18 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --env-file)
       shift
-      ENV_FILE="${1:-}"
+      ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"
       ;;
     --tfvars-file)
       shift
-      TFVARS_FILE="${1:-}"
+      TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"
       ;;
     --configure-github-actions)
       CONFIGURE_GITHUB=true
       ;;
     --repo)
       shift
-      TARGET_REPO="${1:-}"
+      TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"
       ;;
     --plan-only)
       PLAN_ONLY=true
@@ -891,16 +795,8 @@ else
   require_file "$TFVARS_FILE" "Terraform variables file not found: $TFVARS_FILE. Re-run without --non-interactive to generate it interactively."
 fi
 
-load_env_file "$ENV_FILE"
-
-require_gcp_project_and_location
 prepare_bootstrap_terraform_dir
-
-echo "Authenticating with Google Cloud via browser if needed..."
-"${ROOT_DIR}/scripts/gcp-auth.sh" "$ENV_FILE"
-
-echo "Checking access to GCP project ${GCP_PROJECT_ID}..."
-gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
+verify_gcp_project_access "$ENV_FILE" "${ROOT_DIR}/scripts/gcp-auth.sh"
 
 echo "Initializing Terraform..."
 terraform_init_args=(

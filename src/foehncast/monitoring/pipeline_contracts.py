@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from foehncast.feature_pipeline.validate import validation_snapshot
+from foehncast.monitoring._common import safe_float
 from foehncast.pipeline_stage_tracking import (
     FEATURE_PIPELINE_STAGES,
     TRAINING_PIPELINE_STAGES,
@@ -104,17 +106,6 @@ TRAINING_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
         "requested_stage",
     ),
 }
-
-
-def _safe_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    numeric = float(value)
-    if pd.isna(numeric):
-        return None
-    return numeric
-
-
 def _stage_states(
     *,
     stage_names: tuple[str, ...],
@@ -220,7 +211,7 @@ def _max_numeric_abs_delta(
     left = feature_df[numeric_columns].reset_index(drop=True)
     right = stored_df[numeric_columns].reset_index(drop=True)
     delta = (left - right).abs().max().max()
-    return _safe_float(delta)
+    return safe_float(delta)
 
 
 def build_feature_pipeline_spot_summary(
@@ -246,9 +237,10 @@ def build_feature_pipeline_spot_summary(
     ) and ("wind_gusts_10m" not in forecast_df.columns or wind_gusts_10m_unit == "km/h")
     new_columns = sorted(set(feature_frame.columns) - set(forecast_df.columns))
 
-    missing_columns = list(getattr(validation, "missing_columns", []) or [])
-    null_fractions = dict(getattr(validation, "null_fractions", {}) or {})
-    range_violations = getattr(validation, "range_violations", None)
+    validation_details = validation_snapshot(validation)
+    missing_columns = validation_details["missing_columns"]
+    null_fractions = validation_details["null_fractions"]
+    range_violations = validation_details["range_violations"]
 
     missing_after_roundtrip = sorted(
         set(feature_frame.columns) - set(stored_frame.columns)
@@ -283,7 +275,7 @@ def build_feature_pipeline_spot_summary(
             "new_columns": new_columns,
         },
         "validation": {
-            "is_valid": bool(getattr(validation, "is_valid", False)),
+            "is_valid": validation_details["is_valid"],
             "missing_column_count": int(len(missing_columns)),
             "missing_columns": missing_columns,
             "max_null_fraction": _max_null_fraction(null_fractions),
@@ -421,7 +413,7 @@ def build_training_pipeline_run_summary(
         "run_metrics": {
             str(name): float(value)
             for name, value in dict(run_metrics or {}).items()
-            if _safe_float(value) is not None
+            if safe_float(value) is not None
         },
     }
 

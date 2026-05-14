@@ -5,11 +5,7 @@ from __future__ import annotations
 import pytest
 
 from foehncast.training_pipeline import promote
-
-
-@pytest.fixture(autouse=True)
-def _clear_tracking_uri(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+from tests.mlflow_fixtures import clear_tracking_uri as _clear_tracking_uri
 
 
 @pytest.fixture()
@@ -93,3 +89,11 @@ def test_promote_model_alias_promotes_resolved_alias_version(
 
     assert version == "19"
     assert logged["promotion"] == (None, "19", "Production")
+
+
+def test_promote_helpers_require_non_empty_alias_and_version() -> None:
+    with pytest.raises(ValueError, match="Model alias must be non-empty"):
+        promote.resolve_model_version_by_alias("   ")
+
+    with pytest.raises(ValueError, match="Model version must be non-empty"):
+        promote.promote_model_version("   ")

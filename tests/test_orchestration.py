@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from foehncast import orchestration
+from tests.mlflow_fixtures import clear_tracking_uri_env
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +22,89 @@ def _feature_pipeline_state_root(
         orchestration,
         "_feature_pipeline_state_root",
         lambda: tmp_path / "feature-pipeline-state",
+    )
+
+
+class _LoggedRun:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self.logged = logged
+
+    def __enter__(self) -> _LoggedRun:
+        self.logged["entered"] = True
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb) -> None:
+        return None
+
+
+class _FeatureJobMlflow:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self._logged = logged
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        self._logged["tracking_uri"] = tracking_uri
+
+    def set_experiment(self, experiment_name: str) -> None:
+        self._logged["experiment_name"] = experiment_name
+
+    def start_run(self, run_name: str) -> _LoggedRun:
+        self._logged["run_name"] = run_name
+        return _LoggedRun(self._logged)
+
+    def log_params(self, params: dict[str, object]) -> None:
+        self._logged["params"] = params
+
+    def log_metric(self, name: str, value: float) -> None:
+        self._logged.setdefault("metrics", {})[name] = value
+
+
+class _QueriedRunClient:
+    def __init__(
+        self,
+        run: SimpleNamespace,
+        logged: dict[str, object] | None = None,
+    ) -> None:
+        self._run = run
+        self._logged = logged
+
+    def get_run(self, run_id: str) -> SimpleNamespace:
+        if self._logged is not None:
+            self._logged["queried_run_id"] = run_id
+        return self._run
+
+
+class _QueriedRunMlflow:
+    def __init__(
+        self,
+        run: SimpleNamespace,
+        logged: dict[str, object] | None = None,
+    ) -> None:
+        self._client = _QueriedRunClient(run, logged)
+        self._logged = logged
+
+    def MlflowClient(self) -> _QueriedRunClient:
+        return self._client
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        if self._logged is not None:
+            self._logged["tracking_uri"] = tracking_uri
+
+    def start_run(self, run_id: str) -> _LoggedRun:
+        if self._logged is None:
+            raise AssertionError("start_run logging requires a logged dictionary")
+        self._logged["run_id"] = run_id
+        return _LoggedRun(self._logged)
+
+
+def _capture_emitted_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    attribute_name: str,
+    emitted: dict[str, object],
+) -> None:
+    monkeypatch.setattr(
+        orchestration,
+        attribute_name,
+        lambda summary: emitted.update({"summary": summary}),
     )
 
 
@@ -91,10 +175,10 @@ def test_run_feature_pipeline_fetches_validated_features(
         orchestration, "detect_data_drift", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(orchestration, "push_drift_metrics", lambda report: None)
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_feature_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     stored_spots = orchestration.run_feature_pipeline()
@@ -250,10 +334,10 @@ def test_run_feature_pipeline_raises_on_validation_failure(
             range_violations=pd.DataFrame(),
         ),
     )
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_feature_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
@@ -312,10 +396,10 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
             ),
         ),
     )
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_feature_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
@@ -348,10 +432,10 @@ def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(
             ValueError("Unexpected unit for wind_speed_10m: expected km/h, got 'kn'")
         ),
     )
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_feature_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     with pytest.raises(ValueError, match="Unexpected unit for wind_speed_10m"):
@@ -371,7 +455,7 @@ def test_run_feature_pipeline_job_without_mlflow_env_delegates(
 ) -> None:
     captured: dict[str, object] = {}
 
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    clear_tracking_uri_env(monkeypatch)
 
     def fake_run_feature_pipeline(dataset: str = "train") -> list[str]:
         captured["dataset"] = dataset
@@ -394,33 +478,8 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeRun:
-        def __enter__(self) -> FakeRun:
-            logged["entered"] = True
-            return self
-
-        def __exit__(self, exc_type, exc, exc_tb) -> None:
-            return None
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def set_experiment(self, experiment_name: str) -> None:
-            logged["experiment_name"] = experiment_name
-
-        def start_run(self, run_name: str) -> FakeRun:
-            logged["run_name"] = run_name
-            return FakeRun()
-
-        def log_params(self, params: dict[str, object]) -> None:
-            logged["params"] = params
-
-        def log_metric(self, name: str, value: float) -> None:
-            logged.setdefault("metrics", {})[name] = value
-
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
-    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(orchestration, "mlflow", _FeatureJobMlflow(logged))
     monkeypatch.setattr(
         orchestration,
         "get_mlflow_config",
@@ -456,33 +515,8 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeRun:
-        def __enter__(self) -> FakeRun:
-            logged["entered"] = True
-            return self
-
-        def __exit__(self, exc_type, exc, exc_tb) -> None:
-            return None
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def set_experiment(self, experiment_name: str) -> None:
-            logged["experiment_name"] = experiment_name
-
-        def start_run(self, run_name: str) -> FakeRun:
-            logged["run_name"] = run_name
-            return FakeRun()
-
-        def log_params(self, params: dict[str, object]) -> None:
-            logged["params"] = params
-
-        def log_metric(self, name: str, value: float) -> None:
-            logged.setdefault("metrics", {})[name] = value
-
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
-    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(orchestration, "mlflow", _FeatureJobMlflow(logged))
     monkeypatch.setattr(
         orchestration,
         "get_mlflow_config",
@@ -609,33 +643,11 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     logged: dict[str, object] = {}
     emitted: dict[str, object] = {}
 
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    clear_tracking_uri_env(monkeypatch)
 
-    class FakeRun:
-        def __enter__(self) -> FakeRun:
-            logged["entered"] = True
-            return self
+    run = SimpleNamespace(data=SimpleNamespace(metrics={"mae": 0.5}))
 
-        def __exit__(self, exc_type, exc, exc_tb) -> None:
-            return None
-
-    class FakeClient:
-        def get_run(self, run_id: str) -> SimpleNamespace:
-            logged["queried_run_id"] = run_id
-            return SimpleNamespace(data=SimpleNamespace(metrics={"mae": 0.5}))
-
-    class FakeMlflow:
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def start_run(self, run_id: str) -> FakeRun:
-            logged["run_id"] = run_id
-            return FakeRun()
-
-    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
+    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
     monkeypatch.setattr(
         orchestration,
         "get_mlflow_tracking_uri",
@@ -646,10 +658,10 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
         "generate_evaluation_report",
         lambda metrics, output_path: str(tmp_path / "evaluation.md"),
     )
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_training_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     report_path = orchestration.evaluate_training_run("run-123")
@@ -682,10 +694,10 @@ def test_register_training_run_registers_and_promotes(
             {"promotion": (model_name, version, stage)}
         ),
     )
-    monkeypatch.setattr(
-        orchestration,
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_training_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     version = orchestration.register_training_run("run-456")
@@ -701,35 +713,29 @@ def test_run_training_pipeline_step_emits_training_summary(
 ) -> None:
     emitted: dict[str, object] = {}
 
-    class FakeClient:
-        def get_run(self, run_id: str) -> SimpleNamespace:
-            return SimpleNamespace(
-                data=SimpleNamespace(
-                    metrics={
-                        "mae": 0.5,
-                        "training_input_row_count": 240.0,
-                        "training_feature_count": 18.0,
-                        "training_train_row_count": 180.0,
-                        "training_test_row_count": 60.0,
-                    },
-                    params={"model_name": "foehncast"},
-                )
-            )
-
-    class FakeMlflow:
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
+    run = SimpleNamespace(
+        data=SimpleNamespace(
+            metrics={
+                "mae": 0.5,
+                "training_input_row_count": 240.0,
+                "training_feature_count": 18.0,
+                "training_train_row_count": 180.0,
+                "training_test_row_count": 60.0,
+            },
+            params={"model_name": "foehncast"},
+        )
+    )
 
     monkeypatch.setattr(
         orchestration,
         "run_training_pipeline",
         lambda dataset="train": "run-123",
     )
-    monkeypatch.setattr(orchestration, "mlflow", FakeMlflow())
-    monkeypatch.setattr(
-        orchestration,
+    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run))
+    _capture_emitted_summary(
+        monkeypatch,
         "emit_training_pipeline_run_summary",
-        lambda summary: emitted.update({"summary": summary}),
+        emitted,
     )
 
     run_id = orchestration.run_training_pipeline_step(

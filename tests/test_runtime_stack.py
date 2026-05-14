@@ -2,20 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import yaml
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _read_text(relative_path: str) -> str:
-    return (REPO_ROOT / relative_path).read_text()
-
-
-def _read_yaml(relative_path: str) -> dict:
-    return yaml.safe_load(_read_text(relative_path))
+from tests.repo_helpers import (
+    REPO_ROOT,
+    read_repo_text as _read_text,
+    read_repo_yaml as _read_yaml,
+)
 
 
 def test_env_example_uses_airflow3_simple_auth_contract() -> None:
@@ -79,16 +70,22 @@ def test_airflow_compose_uses_airflow3_runtime_contract() -> None:
 
 def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
+    helper = _read_text("scripts/airflow-api-common.sh")
     services = bootstrap.split("BOOTSTRAP_SERVICES=(", 1)[1].split(")", 1)[0]
 
     assert "http://127.0.0.1:8080/api/v2/monitor/health" in bootstrap
+    assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in bootstrap
+    assert "python3 -m foehncast.airflow_api" in helper
+    assert "run_airflow_api_helper" in bootstrap
     assert "Waiting for Airflow API server health" in bootstrap
     assert "verify_airflow_api_health" in bootstrap
+    assert "airflow_api_verify_health" in bootstrap
     assert "wait_for_service_health airflow-postgres 90 2" in bootstrap
     assert "wait_for_service_health airflow-triggerer 90 2" in bootstrap
     assert 'rm -f "$ROOT_DIR/airflow/airflow.db"' in bootstrap
     assert 'rm -rf "$ROOT_DIR/airflow/logs"' in bootstrap
     assert "wait_for_airflow_dag_run_state" in bootstrap
+    assert "airflow_api_wait_for_dag_run_state" in bootstrap
     assert "asset_triggered" in bootstrap
     assert (
         "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
@@ -100,6 +97,33 @@ def test_local_bootstrap_uses_runtime_service_subset_and_api_health() -> None:
     assert "airflow-postgres" in services
     assert "airflow-dag-processor" in services
     assert "development_env" not in services
+
+
+def test_local_bootstrap_uses_shared_env_file_helpers() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+    helper = _read_text("scripts/env-file-common.sh")
+
+    assert 'source "${ROOT_DIR}/scripts/env-file-common.sh"' in bootstrap
+    assert "env_file_value()" in helper
+    assert "resolved_env_value()" in helper
+    assert "export_resolved_env_value()" in helper
+    assert "ensure_env_default()" in helper
+    assert "export_local_feast_datastore_env()" in helper
+    assert "env_file_value()" not in bootstrap
+    assert 'export_local_feast_datastore_env "$ENV_FILE"' in bootstrap
+    assert "ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin" in bootstrap
+    assert 'FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"' in bootstrap
+
+
+def test_local_bootstrap_uses_shared_payload_check_helpers() -> None:
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+    helper = _read_text("scripts/payload-check-common.sh")
+
+    assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in bootstrap
+    assert "payload_check_require_pattern()" in helper
+    assert "payload_check_require_patterns()" in helper
+    assert "require_payload_patterns()" in bootstrap
+    assert 'require_payload_patterns \\' in bootstrap
 
 
 def test_local_bootstrap_handles_missing_docker_desktop_helper() -> None:

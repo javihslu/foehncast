@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ import pandas as pd
 import requests
 
 from foehncast.config import get_api_config, get_spots
+from foehncast.env import env_value
 from foehncast.http_client import ca_bundle
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def _get(url: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ingest_fixture_dir() -> Path | None:
-    fixture_dir = os.getenv(_INGEST_FIXTURE_DIR_ENV, "").strip()
+    fixture_dir = env_value(_INGEST_FIXTURE_DIR_ENV)
     if not fixture_dir:
         return None
 

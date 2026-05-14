@@ -13,6 +13,7 @@ from prometheus_client import CONTENT_TYPE_LATEST
 
 from foehncast.inference_pipeline import predict, serve
 from foehncast.inference_pipeline.rank import RankedSpot
+from tests.mlflow_fixtures import clear_tracking_uri_env
 
 
 @pytest.fixture()
@@ -58,27 +59,34 @@ def forecast_df() -> pd.DataFrame:
     )
 
 
-def test_get_serving_model_version_reads_alias(
+class _AliasLookupClient:
+    def __init__(self, logged: dict[str, object], version: str) -> None:
+        self._logged = logged
+        self._version = version
+
+    def get_model_version_by_alias(self, model_name: str, alias: str) -> object:
+        self._logged["lookup"] = (model_name, alias)
+        return SimpleNamespace(version=self._version)
+
+
+class _AliasLookupMlflow:
+    def __init__(self, logged: dict[str, object], version: str) -> None:
+        self._logged = logged
+        self._version = version
+
+    def set_tracking_uri(self, tracking_uri: str) -> None:
+        self._logged["tracking_uri"] = tracking_uri
+
+    def MlflowClient(self) -> _AliasLookupClient:
+        return _AliasLookupClient(self._logged, self._version)
+
+
+def _patch_serving_model_version_lookup(
     monkeypatch: pytest.MonkeyPatch,
+    logged: dict[str, object],
+    version: str,
 ) -> None:
-    logged: dict[str, object] = {}
-
-    monkeypatch.delenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", raising=False)
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-
-    class FakeClient:
-        def get_model_version_by_alias(self, model_name: str, alias: str) -> object:
-            logged["lookup"] = (model_name, alias)
-            return SimpleNamespace(version="5")
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-    monkeypatch.setattr(predict, "mlflow", FakeMlflow())
+    monkeypatch.setattr(predict, "mlflow", _AliasLookupMlflow(logged, version))
     monkeypatch.setattr(
         predict,
         "get_mlflow_config",
@@ -94,6 +102,16 @@ def test_get_serving_model_version_reads_alias(
         "get_mlflow_tracking_uri",
         lambda: "http://localhost:5001",
     )
+
+
+def test_get_serving_model_version_reads_alias(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logged: dict[str, object] = {}
+
+    monkeypatch.delenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", raising=False)
+    clear_tracking_uri_env(monkeypatch)
+    _patch_serving_model_version_lookup(monkeypatch, logged, "5")
 
     model_version = predict.get_serving_model_version()
 
@@ -108,36 +126,8 @@ def test_get_serving_model_version_prefers_env_alias_override(
     logged: dict[str, object] = {}
 
     monkeypatch.setenv("FOEHNCAST_MLFLOW_SERVING_ALIAS", "candidate")
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-
-    class FakeClient:
-        def get_model_version_by_alias(self, model_name: str, alias: str) -> object:
-            logged["lookup"] = (model_name, alias)
-            return SimpleNamespace(version="11")
-
-    class FakeMlflow:
-        def set_tracking_uri(self, tracking_uri: str) -> None:
-            logged["tracking_uri"] = tracking_uri
-
-        def MlflowClient(self) -> FakeClient:
-            return FakeClient()
-
-    monkeypatch.setattr(predict, "mlflow", FakeMlflow())
-    monkeypatch.setattr(
-        predict,
-        "get_mlflow_config",
-        lambda: {
-            "tracking_uri": "http://localhost:5001",
-            "model_name": "foehncast-quality",
-            "candidate_alias": "candidate",
-            "champion_alias": "champion",
-        },
-    )
-    monkeypatch.setattr(
-        predict,
-        "get_mlflow_tracking_uri",
-        lambda: "http://localhost:5001",
-    )
+    clear_tracking_uri_env(monkeypatch)
+    _patch_serving_model_version_lookup(monkeypatch, logged, "11")
 
     model_version = predict.get_serving_model_version()
 

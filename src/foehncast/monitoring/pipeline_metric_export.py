@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from foehncast.monitoring._common import registered_model_version_metric_value
+
 SummaryWriter = Callable[[dict[str, Any]], Path]
 
 
@@ -72,8 +74,9 @@ def training_pipeline_summary_metrics(summary: dict[str, Any]) -> dict[str, floa
     )
 
     version = summary.get("registered_model_version")
-    if version is not None and str(version).strip().isdigit():
-        metrics["training_registered_model_version"] = float(version)
+    numeric_version = registered_model_version_metric_value(version)
+    if numeric_version is not None:
+        metrics["training_registered_model_version"] = numeric_version
 
     for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
         metrics[f"training_{stage}_duration_seconds"] = float(duration)

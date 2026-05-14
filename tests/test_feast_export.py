@@ -139,7 +139,7 @@ def test_prepare_feature_store_applies_repo_and_materializes(
         ),
     )
     monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
-    monkeypatch.setattr(feast, "feast_repo_path", lambda: repo_path)
+    monkeypatch.setattr(feast, "require_existing_feast_repo_path", lambda: repo_path)
 
     def _record_command(args: list[str], *, cwd: Path, env: dict[str, str]) -> None:
         commands.append(
@@ -200,7 +200,7 @@ def test_prepare_feature_store_can_skip_materialize(
         ),
     )
     monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
-    monkeypatch.setattr(feast, "feast_repo_path", lambda: repo_path)
+    monkeypatch.setattr(feast, "require_existing_feast_repo_path", lambda: repo_path)
     monkeypatch.setattr(
         feast,
         "_run_feast_cli",
@@ -212,6 +212,22 @@ def test_prepare_feature_store_can_skip_materialize(
     assert commands == [["apply"]]
     assert result["materialized"] is False
     assert result["materialize_timestamp"] is None
+
+
+def test_prepare_feature_store_requires_existing_repo_before_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _missing_repo() -> Path:
+        raise RuntimeError("Configured Feast repo not found at /tmp/missing-feature-repo")
+
+    def _unexpected_export(*args: object, **kwargs: object) -> Path:
+        raise AssertionError("offline export should not start before repo validation")
+
+    monkeypatch.setattr(feast, "require_existing_feast_repo_path", _missing_repo)
+    monkeypatch.setattr(feast, "export_offline_store", _unexpected_export)
+
+    with pytest.raises(RuntimeError, match="Configured Feast repo not found"):
+        feast.prepare_feature_store(dataset="train")
 
 
 def test_run_feast_cli_prefers_configured_sibling_console_script(
@@ -241,7 +257,7 @@ def test_run_feast_cli_prefers_configured_sibling_console_script(
     feast._run_feast_cli(
         ["apply"],
         cwd=repo_path,
-        env=feast._feast_runtime_env(config_path),
+        env=feast.feast_runtime_env(config_path),
     )
 
     assert command == [str(feast_executable), "apply"]
@@ -273,7 +289,7 @@ def test_run_feast_cli_falls_back_to_module_invocation_without_console_script(
     feast._run_feast_cli(
         ["apply"],
         cwd=repo_path,
-        env=feast._feast_runtime_env(config_path),
+        env=feast.feast_runtime_env(config_path),
     )
 
     assert command == [

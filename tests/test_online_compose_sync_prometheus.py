@@ -8,13 +8,7 @@ from pathlib import Path
 import pytest
 
 from foehncast.monitoring import online_compose_sync_prometheus
-
-
-def _metric_value(payload: str, metric_prefix: str) -> float:
-    for line in payload.splitlines():
-        if line.startswith(metric_prefix):
-            return float(line.split()[-1])
-    raise AssertionError(f"Metric not found: {metric_prefix}")
+from tests.prometheus_assertions import metric_value
 
 
 def test_render_online_compose_sync_prometheus_metrics_reports_last_success() -> None:
@@ -31,7 +25,7 @@ def test_render_online_compose_sync_prometheus_metrics_reports_last_success() ->
     )
 
     assert "foehncast_online_compose_sync_status_file_present 1.0" in payload
-    assert _metric_value(
+    assert metric_value(
         payload,
         'foehncast_online_compose_sync_last_success_timestamp_seconds{compose_deploy_mode="pull",git_ref="main"}',
     ) == pytest.approx(1778525400.0)

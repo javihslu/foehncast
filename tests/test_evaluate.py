@@ -18,6 +18,20 @@ class ConstantModel:
         return self._predictions
 
 
+class _ActiveRunMlflow:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self._logged = logged
+
+    def active_run(self) -> object:
+        return object()
+
+    def log_metrics(self, metrics: dict[str, float]) -> None:
+        self._logged["metrics"] = metrics
+
+    def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
+        self._logged["artifact"] = (path, artifact_path)
+
+
 def test_evaluate_model_returns_regression_and_class_metrics() -> None:
     features_test = pd.DataFrame({"wind_speed_10m": [10.0, 20.0, 30.0]})
     target_test = pd.Series([1, 3, 4])
@@ -40,14 +54,7 @@ def test_evaluate_model_returns_regression_and_class_metrics() -> None:
 def test_evaluate_model_logs_metrics_when_mlflow_run_is_active(monkeypatch) -> None:
     logged: dict[str, dict[str, float]] = {}
 
-    class FakeMlflow:
-        def active_run(self) -> object:
-            return object()
-
-        def log_metrics(self, metrics: dict[str, float]) -> None:
-            logged["metrics"] = metrics
-
-    monkeypatch.setattr(evaluate, "mlflow", FakeMlflow())
+    monkeypatch.setattr(evaluate, "mlflow", _ActiveRunMlflow(logged))
 
     features_test = pd.DataFrame({"wind_speed_10m": [10.0, 20.0]})
     target_test = pd.Series([1, 2])
@@ -76,14 +83,7 @@ def test_generate_evaluation_report_logs_artifact_when_mlflow_run_is_active(
 ) -> None:
     logged: dict[str, tuple[str, str | None]] = {}
 
-    class FakeMlflow:
-        def active_run(self) -> object:
-            return object()
-
-        def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
-            logged["artifact"] = (path, artifact_path)
-
-    monkeypatch.setattr(evaluate, "mlflow", FakeMlflow())
+    monkeypatch.setattr(evaluate, "mlflow", _ActiveRunMlflow(logged))
 
     report_path = evaluate.generate_evaluation_report(
         {"mae": 0.5}, str(tmp_path / "evaluation.md")

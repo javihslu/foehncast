@@ -4,10 +4,29 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
 from foehncast.monitoring import pipeline_metrics
+
+
+class _ArtifactLoggingMlflow:
+    def __init__(self, logged: dict[str, object]) -> None:
+        self._logged = logged
+
+    def active_run(self) -> object:
+        return object()
+
+    def log_metrics(self, metrics: dict[str, float]) -> None:
+        self._logged["metrics"] = metrics
+
+    def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
+        self._logged["artifact"] = (path, artifact_path)
+
+
+def _read_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text())
 
 
 def test_build_feature_pipeline_spot_summary_captures_ingest_unit_contract() -> None:
@@ -36,24 +55,50 @@ def test_build_feature_pipeline_spot_summary_captures_ingest_unit_contract() -> 
     assert summary["ingest"]["hourly_units"]["wind_speed_10m"] == "km/h"
 
 
+def test_build_feature_pipeline_spot_summary_normalizes_validation_fields() -> None:
+    forecast_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [24.0],
+            "wind_gusts_10m": [30.0],
+        },
+        index=pd.to_datetime(["2026-05-06T00:00:00Z"]),
+    )
+
+    summary = pipeline_metrics.build_feature_pipeline_spot_summary(
+        spot_id="silvaplana",
+        forecast_df=forecast_df,
+        validation=SimpleNamespace(
+            is_valid=False,
+            missing_columns=("shore_alignment",),
+            null_fractions={"gust_factor": 0.25},
+            range_violations=pd.DataFrame([
+                {
+                    "column": "wind_speed_10m",
+                    "index": "row-1",
+                    "value": 300.0,
+                    "min": 0.0,
+                    "max": 200.0,
+                }
+            ]),
+        ),
+        status="validated",
+    )
+
+    assert summary["validation"]["is_valid"] is False
+    assert summary["validation"]["missing_column_count"] == 1
+    assert summary["validation"]["missing_columns"] == ["shore_alignment"]
+    assert summary["validation"]["max_null_fraction"] == 0.25
+    assert summary["validation"]["range_violation_count"] == 1
+
+
 def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeMlflow:
-        def active_run(self) -> object:
-            return object()
-
-        def log_metrics(self, metrics: dict[str, float]) -> None:
-            logged["metrics"] = metrics
-
-        def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
-            logged["artifact"] = (path, artifact_path)
-
     monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
-    monkeypatch.setattr(pipeline_metrics, "mlflow", FakeMlflow())
+    monkeypatch.setattr(pipeline_metrics, "mlflow", _ArtifactLoggingMlflow(logged))
 
     summary = {
         "dataset": "notebook_eval",
@@ -88,7 +133,7 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
     summary_path = pipeline_metrics.emit_feature_pipeline_run_summary(summary)
 
     assert summary_path == tmp_path / "feature-pipeline-notebook_eval-latest.json"
-    assert json.loads(summary_path.read_text())["dataset"] == "notebook_eval"
+    assert _read_json(summary_path)["dataset"] == "notebook_eval"
     assert logged["artifact"] == (
         str(summary_path),
         "monitoring/feature_pipeline",
@@ -104,7 +149,7 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
         dataset="notebook_eval"
     )
     assert len(history_paths) == 1
-    assert json.loads(history_paths[0].read_text())["dataset"] == "notebook_eval"
+    assert _read_json(history_paths[0])["dataset"] == "notebook_eval"
 
 
 def test_feature_pipeline_stage_overview_flattens_summary() -> None:
@@ -150,18 +195,8 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
 ) -> None:
     logged: dict[str, object] = {}
 
-    class FakeMlflow:
-        def active_run(self) -> object:
-            return object()
-
-        def log_metrics(self, metrics: dict[str, float]) -> None:
-            logged["metrics"] = metrics
-
-        def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
-            logged["artifact"] = (path, artifact_path)
-
     monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
-    monkeypatch.setattr(pipeline_metrics, "mlflow", FakeMlflow())
+    monkeypatch.setattr(pipeline_metrics, "mlflow", _ArtifactLoggingMlflow(logged))
 
     summary = {
         "dataset": "train",
@@ -181,7 +216,7 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
     summary_path = pipeline_metrics.emit_training_pipeline_run_summary(summary)
 
     assert summary_path == tmp_path / "training-pipeline-train-latest.json"
-    assert json.loads(summary_path.read_text())["training_run_id"] == "run-123"
+    assert _read_json(summary_path)["training_run_id"] == "run-123"
     assert logged["artifact"] == (
         str(summary_path),
         "monitoring/training_pipeline",
@@ -194,7 +229,7 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
         dataset="train"
     )
     assert len(history_paths) == 1
-    assert json.loads(history_paths[0].read_text())["training_run_id"] == "run-123"
+    assert _read_json(history_paths[0])["training_run_id"] == "run-123"
 
 
 def test_feature_pipeline_summary_history_preserves_latest_contract(
@@ -227,7 +262,7 @@ def test_feature_pipeline_summary_history_preserves_latest_contract(
     pipeline_metrics.write_feature_pipeline_run_summary(second_summary)
 
     assert latest_path == tmp_path / "feature-pipeline-train-latest.json"
-    assert json.loads(latest_path.read_text())["stored_spot_count"] == 2
+    assert _read_json(latest_path)["stored_spot_count"] == 2
     assert [
         path.name
         for path in pipeline_metrics.feature_pipeline_summary_history_paths("train")
@@ -274,7 +309,7 @@ def test_training_pipeline_summary_history_preserves_latest_contract(
     pipeline_metrics.write_training_pipeline_run_summary(second_summary)
 
     assert latest_path == tmp_path / "training-pipeline-train-latest.json"
-    assert json.loads(latest_path.read_text())["training_run_id"] == "run-101"
+    assert _read_json(latest_path)["training_run_id"] == "run-101"
     assert [
         path.name
         for path in pipeline_metrics.training_pipeline_summary_history_paths("train")

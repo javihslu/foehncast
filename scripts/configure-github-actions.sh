@@ -18,15 +18,6 @@ usage() {
   echo "Usage: $0 [--dry-run] [--clear] [--repo owner/repo] [--terraform-dir path]" >&2
 }
 
-resolve_repo() {
-  if [[ -n "$TARGET_REPO" ]]; then
-    printf '%s\n' "$TARGET_REPO"
-    return
-  fi
-
-  require_repo_from_remote "$ROOT_DIR"
-}
-
 set_variable() {
   local repository_path="$1"
   local variable_name="$2"
@@ -64,19 +55,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       shift
-      TARGET_REPO="${1:-}"
-      if [[ -z "$TARGET_REPO" ]]; then
-        usage
-        exit 1
-      fi
+      TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"
       ;;
     --terraform-dir)
       shift
-      TERRAFORM_DIR="${1:-}"
-      if [[ -z "$TERRAFORM_DIR" ]]; then
-        usage
-        exit 1
-      fi
+      TERRAFORM_DIR="$(require_cli_option_value "--terraform-dir" "${1:-}" usage)"
       ;;
     *)
       usage
@@ -87,15 +70,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$DRY_RUN" != "true" ]]; then
-  require_command gh
-
-  if ! gh auth status >/dev/null 2>&1; then
-    echo "gh is installed but not authenticated. Run 'gh auth login' first." >&2
-    exit 1
-  fi
+  require_github_auth
 fi
 
-REPOSITORY_PATH="$(resolve_repo)"
+REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"
 
 echo "GitHub repository variables carry the structural delivery contract only; keep runtime secrets in the runtime environment or a managed secret path."
 

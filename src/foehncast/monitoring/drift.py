@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import os
 import re
 import socket
 from typing import Any
@@ -12,6 +11,8 @@ from typing import Any
 import pandas as pd
 
 from foehncast.config import get_monitoring_config
+from foehncast.env import env_value
+from foehncast.monitoring._common import safe_float
 
 _DEFAULT_DRIFT_THRESHOLD = 0.15
 _DEFAULT_EVALUATION_WINDOW_DAYS = 30
@@ -125,9 +126,9 @@ def detect_prediction_drift(predictions_log: pd.DataFrame) -> DriftReport:
 
 def push_drift_metrics(report: DriftReport) -> None:
     """Push drift metrics to StatsD for Prometheus scraping."""
-    host = os.getenv("FOEHNCAST_STATSD_HOST", _DEFAULT_STATSD_HOST).strip()
-    port = int(os.getenv("FOEHNCAST_STATSD_PORT", str(_DEFAULT_STATSD_PORT)).strip())
-    prefix = os.getenv("FOEHNCAST_STATSD_PREFIX", _DEFAULT_STATSD_PREFIX).strip()
+    host = env_value("FOEHNCAST_STATSD_HOST") or _DEFAULT_STATSD_HOST
+    port = int(env_value("FOEHNCAST_STATSD_PORT") or str(_DEFAULT_STATSD_PORT))
+    prefix = env_value("FOEHNCAST_STATSD_PREFIX") or _DEFAULT_STATSD_PREFIX
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
         for line in _statsd_lines(report, prefix or _DEFAULT_STATSD_PREFIX):
@@ -335,8 +336,8 @@ def _parse_column_metrics(
         if not metric_type.endswith(":ValueDrift"):
             continue
 
-        score = _safe_float(value)
-        threshold = _safe_float(config.get("threshold"))
+        score = safe_float(value)
+        threshold = safe_float(config.get("threshold"))
         method = str(config.get("method", "")).strip() or None
         column_metrics.append(
             DriftMetric(
@@ -355,17 +356,6 @@ def _parse_column_metrics(
         share_of_drifted_columns = float(drifted_column_count / divisor)
 
     return tuple(column_metrics), drifted_column_count, share_of_drifted_columns
-
-
-def _safe_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    numeric = float(value)
-    if pd.isna(numeric):
-        return None
-    return numeric
-
-
 def _is_drift_detected(
     score: float | None,
     threshold: float | None,

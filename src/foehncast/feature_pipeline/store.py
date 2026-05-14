@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import importlib
-import os
 import types
 from typing import Any
 
 import pandas as pd
 
 from foehncast.config import get_storage_config
+from foehncast.env import env_value
 
 _BQ_TIME_COLUMN = "forecast_time"
 _BQ_DATASET_COLUMN = "dataset_name"
@@ -102,16 +102,14 @@ def _s3_bucket(storage_config: dict[str, Any]) -> str:
 
 
 def _objectstore_credentials() -> tuple[str | None, str | None]:
-    access_key = os.getenv("OBJECTSTORE_ACCESS_KEY") or os.getenv("FSSPEC_S3_KEY")
-    secret_key = os.getenv("OBJECTSTORE_SECRET_KEY") or os.getenv("FSSPEC_S3_SECRET")
+    access_key = env_value("OBJECTSTORE_ACCESS_KEY", "FSSPEC_S3_KEY")
+    secret_key = env_value("OBJECTSTORE_SECRET_KEY", "FSSPEC_S3_SECRET")
     return access_key, secret_key
 
 
 def _s3_endpoint(storage_config: dict[str, Any]) -> str | None:
-    return (
-        os.getenv("OBJECTSTORE_ENDPOINT")
-        or os.getenv("FSSPEC_S3_ENDPOINT_URL")
-        or storage_config.get("s3_endpoint")
+    return env_value("OBJECTSTORE_ENDPOINT", "FSSPEC_S3_ENDPOINT_URL") or storage_config.get(
+        "s3_endpoint"
     )
 
 

@@ -26,6 +26,8 @@ source "${ROOT_DIR}/scripts/cli-common.sh"
 source "${ROOT_DIR}/scripts/github-common.sh"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/gcp-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/terraform-platform-state.sh"
 
 usage() {
   echo "Usage: $0 <plan|apply|destroy|cleanup> [--repo owner/repo] [--ref branch] [--env-file path] [--project-id id] [--region region] [--input key=value] [--cleanup-clear-github-actions] [--cleanup-delete-state-bucket] [--wait] [--watch-interval seconds] [--dry-run]" >&2
@@ -107,31 +109,27 @@ normalize_bool() {
   esac
 }
 
-repo_variable_value() {
-  local repository_path="$1"
-  local variable_name="$2"
-  local value
+resolved_repo_backed_value() {
+  local input_value="$1"
+  local repo_variable_name="$2"
+  local env_fallback_value="$3"
+  local value="$input_value"
 
-  value="$(gh variable list --repo "$repository_path" --json name,value --jq ".[] | select(.name == \"${variable_name}\").value" 2>/dev/null || true)"
-  if [[ "$value" == "null" ]]; then
-    value=""
+  if [[ -z "$value" ]]; then
+    value="$(repo_variable_value "$REPOSITORY_PATH" "$repo_variable_name")"
+  fi
+  if [[ -z "$value" ]]; then
+    value="$env_fallback_value"
   fi
 
   printf '%s\n' "$value"
 }
 
 remote_feast_bigquery_dataset() {
-  local value
-
-  value="${INPUT_BIGQUERY_DATASET_ID:-}"
-  if [[ -z "$value" ]]; then
-    value="$(repo_variable_value "$REPOSITORY_PATH" GCP_BIGQUERY_DATASET)"
-  fi
-  if [[ -z "$value" ]]; then
-    value="${GCP_BIGQUERY_DATASET:-${STORAGE_BIGQUERY_DATASET:-${FOEHNCAST_FEAST_BIGQUERY_DATASET:-foehncast}}}"
-  fi
-
-  printf '%s\n' "$value"
+  resolved_repo_backed_value \
+    "${INPUT_BIGQUERY_DATASET_ID:-}" \
+    GCP_BIGQUERY_DATASET \
+    "${GCP_BIGQUERY_DATASET:-${STORAGE_BIGQUERY_DATASET:-${FOEHNCAST_FEAST_BIGQUERY_DATASET:-$(foehncast_default_bigquery_dataset)}}}"
 }
 
 remote_feast_bigquery_table() {
@@ -146,30 +144,17 @@ remote_feast_bigquery_table() {
   fi
 
   dataset="$(remote_feast_bigquery_dataset)"
-  table_id="${INPUT_BIGQUERY_FEATURE_TABLE_ID:-}"
-  if [[ -z "$table_id" ]]; then
-    table_id="$(repo_variable_value "$REPOSITORY_PATH" GCP_BIGQUERY_TABLE)"
-  fi
-  if [[ -z "$table_id" ]]; then
-    table_id="${GCP_BIGQUERY_TABLE:-${STORAGE_BIGQUERY_TABLE:-forecast_features}}"
-  fi
+  table_id="$(resolved_repo_backed_value "${INPUT_BIGQUERY_FEATURE_TABLE_ID:-}" GCP_BIGQUERY_TABLE "${GCP_BIGQUERY_TABLE:-${STORAGE_BIGQUERY_TABLE:-$(foehncast_default_bigquery_table)}}")"
 
   project_id="${PROJECT_ID:-<project_id>}"
   printf '%s.%s.%s\n' "$project_id" "$dataset" "$table_id"
 }
 
 remote_feast_online_store_database() {
-  local value
-
-  value="${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-}"
-  if [[ -z "$value" ]]; then
-    value="$(repo_variable_value "$REPOSITORY_PATH" GCP_FEAST_ONLINE_STORE_DATABASE_NAME)"
-  fi
-  if [[ -z "$value" ]]; then
-    value="${GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-${FOEHNCAST_FEAST_DATASTORE_DATABASE:-feast-online}}"
-  fi
-
-  printf '%s\n' "$value"
+  resolved_repo_backed_value \
+    "${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-}" \
+    GCP_FEAST_ONLINE_STORE_DATABASE_NAME \
+    "${GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-${FOEHNCAST_FEAST_DATASTORE_DATABASE:-$(foehncast_default_feast_online_store_database)}}"
 }
 
 print_remote_feast_follow_up() {
@@ -247,51 +232,27 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       shift
-      TARGET_REPO="${1:-}"
-      if [[ -z "$TARGET_REPO" ]]; then
-        usage
-        exit 1
-      fi
+      TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"
       ;;
     --ref)
       shift
-      REF="${1:-}"
-      if [[ -z "$REF" ]]; then
-        usage
-        exit 1
-      fi
+      REF="$(require_cli_option_value "--ref" "${1:-}" usage)"
       ;;
     --env-file)
       shift
-      ENV_FILE="${1:-}"
-      if [[ -z "$ENV_FILE" ]]; then
-        usage
-        exit 1
-      fi
+      ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"
       ;;
     --project-id)
       shift
-      PROJECT_ID="${1:-}"
-      if [[ -z "$PROJECT_ID" ]]; then
-        usage
-        exit 1
-      fi
+      PROJECT_ID="$(require_cli_option_value "--project-id" "${1:-}" usage)"
       ;;
     --region)
       shift
-      REGION="${1:-}"
-      if [[ -z "$REGION" ]]; then
-        usage
-        exit 1
-      fi
+      REGION="$(require_cli_option_value "--region" "${1:-}" usage)"
       ;;
     --input)
       shift
-      if [[ -z "${1:-}" ]]; then
-        usage
-        exit 1
-      fi
-      record_input "$1"
+      record_input "$(require_cli_option_value "--input" "${1:-}" usage)"
       ;;
     --cleanup-clear-github-actions)
       CLEANUP_CLEAR_GITHUB_ACTIONS=true
@@ -307,7 +268,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --watch-interval)
       shift
-      WATCH_INTERVAL="${1:-}"
+      WATCH_INTERVAL="$(require_cli_option_value "--watch-interval" "${1:-}" usage)"
       if [[ -z "$WATCH_INTERVAL" || ! "$WATCH_INTERVAL" =~ ^[0-9]+$ || "$WATCH_INTERVAL" -lt 1 ]]; then
         echo "--watch-interval expects a positive integer number of seconds." >&2
         exit 1
@@ -336,33 +297,14 @@ if [[ "$COMMAND" != "cleanup" && ( "$CLEANUP_CLEAR_GITHUB_ACTIONS" == "true" || 
   exit 1
 fi
 
-require_command gh
-
-if ! gh auth status >/dev/null 2>&1; then
-  echo "gh is installed but not authenticated. Run 'gh auth login' first." >&2
-  exit 1
-fi
+require_github_auth
 
 load_env_file "$ENV_FILE"
 
-REPOSITORY_PATH="$TARGET_REPO"
-if [[ -z "$REPOSITORY_PATH" ]]; then
-  REPOSITORY_PATH="$(require_repo_from_remote "$ROOT_DIR")"
-fi
+REPOSITORY_PATH="$(resolve_target_repo "$ROOT_DIR" "$TARGET_REPO")"
 
-if [[ -z "$PROJECT_ID" ]]; then
-  PROJECT_ID="$(repo_variable_value "$REPOSITORY_PATH" GCP_PROJECT_ID)"
-fi
-if [[ -z "$PROJECT_ID" ]]; then
-  PROJECT_ID="${GCP_PROJECT_ID:-}"
-fi
-
-if [[ -z "$REGION" ]]; then
-  REGION="$(repo_variable_value "$REPOSITORY_PATH" GCP_LOCATION)"
-fi
-if [[ -z "$REGION" ]]; then
-  REGION="${GCP_LOCATION:-}"
-fi
+PROJECT_ID="$(resolved_repo_backed_value "$PROJECT_ID" GCP_PROJECT_ID "${GCP_PROJECT_ID:-}")"
+REGION="$(resolved_repo_backed_value "$REGION" GCP_LOCATION "${GCP_LOCATION:-}")"
 
 if [[ "$COMMAND" == "destroy" || "$COMMAND" == "cleanup" ]]; then
   if [[ -z "$PROJECT_ID" ]]; then

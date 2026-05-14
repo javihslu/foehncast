@@ -3,25 +3,12 @@
 from __future__ import annotations
 
 import configparser
-import json
-from pathlib import Path
 
-import yaml
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-def _read_text(relative_path: str) -> str:
-    return (REPO_ROOT / relative_path).read_text()
-
-
-def _read_yaml(relative_path: str) -> dict:
-    return yaml.safe_load(_read_text(relative_path))
-
-
-def _read_json(relative_path: str) -> dict:
-    return json.loads(_read_text(relative_path))
+from tests.repo_helpers import (
+    read_repo_json as _read_json,
+    read_repo_text as _read_text,
+    read_repo_yaml as _read_yaml,
+)
 
 
 def test_root_compose_includes_monitoring_module() -> None:

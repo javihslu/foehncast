@@ -12,6 +12,25 @@ DURABLE_METRIC_PREFIX = "foehncast_prediction_log_"
 """Common prefix for retained file-backed metrics that survive restarts."""
 
 
+def _set_latest_timestamp_metric(
+    metric: Gauge,
+    frame: pd.DataFrame,
+    *,
+    column: str,
+    labels: tuple[str],
+) -> None:
+    if column not in frame.columns:
+        return
+
+    timestamps = pd.to_datetime(
+        frame[column],
+        errors="coerce",
+        utc=True,
+    )
+    if timestamps.notna().any():
+        metric.labels(*labels).set(timestamps.max().timestamp())
+
+
 def build_prediction_log_prometheus_registry(
     predictions_log: pd.DataFrame | None = None,
 ) -> CollectorRegistry:
@@ -64,28 +83,18 @@ def build_prediction_log_prometheus_registry(
     for model_version, frame in grouped:
         labels = (str(model_version).strip() or "unknown",)
         row_count.labels(*labels).set(float(len(frame)))
-
-        if "prediction_timestamp" in frame.columns:
-            prediction_timestamps = pd.to_datetime(
-                frame["prediction_timestamp"],
-                errors="coerce",
-                utc=True,
-            )
-            if prediction_timestamps.notna().any():
-                latest_prediction_timestamp.labels(*labels).set(
-                    prediction_timestamps.max().timestamp()
-                )
-
-        if "forecast_time" in frame.columns:
-            forecast_timestamps = pd.to_datetime(
-                frame["forecast_time"],
-                errors="coerce",
-                utc=True,
-            )
-            if forecast_timestamps.notna().any():
-                latest_forecast_timestamp.labels(*labels).set(
-                    forecast_timestamps.max().timestamp()
-                )
+        _set_latest_timestamp_metric(
+            latest_prediction_timestamp,
+            frame,
+            column="prediction_timestamp",
+            labels=labels,
+        )
+        _set_latest_timestamp_metric(
+            latest_forecast_timestamp,
+            frame,
+            column="forecast_time",
+            labels=labels,
+        )
 
     return registry
 

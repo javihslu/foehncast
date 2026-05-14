@@ -12,6 +12,7 @@ from prometheus_client import (
     generate_latest,
 )
 
+from foehncast.monitoring._common import registered_model_version_metric_value
 from foehncast.monitoring.pipeline_metrics import (
     FEATURE_PIPELINE_STAGES,
     TRAINING_PIPELINE_STAGES,
@@ -396,8 +397,9 @@ def build_training_pipeline_prometheus_registry(
         )
 
         version = summary.get("registered_model_version")
-        if version is not None and str(version).strip().isdigit():
-            registered_model_version.labels(*labels).set(float(version))
+        numeric_version = registered_model_version_metric_value(version)
+        if numeric_version is not None:
+            registered_model_version.labels(*labels).set(numeric_version)
 
         for stage, duration in dict(summary.get("stage_durations_seconds", {})).items():
             stage_duration.labels(dataset, requested_stage, str(stage)).set(

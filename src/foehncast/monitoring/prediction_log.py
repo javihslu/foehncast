@@ -13,13 +13,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from foehncast.config import get_monitoring_config
+from foehncast.env import env_value
 from foehncast.monitoring.drift import (
     DriftReport,
     detect_prediction_drift,
@@ -55,7 +55,7 @@ def prediction_event_log_path(
     if path is not None:
         return path
 
-    raw_value = os.getenv("FOEHNCAST_PREDICTION_EVENT_LOG_PATH", "").strip()
+    raw_value = env_value("FOEHNCAST_PREDICTION_EVENT_LOG_PATH")
     if raw_value:
         return Path(raw_value).expanduser()
 
@@ -69,10 +69,10 @@ def _prediction_log_max_rows(configured: int | None = None) -> int:
     if configured is not None:
         return max(int(configured), 2)
 
-    raw_value = os.getenv(
-        "FOEHNCAST_PREDICTION_LOG_MAX_ROWS",
-        str(_DEFAULT_PREDICTION_LOG_MAX_ROWS),
-    ).strip()
+    raw_value = (
+        env_value("FOEHNCAST_PREDICTION_LOG_MAX_ROWS")
+        or str(_DEFAULT_PREDICTION_LOG_MAX_ROWS)
+    )
     try:
         parsed = int(raw_value)
     except ValueError:

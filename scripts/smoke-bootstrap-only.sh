@@ -67,13 +67,13 @@ validate_project_id() {
 }
 
 smoke_feast_bigquery_table() {
-  printf '%s.%s.%s\n' "$PROJECT_ID" "foehncast" "forecast_features"
+  printf '%s.%s.%s\n' "$PROJECT_ID" "$(foehncast_default_bigquery_dataset)" "$(foehncast_default_bigquery_table)"
 }
 
 print_smoke_feast_summary() {
   echo "- hosted Feast source: bigquery"
   echo "- hosted Feast offline source table: $(smoke_feast_bigquery_table)"
-  echo "- hosted Feast online store database: feast-online"
+  echo "- hosted Feast online store database: $(foehncast_default_feast_online_store_database)"
 }
 
 prepare_local_inputs() {
@@ -81,9 +81,9 @@ prepare_local_inputs() {
 
   repo_owner="${TARGET_REPO%%/*}"
   repo_name="${TARGET_REPO#*/}"
-  artifact_repo="foehncast-docker"
-  artifact_bucket="foehncast-artifacts-${PROJECT_ID}"
-  cloud_run_service="foehncast-serve"
+  artifact_repo="$(foehncast_default_artifact_repository)"
+  artifact_bucket="$(foehncast_default_artifact_bucket_name "$PROJECT_ID")"
+  cloud_run_service="$(foehncast_default_cloud_run_service_name)"
 
   if [[ -z "$ENV_FILE" ]]; then
     ensure_temp_workspace
@@ -104,10 +104,10 @@ prepare_local_inputs() {
     "$PROJECT_ID" \
     "$REGION" \
     "$artifact_bucket" \
-    "foehncast" \
+    "$(foehncast_default_bigquery_dataset)" \
     "$REGION" \
-    "forecast_features" \
-    "feast-online" \
+    "$(foehncast_default_bigquery_table)" \
+    "$(foehncast_default_feast_online_store_database)" \
     "$cloud_run_service"
 
   apply_foehncast_cloud_tfvars_values \
@@ -115,11 +115,11 @@ prepare_local_inputs() {
     "$REGION" \
     "$artifact_repo" \
     "$artifact_bucket" \
-    "foehncast" \
+    "$(foehncast_default_bigquery_dataset)" \
     "$REGION" \
-    "forecast_features" \
+    "$(foehncast_default_bigquery_table)" \
     "$REGION" \
-    "feast-online" \
+    "$(foehncast_default_feast_online_store_database)" \
     false \
     "$cloud_run_service" \
     "" \
@@ -188,27 +188,27 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)
       shift
-      TARGET_REPO="${1:-}"
+      TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"
       ;;
     --project-id)
       shift
-      PROJECT_ID="${1:-}"
+      PROJECT_ID="$(require_cli_option_value "--project-id" "${1:-}" usage)"
       ;;
     --region)
       shift
-      REGION="${1:-}"
+      REGION="$(require_cli_option_value "--region" "${1:-}" usage)"
       ;;
     --ref)
       shift
-      REF="${1:-}"
+      REF="$(require_cli_option_value "--ref" "${1:-}" usage)"
       ;;
     --env-file)
       shift
-      ENV_FILE="${1:-}"
+      ENV_FILE="$(require_cli_option_value "--env-file" "${1:-}" usage)"
       ;;
     --tfvars-file)
       shift
-      TFVARS_FILE="${1:-}"
+      TFVARS_FILE="$(require_cli_option_value "--tfvars-file" "${1:-}" usage)"
       ;;
     --keep-environment)
       KEEP_ENVIRONMENT=true

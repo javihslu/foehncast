@@ -29,21 +29,6 @@ def test_load_feature_store_raises_runtime_error_when_feast_dependency_is_missin
         match="Feast runtime dependency is missing from this environment",
     ):
         online_features._load_feature_store()
-
-
-def test_repo_path_uses_project_root_when_repo_override_is_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    repo_path = tmp_path / "feature_repo"
-    repo_path.mkdir()
-    (tmp_path / "config.yaml").write_text("storage: {}\n")
-    (repo_path / "feature_store.yaml").write_text("project: foehncast\n")
-    monkeypatch.delenv("FOEHNCAST_FEAST_REPO_PATH", raising=False)
-    monkeypatch.setenv("FOEHNCAST_PROJECT_ROOT", str(tmp_path))
-
-    assert online_features._repo_path() == repo_path
-
-
 def test_get_online_spot_features_uses_feature_service(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 
 from foehncast.feature_pipeline.validate import (
     ValidationResult,
     run_validation,
+    validation_snapshot,
     validate_completeness,
     validate_ranges,
     validate_schema,
@@ -83,6 +86,24 @@ def test_validate_completeness_fails_when_column_exceeds_null_threshold() -> Non
     df["temperature_2m"] = [None, 14.0]
 
     assert not validate_completeness(df, max_null_pct=0.4)
+
+
+def test_validation_snapshot_normalizes_safe_defaults() -> None:
+    range_violations = pd.DataFrame([{"column": "wind_speed_10m"}])
+
+    snapshot = validation_snapshot(
+        SimpleNamespace(
+            is_valid=True,
+            missing_columns=("shore_alignment",),
+            null_fractions=None,
+            range_violations=range_violations,
+        )
+    )
+
+    assert snapshot["is_valid"] is True
+    assert snapshot["missing_columns"] == ["shore_alignment"]
+    assert snapshot["null_fractions"] == {}
+    assert snapshot["range_violations"] is range_violations
 
 
 def test_run_validation_returns_valid_result_for_clean_dataset(monkeypatch) -> None:

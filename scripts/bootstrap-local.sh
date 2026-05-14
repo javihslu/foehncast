@@ -7,6 +7,7 @@ DEFAULT_ENV_FILE="${ROOT_DIR}/.env"
 EXAMPLE_ENV_FILE="${ROOT_DIR}/.env.example"
 FEATURE_DATE="${FEATURE_DATE:-2024-01-01}"
 TRAINING_DATE="${TRAINING_DATE:-2024-01-02}"
+AIRFLOW_API_BASE_URL="${AIRFLOW_API_BASE_URL:-http://127.0.0.1:8080/api/v2}"
 AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/api/v2/monitor/health}"
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
 APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"
@@ -16,6 +17,12 @@ GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
 CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/env-file-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/airflow-api-common.sh"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/payload-check-common.sh"
 
 usage() {
   echo "Usage: $0 [--ci-smoke] [env-file]" >&2
@@ -160,32 +167,6 @@ compose() {
   docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
 }
 
-env_file_value() {
-  local key="$1"
-  local line value
-
-  line="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 || true)"
-  if [[ -z "$line" ]]; then
-    return
-  fi
-
-  value="${line#*=}"
-  value="${value#\"}"
-  value="${value%\"}"
-  printf '%s\n' "$value"
-}
-
-resolved_env_value() {
-  local key="$1"
-
-  if [[ -n "${!key:-}" ]]; then
-    printf '%s\n' "${!key}"
-    return
-  fi
-
-  env_file_value "$key"
-}
-
 port_in_use() {
   local port="$1"
 
@@ -291,27 +272,15 @@ wait_for_service_health() {
   return 1
 }
 
+run_airflow_api_helper() {
+  airflow_api_helper_run "$@"
+}
+
 verify_airflow_api_health() {
-  local max_attempts="${1:-60}"
-  local sleep_seconds="${2:-2}"
-  local payload=""
-  local attempt
-
-  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "$AIRFLOW_HEALTH_URL" 2>/dev/null)"; then
-      if printf '%s' "$payload" | python3 -c $'import json, sys\npayload = json.load(sys.stdin)\nrequired = ("metadatabase", "scheduler", "dag_processor", "triggerer")\nfailed = []\nfor name in required:\n    status = (payload.get(name) or {}).get("status")\n    if status != "healthy":\n        failed.append(f"{name}={status!r}")\nif failed:\n    print(", ".join(failed), file=sys.stderr)\n    raise SystemExit(1)\n'; then
-        return 0
-      fi
-    fi
-
-    sleep "$sleep_seconds"
-  done
-
-  echo "Timed out waiting for Airflow health endpoint to report all required components healthy." >&2
-  if [[ -n "$payload" ]]; then
-    printf '%s\n' "$payload" >&2
-  fi
-  return 1
+  airflow_api_verify_health \
+    "$AIRFLOW_HEALTH_URL" \
+    "Timed out waiting for Airflow health endpoint to report all required components healthy." \
+    "$@"
 }
 
 wait_for_airflow_dag_run_state() {
@@ -320,32 +289,20 @@ wait_for_airflow_dag_run_state() {
   local expected_run_type="${3:-}"
   local max_attempts="${4:-120}"
   local sleep_seconds="${5:-2}"
-  local payload=""
-  local status
-  local attempt
+  local helper_args=()
 
-  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "http://127.0.0.1:8080/api/v2/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date" 2>/dev/null)"; then
-      if printf '%s' "$payload" | EXPECTED_STATE="$expected_state" EXPECTED_RUN_TYPE="$expected_run_type" python3 -c $'import json, os, sys\npayload = json.load(sys.stdin)\nexpected_state = os.environ["EXPECTED_STATE"]\nexpected_run_type = os.environ.get("EXPECTED_RUN_TYPE", "").strip()\nruns = payload.get("dag_runs") or []\nif expected_run_type:\n    runs = [run for run in runs if run.get("run_type") == expected_run_type]\nif not runs:\n    raise SystemExit(1)\nrun = runs[0]\nstate = (run.get("state") or "").lower()\nif state == expected_state.lower():\n    print(run.get("dag_run_id") or "")\n    raise SystemExit(0)\nif state in {"failed", "error"}:\n    print(json.dumps(run), file=sys.stderr)\n    raise SystemExit(2)\nraise SystemExit(1)\n'; then
-        return 0
-      else
-        status=$?
-        if [[ "$status" -eq 2 ]]; then
-          echo "Airflow DAG '$dag_id' reached a terminal failure state." >&2
-          printf '%s\n' "$payload" >&2
-          return 1
-        fi
-      fi
-    fi
-
-    sleep "$sleep_seconds"
-  done
-
-  echo "Timed out waiting for Airflow DAG '$dag_id' to reach state '$expected_state'." >&2
-  if [[ -n "$payload" ]]; then
-    printf '%s\n' "$payload" >&2
+  if [[ -n "$expected_run_type" ]]; then
+    helper_args+=(--expected-run-type "$expected_run_type")
   fi
-  return 1
+
+  airflow_api_wait_for_dag_run_state \
+    "$AIRFLOW_API_BASE_URL" \
+    "$dag_id" \
+    "$expected_state" \
+    "Timed out waiting for Airflow DAG '$dag_id' to reach state '$expected_state'." \
+    "$max_attempts" \
+    "$sleep_seconds" \
+    "${helper_args[@]}"
 }
 
 grafana_api_get() {
@@ -362,15 +319,11 @@ grafana_api_get() {
 }
 
 require_payload_pattern() {
-  local payload="$1"
-  local pattern="$2"
-  local description="$3"
+  payload_check_require_pattern "Grafana provisioning check failed" "$@"
+}
 
-  if ! printf '%s' "$payload" | grep -Eq "$pattern"; then
-    echo "Grafana provisioning check failed: expected ${description}." >&2
-    printf '%s\n' "$payload" >&2
-    return 1
-  fi
+require_payload_patterns() {
+  payload_check_require_patterns "Grafana provisioning check failed" "$@"
 }
 
 verify_grafana_provisioning() {
@@ -388,77 +341,51 @@ verify_grafana_provisioning() {
 
   echo "Checking Grafana dashboard provisioning..."
   dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-monitoring")"
-  require_payload_pattern \
+  require_payload_patterns \
     "$dashboard_payload" \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast-monitoring"' \
-    'dashboard uid foehncast-monitoring'
-  require_payload_pattern \
-    "$dashboard_payload" \
     '"title"[[:space:]]*:[[:space:]]*"FoehnCast Monitoring"' \
     'dashboard title FoehnCast Monitoring'
 
   echo "Checking Grafana alert-rule provisioning..."
   alert_rules_payload="$(grafana_api_get "/api/v1/provisioning/alert-rules")"
-  require_payload_pattern \
+  require_payload_patterns \
     "$alert_rules_payload" \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_schedule_fail"' \
-    'schedule failure alert rule'
-  require_payload_pattern \
-    "$alert_rules_payload" \
+    'schedule failure alert rule' \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_execution_fail"' \
-    'execution failure alert rule'
-  require_payload_pattern \
-    "$alert_rules_payload" \
+    'execution failure alert rule' \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_stale_success"' \
-    'stale success alert rule'
-  require_payload_pattern \
-    "$alert_rules_payload" \
+    'stale success alert rule' \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_feature_stage_failures"' \
-    'feature stage failure alert rule'
-  require_payload_pattern \
-    "$alert_rules_payload" \
+    'feature stage failure alert rule' \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_training_stage_failures"' \
-    'training stage failure alert rule'
-  require_payload_pattern \
-    "$alert_rules_payload" \
+    'training stage failure alert rule' \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_hosted_sync_stale"' \
     'hosted sync stale alert rule'
 
   echo "Checking Grafana contact point provisioning..."
   contact_points_payload="$(grafana_api_get "/api/v1/provisioning/contact-points?name=foehncast-email")"
-  require_payload_pattern \
+  require_payload_patterns \
     "$contact_points_payload" \
     '"uid"[[:space:]]*:[[:space:]]*"foehncast_email"' \
-    'foehncast email contact point uid'
-  require_payload_pattern \
-    "$contact_points_payload" \
     '"name"[[:space:]]*:[[:space:]]*"foehncast-email"' \
     'foehncast email contact point name'
 
   echo "Checking Grafana notification policy provisioning..."
   policies_payload="$(grafana_api_get "/api/v1/provisioning/policies")"
-  require_payload_pattern \
+  require_payload_patterns \
     "$policies_payload" \
     '"receiver"[[:space:]]*:[[:space:]]*"foehncast-email"' \
-    'notification policy receiver foehncast-email'
-  require_payload_pattern \
-    "$policies_payload" \
+    'notification policy receiver foehncast-email' \
     '"object_matchers"' \
-    'notification policy route matchers'
-  require_payload_pattern \
-    "$policies_payload" \
+    'notification policy route matchers' \
     '"inference-monitoring"' \
-    'notification policy inference-monitoring matcher'
-  require_payload_pattern \
-    "$policies_payload" \
+    'notification policy inference-monitoring matcher' \
     '"feature-pipeline"' \
-    'notification policy feature-pipeline matcher'
-  require_payload_pattern \
-    "$policies_payload" \
+    'notification policy feature-pipeline matcher' \
     '"training-pipeline"' \
-    'notification policy training-pipeline matcher'
-  require_payload_pattern \
-    "$policies_payload" \
+    'notification policy training-pipeline matcher' \
     '"hosted-operator"' \
     'notification policy hosted-operator matcher'
 }
@@ -468,12 +395,9 @@ verify_hosted_sync_metrics() {
 
   echo "Checking hosted sync metrics exposure..."
   metrics_payload="$(curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_METRICS_URL")"
-  require_payload_pattern \
+  require_payload_patterns \
     "$metrics_payload" \
     'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
-    'hosted sync status-file-present metric'
-  require_payload_pattern \
-    "$metrics_payload" \
     'foehncast_online_compose_sync_last_success_timestamp_seconds\{compose_deploy_mode="bootstrap",git_ref="local-bootstrap"\}[[:space:]]+[0-9.e+-]+' \
     'hosted sync last-success timestamp metric'
 }
@@ -514,15 +438,7 @@ export MLFLOW_ARTIFACT_DESTINATION="${MLFLOW_ARTIFACT_DESTINATION:-s3://${OBJECT
 export MLFLOW_S3_ENDPOINT_URL="${MLFLOW_S3_ENDPOINT_URL:-$OBJECTSTORE_ENDPOINT}"
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-$OBJECTSTORE_ACCESS_KEY}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-$OBJECTSTORE_SECRET_KEY}"
-export FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID="${FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID:-$(resolved_env_value FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID)}"
-export FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE="${FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE:-$(resolved_env_value FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE)}"
-export FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE="${FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE:-$(resolved_env_value FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE)}"
-export FEAST_DATASTORE_EMULATOR_BIND_HOST="${FEAST_DATASTORE_EMULATOR_BIND_HOST:-$(resolved_env_value FEAST_DATASTORE_EMULATOR_BIND_HOST)}"
-export FEAST_DATASTORE_EMULATOR_PORT="${FEAST_DATASTORE_EMULATOR_PORT:-$(resolved_env_value FEAST_DATASTORE_EMULATOR_PORT)}"
-
-export FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID="${FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID:-foehncast-local}"
-export FEAST_DATASTORE_EMULATOR_BIND_HOST="${FEAST_DATASTORE_EMULATOR_BIND_HOST:-127.0.0.1}"
-export FEAST_DATASTORE_EMULATOR_PORT="${FEAST_DATASTORE_EMULATOR_PORT:-8181}"
+export_local_feast_datastore_env "$ENV_FILE"
 
 resolved_feast_datastore_port="$(next_available_port "$FEAST_DATASTORE_EMULATOR_PORT")"
 if [[ "$resolved_feast_datastore_port" != "$FEAST_DATASTORE_EMULATOR_PORT" ]]; then
@@ -533,22 +449,22 @@ export FEAST_DATASTORE_EMULATOR_PORT="$resolved_feast_datastore_port"
 export DATASTORE_EMULATOR_HOST="${DATASTORE_EMULATOR_HOST:-${FEAST_DATASTORE_EMULATOR_BIND_HOST}:${FEAST_DATASTORE_EMULATOR_PORT}}"
 FEAST_DATASTORE_EMULATOR_RESET_URL="http://${DATASTORE_EMULATOR_HOST}/reset"
 
-FEAST_DATASET="${FEAST_DATASET:-$(env_file_value AIRFLOW_FEATURE_DATASET)}"
+FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"
 FEAST_DATASET="${FEAST_DATASET:-train}"
 
-export FOEHNCAST_GRAFANA_ADMIN_USER="${FOEHNCAST_GRAFANA_ADMIN_USER:-$(resolved_env_value FOEHNCAST_GRAFANA_ADMIN_USER)}"
-export FOEHNCAST_GRAFANA_ADMIN_PASSWORD="${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-$(resolved_env_value FOEHNCAST_GRAFANA_ADMIN_PASSWORD)}"
-export FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM="${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-$(resolved_env_value FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM)}"
-export FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED="${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-$(resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED)}"
-export FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE="${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-$(resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE)}"
-export GRAFANA_API_USER="${GRAFANA_API_USER:-$(resolved_env_value GRAFANA_API_USER)}"
-export GRAFANA_API_PASSWORD="${GRAFANA_API_PASSWORD:-$(resolved_env_value GRAFANA_API_PASSWORD)}"
+export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_USER "$ENV_FILE"
+export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_PASSWORD "$ENV_FILE"
+export_resolved_env_value FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM "$ENV_FILE"
+export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED "$ENV_FILE"
+export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE "$ENV_FILE"
+export_resolved_env_value GRAFANA_API_USER "$ENV_FILE"
+export_resolved_env_value GRAFANA_API_PASSWORD "$ENV_FILE"
 
-export FOEHNCAST_GRAFANA_ADMIN_USER="${FOEHNCAST_GRAFANA_ADMIN_USER:-admin}"
-export FOEHNCAST_GRAFANA_ADMIN_PASSWORD="${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-foehncast-local}"
-export FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM="${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-true}"
-export FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED="${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-true}"
-export FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE="${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-Admin}"
+ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin
+ensure_env_default FOEHNCAST_GRAFANA_ADMIN_PASSWORD foehncast-local
+ensure_env_default FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM true
+ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED true
+ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE Admin
 export GRAFANA_API_USER="${GRAFANA_API_USER:-${FOEHNCAST_GRAFANA_ADMIN_USER}}"
 export GRAFANA_API_PASSWORD="${GRAFANA_API_PASSWORD:-${FOEHNCAST_GRAFANA_ADMIN_PASSWORD}}"
 

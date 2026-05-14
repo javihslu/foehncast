@@ -31,6 +31,20 @@ require_gcp_project_and_location() {
   require_env_var GCP_LOCATION "Set GCP_LOCATION in .env or the environment."
 }
 
+verify_gcp_project_access() {
+  local env_file="$1"
+  local auth_script_path="$2"
+
+  load_env_file "$env_file"
+  require_gcp_project_and_location
+
+  echo "Authenticating with Google Cloud via browser if needed..."
+  "$auth_script_path" "$env_file"
+
+  echo "Checking access to GCP project ${GCP_PROJECT_ID}..."
+  gcloud projects describe "$GCP_PROJECT_ID" >/dev/null
+}
+
 ensure_gcloud_auth() {
   if ! gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q .; then
     echo "Opening browser-based gcloud login..."

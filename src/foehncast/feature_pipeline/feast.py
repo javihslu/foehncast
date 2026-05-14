@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import UTC, datetime
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,7 +13,13 @@ from typing import Any
 import pandas as pd
 
 from foehncast.config import get_spots
-from foehncast.feast_runtime import feast_repo_path, render_runtime_config
+from foehncast.env import env_value
+from foehncast.feast_runtime import (
+    feast_runtime_env,
+    remove_non_writable_existing_file,
+    render_runtime_config,
+    require_existing_feast_repo_path,
+)
 from foehncast.feature_pipeline.store import read_features
 from foehncast.paths import feast_offline_path
 
@@ -81,24 +86,15 @@ def export_offline_store(
     destination = Path(output_path) if output_path else feast_offline_path(dataset)
     destination.parent.mkdir(parents=True, exist_ok=True)
 
-    if destination.exists() and not os.access(destination, os.W_OK):
-        destination.unlink()
+    remove_non_writable_existing_file(destination)
 
     offline_frame = build_offline_store_frame(dataset=dataset)
     offline_frame.to_parquet(destination, index=False)
     return destination
 
 
-def _feast_runtime_env(config_path: Path) -> dict[str, str]:
-    env = os.environ.copy()
-    resolved_config_path = str(config_path)
-    env["FOEHNCAST_FEAST_CONFIG_PATH"] = resolved_config_path
-    env["FEAST_FS_YAML_FILE_PATH"] = resolved_config_path
-    return env
-
-
 def _feast_python_executable() -> str:
-    configured = os.getenv("FOEHNCAST_FEAST_PYTHON", "").strip()
+    configured = env_value("FOEHNCAST_FEAST_PYTHON")
     return configured or sys.executable
 
 
@@ -143,10 +139,10 @@ def prepare_feature_store(
     materialize_timestamp: str | None = None,
 ) -> dict[str, Any]:
     """Export curated rows and sync the local Feast repo for Airflow-managed runs."""
+    repo_path = require_existing_feast_repo_path()
     destination = export_offline_store(dataset=dataset, output_path=output_path)
     config_path = render_runtime_config()
-    repo_path = feast_repo_path()
-    env = _feast_runtime_env(config_path)
+    env = feast_runtime_env(config_path)
 
     _run_feast_cli(["apply"], cwd=repo_path, env=env)
 
