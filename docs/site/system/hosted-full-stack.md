@@ -1,6 +1,6 @@
 # Hosted Full-Stack
 
-FoehnCast keeps the hosted full-stack target as the retained operator control plane. This target keeps Airflow, MLflow, the FastAPI app, and the operator monitoring stack online from one Compute Engine host while Cloud Run carries the only promoted public API path.
+FoehnCast keeps the hosted full-stack target as the private operator lane. It runs Airflow, MLflow, the FastAPI app, and the monitoring stack on one Compute Engine host while Cloud Run carries the public API lane.
 
 This page records the current hosted full-stack contract that is described by the cloud bootstrap, Terraform reference, and cloud-operator tests. It focuses on the active shared runtime target, not on future migrations.
 
@@ -31,12 +31,14 @@ flowchart LR
     MET --> MON
 </div>
 
-The important boundary is that the hosted full-stack target stays a runtime target, not a contributor environment:
+## Role In The Shared Environment
 
-- the same repository owns the running Airflow, MLflow, app, and monitoring surfaces
-- the host depends on shared GCP storage and identity surfaces instead of local emulators
-- GitHub Actions remote Terraform plus the host sync timer update the target after the one-time maintainer bootstrap
-- Cloud Run is the only promoted public API path, while this VM keeps the retained operator stack available
+| Lane | Current target | Main role |
+|------|----------------|-----------|
+| Shared API lane | Cloud Run hosted inference target | serve the public FastAPI routes |
+| Operator lane | hosted full-stack target on one VM | keep Airflow, MLflow, monitoring, and private app checks online |
+
+The important boundary is that the hosted full-stack target stays a runtime target, not a contributor environment. It depends on shared GCP storage and identity surfaces instead of local emulators, updates through the maintainer bootstrap plus remote Terraform and host sync path, and stays on the private operator side while Cloud Run owns public serving.
 
 ## Surface Responsibilities
 
@@ -49,18 +51,6 @@ The important boundary is that the hosted full-stack target stays a runtime targ
 | GitHub OIDC delivery | run remote Terraform and image-driven deploy updates | a substitute for the runtime host |
 
 This keeps the current shared environment honest. The runtime lives on the host, while Terraform and GitHub delivery keep the dependencies and rollout path reviewable.
-
-## Shared Environment Today
-
-The shared environment keeps this target online today:
-
-- Cloud Run is the primary hosted API surface for shared serving traffic
-- one Compute Engine host still runs Airflow, MLflow, the FastAPI app, Prometheus, the StatsD exporter, and Grafana together
-- maintainers bootstrap the shared GCP baseline and remote Terraform control plane once from Google Cloud Shell
-- GitHub Actions remote Terraform applies advance the shared environment after bootstrap
-- the VM-hosted app remains part of the operator runtime on the host, but it is not treated as a second public API path
-
-That keeps the deployment story concrete: Cloud Run is the one promoted shared hosted API URL, while the compose host remains the retained full-stack operator path.
 
 ## Runtime Contract
 
@@ -80,26 +70,13 @@ The identity split around this target is deliberate:
 - Cloud Run uses its own narrower runtime identity for the inference-only service.
 - the online compose host uses a separate runtime identity because it still bundles Airflow, training, MLflow, Feast preparation, and the app on one VM.
 
-That online compose runtime identity is the current transition contract, not the preferred steady-state shape for every managed runtime. It remains broader than the Cloud Run identity only because the host still owns more responsibilities today.
+That online compose runtime identity is the current transition contract. It remains broader than the Cloud Run identity only because the host still owns more responsibilities today.
 
 ## Bootstrap And Day-2 Delivery
 
-The hosted full-stack target is not part of the default contributor path. Its lifecycle is split into two layers:
+The hosted full-stack target is not part of the default contributor path. Its lifecycle still splits into one-time maintainer bootstrap and GitHub-managed day-2 delivery after bootstrap. For this target, the hosted-specific contract is simple: Terraform provisions the VM and shared cloud data surfaces, the host sync refreshes the repository and runtime `.env`, and the VM app must stay private while Cloud Run remains the public API lane.
 
-- a one-time maintainer bootstrap through `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions` from Google Cloud Shell
-- GitHub-managed day-2 delivery for remote Terraform runs and image-based updates after the shared environment is bootstrapped
-
-The current bootstrap and host contract is:
-
-- Terraform can provision the Compute Engine host, static IP, network, and cloud data surfaces
-- day-2 remote applies read synced GitHub repository variables instead of treating `terraform.tfvars` as the ongoing source of truth
-- the host clones the repository, writes a runtime `.env`, and pulls the published images
-- if those images are not available, the sync fails fast so the image contract stays simple and reviewable
-- bootstrap prints the primary hosted API target first, then the Cloud Run, host, app, Airflow, and MLflow URLs when those outputs exist
-- bootstrap verifies the promoted Cloud Run path through `/health`, `/spots`, and `/metrics` when it is enabled
-- bootstrap fails if the retained VM app is publicly exposed, because Cloud Run is the only supported public API path in this configuration
-
-That split keeps one-time environment setup separate from normal day-2 delivery.
+See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed bootstrap, remote Terraform, and runtime-release handoff steps.
 
 ## Host Sync Contract
 
@@ -124,8 +101,8 @@ The current contract is:
 - `online_compose_public_ports = []` keeps the operator host private by default
 - Airflow and MLflow stay private unless you intentionally expose their ports
 - operator monitoring surfaces remain on the operator side unless you deliberately publish them yourself
-- `bootstrap-gcp` treats Cloud Run as the primary hosted API path and verifies its `/health`, `/spots`, and `/metrics` routes when enabled
-- `bootstrap-gcp` expects the retained VM app to stay private and fails if port `8000` is still exposed publicly
+- `bootstrap-gcp` treats Cloud Run as the primary hosted API path and verifies `/health`, `/spots`, and `/metrics`
+- `bootstrap-gcp` expects the retained VM app to stay private and fails if port `8000` is exposed publicly
 
 This preserves the same public-surface rule used across the rest of the docs: the app is the product and service surface, while operator tools remain private by default.
 
@@ -141,24 +118,11 @@ These surfaces stay local or CI-only:
 - the local MinIO objectstore
 - the local Datastore emulator
 
-The hosted target also does not remain a second public API path. Cloud Run carries the promoted serving role, while the VM keeps the broader operator stack online.
-
 ## Rollback And Retirement Gate
 
-The remaining gate is not whether the VM should keep a public serving fallback. That fallback is already retired. Cloud Run is the only supported public API path in the shared environment.
+Cloud Run remains the only supported public API path in the shared environment, so rollback uses the reviewed runtime trigger contract rather than reopening the VM app publicly. The narrower retirement question stays separate: the VM remains online while Airflow, MLflow, sync status, or operator monitoring still need the retained control plane.
 
-The current rollback contract is:
-
-- `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
-- `.github/workflows/trigger-runtime-release.yml` is the reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
-- `airflow/reports/runtime-release-latest.json` records the latest acknowledged serving rollout request on the runtime side
-- bootstrap and Terraform verification fail if the VM app becomes public again instead of treating that as rollback
-
-The remaining retirement decision is narrower:
-
-- the VM stays online while Airflow, MLflow, sync status, and operator monitoring still need the retained control plane
-- the VM can lose its remaining private app role only after the operator stack no longer needs host-local app checks and the orchestration surface of record is explicit
-- when that gate is met, retiring or slimming the VM should be handled as operator-plane cleanup, not as public-serving rollback
+See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed rollback and retry runbooks.
 
 ## Why This Target Works
 

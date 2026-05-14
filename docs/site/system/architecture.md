@@ -1,13 +1,11 @@
 # Architecture
 
-FoehnCast keeps the same Feature-Training-Inference split in every runtime mode. What changes is the hosting around that split, not the application boundaries.
+FoehnCast keeps the same Feature-Training-Inference split in every runtime mode. What changes is the surrounding lane: the local evaluator, the public API lane on Cloud Run, or the private operator lane on the retained host.
 
 !!! note "How to read this page"
 
     The validated baseline is the local Compose stack.
-    The shared cloud path now promotes the hosted inference target as the primary API surface.
-    The hosted full-stack target remains online as the retained operator control plane.
-    Hosted Airflow remains the orchestration surface of record for the next delivery horizon.
+    The shared cloud path splits into a public API lane on Cloud Run and a private operator lane on the retained host.
     The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
     The rider-facing demo and prediction outputs are not the same thing as operator dashboards, and Grafana is not treated as the main product UI.
 
@@ -58,6 +56,14 @@ See [Interfaces and Surfaces](interfaces-and-surfaces.md) for the dedicated publ
 
 Grafana stays on the operator side of that boundary. The rider-facing experience is the ranking and demo surface served from the application layer. Public docs should therefore show rendered evidence or screenshots rather than live iframe embeds of private operational dashboards.
 
+## Runtime Lanes
+
+| Lane | Current target | Main role | Exposure |
+|------|----------------|-----------|----------|
+| Local evaluator lane | local Compose stack | validate the full system on one machine | local-only |
+| Shared API lane | hosted inference target on Cloud Run | serve the shared FastAPI product and service routes | public |
+| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private app checks online | private by default |
+
 ## Stable Pipeline Boundaries
 
 | Layer | Responsibility | Current runtime surface |
@@ -77,31 +83,24 @@ The orchestration layer now models the main data products as Airflow assets inst
 flowchart LR
     CORE[Shared Feature-Training-Inference boundaries]
     CORE --> LOCAL[Local evaluator target]
-    CORE --> HOST[Hosted full-stack control plane]
-    CORE --> RUN[Hosted inference target today]
+    CORE --> HOST[Operator host lane]
+    CORE --> RUN[Cloud Run API lane]
 </div>
 
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
-| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane and orchestration surface of record |
-| Hosted inference target | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | primary hosted API surface |
+| Hosted full-stack target (operator lane) | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane and orchestration surface of record |
+| Hosted inference target (API lane) | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | primary hosted API surface |
 | GitHub automation | image publishing and Terraform workflows | runtime services | shared cloud day-2 delivery, not a runtime target |
 
-The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. The hosted full-stack target stays private by default. Airflow, MLflow, Prometheus, and Grafana stay private unless you open them on purpose for your own operator workflow.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. The hosted full-stack target stays private by default and keeps the operator stack online when Airflow, MLflow, and monitoring need to stay together.
 
-The shared cloud path now promotes Cloud Run as the primary hosted API. The hosted full-stack target remains available when the operator stack needs to stay online together.
+See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the active hosted topology and exposure contract.
 
 ## Orchestration Surface Of Record
 
-For the next delivery horizon, the runtime orchestration surface is the current hosted Airflow control plane on the retained operator host.
-
-- It matches the validated local DAG and asset model already used for feature and training flows.
-- It keeps runtime scheduling, retries, and backfills out of GitHub Actions.
-- It avoids a Composer migration before the delivery-versus-runtime boundary cleanup is complete.
-- It avoids a lighter trigger redesign that would replace Airflow-owned behavior instead of clarifying ownership.
-
-Composer and lighter managed trigger models stay valid future options, but they are deferred until the operator-plane reduction or course-evidence needs justify the change explicitly.
+Hosted Airflow on the private operator lane remains the runtime orchestration surface for this horizon. The detailed GitHub-versus-runtime boundary, runtime handoff, and recovery ownership stay in [Delivery and Operator Workflow](delivery-and-operator-workflow.md).
 
 ## Current Local Architecture
 
@@ -128,7 +127,7 @@ The Airflow control plane reflects those hand-offs directly. The feature pipelin
 
 <div class="mermaid">
 flowchart LR
-    subgraph Host[Hosted full-stack control plane]
+    subgraph Host[Operator host lane]
         HAF[Airflow]
         HML[MLflow]
         HAPI[FastAPI]
@@ -143,7 +142,7 @@ flowchart LR
 
 <div class="mermaid">
 flowchart LR
-    subgraph Run[Hosted inference target primary]
+    subgraph Run[Cloud Run API lane]
         RAPI[FastAPI]
     end
     BQ2[(BigQuery curated features)] --> RAPI
@@ -153,7 +152,7 @@ flowchart LR
     OSRM2[OSRM] --> RAPI
 </div>
 
-The hosted targets reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the retained hosted control plane. The second shows the promoted primary API path. The cloud path does not ship the local development container, local objectstore, notebooks, docs build tooling, or the Datastore emulator.
+The hosted lanes reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the private operator lane. The second shows the public API lane.
 
 ## Representative Validation
 

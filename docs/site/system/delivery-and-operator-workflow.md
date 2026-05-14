@@ -46,6 +46,15 @@ flowchart LR
 
 The split matters because the local path is the supported public onboarding path, while the cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
 
+## Current Lanes
+
+| Lane | Current target | Main job |
+|------|----------------|----------|
+| Local evaluator lane | `./scripts/bootstrap-local.sh` plus local Compose | run the default contributor path |
+| Delivery lane | GitHub Actions plus Terraform plus OIDC | publish reviewed artifacts and apply reviewed infrastructure changes |
+| Shared API lane | hosted inference target on Cloud Run | serve the shared public API |
+| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private recovery work online |
+
 ## Default Contributor Path
 
 The default contributor path stays local and small:
@@ -54,19 +63,7 @@ The default contributor path stays local and small:
 2. Install Docker.
 3. Run `./scripts/bootstrap-local.sh`.
 
-This path does not require local `gcloud`, Terraform, or GitHub Actions repository variables.
-
-The local bootstrap owns the full evaluator hand-off instead of stopping at container startup:
-
-- it creates `.env` from `.env.example` when needed
-- it resets Docker volumes, Airflow metadata, and disposable local runtime artifacts so each run starts clean
-- it starts the validated runtime subset without enabling the optional `development_env` container
-- it waits for Airflow component health checks and the Airflow API health payload
-- it verifies Grafana dashboard, alert-rule, contact-point, and policy provisioning before any pipeline run starts
-- it runs the `feature_pipeline` DAG for the selected date and waits for the asset-triggered `training_pipeline` run to succeed
-- it prepares local Feast state, verifies `/features/online`, and checks hosted-sync metrics on `/metrics`
-
-If the preferred local ports are already occupied, the bootstrap resolves alternate bindings and prints the final endpoints. See [Local Evaluator](local-evaluator.md) for the full local runtime contract.
+This path does not require local `gcloud`, Terraform, or GitHub Actions repository variables. The bootstrap validates the full local evaluator contract, not just container startup, and prints alternate endpoints automatically when the preferred ports are already occupied. See [Local Evaluator](local-evaluator.md) for the full local runtime contract.
 
 ## One-Time Shared Cloud Bootstrap
 
@@ -76,18 +73,11 @@ For the initial shared-cloud setup, run:
 
 `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions`
 
-The script is interactive by design. It asks the operator to:
+The script is interactive by design. It asks the operator to authenticate with `gcloud`, choose or create the target project and billing context, confirm the hosted identifiers and data surfaces, choose which hosted targets to enable, and sync the GitHub repository variables that the remote workflow uses later.
 
-- sign in with `gcloud`
-- choose an existing GCP project or create one
-- choose a billing account
-- confirm or edit the region, state bucket, Artifact Registry repository, BigQuery dataset, and BigQuery table
-- choose which hosted targets to enable
-- sync the GitHub repository variables that the shared cloud path uses later
+In `--bootstrap-only` mode, the script prepares the remote Terraform control plane, prints the remote-state and identity handoff, and leaves the broader hosted apply to the remote workflow. It also writes `.env` and `terraform/terraform.tfvars` in the working tree so the local checkout reflects the selected project and platform identifiers.
 
-In `--bootstrap-only` mode, the script prepares the remote Terraform control plane and leaves the broader hosted apply to the remote workflow. It also writes `.env` and `terraform/terraform.tfvars` in the working tree so the local repository reflects the selected project and platform identifiers.
-
-When the script runs a normal apply instead of bootstrap-only mode, it also verifies the hosted runtime surfaces that Terraform exposed. The promoted Cloud Run path checks `/health`, `/spots`, and `/metrics`, including the served alias and model version in the health payload. The retained hosted full-stack path is expected to stay private; if its app URL is public, bootstrap fails fast instead of treating that as a supported fallback.
+When the script runs a normal apply instead of bootstrap-only mode, it verifies both hosted lanes. Cloud Run must answer `/health`, `/spots`, and `/metrics`, and the health payload must expose the served alias and model version. The operator host must keep its app URL private. If that app URL is public, bootstrap fails fast instead of treating the VM as a public fallback.
 
 ## Day-2 Delivery Contract
 
@@ -102,21 +92,13 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/trigger-runtime-release.yml` | reviewed runtime handoff | GitHub sends one explicit runtime release request into hosted Airflow after the retained operator host refreshes to the reviewed git ref |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
-This contract is deliberate. The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming more manual workflow inputs.
+The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
 
-That same split is also the current ownership boundary for cloud-facing values. Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables remain structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
-
-GitHub-hosted workflows now stop at reviewed infrastructure change, artifact publication, and one explicit runtime release request. GitHub does not mutate live runtime state directly; the request is handed to hosted Airflow on the retained operator host.
-
-The promoted hosted runtime story is now:
-
-- Cloud Run is the primary hosted API path that operators should treat as the shared serving URL.
-- the hosted full-stack VM remains online for Airflow, MLflow, and monitoring, not as a second public API path.
-- both surfaces still read the same Terraform-managed storage, Feast, and MLflow contract.
+Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
 ## Hosted Orchestration Surface Decision
 
-The orchestration surface of record for the next delivery horizon is the current hosted Airflow control plane on the retained operator host.
+Hosted Airflow on the retained operator host remains the orchestration surface of record for this horizon.
 
 | Option | Fit against current constraints | Decision |
 |------|----------------------------------|----------|
@@ -124,16 +106,11 @@ The orchestration surface of record for the next delivery horizon is the current
 | Composer / Managed Airflow | Stronger managed-service story, but adds cost, IAM surface area, and migration churn before the GitHub-versus-runtime boundary cleanup is complete | deferred |
 | Lighter managed trigger model | Could reduce infrastructure, but the current feature and training paths already depend on Airflow-owned scheduling, asset hand-offs, retries, and backfills | not chosen for this horizon |
 
-This means:
-
-- GitHub Actions stays responsible for lint, test, build, publish, and Terraform-driven delivery.
-- hosted Airflow stays responsible for runtime DAG execution, scheduling, retries, and backfills.
-- Cloud Run stays responsible for serving the public API, not for taking over orchestration duties.
-- Composer or a lighter managed alternative can be revisited later only if the operator-plane reduction justifies the migration.
+So the boundary stays simple: GitHub Actions handles review, build, publish, and Terraform-driven delivery; hosted Airflow handles DAG execution, scheduling, retries, and backfills; Cloud Run serves the public API. Managed alternatives can be revisited later only if the operator lane gets smaller first.
 
 ## GitHub Versus GCP Boundary
 
-The reviewed delivery plane and the runtime execution plane have different responsibilities.
+The reviewed delivery plane and the runtime execution plane still have different responsibilities.
 
 | Plane | Current owner | What it owns | What it must not own |
 |------|---------------|--------------|----------------------|
@@ -141,24 +118,36 @@ The reviewed delivery plane and the runtime execution plane have different respo
 | Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
 | Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
 
-For the next delivery horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. GitHub Actions may trigger reviewed delivery workflows, but it is not the runtime orchestrator.
+GitHub Actions may trigger reviewed delivery workflows, but hosted Airflow on the retained operator host remains the runtime orchestrator.
 
 ## Runtime Release Trigger Contract
 
 GitHub now has exactly one reviewed handoff into runtime execution.
+
+<div class="mermaid">
+flowchart LR
+    GHW[Trigger Runtime Release workflow]
+    SSH[OIDC plus SSH to retained operator host]
+    SCRIPT[trigger-runtime-release.sh]
+    DAG[runtime_release DAG]
+    REPORT[runtime-release-latest.json]
+    SUMMARY[GitHub workflow summary]
+
+    GHW --> SSH --> SCRIPT --> DAG --> REPORT --> SUMMARY
+</div>
 
 - signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
 - receiver: `./scripts/trigger-runtime-release.sh` runs on the retained operator host and triggers the hosted Airflow `runtime_release` DAG locally
 - auth path: GitHub Actions uses OIDC into the deployer service account and Compute Engine SSH; GitHub does not store Airflow credentials or call a public Airflow endpoint
 - observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures `airflow/reports/runtime-release-latest.json`
 
-The current action set is deliberately small:
+Supported actions:
 
 - `deploy_candidate`
 - `promote_candidate`
 - `rollback_live`
 
-This keeps the handoff explicit before deeper runtime automation is added behind the Airflow side of the boundary.
+This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary.
 
 ## Retry And Backfill Runbooks
 
@@ -172,7 +161,7 @@ The recovery lane is now explicit too. Operators should retry work on the same p
 | a replayed feature slice should refresh training state too | hosted Airflow on the retained operator host | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run instead of treating training as a separate first step | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
 | training must be rerun without replaying feature ingestion | hosted Airflow on the retained operator host | use a manual `training_pipeline` run only when the curated feature slice already exists and the operator is intentionally choosing the requested stage in DAG config | training DAG run id, requested stage, model version, and training summary JSON |
 
-The retained operator host stays private by default, so the documented recovery path assumes SSH to the host rather than a public Airflow endpoint.
+The retained operator host stays private by default, so the recovery path assumes SSH to the host rather than a public Airflow endpoint.
 
 Example feature replay on the retained host:
 
@@ -184,17 +173,17 @@ docker compose -f docker-compose.yml -f docker-compose.cloud.yml --env-file .env
     --run-id "manual_backfill__2026-05-14T00-00-00Z"
 ```
 
-The same host-side wait contract used by the sync path still applies after the trigger:
+After the trigger, keep the same host-side wait contract:
 
 - `feature_pipeline` should reach `success` for the chosen logical date
 - the downstream `training_pipeline` should reach `success` as an `asset_triggered` run when the replay is meant to refresh production model state
 - operators should check the latest summary JSON files under `airflow/reports/` before treating the replay as complete
 
-When the problem is serving rollout rather than data replay, do not use the backfill path. Use the runtime trigger contract instead so GitHub sends the reviewed deploy, promote, or rollback request and the runtime side records one explicit acknowledgement.
+Serving rollout problems should use the runtime trigger contract, not the backfill path. GitHub sends the reviewed deploy, promote, or rollback request, and the runtime side records one explicit acknowledgement.
 
 ## Rollback And Retirement Coordinates
 
-The reviewed rollback handoff now runs through the runtime trigger contract instead of direct GitHub runtime mutation.
+Rollback uses the runtime trigger contract instead of direct GitHub runtime mutation.
 
 - `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
 - `.github/workflows/trigger-runtime-release.yml` is the single reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
@@ -202,9 +191,9 @@ The reviewed rollback handoff now runs through the runtime trigger contract inst
 - `airflow/reports/runtime-release-latest.json` and its history files record the acknowledged handoff on the runtime side
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
-The remaining VM-retirement gate is separate from serving rollback. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator-plane scope is reduced explicitly.
+VM retirement is a separate question. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator lane gets smaller explicitly.
 
-For recovery work, the practical split is:
+Practical recovery split:
 
 - use GitHub workflow reruns when reviewed delivery failed before runtime execution
 - use hosted Airflow retries and backfills when runtime data or orchestration work failed after delivery
@@ -221,11 +210,11 @@ The cloud-operator tests keep the delivery path honest in a few specific ways:
 - repository-variable resync after apply is best effort, so a GitHub token limitation does not invalidate a successful Terraform apply
 - destroy and cleanup remain explicit maintainer actions with project-id confirmation checks
 
-This is why the public docs can describe the shared-cloud path as reviewable and repeatable without pretending it is a casual contributor setup.
+That is why the public docs can describe the shared-cloud path as reviewable and repeatable without pretending it is a casual contributor setup.
 
 ## Delivery Boundaries That Stay Deliberate
 
-Several boundaries stay explicit across the scripts, Terraform reference, and tests:
+These boundaries stay explicit across the scripts, Terraform reference, and tests:
 
 - the local Docker evaluator remains the only default contributor path
 - the shared cloud environment stays operator-owned, even though the repository and images are public
@@ -235,7 +224,7 @@ Several boundaries stay explicit across the scripts, Terraform reference, and te
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 
-The same split also keeps cloud retirement reviewable. Destroy and cleanup stay separate workflow commands, and cleanup only runs the specific follow-up actions that the operator selected.
+The same split also keeps cloud retirement reviewable. Destroy and cleanup stay separate workflow commands, and cleanup only runs the follow-up actions the operator selected.
 
 ## Why This Workflow Works
 

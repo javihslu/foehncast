@@ -30,13 +30,13 @@ The important split is that monitoring consumes persisted or runtime monitoring 
 
 ## Monitoring By Runtime Mode
 
-| Runtime mode | What is monitored | What stays private |
-|------|-------------------|--------------------|
-| Local evaluator | app `/metrics`, StatsD drift export, local pipeline summaries, and local Grafana dashboards | local Airflow, MLflow, Prometheus, and Grafana remain operator tools |
-| Active shared environment | app `/metrics`, hosted sync state, and the hosted monitoring stack on the compose host | Airflow, MLflow, Prometheus, and Grafana stay private by default |
-| Public docs | rendered metrics snippets, screenshots, checked-in configs, and summary artifacts | no live control planes |
+| Runtime mode | Monitoring contract | Exposure boundary |
+|------|---------------------|-------------------|
+| Local evaluator | app `/metrics`, StatsD drift export, persisted pipeline summaries, and local Grafana dashboards validate the full monitoring path on one machine | local-only |
+| Shared hosted environment | Cloud Run exposes the app-owned `/metrics` contract, while the operator host keeps Prometheus, Grafana, hosted sync evidence, and operator review online | operator stack stays private by default |
+| Public docs | rendered metrics snippets, screenshots, checked-in configs, and summary artifacts explain the monitoring contract | no live control planes |
 
-This keeps the public explanation clear: operators use the monitoring stack directly, while the docs site uses rendered evidence.
+The public-versus-private surface rule itself is documented in [Interfaces and Surfaces](interfaces-and-surfaces.md). This page stays focused on what monitoring measures and how operators verify it.
 
 ## Surface Roles
 
@@ -52,7 +52,7 @@ This keeps the public explanation clear: operators use the monitoring stack dire
 
 ## Durable And Ephemeral Signals
 
-The monitoring stack uses both durable and ephemeral signals on purpose.
+The monitoring stack uses both durable and ephemeral signals.
 
 Durable signals survive restarts and provide historical evidence:
 
@@ -67,7 +67,7 @@ Ephemeral signals are runtime-only counters that reset on restart:
 - prediction-monitoring execution counts
 - last successful background monitoring execution timestamps
 
-The app combines both kinds of signals on `/metrics`, but the distinction still matters operationally. Durable files support audits and restarts; ephemeral counters describe the current process health.
+The app combines both kinds of signals on `/metrics`, but the distinction still matters operationally. Durable files support audits and restarts. Ephemeral counters describe current process health.
 
 ## Metrics Surface
 
@@ -132,9 +132,9 @@ The checked-in alert rules cover the main operator failure modes.
 
 The contact point and policy tree stay checked in too, so the alert routing contract is reviewable without depending on a live Grafana instance.
 
-## Recovery Evidence And Runbook Checks
+## Recovery Evidence
 
-Retry and backfill work should leave durable evidence that operators can compare before and after the intervention.
+Recovery work should leave durable evidence that operators can compare before and after the intervention.
 
 | Recovery task | Durable evidence to capture | Operator check |
 |------|-----------------------------|----------------|
@@ -143,13 +143,13 @@ Retry and backfill work should leave durable evidence that operators can compare
 | reviewed deploy, promote, or rollback handoff retry | `airflow/reports/runtime-release-latest.json` plus the matching history file | the GitHub workflow summary and the runtime-side acknowledgement describe the same action and coordinates |
 | retained operator host refresh verification | `.state/online-compose-sync/last-success.json` | the hosted-sync stale signal clears and the app republishes the updated sync state on `/metrics` |
 
-When the recovery started from reviewed delivery, capture the GitHub workflow URL too. When the recovery started from hosted Airflow, capture the logical date and DAG run id with the summary artifacts.
+Capture the initiating run reference with the summary artifacts: the GitHub workflow URL for reviewed delivery, or the logical date and DAG run id for hosted Airflow recovery.
 
-These checks are intentionally small. They give operators one repeatable evidence pack without turning the monitoring stack into the system that performs the retry itself.
+These checks stay intentionally small. They give operators one repeatable evidence pack without turning the monitoring stack into the system that performs the recovery itself. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the retry and backfill procedures.
 
 ## Reading Evidence Safely
 
-The docs site should explain monitoring with rendered evidence, not live control-plane embeds.
+Explain monitoring with rendered evidence, not live control-plane embeds.
 
 Preferred public-safe evidence sources are:
 

@@ -1,11 +1,12 @@
 # Cloud Mapping
 
-FoehnCast has two hosted targets. The shared environment uses the inference-only Cloud Run target as the only promoted public API path, while the hosted full-stack target stays online on one GCP host for operator tooling. This page explains how the validated local stack maps onto GCP without changing the core Feature-Training-Inference boundaries.
+FoehnCast keeps one public hosted lane and one private operator lane. Cloud Run carries the shared API, while the hosted full-stack target stays online on one Compute Engine host for Airflow, MLflow, and monitoring. This page maps the validated local stack onto those GCP lanes without changing the core Feature-Training-Inference boundaries.
 
-!!! note "What this page does and does not claim"
+!!! note "What this page covers"
 
-    The shared GCP baseline and the hosted entry points already exist.
-    The current shared environment uses Cloud Run as the shared hosted API path while retaining the hosted full-stack target for operator tooling.
+    The shared GCP baseline and both hosted lanes already exist.
+    Cloud Run is the shared public API lane.
+    The hosted full-stack target stays online as the private operator lane.
 
 ## Cloud Paths In One View
 
@@ -13,22 +14,30 @@ FoehnCast has two hosted targets. The shared environment uses the inference-only
 <ul>
 <li>
 <p><strong>Shared GCP baseline</strong></p>
-<p>Terraform can provision APIs, Artifact Registry, a GCS artifact bucket, BigQuery storage, and GitHub OIDC identities.</p>
+<p>Terraform provisions APIs, Artifact Registry, GCS, BigQuery, and GitHub OIDC.</p>
 </li>
 <li>
 <p><strong>Hosted full-stack target</strong></p>
-<p>A single Compute Engine host runs Airflow, MLflow, monitoring, and the retained operator stack from the same repository.</p>
+<p>One Compute Engine host runs Airflow, MLflow, monitoring, and private app checks.</p>
 </li>
 <li>
 <p><strong>Hosted inference target</strong></p>
-<p>The FastAPI inference service runs as the promoted primary hosted API path on Cloud Run.</p>
+<p>Cloud Run serves the promoted FastAPI API.</p>
 </li>
 <li>
 <p><strong>Operator delivery</strong></p>
-<p>Maintainers bootstrap once, then GitHub Actions advances the shared cloud path.</p>
+<p>Maintainers bootstrap once, then GitHub Actions advances reviewed changes.</p>
 </li>
 </ul>
 </div>
+
+## Hosted Lanes At A Glance
+
+| Lane | Concrete target | Default exposure | Main job |
+|------|-----------------|------------------|----------|
+| Shared API lane | hosted inference target on Cloud Run | public | serve the FastAPI product and service routes |
+| Operator lane | hosted full-stack target on Compute Engine | private by default | run Airflow, MLflow, monitoring, and private app checks |
+| Delivery lane | GitHub Actions plus Terraform plus OIDC | not a runtime surface | publish reviewed artifacts and apply reviewed infrastructure changes |
 
 ## Mapping Principle
 
@@ -69,70 +78,26 @@ flowchart LR
 | Surface | Deploys | Leaves out | Current state |
 |--------|---------|------------|---------------|
 | Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented through Terraform |
-| Hosted full-stack target | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and retained for operator control-plane duties |
-| Hosted inference target | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and promoted as the primary hosted API path |
+| Hosted full-stack target (operator lane) | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and retained for operator control-plane duties |
+| Hosted inference target (API lane) | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and promoted as the primary hosted API path |
 | GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
 | BigQuery backend support | support for a BigQuery storage backend in the app | none | available in both local and hosted runtimes |
 
-The hosted paths deploy runtime services only. Development assets stay local or CI-only. The hosted full-stack target keeps Airflow, MLflow, Prometheus, and Grafana on the operator side unless you intentionally publish them yourself.
-
-The shared environment uses Cloud Run as the only promoted public API path. The hosted full-stack target stays online because it keeps Airflow, MLflow, and monitoring together.
+The hosted targets deploy runtime services only. Development assets stay local or CI-only. Cloud Run is the only promoted public API path. The hosted full-stack target stays private by default and keeps Airflow, MLflow, Prometheus, and Grafana together on the operator side.
 
 ## Active Shared Deployment Path
 
-The shared environment currently follows one promoted hosted lane plus one retained operator lane:
+Today the shared environment keeps a stable split: Cloud Run carries the shared public API URL, one Compute Engine host stays online as the private operator lane for Airflow, MLflow, monitoring, and private app checks, and GitHub Actions plus remote Terraform advance reviewed day-2 changes after maintainer bootstrap.
 
-- maintainers bootstrap once from Google Cloud Shell and seed the remote Terraform plus repository-variable contract
-- GitHub Actions remote Terraform applies handle day-2 infrastructure changes after bootstrap
-- Cloud Run carries the primary shared hosted API URL
-- one Compute Engine host keeps Airflow, MLflow, the API, and the monitoring stack online together as the retained operator surface
-
-This is why the shared environment docs now center Cloud Run as the first hosted API URL while still keeping the compose-host path visible as the retained control plane.
-
-Rollback for the shared API now means retrying the reviewed runtime release handoff, not reopening the VM app publicly or mutating runtime state directly from GitHub. `.github/workflows/publish-app-image.yml` stops at image publication, `.github/workflows/trigger-runtime-release.yml` sends the reviewed deploy, promote, or rollback request into the hosted Airflow receiver, and the runtime side records the acknowledgement under `airflow/reports/runtime-release-latest.json`. The remaining retirement gate is whether the operator lane can later shrink without blurring the Airflow and MLflow control-plane boundary.
-
-## Orchestration Surface Of Record
-
-The runtime orchestration surface of record is the current hosted Airflow control plane on the retained operator host.
-
-| Option | Fit against current scope | Decision |
-|------|---------------------------|----------|
-| Current hosted Airflow control plane | Reuses the validated local Airflow DAG and asset model, keeps retries and backfills on the same operator surface, and avoids introducing another platform migration before the boundary cleanup lands | chosen now |
-| Composer | Offers a stronger managed-service story, but adds service cost, IAM work, and migration churn before the team has finished clarifying the GitHub-versus-runtime split | deferred |
-| Lighter managed trigger model | Could narrow the hosted footprint, but would replace Airflow-owned runtime behavior instead of simply clarifying ownership boundaries | not chosen for this horizon |
-
-GitHub therefore remains the delivery plane, while hosted Airflow remains the runtime scheduling plane. The later retry and backfill runbooks should assume Airflow as the operator surface until a future decision changes that explicitly.
-
-## GitHub Versus GCP Delivery Boundary
-
-The current delivery story is split intentionally:
-
-- GitHub owns reviewed artifacts, CI validation, image publication, and Terraform-driven infrastructure changes.
-- GCP owns runtime execution: Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime secrets and identities, and hosted telemetry.
-- Terraform outputs, repository variables, and published images form the handoff contract between the two planes.
-
-For this horizon, hosted Airflow on the retained operator host remains the orchestration surface of record. That means Cloud Run is the serving surface, not the scheduler, and GitHub Actions is the delivery plane, not the runtime orchestrator.
-
-That same split is also the current ownership boundary for cloud-facing values. Terraform inputs and GitHub repository variables carry the structural delivery contract, while secret-bearing runtime values stay on the runtime side through hosted environment injection or a managed secret path. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
-
-## Operator Recovery Lane
-
-The active shared environment now has one reviewed recovery split:
-
-- delivery failures before runtime execution stay on the GitHub plus Terraform side
-- serving rollout retries use the explicit runtime trigger contract, not ad hoc SSH-only release changes
-- feature retries and backfills stay on hosted Airflow on the retained operator host
-- replaying one logical date starts with `feature_pipeline`; the downstream `training_pipeline` run should remain asset-triggered when the replay is meant to refresh production training state
-
-This keeps the recovery story aligned with the topology: GitHub advances reviewed delivery, Cloud Run serves the public API, and hosted Airflow on the retained host owns runtime replay work.
+Hosted Airflow on the retained operator host remains the runtime orchestration surface for this horizon. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed delivery and recovery runbooks and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
 ## Honest Mapping From Local To Cloud
 
 | Local component | Current hosted path |
 |----------------|---------------------|
-| `app` container | hosted inference target for the primary shared API, plus the retained hosted full-stack app surface for control-plane duties |
-| Airflow containers | hosted full-stack target today |
-| MLflow local service | hosted full-stack target today with GCS-backed artifacts |
+| `app` container | Cloud Run API lane for shared traffic, plus the private operator lane for host-local checks |
+| Airflow containers | operator lane today |
+| MLflow local service | operator lane today with GCS-backed artifacts |
 | Local feature storage | BigQuery backend already available |
 | Local MLflow artifact volume | GCS artifact destination on the hosted compose path |
 | `development_env` container | local and CI only |
@@ -147,8 +112,8 @@ flowchart TD
     FEAT --> BQ[(BigQuery curated features)]
     BQ --> TRAIN[Training job]
     TRAIN --> MLF[(MLflow)]
-    MLF --> HOST[Hosted full-stack target today]
-    MLF --> RUN[Hosted inference target]
+    MLF --> HOST[Operator host lane]
+    MLF --> RUN[Cloud Run API lane]
     OME --> HOST
     OME --> RUN
     OSRM[OSRM] --> HOST
@@ -163,7 +128,7 @@ flowchart TD
 | Raw landing | keep immutable API payloads in GCS when a landing layer is needed |
 | Feature pipeline | transform landed or live inputs and write curated rows to BigQuery |
 | Training pipeline | read curated rows, train, evaluate, and register through MLflow |
-| Inference pipeline | serve the primary hosted API on Cloud Run while retaining the hosted full-stack app surface for operator duties |
+| Inference pipeline | serve the public API on Cloud Run while keeping the operator-host app available for private checks |
 | Feast serving path | point the same logical feature view at BigQuery instead of local parquet |
 
 ## Storage Layering In Cloud
@@ -205,7 +170,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Artifacts | MinIO-backed MLflow artifact path | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
 | Image source | local builds | GHCR runtime images or Artifact Registry app image |
-| Public exposure | local ports on the developer machine | Cloud Run is the shared hosted API surface; the retained hosted full-stack target stays private by default; operator dashboards stay private unless you deliberately publish them |
+| Public exposure | local ports on the developer machine | Cloud Run is the shared hosted API surface; the operator lane stays private by default; dashboards stay private unless you deliberately publish them |
 
 ## Recovery Evidence In Cloud
 
@@ -230,8 +195,7 @@ The stable evidence surfaces are:
 
 - MLflow stays on the compose host in the active shared environment.
 - Airflow stays on the compose host, while the sync timer, retained sync state, and monitoring stack make that host observable.
-- Hosted Airflow remains the orchestration surface of record for runtime scheduling, retries, and backfills.
-- The two hosted paths now solve different roles: Cloud Run is the API surface, and the compose host keeps the broader operator stack online.
+- Cloud Run stays on the public API lane, and the hosted full-stack target keeps the broader private operator stack online.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief

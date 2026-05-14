@@ -1,6 +1,6 @@
 # Container Components
 
-This directory holds the service definitions used by the validated local stack and reused by the online compose-host path. The default contributor entrypoint is still `./scripts/bootstrap-local.sh`. This README explains the container surfaces behind that local path and the hosted compose-host target. It is not a separate onboarding guide.
+This directory holds the service definitions used by the validated local stack and reused by the hosted full-stack target. The default contributor entrypoint is still `./scripts/bootstrap-local.sh`. This README focuses on the container surfaces behind the local and hosted runtimes. It is not a separate onboarding or operator-workflow guide.
 
 ## Container Stack In One View
 
@@ -88,15 +88,9 @@ The starter notification route stays on a built-in placeholder address for the l
 
 For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the app plus Grafana monitoring surfaces.
 
-This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it.
+This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it. For end-to-end contributor setup and the resolved local endpoints, use [../docs/site/getting-started.md](../docs/site/getting-started.md) and [../docs/site/system/local-evaluator.md](../docs/site/system/local-evaluator.md). For maintainer-owned hosted delivery, start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md).
 
-If you maintain the shared cloud environment, start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md) for the operator flow, then use [../terraform/README.md](../terraform/README.md) for the platform detail.
-
-The default local path uses the bundled MinIO service for curated feature storage and MLflow artifacts, starts Airflow and MLflow without a login, prepares Feast against the bundled Datastore-mode emulator, and resets Docker volumes plus disposable local runtime artifacts for a clean run each time. The helper keeps the container-side endpoints on `objectstore:9000` and `feast-online-store:8080`, and can shift the host-exposed ports when the preferred defaults are already occupied.
-The optional `development_env` container now stays off unless you explicitly target it through the dedicated Makefile notebook and dev-shell commands.
-The app image itself is Feast-capable, and the local bootstrap prepares Feast state, verifies the online-feature route, and confirms that Grafana loaded the checked-in dashboard and alerting resources before declaring the stack ready.
-
-The initialized local runtime file is `.env`. The bootstrap script creates it from `.env.example` on first run if it does not exist yet.
+The container-specific local additions are MinIO and the Feast Datastore emulator, while `development_env` stays opt-in. The bootstrap initializes `.env` from `.env.example` on first run if needed, can shift host-exposed ports when the defaults are busy, and verifies the main app, monitoring, and online-feature surfaces before declaring the stack ready.
 
 Run these checks before deployment work:
 
@@ -111,16 +105,9 @@ Run these checks before deployment work:
 
 ## Hosted Reuse
 
-The online compose-host path is maintainer-owned and reuses the same service layout, but changes the runtime context:
+The hosted full-stack target is maintainer-owned and reuses the same service layout, but changes the runtime context: the host writes `.env` from Terraform-managed values, `development_env`, MinIO, and the Feast emulator do not deploy there, public exposure stays narrow and private by default, and MLflow artifacts point at the shared GCS bucket instead of the local artifact volume. Runtime images can be pulled from GHCR or built locally on the host if needed.
 
-- the host writes `.env` from Terraform-managed values
-- `development_env`, MinIO, and the Feast emulator do not deploy to the hosted paths
-- public exposure defaults to the app only
-- Airflow and MLflow remain private unless their ports are deliberately opened
-- MLflow artifacts point at the shared GCS bucket instead of the local artifact volume
-- runtime images can be pulled from GHCR or built locally on the host if needed
-
-That hosted path follows the one-time `bootstrap-gcp` plus GitHub Actions workflow described in [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md).
+See [../docs/site/system/hosted-full-stack.md](../docs/site/system/hosted-full-stack.md) for the hosted target contract and [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md) for the bootstrap and day-2 delivery flow.
 
 ## Build Targets
 

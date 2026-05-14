@@ -2,9 +2,7 @@
 
 FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, product scope, runtime notes, and operator guidance.
 
-The default contributor path stays local with Docker. The shared cloud path is maintainer-owned and documented separately.
-
-This site keeps rider-facing demo surfaces, service APIs, operator dashboards, and public-safe rendered evidence separate on purpose. Grafana belongs to the operator layer here. It is not the primary product UI and the public docs do not depend on live private dashboard embeds.
+The default contributor path stays local with Docker. The shared cloud path is maintainer-owned and documented separately. Surface boundaries also stay explicit here: rider demos and service routes explain the product, while operator dashboards stay private and public docs rely on rendered evidence instead of live control-plane embeds.
 
 ## Start Here
 
@@ -24,21 +22,14 @@ This site keeps rider-facing demo surfaces, service APIs, operator dashboards, a
 | Mode | Who runs it | Purpose |
 |------|-------------|---------|
 | Local stack | Any reader or contributor | Development, evaluation, and reproducible validation |
-| Shared cloud environment | Repository maintainer or fork owner after one-time bootstrap | Full hosted deployment of Airflow, MLflow, and the API |
+| Shared cloud environment | Repository maintainer or fork owner after one-time bootstrap | Maintainer-owned hosted runtime and operator stack |
 | GitHub automation | Repository maintainer or fork owner after bootstrap | Image publishing, Terraform workflows, and docs publishing |
 
 Public images are convenience artifacts, not a shared hosting promise. If you want a running online environment, deploy it in infrastructure you control.
 
 ## Surface Guide
 
-| Surface | Primary audience | Exposure | Current examples |
-|------|------------------|----------|------------------|
-| Rider-facing demo surfaces | rider, reviewer, contributor | public-safe when shown as screenshots or rendered outputs | Streamlit demo, ranking examples, and the online-features demo page |
-| Service APIs | clients, smoke tests, support services | service-only | `/health`, `/spots`, `/predict`, `/rank`, `/features/online`, and `/metrics` |
-| Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, Prometheus, and Grafana |
-| Public-safe docs and evidence | reviewer, course audience, fork reader | public-safe | docs pages, rendered evaluation markdown, summary JSON-derived charts, and screenshots |
-
-Use the rider demo or API examples to explain the product surface. Use rendered artifacts or screenshots to explain operations in public docs. Keep live operator dashboards private unless you are intentionally running your own environment.
+Use rider demos and API examples to explain the product surface. Use rendered artifacts or screenshots to explain operations in public docs. Keep live operator dashboards private unless you are intentionally running your own environment. For the full audience and exposure breakdown, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).
 
 ## System In One View
 
@@ -65,7 +56,7 @@ flowchart LR
 | Feature pipeline | Working | The feature DAG ingests, engineers, validates, and stores curated weather features |
 | Training pipeline | Working | The training DAG labels data, trains the model, evaluates it, and registers fresh versions in MLflow under the requested registry alias |
 | Inference pipeline | Working | The app serves the model-backed API routes used for health, prediction, and ranking |
-| Hosted runtime | Working | Terraform plus the online compose stack can run Airflow, MLflow, and the API on GCP |
+| Hosted runtime | Working | The maintainer-owned hosted runtime follows the documented public-API and operator-surface split |
 | CI/CD | Working | GitHub Actions validates docs and infrastructure and supports remote Terraform operations |
 
 ## Documentation Map

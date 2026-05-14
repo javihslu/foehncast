@@ -12,27 +12,13 @@ This is the default path for a fresh machine.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
-The local evaluator path uses the bundled MinIO surface as the default object-access layer for curated feature persistence and MLflow artifacts, while Feast uses the bundled Datastore-mode emulator as the required online-serving layer on top of the curated contract. The same local stack now includes Prometheus, a StatsD exporter, and Grafana from checked-in monitoring config, Airflow uses a bundled Postgres metadata database instead of a host-mounted SQLite file, the bootstrap helper waits for the feature DAG to publish a training-request asset and for the resulting asset-triggered training run to finish on a real registry version, and it verifies that Grafana loaded its starter resources before reporting success. If the preferred local host ports are already occupied, the bootstrap helper moves the bindings to the next free ports and prints the chosen endpoints.
-The optional `development_env` notebook container stays off by default and only starts when you explicitly target the notebook or dev-shell Makefile commands.
+The local evaluator path bundles MinIO for curated features and MLflow artifacts, the Datastore-mode emulator for Feast online serving, and the checked-in Prometheus, StatsD exporter, and Grafana stack. The bootstrap waits for the feature-to-training hand-off, verifies Grafana starter resources, and prints alternate endpoints automatically if the default ports are already busy. The optional `development_env` notebook container stays off unless you explicitly target notebook or dev-shell commands. See [Local Evaluator](system/local-evaluator.md) for the full runtime contract.
 
 If you maintain the shared cloud environment, use [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). Contributors do not need the cloud path for normal work.
 
 ## Surface Roles
 
-| Surface | Use it for | Do not treat it as |
-|------|------------|--------------------|
-| Streamlit demo and prediction responses | rider-facing evaluation and public-safe screenshots | an operator dashboard |
-| FastAPI routes such as `/predict`, `/rank`, and `/features/online` | service integration, smoke checks, and demo calls | a documentation publishing surface |
-| `/metrics`, Prometheus, Grafana, Airflow, and MLflow | operator validation, monitoring, and debugging | the product UI or a public embed target |
-| Docs pages and rendered evidence | public-safe explanation and review material | a live runtime control plane |
-
-Prediction requests also append flattened local inference rows to `.state/monitoring/prediction-log.jsonl` as a bounded working set and to `.state/monitoring/prediction-events.jsonl` as the retained history contract. That keeps restart-sensitive runtime counters separate from the retained monitoring history and keeps both out of `data/`.
-
-Feature-pipeline dashboard panels are driven from the latest summary JSON under `airflow/reports/`. The app republishes that summary through `/metrics`, so Prometheus and Grafana read the same persisted run summary that the bootstrap path produces. The Airflow Assets view also shows the current local hand-off graph: curated feature rows, Feast synchronization, the training request, the MLflow training run, the evaluation report, and the registry update.
-
-Grafana is present in the local stack so the bootstrap can verify provisioning and so operators can inspect metrics and alert rules. It is not the primary rider-facing interface, and the docs site should prefer screenshots or rendered artifacts over live Grafana embeds.
-
-The bootstrap reset also removes stale local Airflow metadata files and logs, and the bootstrap verifies the Airflow health payload itself instead of treating a `200 OK` response from `/api/v2/monitor/health` as sufficient.
+The local stack still keeps the same surface split as the wider docs: Streamlit and prediction responses are rider-facing evaluation surfaces, FastAPI routes are service surfaces, and `/metrics`, Prometheus, Grafana, Airflow, and MLflow stay on the operator side. The bootstrap also keeps retained monitoring history under `.state/monitoring/`, republishes persisted pipeline summaries through `/metrics`, and verifies the Airflow health payload plus Grafana provisioning before it reports success. For the full surface boundary, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).
 
 After bootstrap completes, the main local endpoints are:
 
@@ -57,27 +43,13 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
 
 ## Shared Cloud Automation
 
-The shared hosted environment is maintained separately from normal contributor setup.
-
-- Contributors only need Docker and the local evaluator bootstrap.
-- Contributors do not need local Terraform, `gcloud`, or `gh`.
-- Maintainers start in Google Cloud Shell and run `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions` once.
-- After bootstrap, GitHub Actions owns the normal shared cloud Terraform flow.
-- The current shared environment uses Cloud Run as the only promoted public API path, while the hosted full-stack target stays online for operator tooling.
-
-See [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) for the maintainer path. Use `terraform/README.md` only if you maintain the shared cloud environment.
+The shared hosted environment is maintained separately from normal contributor setup. Contributors only need Docker and the local evaluator bootstrap, not local Terraform, `gcloud`, or `gh`. Maintainers should start with [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) for the bootstrap and remote Terraform path, and use `terraform/README.md` only when maintaining the shared cloud environment.
 
 Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtime services only; `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
 
 ## What Lives Where
 
-- `src/foehncast/`: application code for feature engineering, training, inference, monitoring, and configuration
-- `dags/`: Airflow workflow entry points
-- `scripts/`: local bootstrap plus maintainer utilities
-- `terraform/`: maintainer cloud infrastructure definition and reference
-- `feature_repo/`: Feast integration surface and config repo
-- `tests/`: regression coverage for the pipeline and API behavior
-- `docs/`: GitHub Pages source for the public documentation
+See [Repository](system/repository.md) for the dedicated layout guide. The short version is: `src/foehncast/` holds the application code, `dags/` holds Airflow entry points, `scripts/` and `terraform/` hold maintainer tooling, and `docs/` plus `tests/` hold the public docs and regression coverage.
 
 ## Read Next
 

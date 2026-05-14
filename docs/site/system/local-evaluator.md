@@ -1,6 +1,6 @@
 # Local Evaluator
 
-FoehnCast uses the local evaluator target as the default contributor runtime. The `bootstrap-local` path starts the validated service subset, resets disposable local state, runs one end-to-end feature and training hand-off, prepares Feast serving state, and verifies the main app and operator contracts before it reports success.
+FoehnCast uses the local evaluator lane as the default contributor runtime. `bootstrap-local` starts the validated service subset, resets disposable local state, runs one end-to-end feature and training hand-off, prepares Feast serving state, and verifies the app and operator contracts before it reports success.
 
 This page records the current local runtime contract that is validated by the bootstrap path and by the runtime-stack and monitoring-stack tests. It describes the current baseline, not a future migration plan.
 
@@ -32,7 +32,7 @@ flowchart LR
     MET --> MON
 </div>
 
-The important point is that the local evaluator is a real runtime target, not a mock environment:
+The local evaluator is a real runtime target, not a mock environment:
 
 - the same feature, training, inference, and monitoring modules run inside the local stack
 - the bootstrap waits for a real asset-triggered training run instead of stopping after container startup
@@ -49,16 +49,7 @@ The default contributor entrypoint is still simple:
 
 You do not need local `gcloud`, Terraform, GitHub Actions variables, or a compiler toolchain for this path.
 
-The bootstrap path owns these responsibilities:
-
-- reset Docker volumes, local Airflow metadata, and disposable runtime artifacts so each run starts clean
-- start the validated service subset without enabling the optional `development_env` container
-- wait for Airflow component health checks and the Airflow API health payload
-- verify Grafana provisioning before any pipeline run starts
-- run the feature pipeline for the selected date
-- wait for the asset-triggered training pipeline to finish successfully
-- prepare Feast local serving state and verify the live `/features/online` route
-- wait for app health and verify hosted-sync metrics on `/metrics`
+The bootstrap path resets disposable state, starts the validated service subset without the optional `development_env` container, waits for Airflow and Grafana health, runs the feature-to-training hand-off, prepares Feast local serving state, and verifies the live app plus `/metrics` before it reports success. The detailed proof path is listed below under [Verification Contract](#verification-contract).
 
 If the preferred local ports are already occupied, the bootstrap moves the bindings to the next free ports and prints the resolved endpoints.
 
@@ -74,7 +65,7 @@ If the preferred local ports are already occupied, the bootstrap moves the bindi
 | Prometheus, StatsD exporter, and Grafana | operator monitoring and provisioning validation | the product UI |
 | `development_env` | optional notebook and dev-shell helper surface | part of the default contributor path |
 
-This keeps the local target close to the hosted architecture. The object-access layer follows the same shape as the hosted artifact path, while Feast continues to provide the online-serving boundary instead of turning storage into a serving shortcut.
+This keeps the local lane close to the hosted architecture. The object-access layer follows the same shape as the hosted artifact path, while Feast continues to provide the online-serving boundary instead of turning storage into a serving shortcut.
 
 ## Verification Contract
 
@@ -90,7 +81,7 @@ The current verification path includes:
 - a live `/features/online` request against the running app
 - app health and hosted-sync metric verification through `/metrics`
 
-That makes the local target more than a container smoke test. It exercises the same hand-offs the rest of the system pages describe.
+That makes the local lane more than a container smoke test. It exercises the same hand-offs the rest of the system pages describe.
 
 ## Disposable And Retained Local State
 
@@ -109,11 +100,7 @@ This boundary matters because reproducibility depends on resetting transient run
 
 The checked-in Grafana configuration keeps deployable-safe defaults: anonymous access, public dashboard sharing, and embedding are disabled by default.
 
-The local evaluator applies local-only access overrides so a fresh Docker run can still verify Grafana provisioning without extra manual setup. That keeps the public and hosted surface policy intact:
-
-- Grafana remains an operator surface
-- rider-facing evaluation still belongs to the Streamlit demo and API outputs
-- public docs should keep preferring rendered evidence over live embeds of private dashboards
+The local evaluator applies local-only access overrides so a fresh Docker run can still verify Grafana provisioning without extra manual setup. Grafana remains an operator surface, rider-facing evaluation stays with the Streamlit demo and API outputs, and public docs should keep preferring rendered evidence over live embeds of private dashboards.
 
 ## Why This Target Works
 

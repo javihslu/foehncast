@@ -37,8 +37,8 @@ The key point is that each stage has one clear job:
 
 | Runtime mode | What the feature path does today |
 |------|-----------------------------|
-| Local evaluator | Airflow writes curated rows to the MinIO-backed baseline, exports local Feast parquet, and materializes the Datastore-mode emulator |
-| Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through BigQuery, GCS, and Datastore |
+| Local evaluator | Airflow writes curated rows to the local storage baseline and prepares Feast downstream |
+| Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through the hosted storage surfaces |
 | Hosted inference target | consumes the curated layer through the app and Feast; it does not run the feature DAG itself |
 
 ## Stage Responsibilities
@@ -132,6 +132,8 @@ This is why raw landing, curated storage, and Feast should remain separate respo
 
 The local operator path mirrors the cloud storage roles more closely: MinIO-backed object storage for curated objects and MLflow artifacts, exported parquet for the local Feast offline source, and a Datastore-mode emulator for the local Feast online store.
 
+That role split matters more than the exact local implementation names: curated persistence stays separate from Feast serving, and both stay separate from registry metadata.
+
 ## Storage Control Surface
 
 The storage split is not only conceptual. The repository exposes it through explicit runtime and infrastructure surfaces so the local path and the cloud target stay aligned.
@@ -170,8 +172,7 @@ That means:
 - `export_offline_store(...)` is a deterministic materialization step, not a second feature-engineering stage
 - `prepare_feature_store(...)` is the Airflow-owned orchestration step that exports curated rows, renders the runtime config, applies the Feast repo, and materializes the online store without redefining the feature contract
 - the local preparation script is an operator wrapper around those helpers, not the real source of truth for the feature contract
-- local Feast stays lightweight with exported parquet plus the Datastore-mode emulator, while keeping registry and runtime config state outside the workload data root and the curated rows in the local objectstore baseline
-- the cloud direction stays aligned with curated BigQuery plus Datastore and GCS support
+- local and cloud Feast bindings stay downstream of curated persistence instead of redefining feature logic
 
 The Airflow-facing part of the contract matters here: the feature DAG emits explicit curated-feature and Feast-sync assets after `prepare_feature_store(...)` succeeds, then optionally publishes the training-request asset that schedules the training DAG. That makes the feature-to-training boundary visible in Airflow instead of hiding it behind a direct trigger.
 
