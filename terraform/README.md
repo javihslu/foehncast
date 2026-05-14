@@ -178,6 +178,10 @@ The normal shared-environment path is:
 
 In normal operation you should not edit these variables by hand. The bootstrap path seeds the shared contract automatically. Remote applies also attempt to resync it, but GitHub's default workflow token may not be allowed to edit repository variables in every repository configuration.
 
+These repository variables are the structural hosted-delivery contract. They are appropriate for project IDs, regions, resource names, topology toggles, and service-account identifiers. They are not the place for runtime passwords, API tokens, or service-account key files.
+
+If the shared cloud runtime later needs secret-bearing values beyond local-safe placeholders, inject them into the hosted runtime environment or a managed secret path instead of adding them to GitHub repository variables. Endpoints such as `GCP_MLFLOW_TRACKING_URI` should stay credential-free; if auth is required later, inject that secret separately at runtime.
+
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
 When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
