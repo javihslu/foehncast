@@ -105,7 +105,7 @@ Run these checks before deployment work:
 
 ## Hosted Reuse
 
-The hosted full-stack target is maintainer-owned and reuses the same service layout, but changes the runtime context: the host writes `.env` from Terraform-managed values, `development_env`, MinIO, and the Feast emulator do not deploy there, public exposure stays narrow and private by default, and MLflow artifacts point at the shared GCS bucket instead of the local artifact volume. Runtime images can be pulled from GHCR or built locally on the host if needed.
+The hosted full-stack target is maintainer-owned and reuses the same service layout, but changes the runtime context: the host writes `.env` from Terraform-managed values, `development_env`, MinIO, and the Feast emulator do not deploy there, public exposure stays narrow and private by default, and MLflow artifacts point at the shared GCS bucket instead of the local artifact volume. In the reviewed hosted path, runtime images are published to Artifact Registry through Cloud Build and pulled onto the host with the VM runtime identity instead of being built locally on the VM.
 
 See [../docs/site/system/hosted-full-stack.md](../docs/site/system/hosted-full-stack.md) for the hosted target contract and [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md) for the bootstrap and day-2 delivery flow.
 
@@ -114,4 +114,4 @@ See [../docs/site/system/hosted-full-stack.md](../docs/site/system/hosted-full-s
 - Local development uses the base `docker-compose.yml`, so images build natively on the current machine.
 - GCP-targeted local runs add `docker-compose.gcp.yml`, which mounts host ADC and pins the deployable app service to `linux/amd64`.
 - Example: `docker compose -f docker-compose.yml -f docker-compose.gcp.yml build app`
-- For release publishing, keep the same target architecture in CI with `docker buildx build --platform linux/amd64 ...`.
+- For reviewed hosted release publishing, GitHub submits Cloud Build builds that publish the deployable images to Artifact Registry.

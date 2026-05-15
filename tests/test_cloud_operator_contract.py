@@ -506,6 +506,10 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
 
     assert workflow["on"]["workflow_dispatch"] == {}
     assert (
+        config_job["outputs"]["project_id"]
+        == "${{ steps.repo_config.outputs.project_id }}"
+    )
+    assert (
         config_job["outputs"]["workload_identity_provider"]
         == "${{ steps.repo_config.outputs.workload_identity_provider }}"
     )
@@ -567,6 +571,39 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
         in skipped_step["run"]
     )
     assert "GCP_CLOUD_RUN_SERVICE" not in skipped_step["run"]
+
+
+def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
+    workflow_text = _read_text(".github/workflows/publish-app-image.yml")
+    push_paths = workflow["on"]["push"]["paths"]
+
+    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
+    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
+    assert "cloudbuild/**" in push_paths
+
+    repo_config_step = _workflow_step(workflow, "config", "repo_config")
+    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
+
+    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
+    assert auth_step["uses"] == "google-github-actions/auth@v2"
+
+    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
+
+    submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
+    assert "gcloud builds submit ." in submit_step["run"]
+    assert "--config cloudbuild/runtime-image.yaml" in submit_step["run"]
+    assert '"_BUILD_CONTEXT=${BUILD_CONTEXT}"' in submit_step["run"]
+    assert '"_DOCKERFILE=${DOCKERFILE}"' in submit_step["run"]
+    assert '"_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"' in submit_step["run"]
+    assert '"_FLOATING_TAG=${LATEST_TAG}"' in submit_step["run"]
+    assert "BUILD_CONTEXT: ." in workflow_text
+    assert "DOCKERFILE: containers/app/Dockerfile" in workflow_text
+    assert "docker/setup-buildx-action" not in workflow_text
+    assert "docker/build-push-action" not in workflow_text
+    assert "docker/metadata-action" not in workflow_text
 
 
 def test_trigger_runtime_release_workflow_uses_hosted_airflow_handoff_contract() -> (
@@ -854,11 +891,72 @@ def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     image_targets = workflow["jobs"]["publish"]["strategy"]["matrix"]["include"]
 
     assert "containers/development_env/**" not in push_paths
+    assert "containers/app/**" not in push_paths
+    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
+    assert "cloudbuild/**" in push_paths
     assert {target["image_name"] for target in image_targets} == {
-        "foehncast-app",
         "foehncast-airflow",
         "foehncast-mlflow",
     }
+
+
+def test_publish_runtime_images_uses_cloud_build_artifact_registry_contract() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
+    workflow_text = _read_text(".github/workflows/publish-runtime-images.yml")
+    config_job = workflow["jobs"]["config"]
+
+    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
+    assert (
+        config_job["outputs"]["project_id"]
+        == "${{ steps.repo_config.outputs.project_id }}"
+    )
+    assert (
+        config_job["outputs"]["image_repository_base"]
+        == "${{ steps.derived.outputs.image_repository_base }}"
+    )
+
+    repo_config_step = _workflow_step(workflow, "config", "repo_config")
+    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
+
+    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
+    assert auth_step["uses"] == "google-github-actions/auth@v2"
+
+    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
+
+    submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
+    assert "gcloud builds submit ." in submit_step["run"]
+    assert "--config cloudbuild/runtime-image.yaml" in submit_step["run"]
+    assert '"_BUILD_CONTEXT=${BUILD_CONTEXT}"' in submit_step["run"]
+    assert '"_DOCKERFILE=${DOCKERFILE}"' in submit_step["run"]
+    assert '"_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"' in submit_step["run"]
+    assert '"_FLOATING_TAG=${LATEST_TAG}"' in submit_step["run"]
+    assert "ghcr.io" not in workflow_text
+    assert "docker/login-action" not in workflow_text
+    assert "docker/build-push-action" not in workflow_text
+    assert "docker/metadata-action" not in workflow_text
+
+
+def test_runtime_image_cloud_build_config_defines_shared_hosted_build_contract() -> (
+    None
+):
+    cloudbuild = _read_text("cloudbuild/runtime-image.yaml")
+
+    assert "gcr.io/cloud-builders/docker" in cloudbuild
+    assert (
+        'docker build -f "${_DOCKERFILE}" "${tags[@]}" "${_BUILD_CONTEXT}"'
+        in cloudbuild
+    )
+    assert 'docker push "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"' in cloudbuild
+    assert 'if [[ -n "${_FLOATING_TAG}" ]]; then' in cloudbuild
+    assert 'docker push "${_FLOATING_TAG}"' in cloudbuild
+    assert "CLOUD_LOGGING_ONLY" in cloudbuild
+    assert (
+        "_IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/example-project/foehncast-docker/foehncast-app"
+        in cloudbuild
+    )
+    assert '_FLOATING_TAG: ""' in cloudbuild
 
 
 def test_cloud_env_pairs_include_feast_runtime_contract() -> None:
@@ -935,6 +1033,54 @@ def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_
         "google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,"
         in terraform
     )
+
+
+def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contract() -> (
+    None
+):
+    terraform = _read_text("terraform/main.tf")
+    variables = _read_text("terraform/variables.tf")
+
+    assert (
+        'artifact_registry_host         = "${var.region}-docker.pkg.dev"' in terraform
+    )
+    assert (
+        'artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"'
+        in terraform
+    )
+    assert (
+        'online_compose_app_image       = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"'
+        in terraform
+    )
+    assert (
+        'online_compose_airflow_image   = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"'
+        in terraform
+    )
+    assert (
+        'online_compose_mlflow_image    = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"'
+        in terraform
+    )
+    assert '"cloudbuild.googleapis.com",' in terraform
+    assert '"roles/cloudbuild.builds.editor",' in terraform
+    assert 'data "google_project" "current"' in terraform
+    assert (
+        'resource "google_artifact_registry_repository_iam_member" "cloud_build_writer"'
+        in terraform
+    )
+    assert (
+        "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
+        in terraform
+    )
+    assert (
+        'resource "google_artifact_registry_repository_iam_member" "online_compose_reader"'
+        in terraform
+    )
+    assert (
+        "google_artifact_registry_repository_iam_member.online_compose_reader,"
+        in terraform
+    )
+    assert "default Artifact Registry image" in variables
+    assert "default GHCR image" not in variables
 
 
 def test_terraform_forecast_feature_schema_tracks_direction_encoding_columns() -> None:
@@ -1072,6 +1218,17 @@ def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> 
         in template
     )
     assert "--build" not in template
+
+
+def test_online_compose_startup_template_configures_artifact_registry_auth() -> None:
+    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
+
+    assert "packages.cloud.google.com/apt/doc/apt-key.gpg" in template
+    assert "google-cloud-cli" in template
+    assert (
+        'gcloud auth configure-docker "${artifact_registry_host}" --quiet >/dev/null 2>&1'
+        in template
+    )
 
 
 def test_online_compose_startup_template_configures_docker_log_rotation() -> None:

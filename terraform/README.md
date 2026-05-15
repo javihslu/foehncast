@@ -78,12 +78,12 @@ This Cloud Run runtime identity is intentionally narrower than the other hosted 
 
 When `provision_online_compose_host = true`, provide:
 
-- optional image overrides if you do not want the default GHCR `:main` tags
+- optional image overrides if you do not want the default Artifact Registry `:latest` tags
 - any extra stack environment in `online_compose_env_vars`
 
 If the hosted Grafana tenant should deliver the provisioned monitoring alerts by email, set `FOEHNCAST_GRAFANA_ALERT_EMAIL` in `online_compose_env_vars`. The local Docker path intentionally leaves that override out of `.env.example` and relies on the placeholder route instead.
 
-Terraform creates a network, a static public IP, and a Compute Engine VM. The VM clones the repo, writes a runtime `.env` file with the GCP and BigQuery settings, and pulls the GHCR images. If the images are not available, the sync fails fast instead of building on the VM.
+Terraform creates a network, a static public IP, and a Compute Engine VM. The VM clones the repo, writes a runtime `.env` file with the GCP and BigQuery settings, configures Artifact Registry auth with its runtime identity, and pulls the reviewed runtime images from Artifact Registry. If the images are not available, the sync fails fast instead of building on the VM.
 That `.env` file uses the same Feast runtime settings as the Cloud Run path, so both hosted targets use the same Feast config.
 It also points MLflow artifacts to `gs://<artifact-bucket>/mlflow/artifacts`, so artifacts go to the shared bucket instead of a VM-local volume.
 The VM installs a `foehncast-online-compose-sync` systemd timer. Every run fetches the configured Git ref and refreshes the hosted compose stack, so DAG and runtime changes land on the host without a manual SSH pull.
@@ -92,7 +92,7 @@ The app exposes that status through Prometheus `/metrics`, and Grafana shows it 
 
 Terraform also creates a Firestore Datastore-mode database for Feast online serving. Using a named database keeps this setup separate from any default Firestore state in the project.
 
-The VM uses a dedicated service account with access to BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
+The VM uses a dedicated service account with access to Artifact Registry pulls, BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
 
 That broader VM identity is transitional by design. GitHub delivery uses the separate `github-actions-deployer` identity, and Cloud Run uses the separate `foehncast-cloud-run` runtime identity. The online compose host keeps the broader `foehncast-online-compose` identity only because the current VM still combines operator, training, and serving responsibilities on one machine.
 
@@ -150,10 +150,12 @@ Remote destroy intentionally stops at Terraform-managed resources tracked in the
 
 ## GitHub Delivery Inputs
 
-The repository uses two delivery workflows:
+The repository uses two image-publication workflows that share one hosted build contract:
 
-- `.github/workflows/publish-runtime-images.yml` publishes the runtime images to GHCR
-- `.github/workflows/publish-app-image.yml` supports the Artifact Registry plus Cloud Run path for the inference service
+- `.github/workflows/publish-app-image.yml` submits the app image build to Cloud Build and publishes the reviewed image to Artifact Registry for the Cloud Run path
+- `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry for the retained operator host
+
+Artifact Registry is the canonical hosted image registry in this contract. GHCR convenience artifacts, if published separately, are not the default hosted deployment path.
 
 Set these GitHub repository variables:
 
@@ -191,6 +193,8 @@ The normal shared-environment path is:
 1. one-time maintainer bootstrap from Google Cloud Shell
 2. GitHub Actions remote apply
 3. best-effort repository-variable resync after each successful apply
+
+GitHub remains the review gate for hosted image publication, but Cloud Build now executes the reviewed hosted image builds on GCP.
 
 In normal operation you should not edit these variables by hand. The bootstrap path seeds the shared contract automatically. Remote applies also attempt to resync it, but GitHub's default workflow token may not be allowed to edit repository variables in every repository configuration.
 

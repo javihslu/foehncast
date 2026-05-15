@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/publish-app-image.yml
+      - .github/actions/load-gcp-repo-config/action.yml
+      - cloudbuild/**
       - containers/app/**
       - src/**
       - pyproject.toml
@@ -21,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+      project_id: ${{ steps.repo_config.outputs.project_id }}
       workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
       service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
       registry_host: ${{ steps.derived.outputs.registry_host }}
@@ -90,46 +93,54 @@ jobs:
     outputs:
       image_uri: ${{ steps.image.outputs.immutable_tag }}
     env:
-      REGISTRY_HOST: ${{ needs.config.outputs.registry_host }}
+      PROJECT_ID: ${{ needs.config.outputs.project_id }}
       IMAGE_NAME: foehncast-app
       IMAGE_REPOSITORY: ${{ needs.config.outputs.image_repository }}
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - uses: docker/setup-buildx-action@v4
-
       - id: image
         run: |
-          echo "immutable_tag=${IMAGE_REPOSITORY}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "latest_tag=${IMAGE_REPOSITORY}:latest" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
 
-      - uses: google-github-actions/auth@v2
+          echo "immutable_tag=${IMAGE_REPOSITORY}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          latest_tag=""
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            latest_tag="${IMAGE_REPOSITORY}:latest"
+          fi
+          echo "latest_tag=${latest_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
           service_account: ${{ needs.config.outputs.service_account_email }}
 
-      - uses: google-github-actions/setup-gcloud@v2
-
-      - run: gcloud auth configure-docker "${REGISTRY_HOST}" --quiet
-
-      - id: metadata
-        uses: docker/metadata-action@v6
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
         with:
-          images: ${{ env.IMAGE_REPOSITORY }}
-          tags: |
-            type=raw,value=sha-${{ github.sha }}
-            type=raw,value=latest,enable={{is_default_branch}}
+          project_id: ${{ needs.config.outputs.project_id }}
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: containers/app/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - id: submit
+        name: Submit Cloud Build
+        env:
+          BUILD_CONTEXT: .
+          DOCKERFILE: containers/app/Dockerfile
+          LATEST_TAG: ${{ steps.image.outputs.latest_tag }}
+        run: |
+          set -euo pipefail
+
+          substitutions=(
+            "_BUILD_CONTEXT=${BUILD_CONTEXT}"
+            "_DOCKERFILE=${DOCKERFILE}"
+            "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"
+            "_COMMIT_SHA=${GITHUB_SHA}"
+            "_FLOATING_TAG=${LATEST_TAG}"
+          )
+          IFS=,
+          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config cloudbuild/runtime-image.yaml --substitutions "${substitutions[*]}" --format='value(id)')"
+          unset IFS
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
 
       - name: Summarize published image
         run: |
@@ -137,7 +148,13 @@ jobs:
             echo "## Published app image"
             echo
             echo "- Immutable: ${{ steps.image.outputs.immutable_tag }}"
-            echo "- Floating: ${{ steps.image.outputs.latest_tag }}"
+            if [[ -n "${{ steps.image.outputs.latest_tag }}" ]]; then
+              echo "- Floating: ${{ steps.image.outputs.latest_tag }}"
+            else
+              echo "- Floating: not published for non-main ref"
+            fi
+            echo "- Builder: Cloud Build"
+            echo "- Build id: ${{ steps.submit.outputs.build_id }}"
             echo "- Runtime handoff: not executed from GitHub in this workflow"
             echo "- Next step: run Trigger Runtime Release with action deploy_candidate and this immutable image URI"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -152,7 +169,7 @@ jobs:
           {
             echo "## App image publish skipped"
             echo
-            echo "Set these repository variables to enable Artifact Registry publishing:"
+            echo "Set these repository variables to enable Artifact Registry publication through Cloud Build:"
             echo "- GCP_PROJECT_ID"
             echo "- GCP_LOCATION"
             echo "- GCP_ARTIFACT_REPOSITORY"
