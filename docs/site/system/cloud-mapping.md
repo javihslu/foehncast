@@ -276,7 +276,7 @@ The stable evidence surfaces are:
 
 - `airflow/reports/feature-pipeline-<dataset>-latest.json` and its history copy for feature retries or backfills
 - `airflow/reports/training-pipeline-<dataset>-latest.json` and its history copy for training follow-up
-- `airflow/reports/runtime-release-latest.json` and its history copy for reviewed deploy, promote, or rollback handoffs
+- the configured runtime release summary target and its history copy for reviewed deploy, promote, or rollback handoffs; the retained host still defaults to `airflow/reports/runtime-release-latest.json`
 - `.state/online-compose-sync/last-success.json` for the retained host refresh state
 - `/metrics` and the checked-in Grafana panels for post-recovery operator verification
 
@@ -285,6 +285,7 @@ The stable evidence surfaces are:
 - Terraform already covers the first cloud runtime slice.
 - The repo already contains a Cloud Run deployment path and Artifact Registry publishing flow.
 - Terraform can now provision an optional Cloud Composer environment for managed-Airflow readiness work.
+- The Composer env contract can now point runtime release acknowledgements at durable GCS storage instead of a VM-local report path.
 - The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
 - Local container runs can already mount ADC for BigQuery-based checks.
 

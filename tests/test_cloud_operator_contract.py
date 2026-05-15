@@ -782,6 +782,7 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket."
         in workflow_doc
     )
+    assert "configured runtime release summary target" in workflow_doc
     assert (
         "reviewed runtime release entry still need separate cutover work"
         in workflow_doc
@@ -803,6 +804,7 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "Cloud Composer is the target managed orchestration direction, and Terraform can now provision a Cloud Composer environment for readiness work."
         in cloud_mapping
     )
+    assert "durable GCS storage instead of a VM-local report path" in cloud_mapping
     assert (
         "A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket."
         in cloud_mapping
@@ -821,6 +823,7 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         in terraform_readme
     )
     assert ".github/workflows/publish-composer-dags.yml" in terraform_readme
+    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in terraform_readme
     assert "reviewed runtime release entry without VM SSH" in terraform_readme
     assert "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" in terraform_readme
     assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in terraform_readme
@@ -1012,8 +1015,9 @@ def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
     assert (
         'wait_for_airflow_dag_run_state "$DAG_ID" "$dag_run_id" success 120 2' in script
     )
-    assert "runtime-release-latest.json" in script
     assert "verify-report" in script
+    assert 'verify-report --expected-run-id "$dag_run_id"' in script
+    assert "--report-path" not in script
 
 
 def test_publish_composer_dags_script_builds_bundle_and_syncs_to_gcs_prefix() -> None:
@@ -1324,6 +1328,11 @@ def test_terraform_defines_cloud_composer_hosted_orchestration_contract() -> Non
     assert 'resource "google_compute_subnetwork" "cloud_composer"' in terraform
     assert 'resource "google_composer_environment" "cloud_composer"' in terraform
     assert "env_variables = local.cloud_composer_env_vars" in terraform
+    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in terraform
+    assert (
+        '"gs://${var.artifact_bucket_name}/airflow/reports/runtime-release-latest.json"'
+        in terraform
+    )
     assert (
         "service_account = google_service_account.cloud_composer_runtime[0].name"
         in terraform

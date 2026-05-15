@@ -93,5 +93,4 @@ docker compose "${compose_args[@]}" exec -T airflow-webserver \
 
 wait_for_airflow_dag_run_state "$DAG_ID" "$dag_run_id" success 120 2 >&2
 
-report_path="$ROOT_DIR/airflow/reports/runtime-release-latest.json"
-run_runtime_release_helper verify-report --expected-run-id "$dag_run_id" --report-path "$report_path"
+run_runtime_release_helper verify-report --expected-run-id "$dag_run_id"
