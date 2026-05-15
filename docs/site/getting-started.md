@@ -2,9 +2,9 @@
 
 This page keeps setup intentionally simple. The supported contributor path is the local evaluator flow with Docker. The shared cloud path is maintainer-only and documented separately.
 
-## Local Evaluator
+## Default Path
 
-This is the default path for a fresh machine.
+This is the default path for almost every reader.
 
 1. Install Docker.
 2. Clone the repository.
@@ -12,26 +12,30 @@ This is the default path for a fresh machine.
 
 You do not need `gcloud`, Terraform, GitHub Actions variables, or a local compiler toolchain for this path.
 
-The local evaluator path bundles MinIO for curated features and MLflow artifacts, the Datastore-mode emulator for Feast online serving, and the checked-in Prometheus, StatsD exporter, and Grafana stack. The bootstrap waits for the feature-to-training hand-off, verifies Grafana starter resources, and prints alternate endpoints automatically if the default ports are already busy. The optional `development_env` notebook container stays off unless you explicitly target notebook or dev-shell commands. See [Local Evaluator](system/local-evaluator.md) for the full runtime contract.
+<div class="mermaid">
+flowchart TD
+  DOCKER["fab:fa-docker Docker"] --> BOOT["./scripts/bootstrap-local.sh"]
+  BOOT --> APP["FastAPI app"]
+  BOOT --> AIR["Airflow"]
+  BOOT --> MLF["MLflow"]
+  BOOT --> MON["Prometheus + Grafana"]
+  BOOT --> DATA["MinIO + Feast emulator"]
+</div>
 
-If you maintain the shared cloud environment, use [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). Contributors do not need the cloud path for normal work.
+The bootstrap starts the local evaluator stack, waits for the feature-to-training hand-off, verifies starter monitoring resources, and prints alternate endpoints when default ports are busy. The optional `development_env` container stays off unless you explicitly ask for notebook or dev-shell workflows. See [Local Evaluator](system/local-evaluator.md) for the full runtime contract.
 
-## Surface Roles
+## Local Endpoints
 
-The local stack still keeps the same surface split as the wider docs: Streamlit and prediction responses are rider-facing evaluation surfaces, FastAPI routes are service surfaces, and `/metrics`, Prometheus, Grafana, Airflow, and MLflow stay on the operator side. The bootstrap also keeps retained monitoring history under `.state/monitoring/`, republishes persisted pipeline summaries through `/metrics`, and verifies the Airflow health payload plus Grafana provisioning before it reports success. For the full surface boundary, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).
+| Surface | URL | Role |
+|------|-----|------|
+| App | `http://127.0.0.1:8000` | service surface for health, prediction, and ranking |
+| App metrics | `http://127.0.0.1:8000/metrics` | service-owned monitoring surface |
+| Airflow | `http://127.0.0.1:8080` | operator surface for orchestration |
+| MLflow | `http://127.0.0.1:5001` | operator surface for runs and model versions |
+| Prometheus | `http://127.0.0.1:9090` | operator surface for scraped metrics |
+| Grafana | `http://127.0.0.1:3000` | operator surface for dashboards and alerts |
 
-After bootstrap completes, the main local endpoints are:
-
-- App: `http://127.0.0.1:8000`
-- App metrics: `http://127.0.0.1:8000/metrics`
-- Airflow: `http://127.0.0.1:8080`
-- MLflow: `http://127.0.0.1:5001`
-- Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000`
-- Objectstore UI: printed by the bootstrap helper when the stack comes up
-- Feast online store emulator: printed by the bootstrap helper when the stack comes up
-
-The app and app-metrics routes are service surfaces. Airflow, MLflow, Prometheus, and Grafana are operator surfaces in this local evaluator path.
+The objectstore UI and the Feast emulator endpoint are printed by the bootstrap helper when the stack comes up. For the full surface boundary, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).
 
 Example check:
 
@@ -41,40 +45,14 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-## Shared Cloud Automation
+## Maintainer Path
 
-The shared hosted environment is maintained separately from normal contributor setup. Contributors only need Docker and the local evaluator bootstrap, not local Terraform, `gcloud`, or `gh`. Maintainers should start with [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md) for the bootstrap and remote Terraform path, and use `terraform/README.md` only when maintaining the shared cloud environment.
+Most contributors can stop at the local evaluator path. If you maintain the shared cloud environment, start with [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). The cloud path stays separate from the default contributor path and does not belong in the first-run setup.
 
-Hosted deployment keeps the runtime scope tight. The cloud targets deploy runtime services only; `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
-
-## What Lives Where
-
-See [Repository](system/repository.md) for the dedicated layout guide. The short version is: `src/foehncast/` holds the application code, `dags/` holds Airflow entry points, `scripts/` and `terraform/` hold maintainer tooling, and `docs/` plus `tests/` hold the public docs and regression coverage.
+Hosted deployment keeps the runtime scope tight. Runtime services deploy to the cloud path. Local notebooks, docs tooling, and local emulators stay local or CI-only.
 
 ## Read Next
 
-### Overview
-
-- [Use Case and Data](system/use-case.md)
-- [Repository](system/repository.md)
-- [Configuration and Contracts](system/configuration-and-contracts.md)
-- [Interfaces and Surfaces](system/interfaces-and-surfaces.md)
-
-### Runtime and Deployment
-
-- [Architecture](system/architecture.md)
-- [Local Evaluator](system/local-evaluator.md)
-- [Hosted Full-Stack](system/hosted-full-stack.md)
-- [Cloud Mapping](system/cloud-mapping.md)
-- [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md)
-
-### Pipelines and Modeling
-
-- [Feature Pipeline](system/feature-pipeline.md)
-- [Training Pipeline](system/training-pipeline.md)
-- [Inference Pipeline](system/inference-pipeline.md)
-- [Seasonality](system/seasonality.md)
-
-### Operations
-
-- [Monitoring](system/monitoring.md)
+- [Local Evaluator](system/local-evaluator.md) for the full local runtime contract.
+- [Interfaces and Surfaces](system/interfaces-and-surfaces.md) for rider, service, and operator boundaries.
+- [Repository](system/repository.md) for the project layout.

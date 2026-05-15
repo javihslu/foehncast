@@ -1,30 +1,48 @@
 # Feature Pipeline
 
-FoehnCast keeps the feature pipeline as a clear set of boundaries. The same curated feature contract drives the local evaluator and the hosted paths: forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for Feast serving use without changing the meaning of the feature set.
+FoehnCast keeps the feature pipeline as a clear set of boundaries. The same curated feature contract drives the local evaluator and the hosted paths: forecast data is ingested, turned into curated features, checked against explicit bounds, stored through a backend abstraction, and then reshaped for Feast serving without changing the meaning of the feature set.
 
-This page records the current design that has been validated in the local stack and in the review notebook. It focuses on what each stage owns today and what stays outside its scope.
+This page describes the validated feature contract. It focuses on what each stage owns and what stays outside its scope.
 
 !!! note "Scope"
 
-    This page describes the current validated feature-path contract.
+    This page describes the validated feature-path contract.
     It is not a roadmap.
-    Future changes should be documented after they are chosen and implemented.
+    Future changes belong here only after the contract changes.
 
 ## Pipeline Shape
 
 <div class="mermaid">
 flowchart LR
-    CFG[Spot and storage config] --> ING[Ingest raw forecast rows]
-    ING --> ENG[Engineer curated features]
-    ENG --> VAL[Validate schema and ranges]
-    VAL --> STO[Store curated rows]
-    STO --> OFF[Build Feast offline frame]
-    OFF --> EXP[Export Feast-ready parquet]
-    EXP --> FEAST[Publish Feast-sync asset]
-    FEAST --> REQ[Publish training-request asset]
+    subgraph Input ["Inputs"]
+        direction TB
+        CFG["Spot and storage config"]
+        ING["Ingest raw forecast rows"]
+        CFG --> ING
+    end
+
+    subgraph Curated ["Curated path"]
+        direction TB
+        ENG["Engineer curated features"]
+        VAL["Validate schema and ranges"]
+        STO["Store curated rows"]
+        ENG --> VAL --> STO
+    end
+
+    subgraph Handoff ["Handoff"]
+        direction TB
+        OFF["Build Feast offline frame"]
+        EXP["Export Feast-ready parquet"]
+        FEAST["Publish Feast-sync asset"]
+        REQ["Publish training-request asset"]
+        OFF --> EXP --> FEAST --> REQ
+    end
+
+    ING --> ENG
+    STO --> OFF
 </div>
 
-The key point is that each stage has one clear job:
+Each stage has one clear job:
 
 - ingest proves the upstream weather contract
 - engineering creates the curated feature frame
@@ -35,7 +53,7 @@ The key point is that each stage has one clear job:
 
 ## Runtime Role
 
-| Runtime mode | What the feature path does today |
+| Runtime mode | What the feature path does |
 |------|-----------------------------|
 | Local evaluator | Airflow writes curated rows to the local storage baseline and prepares Feast downstream |
 | Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through the hosted storage surfaces |
@@ -54,7 +72,7 @@ The key point is that each stage has one clear job:
 
 ## Ingest Boundary
 
-The ingest stage uses the live forecast helper rather than a notebook-only mock. That matters because the first contract to defend is upstream shape and timestamp behavior.
+The ingest stage uses the live forecast helper rather than a notebook-only mock. The first contract to defend is upstream shape and timestamp behavior.
 
 The validated ingest assumptions are:
 
@@ -64,13 +82,13 @@ The validated ingest assumptions are:
 - timezone semantics are made explicit before later storage and Feast hand-offs
 - the upstream wind-unit contract is explicit: Open-Meteo is requested with `wind_speed_unit=kmh`, the returned `hourly_units` map is validated at ingest, and the persisted pipeline summary records those units for later review
 
-For this project, raw weather features stay in source weather units, which currently means km/h for wind speed and gusts. That is separate from domain-facing rideability thresholds, which remain configured in knots and are converted at scoring time instead of changing the stored feature contract.
+For this project, raw weather features stay in source weather units, which means km/h for wind speed and gusts. That is separate from domain-facing rideability thresholds, which remain configured in knots and are converted at scoring time instead of changing the stored feature contract.
 
 Ingest keeps the upstream payload boundary explicit instead of mixing raw capture with curated enrichment.
 
 ## Curated Feature Boundary
 
-The engineering layer creates the project's curated feature frame. The current feature set already reflects several design choices that should remain stable:
+The engineering layer creates the project's curated feature frame. The feature set already reflects several design choices that should stay stable:
 
 - cyclical time variables are encoded with sine and cosine instead of plain integers
 - shoreline fit is represented with circular math through `shore_alignment`
@@ -79,13 +97,13 @@ The engineering layer creates the project's curated feature frame. The current f
 - raw columns remain available alongside engineered columns so downstream validation and storage operate on one complete curated frame
 - the datetime index and time basis are preserved so later storage and Feast preparation can add persistence and serving context without redefining the feature set
 
-The current training path is tree-based, so feature representation quality matters more than blanket scaling. Circular wind-direction encoding and the shift toward `gust_excess_10m` follow that same choice. The engineering stage stays narrow: create curated rows first, then let validation, storage, and Feast-specific projection happen downstream.
+The supported training path is tree-based, so feature representation quality matters more than blanket scaling. Circular wind-direction encoding and the shift toward `gust_excess_10m` follow that same choice. The engineering stage stays narrow: create curated rows first, then let validation, storage, and Feast-specific projection happen downstream.
 
 ## Validation Boundary
 
 Validation is structural, not semantic. It is there to stop broken feature frames before they reach storage, training, or Feast preparation.
 
-The current validated contract is:
+The validation contract is:
 
 - required columns cover the actual curated feature frame, not only raw ingest fields
 - configured range checks cover the engineered features that later storage and Feast preparation depend on
@@ -94,7 +112,7 @@ The current validated contract is:
 - completeness checks remain important because ratio-based features can go null when sustained wind approaches zero
 - validation is the explicit gate before downstream persistence and Feast projection
 
-This layer is not supposed to decide whether a forecast is good for riding. That belongs to the downstream ranking and prediction logic.
+This layer does not decide whether a forecast is good for riding. That belongs to the downstream ranking and prediction logic.
 
 ## Storage Boundary
 
@@ -102,13 +120,13 @@ Storage works only if it behaves like persistence rather than transformation. A 
 
 <div class="mermaid">
 flowchart LR
-    FEAT[Curated feature frame] --> WRITE[write_features]
-    WRITE --> BACKEND[Local, S3-compatible, or BigQuery backend]
-    BACKEND --> READ[read_features]
-    READ --> ROUND[Round-trip checks]
+    FEAT["Curated feature frame"] --> WRITE["write_features"]
+    WRITE --> BACKEND["Local, S3-compatible, or BigQuery backend"]
+    BACKEND --> READ["read_features"]
+    READ --> ROUND["Round-trip checks"]
 </div>
 
-The current storage contract is:
+The storage contract is:
 
 - local, S3-compatible, and BigQuery backends may use different write-time metadata internally
 - rerunning one logical spot-and-dataset write must replace that slice instead of accumulating cloud-only duplicates
@@ -118,7 +136,7 @@ The current storage contract is:
 - the stored frame should preserve the time basis needed for later Feast projection after read-back
 - storage should operate on validation-approved curated rows, not compensate for upstream quality failures
 
-This is why raw landing, curated storage, and Feast should remain separate responsibilities rather than one blurred storage layer.
+That is why raw landing, curated storage, and Feast should remain separate responsibilities rather than one blurred storage layer.
 
 ## Storage Layering
 
@@ -130,28 +148,21 @@ This is why raw landing, curated storage, and Feast should remain separate respo
 | Feast registry and staging | local files | GCS |
 | Feast online store | Datastore-mode emulator | Datastore |
 
-The local operator path mirrors the cloud storage roles more closely: MinIO-backed object storage for curated objects and MLflow artifacts, exported parquet for the local Feast offline source, and a Datastore-mode emulator for the local Feast online store.
-
-That role split matters more than the exact local implementation names: curated persistence stays separate from Feast serving, and both stay separate from registry metadata.
+The local operator path mirrors the cloud storage roles closely: MinIO-backed object storage for curated objects and MLflow artifacts, exported parquet for the local Feast offline source, and a Datastore-mode emulator for the local Feast online store. Curated persistence stays separate from Feast serving, and both stay separate from registry metadata.
 
 ## Storage Control Surface
 
 The storage split is not only conceptual. The repository exposes it through explicit runtime and infrastructure surfaces so the local path and the cloud target stay aligned.
 
-| Surface | Current implementation | Why it matters |
-|------|------------------------|----------------|
-| Backend selection | `storage.backend` in `config.yaml` with supported values `s3` or `bigquery` | keeps the curated persistence mode explicit without carrying a legacy file-backed path |
-| Curated local store | `S3FeatureStoreBackend` against the bundled MinIO service | keeps the local object-access layer aligned with the hosted architecture and MLflow artifact flow |
-| Curated cloud store | `BigQueryFeatureStoreBackend` writing the configured project, dataset, and table | matches the cloud analytical target and preserves rerun-safe slice replacement |
-| Feast offline local source | `export_offline_store(...)` writing `data/feast/<dataset>.parquet` | keeps Feast downstream from curated persistence |
-| Feast cloud source | BigQuery table or view referenced by the cloud Feast config | avoids duplicating feature logic in a separate serving path |
-| Feast local runtime state | `.state/feast/registry.db` and `.state/feast/feature_store.runtime.yaml` | keeps local integration state separate from the curated dataset while the emulator remains disposable |
-| Feast registry and staging | local state files in development, GCS in the cloud path | keeps registry metadata separate from the curated dataset |
-| Terraform baseline | Terraform-managed GCS, BigQuery, and Datastore-mode Firestore baseline | wires the cloud storage surfaces without changing the feature contract itself |
+| Surface | Role |
+|------|------|
+| Backend selection | `storage.backend` keeps curated persistence explicit with `s3` or `bigquery` |
+| Curated storage | `S3FeatureStoreBackend` is the local MinIO-backed path; `BigQueryFeatureStoreBackend` is the cloud path |
+| Feast offline source | local export writes `data/feast/<dataset>.parquet`; cloud Feast reads a BigQuery table or view |
+| Feast runtime state | local `.state/feast/*` files and cloud GCS paths keep Feast metadata separate from curated data |
+| Terraform baseline | Terraform provisions GCS, BigQuery, and Datastore surfaces without changing feature semantics |
 
-Terraform is part of the storage boundary because it provisions the cloud-side GCS and BigQuery surfaces that the feature pipeline expects. It should supply the bucket, dataset, and table baseline while leaving ingest, engineering, validation, storage, and Feast preparation responsible for their own stage contracts.
-
-That means storage normalization is role-specific. The local baseline now normalizes the blob-style surfaces onto MinIO, but the cloud target still keeps curated features in BigQuery and the Feast online store in Datastore rather than flattening everything behind one object API.
+Terraform is part of the storage boundary because it provisions the cloud-side GCS and BigQuery surfaces that the feature pipeline expects. It should supply the bucket, dataset, and table baseline while leaving ingest, engineering, validation, storage, and Feast preparation responsible for their own stage contracts. The local baseline uses MinIO for blob-style surfaces, but the cloud target still keeps curated features in BigQuery and the Feast online store in Datastore rather than flattening everything behind one object API.
 
 ## Feast Boundary
 
@@ -159,11 +170,11 @@ Feast is downstream from the curated feature store. It should consume curated ro
 
 <div class="mermaid">
 flowchart LR
-    STORED[Stored curated rows] --> OFF[build_offline_store_frame]
-    STORED --> ENT[build_entity_rows]
-    OFF --> HIST[Historical retrieval inputs]
+    STORED["Stored curated rows"] --> OFF["build_offline_store_frame"]
+    STORED --> ENT["build_entity_rows"]
+    OFF --> HIST["Historical retrieval inputs"]
     ENT --> HIST
-    HIST --> EXP[export_offline_store]
+    HIST --> EXP["export_offline_store"]
 </div>
 
 That means:

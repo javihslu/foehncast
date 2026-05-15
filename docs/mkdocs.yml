@@ -35,6 +35,11 @@ markdown_extensions:
   - def_list
   - md_in_html
   - tables
+  - pymdownx.emoji:
+      # yaml-language-server-disable Unresolved tag
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      # yaml-language-server-disable Unresolved tag
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.details
   - pymdownx.highlight:
       anchor_linenums: true
@@ -49,6 +54,7 @@ plugins:
 nav:
   - Home: index.md
   - Overview:
+      - Overview: overview.md
       - Getting Started: getting-started.md
       - Use Case and Data: system/use-case.md
       - Repository: system/repository.md

@@ -17,10 +17,10 @@ Use [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/
 Use this repo when you want to operate the Feast serving layer on top of the same curated weather features already produced by the project.
 
 ```mermaid
-flowchart LR
+flowchart TD
    Curated[Curated features] --> FeastRepo[Feast repo]
    FeastRepo --> Online[Online feature store]
-   Online --> API[/features/online path]
+   Online --> API["/features/online path"]
 ```
 
 ## What Lives Here

@@ -1,12 +1,12 @@
 # Cloud Mapping
 
-FoehnCast keeps one public hosted lane and one private operator lane today. Cloud Run carries the shared API, while the hosted full-stack target still runs on one Compute Engine host for Airflow, MLflow, monitoring, and private app checks. That retained host is current but transitional while hosted image builds move toward Cloud Build and hosted orchestration moves toward Cloud Composer. This page maps the validated local stack onto the current and target GCP lanes without changing the core Feature-Training-Inference boundaries.
+FoehnCast has one public hosted lane and one private operator lane. Cloud Run serves the shared API. A private operator surface carries Airflow, MLflow, monitoring, and private app checks. In the active shared environment that surface is implemented by a retained Compute Engine host, while the intended managed direction moves image builds toward Cloud Build and orchestration toward Cloud Composer. This page maps the cloud lanes without changing the core Feature-Training-Inference boundaries.
 
 !!! note "What this page covers"
 
-    The shared GCP baseline and both hosted lanes already exist.
+    The shared GCP baseline defines one public API lane and one private operator lane.
     Cloud Run is the shared public API lane.
-    The hosted full-stack target is the current private operator lane.
+    The hosted full-stack target is the active implementation of the private operator lane.
     Cloud Build and Cloud Composer are the intended managed hosted direction.
 
 ## Cloud Paths In One View
@@ -18,8 +18,8 @@ FoehnCast keeps one public hosted lane and one private operator lane today. Clou
 <p>Terraform provisions APIs, Artifact Registry, GCS, BigQuery, and GitHub OIDC.</p>
 </li>
 <li>
-<p><strong>Current operator lane</strong></p>
-<p>One Compute Engine host still runs Airflow, MLflow, monitoring, and private app checks.</p>
+<p><strong>Active operator lane</strong></p>
+<p>One Compute Engine host runs Airflow, MLflow, monitoring, and private app checks in the shared environment.</p>
 </li>
 <li>
 <p><strong>Managed hosted direction</strong></p>
@@ -37,9 +37,42 @@ FoehnCast keeps one public hosted lane and one private operator lane today. Clou
 | Lane | Concrete target | State | Default exposure | Main job |
 |------|-----------------|-------|------------------|----------|
 | Shared API lane | hosted inference target on Cloud Run | active | public | serve the FastAPI product and service routes |
-| Operator lane | hosted full-stack target on Compute Engine | active but transitional | private by default | run Airflow, MLflow, monitoring, and private app checks |
+| Operator lane | hosted full-stack target on Compute Engine | implemented on retained host | private by default | provide the private operator surface for Airflow, MLflow, monitoring, and private app checks |
 | Managed hosted control plane | Cloud Build and Cloud Composer | target direction | private or platform-only | build hosted images and run hosted Airflow workloads without VM-owned orchestration |
 | Delivery lane | GitHub Actions plus Terraform plus OIDC | active review gate | not a runtime surface | publish reviewed artifacts and apply reviewed infrastructure changes |
+
+## Shared Core And Deployment Differences
+
+<div class="mermaid">
+flowchart TD
+    %% Colors
+    classDef core fill:#f5f5f5,stroke:#333
+    classDef local fill:#e1f5fe,stroke:#01579b
+    classDef cloud fill:#fff8e1,stroke:#f57f17
+
+    CORE["Shared core and pipeline boundaries"]:::core
+
+    subgraph LocalSurface ["fab:fa-docker Local lane"]
+        direction LR
+        LSUP["Airflow + MLflow + metrics"]:::local
+        LAPP["MinIO + Feast + app"]:::local
+        LSUP --> LAPP
+    end
+
+    subgraph CloudSurface ["fab:fa-google Cloud lane"]
+        direction LR
+        CDATA["BigQuery + GCS + Datastore"]:::cloud
+        CAPI["Cloud Run API"]:::cloud
+        COPS["Operator lane"]:::cloud
+        CDATA --> CAPI
+        CDATA --> COPS
+    end
+
+    CORE --> LocalSurface
+    CORE --> CloudSurface
+</div>
+
+The shared core stays the same. Local and cloud differ mainly in the support surfaces around that core.
 
 ## Mapping Principle
 
@@ -61,90 +94,129 @@ FoehnCast keeps one public hosted lane and one private operator lane today. Clou
 
 This boundary matters because the hosted app is the product and service surface. Grafana remains an operator dashboard, and public docs should prefer rendered evidence over live embeds of private hosted tools.
 
-## Current Hosted Topology
+## Active Hosted Topology
 
 <div class="mermaid">
 flowchart LR
-    TF[Terraform baseline] --> GCP[Shared GCP resources]
-    GCP --> HOST[Hosted full-stack target]
-    GCP --> RUN[Hosted inference target]
-    TF --> GH[GitHub OIDC delivery]
-    HOST --> STACK[Airflow + MLflow + API + monitoring]
-    RUN --> API[Inference API only]
-    GH --> HOST
-    GH -. app image publish .-> RUN
+    %% Styling
+    classDef infra fill:#f5f5f5,stroke:#333
+    classDef runner fill:#f4f1ea,stroke:#f05032
+    classDef platform fill:#fff,stroke:#4285F4
+    classDef operator fill:#fff8e1,stroke:#f57f17
+
+    TF["Terraform baseline"]:::infra
+    GH["fab:fa-github Delivery + OIDC"]:::runner
+
+    subgraph GCP ["fab:fa-google Hosted environment"]
+        direction TB
+        BASE["IAM + Registry + GCS + BigQuery"]:::platform
+
+        subgraph PublicLane ["API lane"]
+            RUN["Cloud Run API"]:::platform
+        end
+
+        subgraph PrivateLane ["Ops lane"]
+            HOST["Compute Engine host"]:::operator
+            OPS["Airflow + MLflow + metrics + app checks"]:::operator
+            HOST --> OPS
+        end
+
+        BASE --> RUN
+        BASE --> HOST
+    end
+
+    TF --> BASE
+    GH -- "Deploy" --> RUN
+    GH -- "Refresh" --> HOST
 </div>
 
 ## Managed Direction
 
 <div class="mermaid">
 flowchart LR
-    GH[GitHub review gate] --> CB[Cloud Build]
-    CB --> AR[Artifact Registry]
-    AR --> RUN[Cloud Run API lane]
-    TF[Terraform baseline] --> GCP[Shared GCP resources]
-    GCP --> CMP[Cloud Composer]
-    CMP --> BQ[(BigQuery curated features)]
-    CMP --> GCS[(GCS artifacts)]
+        classDef managed fill:#fff8e1,stroke:#f57f17
+        classDef git fill:#f4f1ea,stroke:#f05032
+        classDef store fill:#ececff,stroke:#9370db
+
+        GH["fab:fa-github GitHub Actions"]:::git
+
+        subgraph ManagedGCP ["fab:fa-google Managed plane"]
+            direction LR
+            CB["Cloud Build"]:::managed --> CRUN["Cloud Run API"]:::managed
+            CMP["Cloud Composer"]:::managed --> DATA["BigQuery + GCS"]:::store
+        end
+
+        GH -- "Build" --> CB
 </div>
 
-The managed direction keeps the same shared storage and API surfaces, but it changes two supporting planes: hosted image builds move into Cloud Build, and hosted orchestration moves into Cloud Composer. The retained host should then shrink to only the services that still need it.
+The managed direction keeps the same storage and API surfaces, but it changes two supporting planes: image builds move into Cloud Build, and orchestration moves into Cloud Composer. The retained host should then shrink to only the services that still need it.
 
-## What Exists Today
+## Implemented Hosted Surfaces
 
-| Surface | Deploys | Leaves out | Current state |
+| Surface | Deploys | Leaves out | Implementation status |
 |--------|---------|------------|---------------|
 | Shared GCP baseline | APIs, Artifact Registry, GCS, BigQuery, Datastore, and OIDC identities | app containers | implemented through Terraform |
-| Hosted full-stack target (operator lane) | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and retained for operator control-plane duties |
+| Hosted full-stack target (operator lane) | Airflow, MLflow, and the API on one Compute Engine host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented as the active operator surface |
 | Hosted inference target (API lane) | the FastAPI inference API on Cloud Run | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | implemented and promoted as the primary hosted API path |
 | GitHub delivery | image publishing and remote Terraform runs | runtime services | implemented and bootstrapped for the shared environment |
-| Hosted runtime image publishing | app image in Artifact Registry, other runtime images still mixed | n/a | transitional; not yet one managed build contract |
+| Hosted runtime image publishing | app image in Artifact Registry, other runtime images still mixed | n/a | partial; not yet one managed build contract |
 | BigQuery backend support | support for a BigQuery storage backend in the app | none | available in both local and hosted runtimes |
 
-The hosted targets deploy runtime services only. Development assets stay local or CI-only. Cloud Run is the only promoted public API path. The hosted full-stack target stays private by default and keeps Airflow, MLflow, Prometheus, and Grafana together on the operator side for now.
+The hosted targets deploy runtime services only. Development assets stay local or CI-only. Cloud Run is the only promoted public API path. The hosted full-stack target stays private by default and keeps Airflow, MLflow, Prometheus, and Grafana together on the operator side.
 
 ## Active Shared Deployment Path
 
-Today the shared environment keeps a stable split: Cloud Run carries the shared public API URL, one Compute Engine host stays online as the private operator lane for Airflow, MLflow, monitoring, and private app checks, and GitHub Actions plus remote Terraform advance reviewed day-2 changes after maintainer bootstrap. This is the current operational contract, not the desired end state.
+The shared environment keeps a stable split: Cloud Run carries the shared public API URL, one Compute Engine host stays online as the private operator lane for Airflow, MLflow, monitoring, and private app checks, and GitHub Actions plus remote Terraform advance reviewed day-2 changes after maintainer bootstrap. This is the active operating contract, not the desired end state.
 
-The intended hosted direction keeps Cloud Run as the public API, moves hosted image builds to Cloud Build, and moves hosted orchestration to Cloud Composer. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed current-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+The intended hosted direction keeps Cloud Run as the public API, moves hosted image builds to Cloud Build, and moves hosted orchestration to Cloud Composer. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
 ## Managed Orchestration Direction
 
 Cloud Composer is the target managed orchestration direction.
 
-Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed current-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
-## Current And Target Hosted Mapping
+## Active And Target Hosted Mapping
 
-| Concern | Current hosted path | Target hosted direction |
+| Concern | Active hosted path | Target hosted direction |
 |---------|---------------------|-------------------------|
 | FastAPI app | Cloud Run API lane for shared traffic, plus the private operator lane for host-local checks | Cloud Run remains the only shared public API lane |
 | Hosted image builds | GitHub-hosted workflows publish an app image to Artifact Registry and other runtime images through a mixed path | Cloud Build publishes all hosted runtime images to Artifact Registry |
-| Airflow orchestration | retained operator lane today | Cloud Composer |
-| MLflow tracking | operator lane today with GCS-backed artifacts | stays on a separate operator surface until a later decision changes it |
-| Monitoring | operator lane today | stays private on an operator surface, whether retained-host or later replacement |
+| Airflow orchestration | retained operator lane in the active shared environment | Cloud Composer |
+| MLflow tracking | operator lane in the active shared environment with GCS-backed artifacts | stays on a separate operator surface until a later decision changes it |
+| Monitoring | operator lane in the active shared environment | stays private on an operator surface, whether retained-host or later replacement |
 | Curated storage | BigQuery backend already available | stays on BigQuery |
 | Feast serving path | sits on top of the same curated data | keeps the same logical feature view against cloud storage |
 
 ## Cloud Pipeline Shape
 
 <div class="mermaid">
-flowchart TD
-    OME[Open-Meteo] --> RAW[(GCS raw landing)]
-    RAW --> FEAT[Feature job]
-    FEAT --> BQ[(BigQuery curated features)]
-    BQ --> TRAIN[Training job]
-    TRAIN --> MLF[(MLflow)]
-    MLF --> HOST[Operator host lane]
-    MLF --> RUN[Cloud Run API lane]
-    OME --> HOST
-    OME --> RUN
-    OSRM[OSRM] --> HOST
-    OSRM --> RUN
-    BQ --> FEAST[Feast view]
-    FEAST --> HOST
+flowchart LR
+    classDef source fill:#f5f5f5,stroke:#333
+    classDef process fill:#e1f5fe,stroke:#01579b
+    classDef data fill:#ececff,stroke:#9370db
+    classDef serving fill:#fff8e1,stroke:#f57f17
+
+    WX["Forecasts"]:::source --> RAW
+    RAW[(GCS landing)]:::data --> FEAT
+    FEAT["Feature job"]:::process --> BQ
+    BQ[(BigQuery curated features)]:::data --> TRAIN
+    TRAIN["Training job"]:::process --> MLF
+    MLF[(MLflow registry)]:::data --> HOST
+    MLF --> RUN
+    BQ --> FEAST
+    FEAST["Feast layer"]:::data --> HOST
     FEAST --> RUN
+    ROUTE["OSRM API"]:::source --> LIVE
+    WX --> LIVE
+    LIVE["Live inputs"]:::source --> HOST
+    LIVE --> RUN
+
+    subgraph Serving ["fab:fa-google Serving lane"]
+        direction TB
+        HOST["Operator lane"]:::serving
+        RUN["Cloud Run API"]:::serving
+    end
 </div>
 
 | Layer | Cloud direction |
@@ -157,7 +229,7 @@ flowchart TD
 
 ## Storage Layering In Cloud
 
-The current cloud design works best when storage is split by role instead of forcing every layer into one system.
+The cloud design works best when storage is split by role.
 
 | Data role | Recommended cloud surface | Why |
 |----------|---------------------------|-----|
@@ -193,7 +265,7 @@ In practice, GCS stores raw landing data and registry-style metadata for the clo
 | Storage | MinIO-backed curated objects plus local Feast parquet and a Datastore-mode emulator | GCS holds raw landing and artifacts; BigQuery becomes the shared curated cloud data surface |
 | Artifacts | MinIO-backed MLflow artifact path | GCS bucket |
 | Auth | local `.env` plus developer credentials | runtime service accounts and GitHub OIDC |
-| Image source | local builds | mixed GitHub-hosted image publication today; target is Cloud Build plus Artifact Registry for all hosted runtime images |
+| Image source | local builds | mixed GitHub-hosted image publication in the active shared environment; target is Cloud Build plus Artifact Registry for all hosted runtime images |
 | Public exposure | local ports on the developer machine | Cloud Run is the shared hosted API surface; the operator lane stays private by default; dashboards stay private unless you deliberately publish them |
 
 ## Recovery Evidence In Cloud
@@ -215,16 +287,16 @@ The stable evidence surfaces are:
 - The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
 - Local container runs can already mount ADC for BigQuery-based checks.
 
-## Current Transitional Points
+## Remaining Hosted Simplifications
 
-- MLflow stays on the retained host in the active shared environment.
-- Airflow still stays on the retained host today, so runtime release, retries, and backfills still depend on VM-backed orchestration.
+- MLflow stays on the retained operator lane in the active shared environment.
+- Airflow still runs on the retained operator lane, so runtime release, retries, and backfills still depend on VM-backed orchestration.
 - Cloud Run already owns the public API lane and should keep that role.
 - Hosted image delivery is still split between GitHub-hosted execution and mixed registries; the target is Cloud Build plus Artifact Registry.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.
 
 ## Why This Fits The Project Brief
 
-The goal is cloud-ready pipelines and cloud orchestration. This mapping keeps the validated backend design, makes the current retained-host dependency explicit, and points the hosted path toward Google-managed build and orchestration services without discarding the working local baseline.
+The goal is cloud-ready pipelines and cloud orchestration. This mapping keeps the validated backend design, makes the retained-host dependency explicit, and points the hosted path toward Google-managed build and orchestration services without discarding the working local baseline.
 
-See [Architecture](architecture.md) for the current runtime view and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the maintainer path that bootstraps and advances these hosted targets. The repository root also includes a Terraform README with the deployment details.
+See [Architecture](architecture.md) for the runtime view and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the maintainer path that bootstraps and advances these hosted targets. The repository root also includes a Terraform README with the deployment details.

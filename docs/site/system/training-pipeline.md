@@ -1,29 +1,29 @@
 # Training Pipeline
 
-FoehnCast keeps training downstream from the curated feature store. The same training contract runs in the local evaluator and in the current shared hosted environment: the training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline. The surrounding hosted orchestration surface is transitional, but the training contract itself stays the same.
+FoehnCast keeps training downstream from the curated feature store. The training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline.
 
-This page records the current training design that is validated in the local stack and in regression tests. It focuses on what each stage owns today and what remains an explicit operator control rather than an automatic side effect.
+This page describes what each stage owns and what remains an explicit operator control rather than an automatic side effect.
 
 !!! note "Scope"
 
-    This page describes the current validated training-path contract.
-    It focuses on what the training path owns, not on the hosted control-plane migration.
-    The target hosted direction may change where orchestration runs, but it does not change the training contract described here.
+    This page describes the validated training-path contract.
+    It focuses on what the training path owns.
+    Hosted orchestration may move, but the training contract described here stays the same.
 
 ## Pipeline Shape
 
 <div class="mermaid">
 flowchart LR
-    CUR[Curated feature store asset] --> LAB[Label curated rows]
-    REQ[Training-request asset] --> LAB
-    LAB --> TRN[Train model]
-    TRN --> EVA[Generate evaluation report]
-    EVA --> REG[Register model version]
-    REG --> ALS[Assign requested alias]
-    OPS[Promote and rollback controls] --> ALS
+    CUR["Curated feature store asset"] --> LAB["Label curated rows"]
+    REQ["Training-request asset"] --> LAB
+    LAB --> TRN["Train model"]
+    TRN --> EVA["Generate evaluation report"]
+    EVA --> REG["Register model version"]
+    REG --> ALS["Assign requested alias"]
+    OPS["Promote and rollback controls"] --> ALS
 </div>
 
-The key point is that the training path stays explicit:
+The training path stays explicit:
 
 - curated features arrive from the feature pipeline instead of being rebuilt from raw ingest
 - labeling owns the synthetic target definition
@@ -34,10 +34,10 @@ The key point is that the training path stays explicit:
 
 ## Runtime Role
 
-| Runtime mode | Training role today |
+| Runtime mode | Training role |
 |------|---------------------|
 | Local evaluator | local Airflow and MLflow run labeling, training, evaluation, and registration |
-| Active shared environment | the current hosted full-stack target runs the same Airflow and MLflow contract online while the managed hosted control plane is still transitional |
+| Active shared environment | the hosted full-stack operator lane runs the same Airflow and MLflow contract online |
 | Hosted inference target | serves a registered alias; it does not run training |
 
 ## Stage Responsibilities
@@ -52,7 +52,7 @@ The key point is that the training path stays explicit:
 
 ## Label Boundary
 
-Labeling is synthetic and physics-driven, not human-curated. The current label contract depends on curated wind and shoreline features that already exist in the stored dataset:
+Labeling is synthetic and physics-driven, not human-curated. The label contract depends on curated wind and shoreline features that already exist in the stored dataset:
 
 - `wind_speed_10m`
 - `wind_gusts_10m`
@@ -75,12 +75,12 @@ This means labeling is part of the training contract, not part of the inference 
 
 Training reads stored feature rows by spot and dataset, then rebuilds schema-derived time, direction, and gust features before labeling. That compatibility step keeps older stored slices usable when the curated schema gains new derived fields.
 
-The current training contract is:
+The training contract is:
 
 - the input comes from stored curated features, not raw forecast payloads
 - derived feature rebuilding is a compatibility guard, not a substitute for the feature pipeline
 - the configured feature list and target column remain explicit in `config.yaml`
-- the current model family is tree-based, with `random_forest` and `gradient_boosting` as the supported algorithms
+- the supported model families are tree-based, with `random_forest` and `gradient_boosting` as the supported algorithms
 - one MLflow run records parameters, regression metrics, class-bucket accuracy metrics, row counts, feature counts, and a feature-importance plot when the estimator exposes importances
 
 Training should stay narrow. It fits a model and records one reproducible run. It should not decide traffic rollout or silently rewrite registry aliases beyond the requested registration stage.
@@ -89,7 +89,7 @@ Training should stay narrow. It fits a model and records one reproducible run. I
 
 Evaluation resumes the same MLflow run after training and turns its metrics into a reviewable artifact.
 
-The current evaluation contract is:
+The evaluation contract is:
 
 - regression metrics include `mae`, `rmse`, and `r2`
 - rounded class-bucket accuracy is logged alongside the regression metrics
@@ -102,7 +102,7 @@ This keeps evaluation visible outside the notebook path. Reviewers and operators
 
 Registration converts one logged MLflow run into a named registry version and assigns the requested alias.
 
-The current registry contract is:
+The registry contract is:
 
 - the registered model name is `foehncast-quality`
 - the validated pre-live alias is `candidate`
@@ -115,26 +115,24 @@ Manual training runs default to the `Candidate` stage. Asset-triggered runs from
 
 The training DAG is scheduled from the feature pipeline's published training-request asset instead of a direct DAG-to-DAG trigger.
 
-That hand-off matters because it keeps the orchestration boundary visible:
+That keeps the orchestration boundary visible:
 
 - the feature DAG publishes curated-feature and training-request assets after persistence succeeds
 - the training DAG consumes the curated feature store and the training request
 - the training DAG emits MLflow training-run, evaluation-report, and model-registry assets
 - dataset and stage can still be overridden through DAG config when needed
 
-This makes the Airflow Assets view reflect the real dependency graph between curated feature persistence, training, evaluation, and registration.
-
-In the shared hosted path today, those Airflow-owned steps still run on the retained operator lane. The target hosted orchestrator is Cloud Composer, but that change should preserve the same training-stage ownership and evidence boundaries.
+This makes the Airflow Assets view reflect the real dependency graph between curated feature persistence, training, evaluation, and registration. In the shared hosted path, those Airflow-owned steps run on the retained operator lane until orchestration moves to Cloud Composer. That infrastructure change should preserve the same training-stage ownership and evidence boundaries.
 
 ## Alias Controls Outside The DAG
 
 Promotion and rollback are explicit controls layered on top of the registry aliases, not hidden inside normal training.
 
-The current operator controls are:
+The operator controls are:
 
-- `foehncast.training_pipeline.promote` can move an explicit version or the current `candidate` alias to the production stage
+- `foehncast.training_pipeline.promote` can move an explicit version or the `candidate` alias to the production stage
 - `foehncast.training_pipeline.rollback` can restore the `champion` alias to an explicit previous version
-- the same alias contract is reused by the shared cloud operator workflows and by the serving path that loads the current live alias
+- the same alias contract is reused by the shared cloud operator workflows and by the serving path that loads the live alias
 
 That separation is deliberate. Training can succeed without immediately changing the live serving version, and rollback can happen without retraining.
 

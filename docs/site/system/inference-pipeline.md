@@ -1,12 +1,12 @@
 # Inference Pipeline
 
-FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs in three places: the local evaluator lane, the public API lane on Cloud Run, and the private operator lane on the hosted full-stack target. The Cloud Run lane is the shared public API. The operator-lane app is a transitional support surface that stays private while the hosted control plane moves away from the retained host. The serving path resolves the live MLflow alias, fetches fresh forecasts for configured spots, rebuilds the shared engineered feature vector, returns per-spot quality predictions, and optionally exposes the Feast-backed online lookup without pulling training or operator concerns into the request path.
+FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs locally, on Cloud Run, and on the private operator lane. Cloud Run is the shared public API. The operator-lane app stays private and supports internal checks on the hosted operator surface.
 
-This page records the current serving contract that is validated in the local stack and in endpoint, dashboard, and cloud-runtime tests. It focuses on what the running app owns today and what stays optional or operator-controlled.
+This page describes what the running app owns and what stays optional or operator-controlled.
 
 !!! note "Scope"
 
-    This page describes the current validated inference-path contract.
+    This page describes the validated inference-path contract.
     It does not redefine the hosted build or orchestration plan.
     The serving contract stays stable even as the surrounding hosted control plane moves toward Cloud Build and Cloud Composer.
 
@@ -14,19 +14,45 @@ This page records the current serving contract that is validated in the local st
 
 <div class="mermaid">
 flowchart LR
-    REQ[Requested spots] --> RES[Resolve configured spots]
-    RES --> WX[Fetch Open-Meteo forecast]
-    WX --> ENG[Engineer shared features]
-    REG[MLflow serving alias] --> MOD[Load served model]
+    subgraph RequestPath ["Request path"]
+        direction TB
+        REQ["Requested spots"]
+        RES["Resolve configured spots"]
+        WX["Fetch Open-Meteo forecast"]
+        ENG["Engineer shared features"]
+        REQ --> RES --> WX --> ENG
+    end
+
+    subgraph ModelPath ["Model path"]
+        direction TB
+        REG["MLflow serving alias"]
+        MOD["Load served model"]
+        REG --> MOD
+    end
+
+    subgraph OutputPath ["Outputs"]
+        direction TB
+        PRE["/predict response"]
+        RNK["Rank with rider profile and drive time"]
+        OUT["/rank response"]
+        MON["Prediction monitoring hand-off"]
+        PRE --> RNK --> OUT
+    end
+
+    subgraph OptionalPath ["Demo surfaces"]
+        direction TB
+        ONL["/features/online lookup"]
+        DEMO["Online-features demo"]
+        DASH["Streamlit live demo"]
+        ONL --> DEMO
+    end
+
     ENG --> MOD
-    MOD --> PRE[/predict response]
-    PRE --> RNK[Rank with rider profile and drive time]
-    RNK --> OUT[/rank response]
-    RES --> ONL[/features/online lookup]
-    ONL --> DEMO[Online-features demo]
-    DASH[Streamlit live demo] --> PRE
+    MOD --> PRE
+    RES --> ONL
+    DASH --> PRE
     DASH --> OUT
-    PRE --> MON[Prediction monitoring hand-off]
+    PRE --> MON
     OUT --> MON
 </div>
 
@@ -53,7 +79,7 @@ The app also serves `/metrics`, but that route belongs to the monitoring hand-of
 
 ## Model Resolution Boundary
 
-Inference serves one registry alias at a time. The current contract is:
+Inference serves one registry alias at a time. The serving contract is:
 
 - the registered model name is `foehncast-quality`
 - the default live alias is `champion`
@@ -68,8 +94,8 @@ This keeps serving aligned with the training registry contract without giving th
 The prediction path is intentionally narrow:
 
 - requested spot IDs are resolved against the configured spot list, and unknown spots return `404` instead of silently falling back
-- live weather comes from the current Open-Meteo forecast pull for each requested spot
-- the request horizon is capped by `inference.max_horizon_hours`, which is currently `14`
+- live weather comes from the Open-Meteo forecast pull for each requested spot
+- the request horizon is capped by `inference.max_horizon_hours`, which defaults to `14`
 - the same `engineer_features` step used by the feature path rebuilds the feature vector expected by the trained model
 - the served feature columns come from `model.features` in `config.yaml`
 - the app returns forecast rows as timestamps plus continuous `quality_index` values
@@ -80,9 +106,9 @@ That means the request path scores a trained model against fresh forecast featur
 
 `/rank` is not a second model. It reuses the prediction payload from `/predict` and then scores the candidate spots for the configured rider profile.
 
-The current ranking contract is:
+The ranking contract is:
 
-- ranking weights come from `config.yaml` and are currently `0.6` for peak quality, `0.3` for ride-versus-drive ratio, and `0.1` for rideable duration
+- ranking weights come from `config.yaml`; the default weights are `0.6` for peak quality, `0.3` for ride-versus-drive ratio, and `0.1` for rideable duration
 - drive-time cost comes from the rider profile plus the OSRM routing lookup
 - session duration is derived from the forecast hours that clear the rideable threshold
 - the route returns ranked numeric rows such as `quality_index`, `drive_minutes`, `session_hours`, `ride_drive_ratio`, and `score`
@@ -93,7 +119,7 @@ This keeps ranking personal without hiding another model behind the API. The Str
 
 The online feature route is a separate integration surface layered on top of the same curated contract.
 
-The current online-feature contract is:
+The online-feature contract is:
 
 - the default Feast repo path is `feature_repo/`, with `FOEHNCAST_FEAST_REPO_PATH` as an override
 - a call without explicit feature names uses the `foehncast_model_v1` feature service
@@ -107,18 +133,18 @@ This path stays optional. Normal `/predict` and `/rank` requests do not depend o
 
 FoehnCast keeps the rider-facing demo separate from operator dashboards.
 
-The current demo surfaces are:
+The demo surfaces are:
 
 - the Streamlit live demo, which loads live predictions, applies the ranking helper, and presents rider-facing cards and tables
 - the online-features demo page, which issues manual `/features/online` calls against the running app
 
-The Streamlit helper rounds continuous quality scores into stable rider-facing labels from `Unsafe` through `Perfect Storm`, uses the configured forecast horizon to describe the current live window, and exposes the current `model_version` in the returned payload. That makes it a public-safe evaluation surface, not an operator dashboard.
+The Streamlit helper rounds continuous quality scores into stable rider-facing labels from `Unsafe` through `Perfect Storm`, uses the configured forecast horizon to describe the live window, and exposes the served `model_version` in the returned payload. That makes it a public-safe evaluation surface, not an operator dashboard.
 
 ## Monitoring Hand-Off
 
 Prediction routes emit monitoring signals, but the monitoring surface itself stays separate.
 
-The current hand-off is:
+The monitoring hand-off is:
 
 - `/predict` and `/rank` schedule background prediction-monitoring work after a successful response payload is built
 - the background path records scheduling and execution outcomes and emits prediction-drift metrics from retained prediction history
@@ -126,29 +152,18 @@ The current hand-off is:
 
 This keeps the inference service responsible for request-side facts while leaving dashboards, alert rules, and long-range operator review to the monitoring stack.
 
-## Serving Targets Today
+## Serving Targets
 
-| Lane | Current target | Main role |
-|------|----------------|-----------|
-| Local evaluator lane | local Compose app | validate the full serving contract locally |
-| Shared API lane | hosted inference target on Cloud Run | serve the shared public API |
-| Operator lane | hosted full-stack target on one GCP host | keep the same app available for private operator checks next to Airflow and MLflow while the retained operator lane still exists |
+The same FastAPI app runs in the local evaluator, on Cloud Run, and on the private operator host. Cloud Run owns the shared public API. The operator host keeps the app available only for private checks next to the other hosted operator services.
 
-<div class="mermaid">
-flowchart LR
-    APP[Same FastAPI app] --> LOCAL[Local evaluator target]
-    APP --> RUN[Cloud Run API lane]
-    APP --> HOST[Operator host lane]
-</div>
-
-The same FastAPI app runs across these serving targets. Cloud Run owns the shared public API. The hosted full-stack target keeps the app available only for private operator checks next to the current runtime services, and that private lane should shrink rather than become the long-term public serving path. See [Hosted Full-Stack](hosted-full-stack.md) and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the hosted exposure, transition, and rollback rules around that split.
+See [Architecture](architecture.md) for the lane summary and [Hosted Full-Stack](hosted-full-stack.md) for the hosted exposure and transition rules.
 
 ## Why This Structure Works
 
 - it keeps live requests narrow enough to verify through simple route and dashboard tests
 - it reuses the shared feature contract instead of inventing a serving-only schema
 - it ties responses back to a concrete registry version without giving the app promotion authority
-- it lets one FastAPI contract run locally, on Cloud Run, and on the current retained hosted full-stack surface without changing the serving contract
+- it lets one FastAPI contract run locally, on Cloud Run, and on the retained hosted full-stack surface without changing the serving contract
 - it keeps the Feast lookup path useful for integration checks while leaving prediction and ranking available from the core app alone
 
 See [Architecture](architecture.md), [Training Pipeline](training-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding system boundaries.
