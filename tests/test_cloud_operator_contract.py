@@ -1040,25 +1040,27 @@ def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contra
 ):
     terraform = _read_text("terraform/main.tf")
     variables = _read_text("terraform/variables.tf")
+    terraform_single_spaced = re.sub(r"[ \t]+", " ", terraform)
 
     assert (
-        'artifact_registry_host         = "${var.region}-docker.pkg.dev"' in terraform
+        'artifact_registry_host = "${var.region}-docker.pkg.dev"'
+        in terraform_single_spaced
     )
     assert (
         'artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"'
-        in terraform
+        in terraform_single_spaced
     )
     assert (
-        'online_compose_app_image       = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"'
-        in terraform
+        'online_compose_app_image = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"'
+        in terraform_single_spaced
     )
     assert (
-        'online_compose_airflow_image   = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"'
-        in terraform
+        'online_compose_airflow_image = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"'
+        in terraform_single_spaced
     )
     assert (
-        'online_compose_mlflow_image    = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"'
-        in terraform
+        'online_compose_mlflow_image = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"'
+        in terraform_single_spaced
     )
     assert '"cloudbuild.googleapis.com",' in terraform
     assert '"roles/cloudbuild.builds.editor",' in terraform
