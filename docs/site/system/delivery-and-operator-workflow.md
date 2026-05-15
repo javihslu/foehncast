@@ -83,10 +83,13 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `scripts/configure-github-actions.sh` | sync Terraform outputs into GitHub repository variables |
 | `terraform/terraform.tfvars` | interactive bootstrap input, not the day-2 source of truth |
 | runtime image workflows | submit reviewed hosted image builds to Cloud Build and publish images to Artifact Registry |
+| `.github/workflows/publish-composer-dags.yml` | publish the reviewed DAG and source bundle to the provisioned Composer DAG bucket |
 | `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into hosted Airflow while the retained host still owns that handoff |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
+
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Dependency packaging, runtime secret delivery, and the reviewed runtime release entry still need separate cutover work.
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
@@ -163,6 +166,8 @@ Cloud Composer is now provisionable as a managed-Airflow readiness surface, but 
 | Secrets and runtime config | the retained host reads runtime configuration from the VM-local environment and service identity | a managed secret and runtime-config path for hosted orchestration |
 | Network and API reachability | the current trigger contract reaches Airflow through VM SSH and host-local API access | a reviewed runtime-release entry path that reaches Composer without VM SSH |
 | Operator access model | retries, backfills, and recovery currently assume SSH to the retained host | a clear managed operator access model for Composer-owned orchestration |
+
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, but it does not yet solve Composer-specific dependency installation, secret injection, or the reviewed runtime release entry without VM SSH.
 
 ## Retry And Backfill Runbooks
 

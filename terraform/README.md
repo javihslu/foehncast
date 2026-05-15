@@ -175,8 +175,11 @@ The repository uses two image-publication workflows that share one hosted build 
 
 - `.github/workflows/publish-app-image.yml` submits the app image build to Cloud Build and publishes the reviewed image to Artifact Registry for the Cloud Run path
 - `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry for the retained operator host
+- `.github/workflows/publish-composer-dags.yml` syncs the reviewed DAG and source bundle into the provisioned Composer DAG bucket
 
 Artifact Registry is the canonical hosted image registry in this contract. GHCR convenience artifacts, if published separately, are not the default hosted deployment path.
+
+The Composer DAG bundle path narrows the VM-checkout dependency for DAG delivery, but the reviewed runtime release entry without VM SSH and Composer-specific dependency installation still belong to later orchestration issues.
 
 Set these GitHub repository variables:
 
@@ -200,6 +203,7 @@ Set these GitHub repository variables:
 - `GCP_MLFLOW_TRACKING_URI` when Cloud Run is enabled
 - `GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT`
 - `GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME`
+- `GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX` when Composer is enabled
 - `GCP_PROVISION_ONLINE_COMPOSE_HOST`
 - `GCP_ONLINE_COMPOSE_HOST_NAME`
 - `GCP_ONLINE_COMPOSE_HOST_ZONE`

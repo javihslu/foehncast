@@ -68,6 +68,9 @@ outputs:
   cloud_composer_environment_name:
     description: Configured Cloud Composer environment name repository variable
     value: ${{ steps.repo_config.outputs.cloud_composer_environment_name }}
+  cloud_composer_dag_gcs_prefix:
+    description: Cloud Composer DAG bucket prefix repository variable
+    value: ${{ steps.repo_config.outputs.cloud_composer_dag_gcs_prefix }}
   provision_online_compose_host:
     description: Online compose host provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_online_compose_host }}
@@ -135,6 +138,7 @@ runs:
           echo "mlflow_tracking_uri=$(read_repo_var GCP_MLFLOW_TRACKING_URI)"
           echo "provision_cloud_composer_environment=$(read_repo_var GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT)"
           echo "cloud_composer_environment_name=$(read_repo_var GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME)"
+          echo "cloud_composer_dag_gcs_prefix=$(read_repo_var GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX)"
           echo "provision_online_compose_host=$(read_repo_var GCP_PROVISION_ONLINE_COMPOSE_HOST)"
           echo "online_compose_host_name=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_NAME)"
           echo "online_compose_host_zone=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_ZONE)"

@@ -38,6 +38,7 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
         "provision_cloud_composer_environment",
     ),
     ("GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME", "cloud_composer_environment_name"),
+    ("GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX", "cloud_composer_dag_gcs_prefix"),
     ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
     ("GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
     ("GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
@@ -776,6 +777,15 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "a reviewed DAG delivery path that does not depend on a VM checkout"
         in workflow_doc
     )
+    assert ".github/workflows/publish-composer-dags.yml" in workflow_doc
+    assert (
+        "GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket."
+        in workflow_doc
+    )
+    assert (
+        "reviewed runtime release entry still need separate cutover work"
+        in workflow_doc
+    )
     assert (
         "a managed secret and runtime-config path for hosted orchestration"
         in workflow_doc
@@ -794,6 +804,10 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         in cloud_mapping
     )
     assert (
+        "A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket."
+        in cloud_mapping
+    )
+    assert (
         "a reviewed runtime release entry that reaches the managed Airflow surface directly"
         in cloud_mapping
     )
@@ -806,8 +820,10 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "Terraform can provision an optional Cloud Composer environment today."
         in terraform_readme
     )
+    assert ".github/workflows/publish-composer-dags.yml" in terraform_readme
     assert "reviewed runtime release entry without VM SSH" in terraform_readme
     assert "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" in terraform_readme
+    assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in terraform_readme
 
 
 def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
@@ -998,6 +1014,90 @@ def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
     )
     assert "runtime-release-latest.json" in script
     assert "verify-report" in script
+
+
+def test_publish_composer_dags_script_builds_bundle_and_syncs_to_gcs_prefix() -> None:
+    script = _read_text("scripts/publish-composer-dags.sh")
+
+    assert (
+        "Usage: $0 --dag-gcs-prefix gs://bucket/path [--bundle-dir path] [--manifest-path path]"
+        in script
+    )
+    assert 'source "${ROOT_DIR}/scripts/cli-common.sh"' in script
+    assert "require_command gcloud" in script
+    assert "require_command python3" in script
+    assert 'mktemp -d "${TMPDIR:-/tmp}/foehncast-composer-dags.XXXXXX"' in script
+    assert 'PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in script
+    assert "python3 -m foehncast.composer_bundle build" in script
+    assert "gcloud storage rsync --recursive" in script
+    assert "Composer DAG bundle published to" in script
+
+
+def test_publish_composer_dags_workflow_uses_repo_backed_composer_contract() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-composer-dags.yml")
+    workflow_text = _read_text(".github/workflows/publish-composer-dags.yml")
+    push_paths = workflow["on"]["push"]["paths"]
+    config_job = workflow["jobs"]["config"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
+    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
+    assert "dags/**" in push_paths
+    assert "src/**" in push_paths
+    assert "feature_repo/**" in push_paths
+    assert "scripts/publish-composer-dags.sh" in push_paths
+    assert dispatch_inputs["cloud_composer_dag_gcs_prefix"]["type"] == "string"
+
+    assert (
+        config_job["outputs"]["cloud_composer_environment_name"]
+        == "${{ steps.repo_config.outputs.cloud_composer_environment_name }}"
+    )
+    assert (
+        config_job["outputs"]["dag_gcs_prefix"]
+        == "${{ steps.derived.outputs.dag_gcs_prefix }}"
+    )
+    assert (
+        config_job["outputs"]["publish_ready"]
+        == "${{ steps.derived.outputs.publish_ready }}"
+    )
+
+    repo_config_step = _workflow_step(workflow, "config", "repo_config")
+    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
+
+    derived_step = _workflow_step(workflow, "config", "derived")
+    assert (
+        derived_step["env"]["REPO_DAG_GCS_PREFIX"]
+        == "${{ steps.repo_config.outputs.cloud_composer_dag_gcs_prefix }}"
+    )
+    assert (
+        derived_step["env"]["PROVISION_CLOUD_COMPOSER_ENVIRONMENT"]
+        == "${{ steps.repo_config.outputs.provision_cloud_composer_environment }}"
+    )
+    assert "publish_ready=false" in derived_step["run"]
+    assert 'echo "publish_ready=$publish_ready"' in derived_step["run"]
+
+    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
+    assert auth_step["uses"] == "google-github-actions/auth@v2"
+
+    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
+
+    publish_step = _workflow_step(workflow, "publish", "Publish Composer DAG bundle")
+    assert "bash ./scripts/publish-composer-dags.sh" in publish_step["run"]
+    assert '--dag-gcs-prefix "$DAG_GCS_PREFIX"' in publish_step["run"]
+    assert "composer-dag-bundle-manifest.json" in publish_step["run"]
+
+    summary_step = _workflow_step(workflow, "publish", "Summarize bundle")
+    assert "## Published Composer DAG bundle" in summary_step["run"]
+    assert "composer-dag-bundle-manifest.json" in summary_step["run"]
+
+    skipped_step = _workflow_step(workflow, "skipped", "Explain skipped publish")
+    assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in skipped_step["run"]
+    assert "Runtime release still uses the retained-host handoff" in skipped_step["run"]
+
+    assert "gcloud compute ssh" not in workflow_text
+    assert "trigger-runtime-release.sh" not in workflow_text
 
 
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:
@@ -2056,6 +2156,15 @@ def test_cloud_scripts_share_github_repo_helpers() -> None:
     assert "resolve_repo()" not in configure
     assert "gh auth status" not in configure
     assert "require_github_auth" in configure
+    assert "cloud_composer_dag_gcs_prefix_synced=false" in configure
+    assert (
+        'delete_variable "$REPOSITORY_PATH" GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX'
+        in configure
+    )
+    assert (
+        'echo "Skipping GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX because Terraform has not provisioned a Cloud Composer DAG bucket prefix yet."'
+        in configure
+    )
     assert (
         'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in configure
     )

@@ -1,0 +1,155 @@
+name: Publish Composer DAG Bundle
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - .github/workflows/publish-composer-dags.yml
+            - .github/actions/load-gcp-repo-config/action.yml
+            - dags/**
+            - src/**
+            - feature_repo/**
+            - scripts/publish-composer-dags.sh
+            - config.yaml
+            - pyproject.toml
+    workflow_dispatch:
+        inputs:
+            cloud_composer_dag_gcs_prefix:
+                description: Optional override for the Composer DAG GCS prefix
+                required: false
+                type: string
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    config:
+        runs-on: ubuntu-latest
+        outputs:
+            owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+            project_id: ${{ steps.repo_config.outputs.project_id }}
+            workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
+            service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
+            cloud_composer_environment_name: ${{ steps.repo_config.outputs.cloud_composer_environment_name }}
+            dag_gcs_prefix: ${{ steps.derived.outputs.dag_gcs_prefix }}
+            publish_ready: ${{ steps.derived.outputs.publish_ready }}
+        steps:
+            - uses: actions/checkout@v6.0.2
+
+            - id: flags
+              env:
+                  ACTOR: ${{ github.actor }}
+                  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+                  REPOSITORY_OWNER: ${{ github.repository_owner }}
+              run: |
+                  set -euo pipefail
+
+                  owner_allowed=false
+                  if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
+                    owner_allowed=true
+                  fi
+
+                  echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
+
+            - id: repo_config
+              uses: ./.github/actions/load-gcp-repo-config
+              with:
+                  repo-vars-json: ${{ toJson(vars) }}
+
+            - id: derived
+              env:
+                  DAG_GCS_PREFIX_INPUT: ${{ github.event.inputs.cloud_composer_dag_gcs_prefix }}
+                  REPO_DAG_GCS_PREFIX: ${{ steps.repo_config.outputs.cloud_composer_dag_gcs_prefix }}
+                  PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+                  PROVISION_CLOUD_COMPOSER_ENVIRONMENT: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
+                  WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+                  SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+              run: |
+                  set -euo pipefail
+
+                  dag_gcs_prefix="$(printf '%s' "${DAG_GCS_PREFIX_INPUT:-}" | tr -d '\r')"
+                  if [[ -z "$dag_gcs_prefix" ]]; then
+                    dag_gcs_prefix="$(printf '%s' "${REPO_DAG_GCS_PREFIX:-}" | tr -d '\r')"
+                  fi
+                  dag_gcs_prefix="${dag_gcs_prefix%/}"
+
+                  publish_ready=false
+                  if [[ "$PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == 'true' \
+                    && -n "$PROJECT_ID" \
+                    && -n "$dag_gcs_prefix" \
+                    && -n "$WORKLOAD_IDENTITY_PROVIDER" \
+                    && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+                    publish_ready=true
+                  fi
+
+                  {
+                    echo "dag_gcs_prefix=$dag_gcs_prefix"
+                    echo "publish_ready=$publish_ready"
+                  } >> "$GITHUB_OUTPUT"
+
+    publish:
+        needs: config
+        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready == 'true' }}
+        runs-on: ubuntu-latest
+        env:
+            DAG_GCS_PREFIX: ${{ needs.config.outputs.dag_gcs_prefix }}
+            CLOUD_COMPOSER_ENVIRONMENT_NAME: ${{ needs.config.outputs.cloud_composer_environment_name }}
+        steps:
+            - uses: actions/checkout@v6.0.2
+
+            - name: Authenticate to Google Cloud
+              uses: google-github-actions/auth@v2
+              with:
+                  workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
+                  service_account: ${{ needs.config.outputs.service_account_email }}
+
+            - name: Set up gcloud
+              uses: google-github-actions/setup-gcloud@v2
+              with:
+                  project_id: ${{ needs.config.outputs.project_id }}
+
+            - name: Publish Composer DAG bundle
+              run: |
+                  set -euo pipefail
+
+                  bash ./scripts/publish-composer-dags.sh \
+                    --dag-gcs-prefix "$DAG_GCS_PREFIX" \
+                    --bundle-dir composer-dag-bundle \
+                    --manifest-path composer-dag-bundle-manifest.json
+
+            - name: Summarize bundle
+              run: |
+                  {
+                    echo "## Published Composer DAG bundle"
+                    echo
+                    echo "- Composer environment: ${CLOUD_COMPOSER_ENVIRONMENT_NAME:-not set}"
+                    echo "- DAG bucket prefix: $DAG_GCS_PREFIX"
+                    echo "- Bundle path: composer-dag-bundle"
+                    echo "- Manifest: composer-dag-bundle-manifest.json"
+                    echo "- Delivery: repo-managed DAG and source bundle"
+                    echo
+                    echo '```json'
+                    cat composer-dag-bundle-manifest.json
+                    echo '```'
+                  } >> "$GITHUB_STEP_SUMMARY"
+
+    skipped:
+        needs: config
+        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready != 'true' }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: Explain skipped publish
+              run: |
+                  {
+                    echo "## Composer DAG bundle publish skipped"
+                    echo
+                    echo "Set these repository variables to enable reviewed Composer DAG publication:"
+                    echo "- GCP_PROJECT_ID"
+                    echo "- GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT=true"
+                    echo "- GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX"
+                    echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
+                    echo "- GCP_SERVICE_ACCOUNT_EMAIL"
+                    echo
+                    echo "This publishes the repo-managed DAG and source bundle only. Runtime release still uses the retained-host handoff until a later cutover issue lands."
+                  } >> "$GITHUB_STEP_SUMMARY"
