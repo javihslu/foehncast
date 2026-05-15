@@ -111,6 +111,18 @@ By default, `online_compose_public_ports = []`, so the retained operator host st
 
 The compose-host path is the simplest way to keep the whole stack online without forcing Airflow into Cloud Run.
 
+## Transitional VM-Specific Surface
+
+The retained host is still part of the shared environment, but several VM-specific surfaces are transitional rather than long-term design targets.
+
+| Surface | Why it still exists | Classification | Next migration issue |
+|--------|----------------------|----------------|----------------------|
+| `online_compose_*` Terraform inputs, outputs, and repo variables | the current VM target still needs host name, zone, sizing, and exposure controls | transitional | #224 |
+| default GHCR image sources for the VM path | the retained-host images still fall back to GHCR when explicit image URIs are not provided | stale build-plane assumption | #223 |
+| VM runtime service account and IAM | the current host still combines Airflow, MLflow, training, Feast preparation, and private app checks on one machine | current but transitional | later host-shrink issue |
+| startup template and sync timer | the VM still refreshes the repo, pulls the stack, and records retained-host sync evidence for operators | current but transitional | later host-shrink issue |
+| public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface while the VM stays private | keep for now | keep until the VM role changes |
+
 ## What The Hosted Paths Expose
 
 | Path | Public surface by default | Notes |

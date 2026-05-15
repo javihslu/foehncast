@@ -96,6 +96,18 @@ The remote workflow reads repository-backed values for project, state, storage, 
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
+## Current Retained-Host Dependencies
+
+The shared environment still depends on the retained operator host in a few specific places. This table is the current inventory for the active migration wave.
+
+| Surface | Current dependency | Classification | Next migration issue |
+|------|--------------------|----------------|----------------------|
+| runtime release handoff | `.github/workflows/trigger-runtime-release.yml` still refreshes the VM checkout over SSH and runs `scripts/trigger-runtime-release.sh` to trigger the host-local `runtime_release` DAG | transitional | #224 |
+| hosted DAG execution and recovery | runtime retries, backfills, and manual replay still assume SSH access to the retained host and host-local Airflow | transitional | #224 |
+| bootstrap and repo-variable plumbing | `scripts/bootstrap-gcp.sh`, `.github/workflows/terraform.yml`, and `scripts/terraform-platform-state.sh` still resolve and sync `GCP_ONLINE_COMPOSE_*` inputs | transitional | #224 |
+| sync evidence and operator checks | the retained host still writes `.state/online-compose-sync/last-success.json`, and hosted verification still checks that sync evidence through `/metrics` | keep for now | later host-shrink issue |
+| cloud-operator regression tests | `tests/test_cloud_operator_contract.py` and the online-compose sync tests still enforce the retained-host contract directly | keep while migrating | same issue as the production surface being changed |
+
 ## Hosted Orchestration Surface Decision
 
 Hosted Airflow on the retained operator host remains the orchestration surface of record for this horizon.
