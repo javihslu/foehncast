@@ -1,14 +1,14 @@
 locals {
-  github_repository_path         = "${var.github_owner}/${var.github_repository}"
-  artifact_registry_host         = "${var.region}-docker.pkg.dev"
+  github_repository_path            = "${var.github_owner}/${var.github_repository}"
+  artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
-  cloud_run_image                = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  online_compose_app_image       = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  online_compose_airflow_image   = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
-  online_compose_mlflow_image    = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
-  feast_registry_uri             = "gs://${var.artifact_bucket_name}/feast/registry.db"
-  feast_staging_uri              = "gs://${var.artifact_bucket_name}/feast/staging"
-  feast_bigquery_table           = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
+  cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  online_compose_app_image          = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  online_compose_airflow_image      = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
+  online_compose_mlflow_image       = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
+  feast_registry_uri                = "gs://${var.artifact_bucket_name}/feast/registry.db"
+  feast_staging_uri                 = "gs://${var.artifact_bucket_name}/feast/staging"
+  feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
   cloud_run_env_vars = merge(
     {
       GCP_PROJECT_ID                       = var.project_id
