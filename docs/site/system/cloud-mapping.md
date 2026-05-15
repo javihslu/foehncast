@@ -172,9 +172,9 @@ The intended hosted direction keeps Cloud Run as the public API, moves hosted im
 
 ## Managed Orchestration Direction
 
-Cloud Composer is the target managed orchestration direction.
+Cloud Composer is the target managed orchestration direction, and Terraform can now provision a Cloud Composer environment for readiness work.
 
-Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. The retained host remains the active orchestration authority until those boundaries move. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
 ## Active And Target Hosted Mapping
 
@@ -284,13 +284,14 @@ The stable evidence surfaces are:
 
 - Terraform already covers the first cloud runtime slice.
 - The repo already contains a Cloud Run deployment path and Artifact Registry publishing flow.
+- Terraform can now provision an optional Cloud Composer environment for managed-Airflow readiness work.
 - The application already supports a `bigquery` storage backend through the shared feature-store abstraction.
 - Local container runs can already mount ADC for BigQuery-based checks.
 
 ## Remaining Hosted Simplifications
 
 - MLflow stays on the retained operator lane in the active shared environment.
-- Airflow still runs on the retained operator lane, so runtime release, retries, and backfills still depend on VM-backed orchestration.
+- Airflow still runs on the retained operator lane as the operational authority, so runtime release, retries, and backfills still depend on VM-backed orchestration even when a Cloud Composer environment is provisioned.
 - Cloud Run already owns the public API lane and should keep that role.
 - Hosted image delivery is still split between GitHub-hosted execution and mixed registries; the target is Cloud Build plus Artifact Registry.
 - The monitoring stack stays intentionally small and reviewable through checked-in dashboards, alert rules, and scrape config.

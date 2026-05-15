@@ -1,6 +1,6 @@
 # Terraform Baseline
 
-This directory defines one shared GCP baseline and two hosted runtime targets.
+This directory defines one shared GCP baseline, two hosted runtime targets, and one optional managed orchestration target.
 
 This is maintainer/operator reference material. Default contributor setup stays local with Docker and does not require Terraform, `gcloud`, or `gh`.
 
@@ -13,6 +13,7 @@ Start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/
 | Shared GCP baseline | APIs, storage, identities, and registries | no app containers |
 | Hosted full-stack target | keep Airflow, MLflow, and the API online together | runtime services only |
 | Hosted inference target | publish the inference API as a smaller hosted surface | FastAPI only |
+| Managed orchestration target | provision Cloud Composer for hosted Airflow readiness work | managed Airflow environment only |
 | GitHub OIDC delivery | remote Terraform and image-based deploys | no runtime services |
 
 ```mermaid
@@ -20,15 +21,18 @@ flowchart TD
    TF[Terraform] --> BASE[Shared GCP baseline]
    BASE --> HOST[Hosted full-stack target]
    BASE --> RUN[Hosted inference target]
+   BASE --> COMP[Managed orchestration target]
    BASE --> GH[GitHub OIDC delivery]
 ```
 
 ## What This Directory Covers
 
-This directory covers two cloud paths:
+This directory covers four cloud surfaces:
 
 - a shared GCP baseline for datasets, registries, identities, and the hosted runtime targets
+- an inference-only Cloud Run target for the shared public API
 - a single online Docker host target that runs the full Airflow, MLflow, and API stack from the same repo
+- an optional Cloud Composer environment for managed-orchestration readiness work
 
 ## Current Scope
 
@@ -40,9 +44,10 @@ Terraform can provision:
 - a BigQuery dataset and feature table
 - GitHub OIDC trust and deploy identities
 - an inference-only Cloud Run service
+- an optional Cloud Composer environment for managed Airflow readiness work
 - an optional Compute Engine host for the full online container stack
 
-The Cloud Run service remains inference-only. The full online stack is the compose-host path.
+The Cloud Run service remains inference-only. The full online stack is the compose-host path. Cloud Composer is provisionable as a managed orchestration target, but the retained host remains the active orchestration and recovery surface until a later cutover replaces the VM handoff.
 
 ## Deployment Scope Rule
 
@@ -59,6 +64,7 @@ Deploy only runtime surfaces in cloud environments.
 | Shared GCP baseline | you need the cloud data and identity foundation | no containers |
 | Hosted full-stack target | you want Airflow, MLflow, and the API online together | runtime services only |
 | Hosted inference target | you only need the inference API | FastAPI only |
+| Managed orchestration target | you want a non-production Cloud Composer environment while keeping the retained host as the operational authority | managed Airflow environment only |
 
 ## Hosted Inference Target Inputs
 
@@ -118,14 +124,14 @@ The retained host is still part of the shared environment, but several VM-specif
 | Surface | Why it still exists | Classification | Next migration issue |
 |--------|----------------------|----------------|----------------------|
 | `online_compose_*` Terraform inputs, outputs, and repo variables | the current VM target still needs host name, zone, sizing, and exposure controls | transitional | #224 |
-| default GHCR image sources for the VM path | the retained-host images still fall back to GHCR when explicit image URIs are not provided | stale build-plane assumption | #223 |
+| compose-host-specific image overrides and sizing inputs | the current VM target still needs host name, zone, sizing, and optional image override controls even though default hosted images come from Artifact Registry | current but transitional | #224 |
 | VM runtime service account and IAM | the current host still combines Airflow, MLflow, training, Feast preparation, and private app checks on one machine | current but transitional | later host-shrink issue |
 | startup template and sync timer | the VM still refreshes the repo, pulls the stack, and records retained-host sync evidence for operators | current but transitional | later host-shrink issue |
 | public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface while the VM stays private | keep for now | keep until the VM role changes |
 
 ## Composer Readiness Boundary
 
-Terraform does not provision Cloud Composer today. The current online compose host remains the operational orchestration surface.
+Terraform can provision an optional Cloud Composer environment today. The current online compose host remains the operational orchestration surface.
 
 Before a later Composer cutover, this repo needs explicit contract surfaces for:
 
@@ -192,6 +198,8 @@ Set these GitHub repository variables:
 - `GCP_CLOUD_RUN_CPU`
 - `GCP_CLOUD_RUN_MEMORY`
 - `GCP_MLFLOW_TRACKING_URI` when Cloud Run is enabled
+- `GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT`
+- `GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME`
 - `GCP_PROVISION_ONLINE_COMPOSE_HOST`
 - `GCP_ONLINE_COMPOSE_HOST_NAME`
 - `GCP_ONLINE_COMPOSE_HOST_ZONE`
@@ -233,7 +241,7 @@ Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or 
 
 Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
 
-GitHub limits `workflow_dispatch` to 25 inputs. The manual workflow therefore keeps the higher-value environment and topology overrides exposed there, while lower-level Cloud Run sizing defaults such as container port, CPU, and memory stay repo-variable-backed through the Terraform sync contract.
+GitHub limits `workflow_dispatch` to 25 inputs. The manual workflow therefore keeps the higher-value environment and topology overrides exposed there, while lower-level Cloud Run sizing defaults such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed through the Terraform sync contract.
 
 For `command=destroy`, the workflow does not create a missing backend bucket. Instead it fails fast unless the remote state backend already exists, and it requires `destroy_confirmation` to match the resolved GCP project id. That keeps remote teardown explicit and tied to the same state that created the environment.
 

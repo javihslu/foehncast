@@ -156,6 +156,10 @@ foehncast_default_cloud_run_service_name() {
   printf 'foehncast-serve\n'
 }
 
+foehncast_default_cloud_composer_environment_name() {
+  printf 'foehncast-composer\n'
+}
+
 foehncast_default_online_compose_host_zone() {
   local location="$1"
 
@@ -223,11 +227,13 @@ apply_foehncast_cloud_tfvars_values() {
   local provision_cloud_run_service="${10}"
   local cloud_run_service_name="${11}"
   local mlflow_tracking_uri="${12}"
-  local provision_online_compose_host="${13}"
-  local online_compose_host_name="${14:-$(foehncast_default_online_compose_host_name)}"
-  local online_compose_host_zone="${15:-$(foehncast_default_online_compose_host_zone "$location")}"
-  local online_compose_machine_type="${16:-e2-standard-4}"
-  local online_compose_disk_size_gb="${17:-40}"
+  local provision_cloud_composer_environment="${13}"
+  local cloud_composer_environment_name="${14:-$(foehncast_default_cloud_composer_environment_name)}"
+  local provision_online_compose_host="${15}"
+  local online_compose_host_name="${16:-$(foehncast_default_online_compose_host_name)}"
+  local online_compose_host_zone="${17:-$(foehncast_default_online_compose_host_zone "$location")}"
+  local online_compose_machine_type="${18:-e2-standard-4}"
+  local online_compose_disk_size_gb="${19:-40}"
 
   set_tfvars_string project_id "$project_id"
   set_tfvars_string region "$location"
@@ -242,6 +248,8 @@ apply_foehncast_cloud_tfvars_values() {
   set_tfvars_string cloud_run_service_name "$cloud_run_service_name"
   set_tfvars_string cloud_run_image "$(foehncast_default_cloud_run_image "$location" "$project_id" "$artifact_repository")"
   set_tfvars_string mlflow_tracking_uri "$mlflow_tracking_uri"
+  set_tfvars_bool provision_cloud_composer_environment "$provision_cloud_composer_environment"
+  set_tfvars_string cloud_composer_environment_name "$cloud_composer_environment_name"
   set_tfvars_bool provision_online_compose_host "$provision_online_compose_host"
   set_tfvars_string online_compose_host_name "$online_compose_host_name"
   set_tfvars_string online_compose_host_zone "$online_compose_host_zone"
@@ -267,6 +275,8 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
   # shellcheck disable=SC2034
   FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"
+  # shellcheck disable=SC2034
+  FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_composer_runtime_service_account)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"
   FOEHNCAST_TF_CLOUD_RUN_CONTAINER_PORT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_container_port cloud_run_container_port)"
@@ -276,6 +286,8 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_CLOUD_RUN_CPU="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_cpu cloud_run_cpu)"
   FOEHNCAST_TF_CLOUD_RUN_MEMORY="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_memory cloud_run_memory)"
   FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
+  FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_composer_environment provision_cloud_composer_environment)"
+  FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_composer_environment_name cloud_composer_environment_name)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
   FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_host_name online_compose_host_name)"
@@ -310,6 +322,8 @@ terraform_repo_variable_names() {
     GCP_CLOUD_RUN_CPU \
     GCP_CLOUD_RUN_MEMORY \
     GCP_MLFLOW_TRACKING_URI \
+    GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT \
+    GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
     GCP_ONLINE_COMPOSE_HOST_NAME \
     GCP_ONLINE_COMPOSE_HOST_ZONE \
@@ -344,6 +358,8 @@ terraform_repo_variable_pairs() {
   printf 'GCP_CLOUD_RUN_MAX_INSTANCE_COUNT\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MAX_INSTANCE_COUNT"
   printf 'GCP_CLOUD_RUN_CPU\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_CPU"
   printf 'GCP_CLOUD_RUN_MEMORY\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MEMORY"
+  printf 'GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"
+  printf 'GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME"
   printf 'GCP_PROVISION_ONLINE_COMPOSE_HOST\t%s\n' "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST"
   printf 'GCP_ONLINE_COMPOSE_HOST_NAME\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME"
   printf 'GCP_ONLINE_COMPOSE_HOST_ZONE\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_ZONE"

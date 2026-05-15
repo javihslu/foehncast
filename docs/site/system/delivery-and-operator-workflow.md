@@ -38,7 +38,7 @@ flowchart TD
 
 The split matters because the local path is the supported onboarding path, while the cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
 
-The remote workflow lands on two hosted runtime surfaces: Cloud Run for the public API lane and the retained operator host for Airflow, MLflow, monitoring, and private recovery work. The target managed direction keeps the same onboarding split but replaces host-owned build and orchestration duties with Cloud Build and Cloud Composer.
+The remote workflow lands on two hosted runtime surfaces: Cloud Run for the public API lane and the retained operator host for Airflow, MLflow, monitoring, and private recovery work. It can also provision an optional Cloud Composer environment for readiness work. The target managed direction keeps the same onboarding split but replaces host-owned build and orchestration duties with Cloud Build and Cloud Composer.
 
 ## Supported Paths
 
@@ -86,7 +86,7 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into hosted Airflow while the retained host still owns that handoff |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
-The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
+The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
@@ -112,6 +112,7 @@ The current hosted orchestration path and the target managed direction are diffe
 | Operator host role | Airflow, MLflow, monitoring, and private app checks on one VM | shrink after Composer absorbs orchestration; keep only the services that still need a VM |
 
 Today the retained host path remains the operational recovery surface. It is not the intended long-term hosted orchestration authority.
+Terraform can provision the managed surface ahead of that cutover, but runtime release, retries, and backfills still belong to the retained-host path until the reviewed handoff stops depending on VM SSH.
 
 ## GitHub Versus GCP Boundary
 
@@ -153,7 +154,7 @@ This keeps the handoff explicit while deeper runtime automation still lives behi
 
 ## Composer Readiness Requirements
 
-Cloud Composer is still a target, not a provisioned surface in this repo. Before it can become the hosted orchestration authority, the repo needs an explicit contract for:
+Cloud Composer is now provisionable as a managed-Airflow readiness surface, but it is still not the hosted orchestration authority in this repo. Before it can take over that role, the repo needs an explicit contract for:
 
 | Requirement | Current repo shape | What later Composer work must replace or define |
 |------|--------------------|-----------------------------------------------|

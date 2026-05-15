@@ -33,6 +33,11 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_CLOUD_RUN_CPU", "cloud_run_cpu"),
     ("GCP_CLOUD_RUN_MEMORY", "cloud_run_memory"),
     ("GCP_MLFLOW_TRACKING_URI", "mlflow_tracking_uri"),
+    (
+        "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT",
+        "provision_cloud_composer_environment",
+    ),
+    ("GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME", "cloud_composer_environment_name"),
     ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
     ("GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
     ("GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
@@ -62,6 +67,14 @@ WORKFLOW_REPO_ENV_OUTPUTS: list[tuple[str, str]] = [
     ("REPO_GCP_CLOUD_RUN_CPU", "cloud_run_cpu"),
     ("REPO_GCP_CLOUD_RUN_MEMORY", "cloud_run_memory"),
     ("REPO_GCP_MLFLOW_TRACKING_URI", "mlflow_tracking_uri"),
+    (
+        "REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT",
+        "provision_cloud_composer_environment",
+    ),
+    (
+        "REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME",
+        "cloud_composer_environment_name",
+    ),
     ("REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
     ("REPO_GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
     ("REPO_GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
@@ -84,8 +97,8 @@ REPO_BACKED_WORKFLOW_INPUTS = {
     "mlflow_tracking_uri",
     "cloud_run_service_name",
     "cloud_run_allow_unauthenticated",
-    "cloud_run_min_instance_count",
-    "cloud_run_max_instance_count",
+    "provision_cloud_composer_environment",
+    "cloud_composer_environment_name",
     "provision_online_compose_host",
     "online_compose_host_name",
     "online_compose_host_zone",
@@ -178,8 +191,11 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert "cloud_run_container_port" not in inputs
     assert "cloud_run_cpu" not in inputs
     assert "cloud_run_memory" not in inputs
+    assert "cloud_run_min_instance_count" not in inputs
+    assert "cloud_run_max_instance_count" not in inputs
 
     assert inputs["provision_cloud_run_service"]["type"] == "string"
+    assert inputs["provision_cloud_composer_environment"]["type"] == "string"
     assert inputs["provision_online_compose_host"]["type"] == "string"
 
     resolve_step = _workflow_step(workflow, "remote", "Resolve Terraform inputs")
@@ -220,20 +236,12 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
         in run_script
     )
     assert (
-        'cloud_run_min_instance_count="${{ inputs.cloud_run_min_instance_count }}"'
-        in run_script
-    )
-    assert (
         'cloud_run_min_instance_count="$REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT"'
         in run_script
     )
     assert "cloud_run_min_instance_count='0'" in run_script
     assert (
         'cloud_run_min_instance_count="$(normalize_non_negative_integer cloud_run_min_instance_count "$cloud_run_min_instance_count")"'
-        in run_script
-    )
-    assert (
-        'cloud_run_max_instance_count="${{ inputs.cloud_run_max_instance_count }}"'
         in run_script
     )
     assert (
@@ -253,6 +261,28 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert "cloud_run_cpu='1'" in run_script
     assert 'cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"' in run_script
     assert "cloud_run_memory='512Mi'" in run_script
+    assert (
+        'provision_cloud_composer_environment="${{ inputs.provision_cloud_composer_environment }}"'
+        in run_script
+    )
+    assert (
+        'provision_cloud_composer_environment="$REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"'
+        in run_script
+    )
+    assert "provision_cloud_composer_environment='false'" in run_script
+    assert (
+        'provision_cloud_composer_environment="$(normalize_bool provision_cloud_composer_environment "$provision_cloud_composer_environment")"'
+        in run_script
+    )
+    assert (
+        'cloud_composer_environment_name="${{ inputs.cloud_composer_environment_name }}"'
+        in run_script
+    )
+    assert (
+        'cloud_composer_environment_name="$REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME"'
+        in run_script
+    )
+    assert "cloud_composer_environment_name='foehncast-composer'" in run_script
     assert (
         'feast_online_store_location="${{ inputs.feast_online_store_location }}"'
         in run_script
@@ -297,6 +327,14 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     )
     assert 'echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"' in run_script
     assert 'echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"' in run_script
+    assert (
+        'echo "TF_VAR_provision_cloud_composer_environment=${provision_cloud_composer_environment}"'
+        in run_script
+    )
+    assert (
+        'echo "TF_VAR_cloud_composer_environment_name=${cloud_composer_environment_name}"'
+        in run_script
+    )
 
 
 def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> None:
@@ -433,6 +471,16 @@ def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
     tfvars = _read_text("terraform/terraform.tfvars.example")
 
     assert "provision_cloud_run_service    = true" in tfvars
+    assert re.search(
+        r"^provision_cloud_composer_environment\s+=\s+false$",
+        tfvars,
+        flags=re.MULTILINE,
+    )
+    assert re.search(
+        r'^cloud_composer_environment_name\s+=\s+"foehncast-composer"$',
+        tfvars,
+        flags=re.MULTILINE,
+    )
     assert "provision_online_compose_host  = true" in tfvars
     assert "online_compose_public_ports    = []" in tfvars
 
@@ -736,17 +784,30 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step."
         in workflow_doc
     )
+    assert (
+        "Terraform can provision the managed surface ahead of that cutover"
+        in workflow_doc
+    )
 
     assert (
-        "Cloud Composer is the target managed orchestration direction." in cloud_mapping
+        "Cloud Composer is the target managed orchestration direction, and Terraform can now provision a Cloud Composer environment for readiness work."
+        in cloud_mapping
     )
     assert (
         "a reviewed runtime release entry that reaches the managed Airflow surface directly"
         in cloud_mapping
     )
+    assert (
+        "The retained host remains the active orchestration authority until those boundaries move."
+        in cloud_mapping
+    )
 
-    assert "Terraform does not provision Cloud Composer today." in terraform_readme
+    assert (
+        "Terraform can provision an optional Cloud Composer environment today."
+        in terraform_readme
+    )
     assert "reviewed runtime release entry without VM SSH" in terraform_readme
+    assert "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" in terraform_readme
 
 
 def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
@@ -1139,6 +1200,40 @@ def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contra
     assert "default GHCR image" not in variables
 
 
+def test_terraform_defines_cloud_composer_hosted_orchestration_contract() -> None:
+    terraform = _read_text("terraform/main.tf")
+    variables = _read_text("terraform/variables.tf")
+    outputs = _read_text("terraform/outputs.tf")
+
+    assert '"composer.googleapis.com",' in terraform
+    assert '"container.googleapis.com",' in terraform
+    assert '"sqladmin.googleapis.com",' in terraform
+    assert '"roles/composer.admin",' in terraform
+    assert 'variable "provision_cloud_composer_environment"' in variables
+    assert 'variable "cloud_composer_environment_name"' in variables
+    assert 'variable "cloud_composer_image_version"' in variables
+    assert 'resource "google_service_account" "cloud_composer_runtime"' in terraform
+    assert 'resource "google_project_iam_member" "cloud_composer_worker"' in terraform
+    assert 'role    = "roles/composer.worker"' in terraform
+    assert (
+        'resource "google_service_account_iam_member" "cloud_composer_service_agent_extension"'
+        in terraform
+    )
+    assert 'role               = "roles/composer.ServiceAgentV2Ext"' in terraform
+    assert 'resource "google_compute_network" "cloud_composer"' in terraform
+    assert 'resource "google_compute_subnetwork" "cloud_composer"' in terraform
+    assert 'resource "google_composer_environment" "cloud_composer"' in terraform
+    assert "env_variables = local.cloud_composer_env_vars" in terraform
+    assert (
+        "service_account = google_service_account.cloud_composer_runtime[0].name"
+        in terraform
+    )
+    assert 'output "provision_cloud_composer_environment"' in outputs
+    assert 'output "cloud_composer_environment_name"' in outputs
+    assert 'output "cloud_composer_airflow_uri"' in outputs
+    assert 'output "cloud_composer_dag_gcs_prefix"' in outputs
+
+
 def test_terraform_forecast_feature_schema_tracks_direction_encoding_columns() -> None:
     terraform = _read_text("terraform/main.tf")
 
@@ -1156,13 +1251,20 @@ def test_terraform_outputs_split_runtime_identity_contract() -> None:
     assert 'output "github_deployer_service_account"' in outputs
     assert 'output "cloud_run_runtime_service_account"' in outputs
     assert 'output "online_compose_runtime_service_account"' in outputs
+    assert 'output "cloud_composer_runtime_service_account"' in outputs
     assert (
         'value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null'
         in outputs
     )
+    assert (
+        'value       = var.provision_cloud_composer_environment ? try(google_service_account.cloud_composer_runtime[0].email, "foehncast-composer@${var.project_id}.iam.gserviceaccount.com") : null'
+        in outputs
+    )
 
 
-def test_platform_state_tracks_online_compose_identity_without_repo_var_sync() -> None:
+def test_platform_state_tracks_hosted_runtime_identities_without_repo_var_sync() -> (
+    None
+):
     load_body = _function_body(
         "scripts/terraform-platform-state.sh", "load_terraform_platform_state"
     )
@@ -1177,8 +1279,14 @@ def test_platform_state_tracks_online_compose_identity_without_repo_var_sync() -
         'FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"'
         in load_body
     )
+    assert (
+        'FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_composer_runtime_service_account)"'
+        in load_body
+    )
     assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in names_body
     assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
+    assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in names_body
+    assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
 
 
 def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> None:
