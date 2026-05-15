@@ -5,30 +5,86 @@ on:
     branches: [main]
     paths:
       - .github/workflows/publish-runtime-images.yml
-      - containers/app/**
+      - .github/actions/load-gcp-repo-config/action.yml
+      - cloudbuild/**
       - containers/airflow/**
       - containers/mlflow/**
       - src/**
       - pyproject.toml
       - uv.lock
       - config.yaml
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
-  packages: write
+  id-token: write
 
 jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+      project_id: ${{ steps.repo_config.outputs.project_id }}
+      workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
+      service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
+      image_repository_base: ${{ steps.derived.outputs.image_repository_base }}
+      publish_ready: ${{ steps.derived.outputs.publish_ready }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - id: flags
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          owner_allowed=false
+          if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
+            owner_allowed=true
+          fi
+
+          echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
+
+      - id: repo_config
+        uses: ./.github/actions/load-gcp-repo-config
+        with:
+          repo-vars-json: ${{ toJson(vars) }}
+
+      - id: derived
+        env:
+          PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          LOCATION: ${{ steps.repo_config.outputs.location }}
+          ARTIFACT_REPOSITORY: ${{ steps.repo_config.outputs.artifact_repository }}
+          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+        run: |
+          set -euo pipefail
+
+          image_repository_base=""
+          if [[ -n "$LOCATION" && -n "$PROJECT_ID" && -n "$ARTIFACT_REPOSITORY" ]]; then
+            image_repository_base="${LOCATION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+          fi
+
+          publish_ready=false
+          if [[ -n "$image_repository_base" && -n "$WORKLOAD_IDENTITY_PROVIDER" && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            publish_ready=true
+          fi
+
+          {
+            echo "image_repository_base=$image_repository_base"
+            echo "publish_ready=$publish_ready"
+          } >> "$GITHUB_OUTPUT"
+
   publish:
-    if: ${{ github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - image_name: foehncast-app
-            context: .
-            dockerfile: containers/app/Dockerfile
           - image_name: foehncast-airflow
             context: .
             dockerfile: containers/airflow/Dockerfile
@@ -38,38 +94,90 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
 
-      - uses: docker/setup-buildx-action@v4
+      - id: image
+        env:
+          IMAGE_REPOSITORY_BASE: ${{ needs.config.outputs.image_repository_base }}
+          IMAGE_NAME: ${{ matrix.image_name }}
+        run: |
+          set -euo pipefail
 
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          image_repository="${IMAGE_REPOSITORY_BASE}/${IMAGE_NAME}"
+          immutable_tag="${image_repository}:sha-${GITHUB_SHA}"
+          latest_tag=""
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            latest_tag="${image_repository}:latest"
+          fi
 
-      - id: metadata
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}
-          tags: |
-            type=raw,value=main,enable={{is_default_branch}}
-            type=sha,prefix=sha-
+          {
+            echo "image_repository=${image_repository}"
+            echo "immutable_tag=${immutable_tag}"
+            echo "latest_tag=${latest_tag}"
+          } >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v6
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.metadata.outputs.tags }}
-          labels: ${{ steps.metadata.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
+          service_account: ${{ needs.config.outputs.service_account_email }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.config.outputs.project_id }}
+
+      - id: submit
+        name: Submit Cloud Build
+        env:
+          PROJECT_ID: ${{ needs.config.outputs.project_id }}
+          BUILD_CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          IMAGE_REPOSITORY: ${{ steps.image.outputs.image_repository }}
+          LATEST_TAG: ${{ steps.image.outputs.latest_tag }}
+        run: |
+          set -euo pipefail
+
+          substitutions=(
+            "_BUILD_CONTEXT=${BUILD_CONTEXT}"
+            "_DOCKERFILE=${DOCKERFILE}"
+            "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"
+            "_COMMIT_SHA=${GITHUB_SHA}"
+            "_FLOATING_TAG=${LATEST_TAG}"
+          )
+          IFS=,
+          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config cloudbuild/runtime-image.yaml --substitutions "${substitutions[*]}" --format='value(id)')"
+          unset IFS
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
 
       - name: Summarize image
         run: |
           {
             echo "## Published runtime image"
             echo
-            echo "- Image: ghcr.io/${{ github.repository_owner }}/${{ matrix.image_name }}"
-            echo "- Tags: ${{ steps.metadata.outputs.tags }}"
+            echo "- Image: ${{ steps.image.outputs.image_repository }}"
+            echo "- Immutable: ${{ steps.image.outputs.immutable_tag }}"
+            if [[ -n "${{ steps.image.outputs.latest_tag }}" ]]; then
+              echo "- Floating: ${{ steps.image.outputs.latest_tag }}"
+            else
+              echo "- Floating: not published for non-main ref"
+            fi
+            echo "- Builder: Cloud Build"
+            echo "- Build id: ${{ steps.submit.outputs.build_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  skipped:
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.publish_ready != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skipped publish
+        run: |
+          {
+            echo "## Runtime image publish skipped"
+            echo
+            echo "Set these repository variables to enable Artifact Registry publication through Cloud Build:"
+            echo "- GCP_PROJECT_ID"
+            echo "- GCP_LOCATION"
+            echo "- GCP_ARTIFACT_REPOSITORY"
+            echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
+            echo "- GCP_SERVICE_ACCOUNT_EMAIL"
           } >> "$GITHUB_STEP_SUMMARY"

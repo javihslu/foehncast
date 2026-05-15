@@ -1,13 +1,14 @@
 locals {
-  github_repository_path       = "${var.github_owner}/${var.github_repository}"
-  cloud_run_image              = var.cloud_run_image != "" ? var.cloud_run_image : "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_repository_id}/foehncast-app:latest"
-  ghcr_registry_owner          = lower(var.github_owner)
-  online_compose_app_image     = var.online_compose_app_image != "" ? var.online_compose_app_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-app:main"
-  online_compose_airflow_image = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-airflow:main"
-  online_compose_mlflow_image  = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "ghcr.io/${local.ghcr_registry_owner}/foehncast-mlflow:main"
-  feast_registry_uri           = "gs://${var.artifact_bucket_name}/feast/registry.db"
-  feast_staging_uri            = "gs://${var.artifact_bucket_name}/feast/staging"
-  feast_bigquery_table         = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
+  github_repository_path         = "${var.github_owner}/${var.github_repository}"
+  artifact_registry_host         = "${var.region}-docker.pkg.dev"
+  artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
+  cloud_run_image                = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  online_compose_app_image       = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  online_compose_airflow_image   = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
+  online_compose_mlflow_image    = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
+  feast_registry_uri             = "gs://${var.artifact_bucket_name}/feast/registry.db"
+  feast_staging_uri              = "gs://${var.artifact_bucket_name}/feast/staging"
+  feast_bigquery_table           = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
   cloud_run_env_vars = merge(
     {
       GCP_PROJECT_ID                       = var.project_id
@@ -234,6 +235,7 @@ locals {
   required_services = toset([
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
+    "cloudbuild.googleapis.com",
     "compute.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
@@ -241,6 +243,10 @@ locals {
     "run.googleapis.com",
     "sts.googleapis.com",
   ])
+}
+
+data "google_project" "current" {
+  project_id = var.project_id
 }
 
 resource "random_password" "airflow_api_auth_jwt_secret" {
@@ -332,6 +338,7 @@ resource "google_project_iam_member" "github_project_admin" {
   for_each = toset([
     "roles/artifactregistry.admin",
     "roles/bigquery.admin",
+    "roles/cloudbuild.builds.editor",
     "roles/compute.admin",
     "roles/datastore.owner",
     "roles/iam.serviceAccountAdmin",
@@ -380,6 +387,13 @@ resource "google_storage_bucket_iam_member" "github_bucket_admin" {
   bucket = google_storage_bucket.artifacts.name
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "cloud_build_writer" {
+  location   = google_artifact_registry_repository.containers.location
+  repository = google_artifact_registry_repository.containers.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
 }
 
 resource "google_artifact_registry_repository_iam_member" "cloud_run_reader" {
@@ -447,6 +461,15 @@ resource "google_project_iam_member" "online_compose_datastore_user" {
   project = var.project_id
   role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "online_compose_reader" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  location   = google_artifact_registry_repository.containers.location
+  repository = google_artifact_registry_repository.containers.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
 resource "google_storage_bucket_iam_member" "online_compose_bucket_admin" {
@@ -607,6 +630,7 @@ resource "google_compute_instance" "online_compose" {
   metadata_startup_script = templatefile("${path.module}/templates/online-compose-host.sh.tftpl", {
     github_repository_path = local.github_repository_path
     git_ref                = var.online_compose_git_ref
+    artifact_registry_host = local.artifact_registry_host
     stack_env              = local.online_compose_env_vars
   })
 
@@ -617,6 +641,7 @@ resource "google_compute_instance" "online_compose" {
     google_project_iam_member.online_compose_bigquery_job_user,
     google_project_iam_member.online_compose_bigquery_read_session_user,
     google_project_iam_member.online_compose_datastore_user,
+    google_artifact_registry_repository_iam_member.online_compose_reader,
     google_storage_bucket_iam_member.online_compose_bucket_admin,
     google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,
     google_bigquery_dataset_iam_member.online_compose_bigquery_editor,

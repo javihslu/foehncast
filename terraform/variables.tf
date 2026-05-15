@@ -178,19 +178,19 @@ variable "online_compose_airflow_admin_username" {
 }
 
 variable "online_compose_app_image" {
-  description = "Optional app image URI for the online Docker host. Leave empty to use the default GHCR image."
+  description = "Optional app image URI for the online Docker host. Leave empty to use the default Artifact Registry image."
   type        = string
   default     = ""
 }
 
 variable "online_compose_airflow_image" {
-  description = "Optional Airflow image URI for the online Docker host. Leave empty to use the default GHCR image."
+  description = "Optional Airflow image URI for the online Docker host. Leave empty to use the default Artifact Registry image."
   type        = string
   default     = ""
 }
 
 variable "online_compose_mlflow_image" {
-  description = "Optional MLflow image URI for the online Docker host. Leave empty to use the default GHCR image."
+  description = "Optional MLflow image URI for the online Docker host. Leave empty to use the default Artifact Registry image."
   type        = string
   default     = ""
 }
