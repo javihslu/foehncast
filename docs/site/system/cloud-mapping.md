@@ -1,12 +1,13 @@
 # Cloud Mapping
 
-FoehnCast keeps one public hosted lane and one private operator lane. Cloud Run carries the shared API, while the hosted full-stack target stays online on one Compute Engine host for Airflow, MLflow, and monitoring. This page maps the validated local stack onto those GCP lanes without changing the core Feature-Training-Inference boundaries.
+FoehnCast keeps one public hosted lane and one private operator lane. Cloud Run carries the shared API, while the hosted full-stack target stays online on one Compute Engine host for Airflow, MLflow, and monitoring. That retained host is current, not the intended long-term orchestration authority. This page maps the validated local stack onto those GCP lanes without changing the core Feature-Training-Inference boundaries.
 
 !!! note "What this page covers"
 
     The shared GCP baseline and both hosted lanes already exist.
     Cloud Run is the shared public API lane.
     The hosted full-stack target stays online as the private operator lane.
+    Cloud Composer is the target managed orchestration direction.
 
 ## Cloud Paths In One View
 
@@ -37,6 +38,7 @@ FoehnCast keeps one public hosted lane and one private operator lane. Cloud Run 
 |------|-----------------|------------------|----------|
 | Shared API lane | hosted inference target on Cloud Run | public | serve the FastAPI product and service routes |
 | Operator lane | hosted full-stack target on Compute Engine | private by default | run Airflow, MLflow, monitoring, and private app checks |
+| Managed orchestration direction | Cloud Composer | private or platform-only | run hosted Airflow workloads without VM-owned orchestration |
 | Delivery lane | GitHub Actions plus Terraform plus OIDC | not a runtime surface | publish reviewed artifacts and apply reviewed infrastructure changes |
 
 ## Mapping Principle
@@ -89,7 +91,19 @@ The hosted targets deploy runtime services only. Development assets stay local o
 
 Today the shared environment keeps a stable split: Cloud Run carries the shared public API URL, one Compute Engine host stays online as the private operator lane for Airflow, MLflow, monitoring, and private app checks, and GitHub Actions plus remote Terraform advance reviewed day-2 changes after maintainer bootstrap.
 
-Hosted Airflow on the retained operator host remains the runtime orchestration surface for this horizon. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed delivery and recovery runbooks and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+Today the retained operator host still owns hosted orchestration. The target managed orchestration direction is Cloud Composer once DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and runtime release entry no longer depend on the retained host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed current-versus-target boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+
+## Managed Orchestration Direction
+
+Cloud Composer is the target managed orchestration direction.
+
+Before a later cutover, the repo needs:
+
+- a DAG packaging path that does not depend on a VM checkout
+- a Python dependency bundle for hosted Airflow
+- secret and runtime-config delivery for the managed orchestrator
+- network and API reachability that does not depend on VM SSH
+- a reviewed runtime release entry that reaches the managed Airflow surface directly
 
 ## Honest Mapping From Local To Cloud
 

@@ -359,7 +359,6 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     summary_script = summary_step["run"]
 
     assert "always()" in summary_step["if"]
-    assert (
         'echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"'
         in summary_script
     )
@@ -606,7 +605,7 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
     assert "docker/metadata-action" not in workflow_text
 
 
-def test_trigger_runtime_release_workflow_uses_hosted_airflow_handoff_contract() -> (
+def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_contract() -> (
     None
 ):
     workflow = _workflow_yaml(".github/workflows/trigger-runtime-release.yml")
@@ -692,7 +691,61 @@ def test_trigger_runtime_release_workflow_uses_hosted_airflow_handoff_contract()
         in handoff_step["run"]
     )
     assert 'echo "- Airflow DAG: runtime_release"' in handoff_step["run"]
+    assert (
+        'echo "- Current receiver: retained-host Airflow adapter"'
+        in handoff_step["run"]
+    )
+    assert (
+        'echo "- Target receiver: Cloud Composer without VM SSH"' in handoff_step["run"]
+    )
     assert 'echo "## Runtime release handoff"' in handoff_step["run"]
+
+    skipped_step = _workflow_step(
+        workflow, "skipped", "Explain skipped runtime release handoff"
+    )
+    assert "This is the current retained-host entry contract." in skipped_step["run"]
+    assert "Cloud Composer without VM SSH" in skipped_step["run"]
+
+
+def test_orchestration_docs_describe_current_host_path_and_target_composer_readiness() -> (
+    None
+):
+    workflow_doc = _read_text("docs/site/system/delivery-and-operator-workflow.md")
+    cloud_mapping = _read_text("docs/site/system/cloud-mapping.md")
+    terraform_readme = _read_text("terraform/README.md")
+
+    assert (
+        "The current hosted orchestration path and the target managed direction are different on purpose."
+        in workflow_doc
+    )
+    assert (
+        "| Hosted Airflow surface | retained operator host | Cloud Composer |"
+        in workflow_doc
+    )
+    assert "reviewed request should reach Composer without VM SSH" in workflow_doc
+    assert (
+        "a reviewed DAG delivery path that does not depend on a VM checkout"
+        in workflow_doc
+    )
+    assert (
+        "a managed secret and runtime-config path for hosted orchestration"
+        in workflow_doc
+    )
+    assert (
+        "The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step."
+        in workflow_doc
+    )
+
+    assert (
+        "Cloud Composer is the target managed orchestration direction." in cloud_mapping
+    )
+    assert (
+        "a reviewed runtime release entry that reaches the managed Airflow surface directly"
+        in cloud_mapping
+    )
+
+    assert "Terraform does not provision Cloud Composer today." in terraform_readme
+    assert "reviewed runtime release entry without VM SSH" in terraform_readme
 
 
 def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:

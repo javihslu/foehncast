@@ -123,6 +123,21 @@ The retained host is still part of the shared environment, but several VM-specif
 | startup template and sync timer | the VM still refreshes the repo, pulls the stack, and records retained-host sync evidence for operators | current but transitional | later host-shrink issue |
 | public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface while the VM stays private | keep for now | keep until the VM role changes |
 
+## Composer Readiness Boundary
+
+Terraform does not provision Cloud Composer today. The current online compose host remains the operational orchestration surface.
+
+Before a later Composer cutover, this repo needs explicit contract surfaces for:
+
+- DAG packaging outside a VM checkout
+- a Python dependency bundle for hosted Airflow
+- secrets and runtime-config delivery for managed orchestration
+- network and API reachability for managed Airflow
+- reviewed runtime release entry without VM SSH
+- operator access rules for retries, backfills, and recovery
+
+These are readiness requirements, not resources this directory manages yet.
+
 ## What The Hosted Paths Expose
 
 | Path | Public surface by default | Notes |
