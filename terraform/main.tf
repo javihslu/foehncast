@@ -92,6 +92,22 @@ locals {
     },
     var.cloud_composer_env_vars,
   )
+  cloud_composer_pypi_packages = merge(
+    {
+      evidently             = ">=0.7.21"
+      feast                 = "[gcp]>=0.63.0"
+      google-cloud-bigquery = ">=3.30.0"
+      google-cloud-storage  = ">=2.19.0"
+      matplotlib            = ">=3.8"
+      mlflow                = ">=3.0"
+      pandas                = ">=2.0"
+      pyarrow               = ">=14.0"
+      pyyaml                = ">=6.0"
+      requests              = ">=2.31"
+      scikit-learn          = ">=1.5"
+    },
+    var.cloud_composer_pypi_packages,
+  )
 
   forecast_feature_schema = [
     {
@@ -795,7 +811,7 @@ resource "google_composer_environment" "cloud_composer" {
       }
 
       env_variables = local.cloud_composer_env_vars
-      pypi_packages = var.cloud_composer_pypi_packages
+      pypi_packages = local.cloud_composer_pypi_packages
     }
 
     node_config {

@@ -49,6 +49,7 @@ Terraform can provision:
 
 The Cloud Run service remains inference-only. The full online stack is the compose-host path. Cloud Composer is provisionable as a managed orchestration target, but the retained host remains the active orchestration and recovery surface until a later cutover replaces the VM handoff.
 When Composer is enabled, Terraform also seeds `FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH` to a durable `gs://<artifact-bucket>/airflow/reports/runtime-release-latest.json` target so the future managed runtime handoff does not depend on a writable VM checkout for its acknowledgement record.
+Terraform also seeds a reviewed Composer PyPI package baseline for the checked-in DAG bundle and merges any extra `cloud_composer_pypi_packages` entries on top of that baseline.
 
 ## Deployment Scope Rule
 
@@ -134,16 +135,16 @@ The retained host is still part of the shared environment, but several VM-specif
 
 Terraform can provision an optional Cloud Composer environment today. The current online compose host remains the operational orchestration surface.
 
-Before a later Composer cutover, this repo needs explicit contract surfaces for:
+Before a later Composer cutover, this repo still needs explicit contract surfaces for:
 
-- DAG packaging outside a VM checkout
-- a Python dependency bundle for hosted Airflow
 - secrets and runtime-config delivery for managed orchestration
 - network and API reachability for managed Airflow
 - reviewed runtime release entry without VM SSH
 - operator access rules for retries, backfills, and recovery
 
-These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption.
+The repo now covers two Composer readiness seams directly: the reviewed DAG and source bundle sync path, and the reviewed Composer PyPI package baseline for the checked-in DAG bundle. Terraform merges later `cloud_composer_pypi_packages` overrides on top of that baseline so follow-up slices can extend the package set without replacing the known-good contract.
+
+These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption. Private package indexes, non-PyPI or system-level dependencies, secret injection, and the reviewed runtime release entry still remain separate cutover work.
 
 ## What The Hosted Paths Expose
 
@@ -180,7 +181,7 @@ The repository uses two image-publication workflows that share one hosted build 
 
 Artifact Registry is the canonical hosted image registry in this contract. GHCR convenience artifacts, if published separately, are not the default hosted deployment path.
 
-The Composer DAG bundle path narrows the VM-checkout dependency for DAG delivery, but the reviewed runtime release entry without VM SSH and Composer-specific dependency installation still belong to later orchestration issues.
+The Composer DAG bundle path plus the reviewed Composer PyPI baseline narrow the VM-checkout and dependency-installation gaps, but the reviewed runtime release entry without VM SSH and managed secret or runtime-config delivery still belong to later orchestration issues.
 
 Set these GitHub repository variables:
 

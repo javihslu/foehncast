@@ -120,6 +120,20 @@ FEAST_CLOUD_ENV_KEYS = {
     "FOEHNCAST_FEAST_DATASTORE_DATABASE",
 }
 
+COMPOSER_BASELINE_PYPI_PACKAGES = {
+    "evidently": ">=0.7.21",
+    "feast": "[gcp]>=0.63.0",
+    "google-cloud-bigquery": ">=3.30.0",
+    "google-cloud-storage": ">=2.19.0",
+    "matplotlib": ">=3.8",
+    "mlflow": ">=3.0",
+    "pandas": ">=2.0",
+    "pyarrow": ">=14.0",
+    "pyyaml": ">=6.0",
+    "requests": ">=2.31",
+    "scikit-learn": ">=1.5",
+}
+
 
 def _function_body(relative_path: str, function_name: str) -> str:
     match = re.search(
@@ -468,6 +482,31 @@ def test_terraform_online_compose_public_ports_default_to_private_control_plane(
     assert "default     = []" in variables
 
 
+def test_terraform_seeds_reviewed_composer_pypi_baseline() -> None:
+    terraform = _read_text("terraform/main.tf")
+
+    assert "cloud_composer_pypi_packages = merge(" in terraform
+    assert "pypi_packages = local.cloud_composer_pypi_packages" in terraform
+    assert "var.cloud_composer_pypi_packages" in terraform
+
+    for package_name, constraint in COMPOSER_BASELINE_PYPI_PACKAGES.items():
+        assert re.search(
+            rf'^\s+{re.escape(package_name)}\s+=\s+"{re.escape(constraint)}"$',
+            terraform,
+            flags=re.MULTILINE,
+        )
+
+
+def test_terraform_describes_composer_pypi_override_contract() -> None:
+    variables = _read_text("terraform/variables.tf")
+
+    assert 'variable "cloud_composer_pypi_packages"' in variables
+    assert (
+        "Additional or overriding PyPI packages merged on top of the repo-reviewed Cloud Composer baseline."
+        in variables
+    )
+
+
 def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
     tfvars = _read_text("terraform/terraform.tfvars.example")
 
@@ -482,8 +521,34 @@ def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
         tfvars,
         flags=re.MULTILINE,
     )
+    assert re.search(
+        r"^cloud_composer_pypi_packages\s+=\s+\{\}$",
+        tfvars,
+        flags=re.MULTILINE,
+    )
     assert "provision_online_compose_host  = true" in tfvars
     assert "online_compose_public_ports    = []" in tfvars
+
+
+def test_composer_readiness_docs_describe_reviewed_pypi_baseline() -> None:
+    terraform_readme = _read_text("terraform/README.md")
+    workflow_doc = _read_text("docs/site/system/delivery-and-operator-workflow.md")
+    cloud_mapping_doc = _read_text("docs/site/system/cloud-mapping.md")
+
+    assert "reviewed Composer PyPI package baseline" in terraform_readme
+    assert "cloud_composer_pypi_packages" in terraform_readme
+    assert (
+        "Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle"
+        in workflow_doc
+    )
+    assert (
+        "Terraform now seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle"
+        in workflow_doc
+    )
+    assert (
+        "Terraform also seeds the reviewed PyPI baseline required by the checked-in DAG bundle"
+        in cloud_mapping_doc
+    )
 
 
 def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> None:

@@ -89,7 +89,7 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
 
-GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Dependency packaging, runtime secret delivery, and the reviewed runtime release entry still need separate cutover work.
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle, but runtime secret delivery and the reviewed runtime release entry still need separate cutover work.
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
@@ -162,12 +162,12 @@ Cloud Composer is now provisionable as a managed-Airflow readiness surface, but 
 | Requirement | Current repo shape | What later Composer work must replace or define |
 |------|--------------------|-----------------------------------------------|
 | DAG packaging | DAGs currently arrive through the retained host checkout and compose-mounted repo path | a reviewed DAG delivery path that does not depend on a VM checkout |
-| Python dependencies | Airflow dependencies currently live in the retained-host container image path | a hosted Airflow dependency bundle compatible with Composer |
+| Python dependencies | Terraform now seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle | extend or replace that baseline when later Composer work needs private indexes, non-PyPI or system-level dependencies, or broader DAG coverage |
 | Secrets and runtime config | the retained host reads runtime configuration from the VM-local environment and service identity | a managed secret and runtime-config path for hosted orchestration |
 | Network and API reachability | the current trigger contract reaches Airflow through VM SSH and host-local API access | a reviewed runtime-release entry path that reaches Composer without VM SSH |
 | Operator access model | retries, backfills, and recovery currently assume SSH to the retained host | a clear managed operator access model for Composer-owned orchestration |
 
-GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, but it does not yet solve Composer-specific dependency installation, secret injection, or the reviewed runtime release entry without VM SSH.
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, and Terraform now seeds the reviewed Composer PyPI package baseline needed by that checked-in DAG bundle. The baseline still allows extra `cloud_composer_pypi_packages` overrides for follow-up slices, but it does not yet solve secret injection or the reviewed runtime release entry without VM SSH.
 
 The runtime release acknowledgement path is now portable as well: the same DAG can keep writing the reviewed summary to the retained-host default path today, or to a durable storage target such as `gs://...` when the managed orchestration path is ready to own that evidence directly.
 
