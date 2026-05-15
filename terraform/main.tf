@@ -68,26 +68,26 @@ locals {
   )
   cloud_composer_env_vars = merge(
     {
-      GCP_PROJECT_ID                       = var.project_id
-      GCP_LOCATION                         = var.region
-      GCP_BUCKET_NAME                      = var.artifact_bucket_name
-      GOOGLE_CLOUD_PROJECT                 = var.project_id
-      MLFLOW_ARTIFACT_DESTINATION          = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      MLFLOW_TRACKING_URI                  = var.mlflow_tracking_uri
-      STORAGE_BACKEND                      = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
-      STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE               = var.bigquery_feature_table_id
-      FOEHNCAST_FEAST_SOURCE               = "bigquery"
-      FOEHNCAST_FEAST_PROJECT              = "foehncast"
-      FOEHNCAST_FEAST_PROJECT_ID           = var.project_id
-      FOEHNCAST_FEAST_REGISTRY             = local.feast_registry_uri
-      FOEHNCAST_FEAST_GCS_BUCKET           = var.artifact_bucket_name
-      FOEHNCAST_FEAST_GCS_STAGING_LOCATION = local.feast_staging_uri
-      FOEHNCAST_FEAST_BIGQUERY_DATASET     = var.bigquery_dataset_id
-      FOEHNCAST_FEAST_BIGQUERY_LOCATION    = var.bigquery_location
-      FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
-      FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
+      GCP_PROJECT_ID                        = var.project_id
+      GCP_LOCATION                          = var.region
+      GCP_BUCKET_NAME                       = var.artifact_bucket_name
+      GOOGLE_CLOUD_PROJECT                  = var.project_id
+      MLFLOW_ARTIFACT_DESTINATION           = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
+      MLFLOW_TRACKING_URI                   = var.mlflow_tracking_uri
+      STORAGE_BACKEND                       = "bigquery"
+      STORAGE_BIGQUERY_PROJECT_ID           = var.project_id
+      STORAGE_BIGQUERY_DATASET              = var.bigquery_dataset_id
+      STORAGE_BIGQUERY_TABLE                = var.bigquery_feature_table_id
+      FOEHNCAST_FEAST_SOURCE                = "bigquery"
+      FOEHNCAST_FEAST_PROJECT               = "foehncast"
+      FOEHNCAST_FEAST_PROJECT_ID            = var.project_id
+      FOEHNCAST_FEAST_REGISTRY              = local.feast_registry_uri
+      FOEHNCAST_FEAST_GCS_BUCKET            = var.artifact_bucket_name
+      FOEHNCAST_FEAST_GCS_STAGING_LOCATION  = local.feast_staging_uri
+      FOEHNCAST_FEAST_BIGQUERY_DATASET      = var.bigquery_dataset_id
+      FOEHNCAST_FEAST_BIGQUERY_LOCATION     = var.bigquery_location
+      FOEHNCAST_FEAST_BIGQUERY_TABLE        = local.feast_bigquery_table
+      FOEHNCAST_FEAST_DATASTORE_DATABASE    = var.feast_online_store_database_name
       FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH = "gs://${var.artifact_bucket_name}/airflow/reports/runtime-release-latest.json"
     },
     var.cloud_composer_env_vars,
