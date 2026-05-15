@@ -359,6 +359,7 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     summary_script = summary_step["run"]
 
     assert "always()" in summary_step["if"]
+    assert (
         'echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"'
         in summary_script
     )
