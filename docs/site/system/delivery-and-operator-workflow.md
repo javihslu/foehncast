@@ -1,12 +1,12 @@
 # Delivery and Operator Workflow
 
-FoehnCast keeps contributor onboarding and shared-cloud delivery separate on purpose. Contributors use `./scripts/bootstrap-local.sh` to run the validated local evaluator. Maintainers use `./scripts/bootstrap-gcp.sh`, GitHub Actions, and Terraform to bootstrap and advance the shared hosted environment. This page records the current workflow contract validated by the bootstrap scripts, the Terraform reference, and the cloud-operator tests.
+FoehnCast keeps contributor onboarding and shared-cloud delivery separate on purpose. Contributors use `./scripts/bootstrap-local.sh` to run the validated local evaluator. Maintainers use `./scripts/bootstrap-gcp.sh`, GitHub Actions, and Terraform to bootstrap and advance the shared hosted environment. The current hosted runtime still uses a retained operator host for Airflow handoff and operator surfaces, but the intended hosted direction is Cloud Build plus Cloud Composer. This page records the current workflow contract and the boundary that future hosted changes should move toward.
 
 !!! note "Scope"
 
     This page describes the current validated delivery and operator workflow.
-    It is not a roadmap.
-    Future deployment changes should be documented after they are chosen and implemented.
+    It also names the intended managed hosted direction so the current host-backed path is not mistaken for the final design.
+    It is not a cutover runbook for Composer or Cloud Build.
 
 ## Workflow In One View
 
@@ -46,14 +46,16 @@ flowchart LR
 
 The split matters because the local path is the supported public onboarding path, while the cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
 
+Today the remote workflow still lands on two hosted runtime surfaces: Cloud Run for the public API lane and the retained operator host for Airflow, MLflow, monitoring, and private recovery work. The target managed direction keeps the same onboarding split but replaces host-owned build and orchestration duties with Cloud Build and Cloud Composer.
+
 ## Current Lanes
 
-| Lane | Current target | Main job |
-|------|----------------|----------|
-| Local evaluator lane | `./scripts/bootstrap-local.sh` plus local Compose | run the default contributor path |
-| Delivery lane | GitHub Actions plus Terraform plus OIDC | publish reviewed artifacts and apply reviewed infrastructure changes |
-| Shared API lane | hosted inference target on Cloud Run | serve the shared public API |
-| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private recovery work online |
+| Lane | Current target | State | Main job |
+|------|----------------|-------|----------|
+| Local evaluator lane | `./scripts/bootstrap-local.sh` plus local Compose | stable baseline | run the default contributor path |
+| Delivery lane | GitHub Actions plus Terraform plus OIDC | active review gate | publish reviewed artifacts and apply reviewed infrastructure changes |
+| Shared API lane | hosted inference target on Cloud Run | active hosted target | serve the shared public API |
+| Operator lane | hosted full-stack target on one GCP host | active but transitional | keep Airflow, MLflow, monitoring, and private recovery work online until the managed hosted control plane is ready |
 
 ## Default Contributor Path
 
@@ -88,7 +90,7 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/terraform.yml` | primary Terraform operator path | pushes to `main` automatically resolve to `apply` after bootstrap; manual dispatch stays available for `plan`, `destroy`, `cleanup`, and explicit overrides |
 | `scripts/configure-github-actions.sh` | repo-variable sync | Terraform outputs are copied into GitHub repository variables so the remote workflow reads one shared contract |
 | `terraform/terraform.tfvars` | bootstrap input | used during the interactive bootstrap path, not as the day-2 source of truth for remote applies |
-| runtime image workflows | reviewed artifact publishing | publish automation builds and publishes runtime images, but it does not deploy Cloud Run, shift traffic, or mutate MLflow aliases directly |
+| runtime image workflows | reviewed artifact publishing | GitHub-reviewed workflows now submit hosted image builds to Cloud Build and publish the reviewed images to Artifact Registry, but they still do not deploy Cloud Run, shift traffic, or mutate MLflow aliases directly |
 | `.github/workflows/trigger-runtime-release.yml` | reviewed runtime handoff | today GitHub sends one explicit runtime release request into hosted Airflow after the retained operator host refreshes to the reviewed git ref; this handoff is transitional until Composer owns it |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
@@ -118,7 +120,6 @@ The current hosted orchestration path and the target managed direction are diffe
 | Reviewed runtime release entry | GitHub OIDC plus SSH to the retained host, then local `runtime_release` DAG trigger | reviewed request should reach Composer without VM SSH |
 | Scheduling, retries, and backfills | retained-host Airflow | Composer |
 | Operator host role | Airflow, MLflow, monitoring, and private app checks on one VM | shrink after Composer absorbs orchestration; keep only the services that still need a VM |
-
 Today the retained host path remains the operational recovery surface. It is not the intended long-term hosted orchestration authority.
 
 ## GitHub Versus GCP Boundary
@@ -128,12 +129,12 @@ The reviewed delivery plane and the runtime execution plane still have different
 | Plane | Current owner | What it owns | What it must not own |
 |------|---------------|--------------|----------------------|
 | Reviewed delivery | GitHub Actions plus Terraform | lint, test, build, image publish, Terraform plan/apply/destroy, and reviewed deploy workflows | runtime scheduling, retries, backfills, and long-lived operator state |
-| Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
-| Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
+| Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, current hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
+| Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces; today it reaches runtime through the retained-host handoff and later should reach managed Airflow directly | ad hoc operator-only divergence from the declared contract |
 
 GitHub Actions may trigger reviewed delivery workflows, but runtime scheduling does not belong to GitHub. Today that runtime orchestration still lives on the retained operator host. The target managed surface is Cloud Composer.
 
-## Runtime Release Trigger Contract
+## Current Runtime Release Trigger Contract
 
 GitHub now has exactly one reviewed handoff into runtime execution.
 
@@ -218,7 +219,7 @@ Rollback uses the runtime trigger contract instead of direct GitHub runtime muta
 - `airflow/reports/runtime-release-latest.json` and its history files record the acknowledged handoff on the runtime side
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
-VM retirement is a separate question. The VM stays online while Airflow, MLflow, and monitoring still define the retained control plane. Later retirement should happen only after that operator lane gets smaller explicitly.
+VM retirement is a separate question. The VM stays online only while Airflow, MLflow, and monitoring still define the retained control plane. Airflow should leave the VM before that host is treated as steady state.
 
 Practical recovery split:
 
@@ -246,7 +247,7 @@ These boundaries stay explicit across the scripts, Terraform reference, and test
 - the local Docker evaluator remains the only default contributor path
 - the shared cloud environment stays operator-owned, even though the repository and images are public
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
-- runtime scheduling, retries, and backfills belong to hosted Airflow for this horizon rather than to GitHub Actions
+- runtime scheduling, retries, and backfills belong to hosted Airflow today and to Composer after the managed cutover, not to GitHub Actions
 - runtime promotion, rollback, and live traffic control do not run inside GitHub workflows; GitHub only sends the reviewed runtime release request
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
@@ -259,5 +260,6 @@ The same split also keeps cloud retirement reviewable. Destroy and cleanup stay 
 - it keeps the one-time cloud bootstrap explicit and interactive, which is safer for project, billing, and hosted-target choices
 - it moves normal day-2 infrastructure changes into GitHub Actions so operators do not need local Terraform for routine work
 - it keeps shared-cloud configuration reviewable because Terraform outputs, repository variables, and workflow behavior are tied together by regression tests
+- it records the current retained-host workflow without pretending that VM-backed orchestration is the desired hosted end state
 
 See [Interfaces and Surfaces](interfaces-and-surfaces.md), [Hosted Full-Stack](hosted-full-stack.md), [Cloud Mapping](cloud-mapping.md), and [Monitoring](monitoring.md) for the surrounding runtime and exposure boundaries.

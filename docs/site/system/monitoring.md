@@ -1,14 +1,14 @@
 # Monitoring
 
-FoehnCast keeps monitoring as an operator surface, not a rider-facing one. The monitoring stack turns pipeline summaries, retained prediction events, drift signals, and hosted sync state into scrapeable metrics and checked-in alert rules without changing the runtime contracts those signals describe.
+FoehnCast keeps monitoring as an operator surface, not a rider-facing one. The monitoring stack turns pipeline summaries, retained prediction events, drift signals, and hosted sync state into scrapeable metrics and checked-in alert rules without changing the runtime contracts those signals describe. In the shared hosted path today, some of that operator evidence still comes from the retained host. That host is transitional, but the monitoring boundary itself stays the same.
 
 This page records the current monitoring design that is validated in the local stack and in regression tests. It focuses on what is measured today, where the evidence comes from, and how the operator path stays separate from the public docs surface.
 
 !!! note "Scope"
 
     This page describes the current validated monitoring contract.
-    It is not a roadmap.
-    Future changes should be documented after they are chosen and implemented.
+    It focuses on the current monitoring evidence and boundaries.
+    It does not treat the retained host as the desired long-term hosted control plane.
 
 ## Signal Path
 
@@ -33,7 +33,7 @@ The important split is that monitoring consumes persisted or runtime monitoring 
 | Runtime mode | Monitoring contract | Exposure boundary |
 |------|---------------------|-------------------|
 | Local evaluator | app `/metrics`, StatsD drift export, persisted pipeline summaries, and local Grafana dashboards validate the full monitoring path on one machine | local-only |
-| Shared hosted environment | Cloud Run exposes the app-owned `/metrics` contract, while the operator host keeps Prometheus, Grafana, hosted sync evidence, and operator review online | operator stack stays private by default |
+| Shared hosted environment | Cloud Run exposes the app-owned `/metrics` contract, while the current operator host keeps Prometheus, Grafana, hosted sync evidence, and operator review online until the managed hosted control plane absorbs more of that work | operator stack stays private by default |
 | Public docs | rendered metrics snippets, screenshots, checked-in configs, and summary artifacts explain the monitoring contract | no live control planes |
 
 The public-versus-private surface rule itself is documented in [Interfaces and Surfaces](interfaces-and-surfaces.md). This page stays focused on what monitoring measures and how operators verify it.
@@ -117,6 +117,8 @@ That makes the dashboard a view over checked-in metrics contracts rather than a 
 
 The same dashboard contract works in the local evaluator and in the active shared environment. What changes is the runtime around it, not the meaning of the monitored signals.
 
+That distinction matters during the hosted migration too. The operator evidence sources may move, but the monitoring contract should stay reviewable through the same metrics, alerts, and checked-in dashboards.
+
 ## Alert Rules
 
 The checked-in alert rules cover the main operator failure modes.
@@ -145,7 +147,7 @@ Recovery work should leave durable evidence that operators can compare before an
 
 Capture the initiating run reference with the summary artifacts: the GitHub workflow URL for reviewed delivery, or the logical date and DAG run id for hosted Airflow recovery.
 
-These checks stay intentionally small. They give operators one repeatable evidence pack without turning the monitoring stack into the system that performs the recovery itself. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the retry and backfill procedures.
+These checks stay intentionally small. They give operators one repeatable evidence pack without turning the monitoring stack into the system that performs the recovery itself. The retained-host sync evidence is part of the current operational contract, not a claim that the VM should remain the permanent monitoring or orchestration anchor. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the retry and backfill procedures.
 
 ## Reading Evidence Safely
 
@@ -166,6 +168,7 @@ This keeps the public docs understandable in review while leaving live Grafana, 
 - it keeps operator monitoring separate from the rider-facing app and docs pages
 - it preserves durable monitoring evidence across restarts without turning runtime state into product data
 - it keeps alerting reviewable because dashboards, rules, and scrape config live in git
+- it keeps the monitoring boundary stable even while the hosted operator surface changes underneath it
 - it lets one `/metrics` surface describe the app-owned monitoring contract while StatsD handles Evidently drift export
 
 See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Feature Pipeline](feature-pipeline.md), and [Getting Started](../getting-started.md) for the surrounding system and local operator path.

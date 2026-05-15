@@ -1,14 +1,14 @@
 # Training Pipeline
 
-FoehnCast keeps training downstream from the curated feature store. The same training contract runs in the local evaluator and in the active shared environment: the training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline.
+FoehnCast keeps training downstream from the curated feature store. The same training contract runs in the local evaluator and in the current shared hosted environment: the training path reads stored curated rows, rebuilds schema-derived features when needed, generates synthetic rideability labels, trains the configured regressor, writes evaluation evidence, and registers a versioned model in MLflow without pushing training concerns back into the feature pipeline. The surrounding hosted orchestration surface is transitional, but the training contract itself stays the same.
 
 This page records the current training design that is validated in the local stack and in regression tests. It focuses on what each stage owns today and what remains an explicit operator control rather than an automatic side effect.
 
 !!! note "Scope"
 
     This page describes the current validated training-path contract.
-    It is not a roadmap.
-    Future changes should be documented after they are chosen and implemented.
+    It focuses on what the training path owns, not on the hosted control-plane migration.
+    The target hosted direction may change where orchestration runs, but it does not change the training contract described here.
 
 ## Pipeline Shape
 
@@ -37,7 +37,7 @@ The key point is that the training path stays explicit:
 | Runtime mode | Training role today |
 |------|---------------------|
 | Local evaluator | local Airflow and MLflow run labeling, training, evaluation, and registration |
-| Active shared environment | the hosted full-stack target runs the same Airflow and MLflow contract online |
+| Active shared environment | the current hosted full-stack target runs the same Airflow and MLflow contract online while the managed hosted control plane is still transitional |
 | Hosted inference target | serves a registered alias; it does not run training |
 
 ## Stage Responsibilities
@@ -124,6 +124,8 @@ That hand-off matters because it keeps the orchestration boundary visible:
 
 This makes the Airflow Assets view reflect the real dependency graph between curated feature persistence, training, evaluation, and registration.
 
+In the shared hosted path today, those Airflow-owned steps still run on the retained operator lane. The target hosted orchestrator is Cloud Composer, but that change should preserve the same training-stage ownership and evidence boundaries.
+
 ## Alias Controls Outside The DAG
 
 Promotion and rollback are explicit controls layered on top of the registry aliases, not hidden inside normal training.
@@ -142,5 +144,6 @@ That separation is deliberate. Training can succeed without immediately changing
 - it preserves reviewable evidence through MLflow runs and markdown evaluation reports
 - it keeps candidate and champion semantics explicit in the registry rather than buried in deployment scripts
 - it makes automatic retraining visible in Airflow through asset hand-offs instead of opaque trigger chains
+- it keeps the training contract stable even while the hosted orchestration surface is being simplified
 
 See [Architecture](architecture.md), [Feature Pipeline](feature-pipeline.md), [Monitoring](monitoring.md), and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the surrounding system boundaries.
