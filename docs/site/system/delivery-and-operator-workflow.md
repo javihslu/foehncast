@@ -145,7 +145,7 @@ flowchart LR
 - signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
 - receiver: `./scripts/trigger-runtime-release.sh` runs on the retained operator host and triggers the hosted Airflow `runtime_release` DAG locally
 - auth path: GitHub Actions uses OIDC into the deployer service account and Compute Engine SSH; GitHub does not store Airflow credentials or call a public Airflow endpoint
-- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures `airflow/reports/runtime-release-latest.json`
+- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target; on the retained host the default remains `airflow/reports/runtime-release-latest.json`
 
 Supported actions:
 
@@ -169,6 +169,8 @@ Cloud Composer is now provisionable as a managed-Airflow readiness surface, but 
 
 GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, but it does not yet solve Composer-specific dependency installation, secret injection, or the reviewed runtime release entry without VM SSH.
 
+The runtime release acknowledgement path is now portable as well: the same DAG can keep writing the reviewed summary to the retained-host default path today, or to a durable storage target such as `gs://...` when the managed orchestration path is ready to own that evidence directly.
+
 ## Retry And Backfill Runbooks
 
 Operators should retry work on the same plane that owns it instead of jumping between GitHub and runtime surfaces. These are the retained-host runbooks while hosted orchestration still lives on the retained host.
@@ -176,7 +178,7 @@ Operators should retry work on the same plane that owns it instead of jumping be
 | Situation | Where to act | Normal procedure | Minimum evidence |
 |------|---------------|------------------|------------------|
 | Terraform or image publication fails before any runtime request is sent | GitHub Actions | fix the reviewed delivery input, then rerun the failed GitHub workflow | GitHub workflow URL plus the updated workflow summary |
-| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates so the retained operator host refreshes and the hosted Airflow `runtime_release` DAG records a new acknowledgement | GitHub workflow URL plus `airflow/reports/runtime-release-latest.json` |
+| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates so the retained operator host refreshes and the hosted Airflow `runtime_release` DAG records a new acknowledgement | GitHub workflow URL plus the configured runtime release summary target |
 | a feature slice failed or needs replay for one logical date | hosted Airflow on the retained operator host | SSH to the host, verify Airflow health, trigger `feature_pipeline` with an explicit logical date, and wait for the DAG to succeed | logical date, feature DAG run id, and `airflow/reports/feature-pipeline-<dataset>-latest.json` |
 | a replayed feature slice should refresh training state too | hosted Airflow on the retained operator host | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run instead of treating training as a separate first step | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
 | training must be rerun without replaying feature ingestion | hosted Airflow on the retained operator host | use a manual `training_pipeline` run only when the curated feature slice already exists and the operator is intentionally choosing the requested stage in DAG config | training DAG run id, requested stage, model version, and training summary JSON |
@@ -208,7 +210,7 @@ Rollback uses the runtime trigger contract instead of direct GitHub runtime muta
 - `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
 - `.github/workflows/trigger-runtime-release.yml` is the single reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
 - `.github/workflows/promote-candidate.yml` and `.github/workflows/rollback-live-release.yml` stay as blocked redirect workflows so the old entry points do not continue mutating runtime state directly
-- `airflow/reports/runtime-release-latest.json` and its history files record the acknowledged handoff on the runtime side
+- the configured runtime release summary target records the acknowledged handoff on the runtime side; on the retained host the default remains `airflow/reports/runtime-release-latest.json`
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
 VM retirement is a separate question. The VM stays online only while Airflow, MLflow, and monitoring still define the retained control plane. Airflow should leave the VM before that host is treated as steady state.

@@ -7,16 +7,13 @@ import argparse
 from collections.abc import Mapping
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 from typing import Any
 
-from foehncast._json import json_object_mapping
-from foehncast._report_store import (
-    history_json_paths,
-    read_json_object,
-    write_history_copy,
-    write_json_object,
-)
+from foehncast._json import json_object_mapping, read_json_file, write_pretty_json
+from foehncast._report_store import history_json_paths
+from foehncast._time import compact_utc_timestamp
 from foehncast.paths import project_root
 
 
@@ -25,6 +22,7 @@ ALLOWED_RUNTIME_RELEASE_ACTIONS = {
     "promote_candidate",
     "rollback_live",
 }
+RUNTIME_RELEASE_REPORT_PATH_ENV = "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH"
 
 
 def runtime_release_report_dir() -> Path:
@@ -37,28 +35,149 @@ def runtime_release_summary_path() -> Path:
     return runtime_release_report_dir() / "runtime-release-latest.json"
 
 
-def runtime_release_summary_history_paths() -> list[Path]:
-    """Return persisted runtime release handoff history paths."""
-    return history_json_paths(runtime_release_report_dir(), "runtime-release-*.json")
+def configured_runtime_release_summary_location() -> str:
+    """Return the configured summary target for runtime release acknowledgements."""
+    configured_location = os.environ.get(RUNTIME_RELEASE_REPORT_PATH_ENV, "").strip()
+    return configured_location or str(runtime_release_summary_path())
 
 
-def _write_runtime_release_history(summary: dict[str, Any]) -> Path:
-    return write_history_copy(
-        runtime_release_report_dir(),
+def _is_gcs_location(location: str) -> bool:
+    return location.startswith("gs://")
+
+
+def _parse_gcs_location(location: str) -> tuple[str, str]:
+    normalized_location = location.strip()
+    bucket_name, separator, object_name = normalized_location[5:].partition("/")
+    object_name = object_name.strip("/")
+    if not bucket_name or not separator or not object_name:
+        raise ValueError(
+            "Runtime release GCS report path must look like "
+            "'gs://bucket/path/to/runtime-release-latest.json'."
+        )
+    return bucket_name, object_name
+
+
+def _new_storage_client() -> Any:
+    from google.cloud import storage
+
+    return storage.Client()
+
+
+def _write_gcs_json_object(location: str, payload: dict[str, Any]) -> None:
+    bucket_name, object_name = _parse_gcs_location(location)
+    blob = _new_storage_client().bucket(bucket_name).blob(object_name)
+    blob.upload_from_string(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        content_type="application/json",
+    )
+
+
+def _read_gcs_json_object(location: str, *, error_message: str) -> dict[str, Any]:
+    bucket_name, object_name = _parse_gcs_location(location)
+    blob = _new_storage_client().bucket(bucket_name).blob(object_name)
+    if not blob.exists():
+        raise FileNotFoundError(
+            f"Runtime release report was not written to {location}."
+        )
+
+    payload = json.loads(blob.download_as_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(error_message)
+    return payload
+
+
+def _history_location(
+    summary_location: str,
+    *,
+    prefix: str,
+    payload: dict[str, Any],
+    timestamp_field: str = "generated_at",
+) -> str:
+    filename = f"{prefix}-{compact_utc_timestamp(payload.get(timestamp_field))}.json"
+
+    if _is_gcs_location(summary_location):
+        bucket_name, object_name = _parse_gcs_location(summary_location)
+        object_dir = object_name.rpartition("/")[0]
+        history_name = "/".join(
+            part for part in (object_dir, "history", filename) if part
+        )
+        return f"gs://{bucket_name}/{history_name}"
+
+    return str(Path(summary_location).parent / "history" / filename)
+
+
+def _gcs_history_prefix(summary_location: str, *, prefix: str) -> tuple[str, str]:
+    bucket_name, object_name = _parse_gcs_location(summary_location)
+    object_dir = object_name.rpartition("/")[0]
+    history_prefix = "/".join(
+        part for part in (object_dir, "history", f"{prefix}-") if part
+    )
+    return bucket_name, history_prefix
+
+
+def runtime_release_summary_history_paths() -> list[str | Path]:
+    """Return persisted runtime release handoff history paths or URIs."""
+    summary_location = configured_runtime_release_summary_location()
+    if _is_gcs_location(summary_location):
+        bucket_name, history_prefix = _gcs_history_prefix(
+            summary_location,
+            prefix="runtime-release",
+        )
+        return [
+            f"gs://{bucket_name}/{blob.name}"
+            for blob in sorted(
+                _new_storage_client().list_blobs(bucket_name, prefix=history_prefix),
+                key=lambda item: item.name,
+            )
+            if blob.name.endswith(".json")
+        ]
+
+    return history_json_paths(
+        Path(summary_location).parent,
+        "runtime-release-*.json",
+    )
+
+
+def _write_runtime_release_history(
+    summary: dict[str, Any],
+    summary_location: str,
+) -> str | Path:
+    history_location = _history_location(
+        summary_location,
         prefix="runtime-release",
         payload=summary,
     )
+    _write_runtime_release_json(history_location, summary)
+    if _is_gcs_location(history_location):
+        return history_location
+    return Path(history_location)
 
 
-def _write_runtime_release_json(path: Path, payload: dict[str, Any]) -> None:
-    write_json_object(path, payload)
+def _write_runtime_release_json(location: str, payload: dict[str, Any]) -> None:
+    if _is_gcs_location(location):
+        _write_gcs_json_object(location, payload)
+        return
+
+    write_pretty_json(Path(location), payload)
 
 
-def _read_runtime_release_json(path: Path) -> dict[str, Any]:
-    return read_json_object(
-        path,
-        error_message="Runtime release report must decode to a JSON object.",
-    )
+def _read_runtime_release_json(location: str) -> dict[str, Any]:
+    if _is_gcs_location(location):
+        return _read_gcs_json_object(
+            location,
+            error_message="Runtime release report must decode to a JSON object.",
+        )
+
+    path = Path(location)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Runtime release report was not written to {location}."
+        )
+
+    payload = read_json_file(path)
+    if not isinstance(payload, dict):
+        raise ValueError("Runtime release report must decode to a JSON object.")
+    return payload
 
 
 def _request_mapping(request: Mapping[str, Any] | str | None) -> dict[str, Any]:
@@ -177,33 +296,32 @@ def build_runtime_release_summary(
     }
 
 
-def write_runtime_release_summary(summary: dict[str, Any]) -> Path:
+def write_runtime_release_summary(summary: dict[str, Any]) -> Path | str:
     """Persist the latest runtime release handoff summary and a history copy."""
-    summary_path = runtime_release_summary_path()
-    _write_runtime_release_json(summary_path, summary)
-    _write_runtime_release_history(summary)
-    return summary_path
+    summary_location = _resolved_runtime_release_summary_location()
+    _write_runtime_release_json(summary_location, summary)
+    _write_runtime_release_history(summary, summary_location)
+    if _is_gcs_location(summary_location):
+        return summary_location
+    return Path(summary_location)
 
 
-def _resolved_runtime_release_summary_path(
+def _resolved_runtime_release_summary_location(
     report_path: str | Path | None = None,
-) -> Path:
-    return (
-        Path(report_path) if report_path is not None else runtime_release_summary_path()
-    )
+) -> str:
+    if report_path is None:
+        return configured_runtime_release_summary_location()
+
+    resolved_path = str(report_path).strip()
+    return resolved_path or configured_runtime_release_summary_location()
 
 
 def read_runtime_release_summary(
     report_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Read a persisted runtime release summary from disk."""
-    summary_path = _resolved_runtime_release_summary_path(report_path)
-    if not summary_path.is_file():
-        raise FileNotFoundError(
-            f"Runtime release report was not written to {summary_path}."
-        )
-
-    return _read_runtime_release_json(summary_path)
+    summary_location = _resolved_runtime_release_summary_location(report_path)
+    return _read_runtime_release_json(summary_location)
 
 
 def verify_runtime_release_summary(
@@ -211,13 +329,13 @@ def verify_runtime_release_summary(
     report_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Return the persisted runtime release summary after checking the DAG run id."""
-    summary_path = _resolved_runtime_release_summary_path(report_path)
-    summary = read_runtime_release_summary(summary_path)
+    summary_location = _resolved_runtime_release_summary_location(report_path)
+    summary = read_runtime_release_summary(summary_location)
     if summary.get("dag_run_id") != expected_run_id:
         raise ValueError(
             f"runtime release report does not match dag run {expected_run_id!r}"
         )
-    summary["report_path"] = str(summary_path)
+    summary["report_path"] = summary_location
     return summary
 
 

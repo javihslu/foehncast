@@ -48,6 +48,7 @@ Terraform can provision:
 - an optional Compute Engine host for the full online container stack
 
 The Cloud Run service remains inference-only. The full online stack is the compose-host path. Cloud Composer is provisionable as a managed orchestration target, but the retained host remains the active orchestration and recovery surface until a later cutover replaces the VM handoff.
+When Composer is enabled, Terraform also seeds `FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH` to a durable `gs://<artifact-bucket>/airflow/reports/runtime-release-latest.json` target so the future managed runtime handoff does not depend on a writable VM checkout for its acknowledgement record.
 
 ## Deployment Scope Rule
 
@@ -142,7 +143,7 @@ Before a later Composer cutover, this repo needs explicit contract surfaces for:
 - reviewed runtime release entry without VM SSH
 - operator access rules for retries, backfills, and recovery
 
-These are readiness requirements, not resources this directory manages yet.
+These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption.
 
 ## What The Hosted Paths Expose
 
