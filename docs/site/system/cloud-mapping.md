@@ -174,7 +174,7 @@ The intended hosted direction keeps Cloud Run as the public API, moves hosted im
 
 Cloud Composer is the target managed orchestration direction, and Terraform can now provision a Cloud Composer environment for readiness work.
 
-Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. The retained host remains the active orchestration authority until those boundaries move. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket. That narrows the packaging gap, but Python dependency delivery, secret and runtime-config injection, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. The retained host remains the active orchestration authority until those boundaries move. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
 ## Active And Target Hosted Mapping
 
