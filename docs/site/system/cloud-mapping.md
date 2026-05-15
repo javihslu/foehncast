@@ -113,7 +113,7 @@ The intended hosted direction keeps Cloud Run as the public API, moves hosted im
 
 Cloud Composer is the target managed orchestration direction.
 
-Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and runtime release entry still need to stop depending on the retained operator host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed current-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
+Before a later cutover, DAG packaging, Python dependency delivery, secret and runtime-config injection, network and API reachability, and a reviewed runtime release entry that reaches the managed Airflow surface directly still need to stop depending on the retained operator host. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed current-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
 ## Current And Target Hosted Mapping
 
