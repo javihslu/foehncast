@@ -89,7 +89,7 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `scripts/configure-github-actions.sh` | repo-variable sync | Terraform outputs are copied into GitHub repository variables so the remote workflow reads one shared contract |
 | `terraform/terraform.tfvars` | bootstrap input | used during the interactive bootstrap path, not as the day-2 source of truth for remote applies |
 | runtime image workflows | reviewed artifact publishing | publish automation builds and publishes runtime images, but it does not deploy Cloud Run, shift traffic, or mutate MLflow aliases directly |
-| `.github/workflows/trigger-runtime-release.yml` | reviewed runtime handoff | GitHub sends one explicit runtime release request into hosted Airflow after the retained operator host refreshes to the reviewed git ref |
+| `.github/workflows/trigger-runtime-release.yml` | reviewed runtime handoff | today GitHub sends one explicit runtime release request into hosted Airflow after the retained operator host refreshes to the reviewed git ref; this handoff is transitional until Composer owns it |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up | run this after a remote apply succeeds and curated BigQuery rows exist |
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
@@ -108,17 +108,18 @@ The shared environment still depends on the retained operator host in a few spec
 | sync evidence and operator checks | the retained host still writes `.state/online-compose-sync/last-success.json`, and hosted verification still checks that sync evidence through `/metrics` | keep for now | later host-shrink issue |
 | cloud-operator regression tests | `tests/test_cloud_operator_contract.py` and the online-compose sync tests still enforce the retained-host contract directly | keep while migrating | same issue as the production surface being changed |
 
-## Hosted Orchestration Surface Decision
+## Hosted Orchestration Boundary
 
-Hosted Airflow on the retained operator host remains the orchestration surface of record for this horizon.
+The current hosted orchestration path and the target managed direction are different on purpose.
 
-| Option | Fit against current constraints | Decision |
-|------|----------------------------------|----------|
-| Current hosted Airflow control plane | Matches the validated local Airflow DAG and asset model, already exists on the retained operator host, and supports runtime scheduling, retries, backfills, and operator inspection without another platform migration | chosen now |
-| Composer / Managed Airflow | Stronger managed-service story, but adds cost, IAM surface area, and migration churn before the GitHub-versus-runtime boundary cleanup is complete | deferred |
-| Lighter managed trigger model | Could reduce infrastructure, but the current feature and training paths already depend on Airflow-owned scheduling, asset hand-offs, retries, and backfills | not chosen for this horizon |
+| Concern | Current operational path | Target managed direction |
+|------|---------------------------|--------------------------|
+| Hosted Airflow surface | retained operator host | Cloud Composer |
+| Reviewed runtime release entry | GitHub OIDC plus SSH to the retained host, then local `runtime_release` DAG trigger | reviewed request should reach Composer without VM SSH |
+| Scheduling, retries, and backfills | retained-host Airflow | Composer |
+| Operator host role | Airflow, MLflow, monitoring, and private app checks on one VM | shrink after Composer absorbs orchestration; keep only the services that still need a VM |
 
-So the boundary stays simple: GitHub Actions handles review, build, publish, and Terraform-driven delivery; hosted Airflow handles DAG execution, scheduling, retries, and backfills; Cloud Run serves the public API. Managed alternatives can be revisited later only if the operator lane gets smaller first.
+Today the retained host path remains the operational recovery surface. It is not the intended long-term hosted orchestration authority.
 
 ## GitHub Versus GCP Boundary
 
@@ -130,7 +131,7 @@ The reviewed delivery plane and the runtime execution plane still have different
 | Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, hosted Airflow scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
 | Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
 
-GitHub Actions may trigger reviewed delivery workflows, but hosted Airflow on the retained operator host remains the runtime orchestrator.
+GitHub Actions may trigger reviewed delivery workflows, but runtime scheduling does not belong to GitHub. Today that runtime orchestration still lives on the retained operator host. The target managed surface is Cloud Composer.
 
 ## Runtime Release Trigger Contract
 
@@ -159,11 +160,25 @@ Supported actions:
 - `promote_candidate`
 - `rollback_live`
 
-This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary.
+This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary. It is the current operational contract, not the intended long-term hosted entry path. The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step.
+
+## Composer Readiness Requirements
+
+Cloud Composer is still a target, not a provisioned surface in this repo. Before it can become the hosted orchestration authority, the repo needs an explicit contract for:
+
+| Requirement | Current repo shape | What later Composer work must replace or define |
+|------|--------------------|-----------------------------------------------|
+| DAG packaging | DAGs currently arrive through the retained host checkout and compose-mounted repo path | a reviewed DAG delivery path that does not depend on a VM checkout |
+| Python dependencies | Airflow dependencies currently live in the retained-host container image path | a hosted Airflow dependency bundle compatible with Composer |
+| Secrets and runtime config | the retained host reads runtime configuration from the VM-local environment and service identity | a managed secret and runtime-config path for hosted orchestration |
+| Network and API reachability | the current trigger contract reaches Airflow through VM SSH and host-local API access | a reviewed runtime-release entry path that reaches Composer without VM SSH |
+| Operator access model | retries, backfills, and recovery currently assume SSH to the retained host | a clear managed operator access model for Composer-owned orchestration |
 
 ## Retry And Backfill Runbooks
 
 The recovery lane is now explicit too. Operators should retry work on the same plane that owns it instead of jumping between GitHub and runtime surfaces.
+
+These are the current runbooks while hosted orchestration still lives on the retained host.
 
 | Situation | Where to act | Normal procedure | Minimum evidence |
 |------|---------------|------------------|------------------|

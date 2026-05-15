@@ -1,288 +1,291 @@
 name: Trigger Runtime Release
 
 on:
-    workflow_dispatch:
-        inputs:
-            action:
-                description: Runtime release action to hand off to hosted Airflow
-                required: true
-                default: deploy_candidate
-                type: choice
-                options:
-                    - deploy_candidate
-                    - promote_candidate
-                    - rollback_live
-            image_uri:
-                description: Immutable image URI for deploy_candidate requests
-                required: false
-                type: string
-            candidate_revision_tag:
-                description: Candidate Cloud Run revision tag for deploy or promote requests
-                required: false
-                default: candidate
-                type: string
-            candidate_alias:
-                description: Candidate MLflow alias expected for promote requests
-                required: false
-                default: candidate
-                type: string
-            target_alias:
-                description: Target MLflow alias expected after promote or rollback requests
-                required: false
-                default: champion
-                type: string
-            rollback_revision:
-                description: Exact Cloud Run revision to restore for rollback_live requests
-                required: false
-                type: string
-            rollback_model_version:
-                description: Exact MLflow model version to restore for rollback_live requests
-                required: false
-                type: string
-            rollback_revision_tag:
-                description: Temporary rollback revision tag for rollback_live requests
-                required: false
-                default: rollback
-                type: string
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Runtime release action to hand off to hosted Airflow
+        required: true
+        default: deploy_candidate
+        type: choice
+        options:
+          - deploy_candidate
+          - promote_candidate
+          - rollback_live
+      image_uri:
+        description: Immutable image URI for deploy_candidate requests
+        required: false
+        type: string
+      candidate_revision_tag:
+        description: Candidate Cloud Run revision tag for deploy or promote requests
+        required: false
+        default: candidate
+        type: string
+      candidate_alias:
+        description: Candidate MLflow alias expected for promote requests
+        required: false
+        default: candidate
+        type: string
+      target_alias:
+        description: Target MLflow alias expected after promote or rollback requests
+        required: false
+        default: champion
+        type: string
+      rollback_revision:
+        description: Exact Cloud Run revision to restore for rollback_live requests
+        required: false
+        type: string
+      rollback_model_version:
+        description: Exact MLflow model version to restore for rollback_live requests
+        required: false
+        type: string
+      rollback_revision_tag:
+        description: Temporary rollback revision tag for rollback_live requests
+        required: false
+        default: rollback
+        type: string
 
 permissions:
-    contents: read
-    id-token: write
+  contents: read
+  id-token: write
 
 jobs:
-    config:
-        runs-on: ubuntu-latest
-        outputs:
-            owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
-            project_id: ${{ steps.repo_config.outputs.project_id }}
-            workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
-            service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
-            online_compose_host_name: ${{ steps.repo_config.outputs.online_compose_host_name }}
-            online_compose_host_zone: ${{ steps.repo_config.outputs.online_compose_host_zone }}
-            action: ${{ steps.derived.outputs.action }}
-            image_uri: ${{ steps.derived.outputs.image_uri }}
-            candidate_revision_tag: ${{ steps.derived.outputs.candidate_revision_tag }}
-            candidate_alias: ${{ steps.derived.outputs.candidate_alias }}
-            target_alias: ${{ steps.derived.outputs.target_alias }}
-            rollback_revision: ${{ steps.derived.outputs.rollback_revision }}
-            rollback_model_version: ${{ steps.derived.outputs.rollback_model_version }}
-            rollback_revision_tag: ${{ steps.derived.outputs.rollback_revision_tag }}
-            trigger_ready: ${{ steps.derived.outputs.trigger_ready }}
-        steps:
-            - uses: actions/checkout@v6.0.2
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
+      project_id: ${{ steps.repo_config.outputs.project_id }}
+      workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
+      service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
+      online_compose_host_name: ${{ steps.repo_config.outputs.online_compose_host_name }}
+      online_compose_host_zone: ${{ steps.repo_config.outputs.online_compose_host_zone }}
+      action: ${{ steps.derived.outputs.action }}
+      image_uri: ${{ steps.derived.outputs.image_uri }}
+      candidate_revision_tag: ${{ steps.derived.outputs.candidate_revision_tag }}
+      candidate_alias: ${{ steps.derived.outputs.candidate_alias }}
+      target_alias: ${{ steps.derived.outputs.target_alias }}
+      rollback_revision: ${{ steps.derived.outputs.rollback_revision }}
+      rollback_model_version: ${{ steps.derived.outputs.rollback_model_version }}
+      rollback_revision_tag: ${{ steps.derived.outputs.rollback_revision_tag }}
+      trigger_ready: ${{ steps.derived.outputs.trigger_ready }}
+    steps:
+      - uses: actions/checkout@v6.0.2
 
-            - id: flags
-              env:
-                  ACTOR: ${{ github.actor }}
-                  TRIGGERING_ACTOR: ${{ github.triggering_actor }}
-                  REPOSITORY_OWNER: ${{ github.repository_owner }}
-              run: |
-                  set -euo pipefail
-
-                  owner_allowed=false
-                  if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
-                    owner_allowed=true
-                  fi
-
-                  echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
-
-            - id: repo_config
-              uses: ./.github/actions/load-gcp-repo-config
-              with:
-                  repo-vars-json: ${{ toJson(vars) }}
-
-            - id: derived
-              env:
-                  ACTION_INPUT: ${{ github.event.inputs.action }}
-                  IMAGE_URI_INPUT: ${{ github.event.inputs.image_uri }}
-                  CANDIDATE_REVISION_TAG_INPUT: ${{ github.event.inputs.candidate_revision_tag }}
-                  CANDIDATE_ALIAS_INPUT: ${{ github.event.inputs.candidate_alias }}
-                  TARGET_ALIAS_INPUT: ${{ github.event.inputs.target_alias }}
-                  ROLLBACK_REVISION_INPUT: ${{ github.event.inputs.rollback_revision }}
-                  ROLLBACK_MODEL_VERSION_INPUT: ${{ github.event.inputs.rollback_model_version }}
-                  ROLLBACK_REVISION_TAG_INPUT: ${{ github.event.inputs.rollback_revision_tag }}
-                  PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
-                  PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
-                  ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
-                  ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
-                  WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
-                  SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
-              run: |
-                  set -euo pipefail
-
-                  action="$(printf '%s' "${ACTION_INPUT:-deploy_candidate}" | tr '[:upper:]' '[:lower:]')"
-                  case "$action" in
-                    deploy_candidate|promote_candidate|rollback_live)
-                      ;;
-                    *)
-                      echo "Unsupported action '$action'." >&2
-                      exit 1
-                      ;;
-                  esac
-
-                  image_uri="$(printf '%s' "${IMAGE_URI_INPUT:-}" | tr -d '\r')"
-
-                  candidate_revision_tag="$(printf '%s' "${CANDIDATE_REVISION_TAG_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-                  candidate_revision_tag="${candidate_revision_tag#-}"
-                  candidate_revision_tag="${candidate_revision_tag%-}"
-                  if [[ -z "$candidate_revision_tag" ]]; then
-                    candidate_revision_tag='candidate'
-                  fi
-
-                  candidate_alias="$(printf '%s' "${CANDIDATE_ALIAS_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]')"
-                  if [[ -z "$candidate_alias" ]]; then
-                    candidate_alias='candidate'
-                  fi
-
-                  target_alias="$(printf '%s' "${TARGET_ALIAS_INPUT:-champion}" | tr '[:upper:]' '[:lower:]')"
-                  if [[ -z "$target_alias" ]]; then
-                    target_alias='champion'
-                  fi
-
-                  rollback_revision="$(printf '%s' "${ROLLBACK_REVISION_INPUT:-}" | tr -d '[:space:]')"
-                  rollback_model_version="$(printf '%s' "${ROLLBACK_MODEL_VERSION_INPUT:-}" | tr -d '[:space:]')"
-
-                  rollback_revision_tag="$(printf '%s' "${ROLLBACK_REVISION_TAG_INPUT:-rollback}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-                  rollback_revision_tag="${rollback_revision_tag#-}"
-                  rollback_revision_tag="${rollback_revision_tag%-}"
-                  if [[ -z "$rollback_revision_tag" ]]; then
-                    rollback_revision_tag='rollback'
-                  fi
-
-                  trigger_ready=false
-                  if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
-                    && -n "$PROJECT_ID" \
-                    && -n "$ONLINE_COMPOSE_HOST_NAME" \
-                    && -n "$ONLINE_COMPOSE_HOST_ZONE" \
-                    && -n "$WORKLOAD_IDENTITY_PROVIDER" \
-                    && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
-                    trigger_ready=true
-                  fi
-
-                  case "$action" in
-                    deploy_candidate)
-                      if [[ -z "$image_uri" ]]; then
-                        trigger_ready=false
-                      fi
-                      ;;
-                    rollback_live)
-                      if [[ -z "$rollback_revision" || -z "$rollback_model_version" ]]; then
-                        trigger_ready=false
-                      fi
-                      ;;
-                  esac
-
-                  {
-                    echo "action=$action"
-                    echo "image_uri=$image_uri"
-                    echo "candidate_revision_tag=$candidate_revision_tag"
-                    echo "candidate_alias=$candidate_alias"
-                    echo "target_alias=$target_alias"
-                    echo "rollback_revision=$rollback_revision"
-                    echo "rollback_model_version=$rollback_model_version"
-                    echo "rollback_revision_tag=$rollback_revision_tag"
-                    echo "trigger_ready=$trigger_ready"
-                  } >> "$GITHUB_OUTPUT"
-
-    trigger:
-        needs: config
-        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready == 'true' }}
-        runs-on: ubuntu-latest
+      - id: flags
         env:
-            PROJECT_ID: ${{ needs.config.outputs.project_id }}
-            HOST_NAME: ${{ needs.config.outputs.online_compose_host_name }}
-            HOST_ZONE: ${{ needs.config.outputs.online_compose_host_zone }}
-            ACTION: ${{ needs.config.outputs.action }}
-            IMAGE_URI: ${{ needs.config.outputs.image_uri }}
-            CANDIDATE_REVISION_TAG: ${{ needs.config.outputs.candidate_revision_tag }}
-            CANDIDATE_ALIAS: ${{ needs.config.outputs.candidate_alias }}
-            TARGET_ALIAS: ${{ needs.config.outputs.target_alias }}
-            ROLLBACK_REVISION: ${{ needs.config.outputs.rollback_revision }}
-            ROLLBACK_MODEL_VERSION: ${{ needs.config.outputs.rollback_model_version }}
-            ROLLBACK_REVISION_TAG: ${{ needs.config.outputs.rollback_revision_tag }}
-        steps:
-            - uses: actions/checkout@v6.0.2
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
 
-            - uses: google-github-actions/auth@v2
-              with:
-                  workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
-                  service_account: ${{ needs.config.outputs.service_account_email }}
+          owner_allowed=false
+          if [[ "$ACTOR" == "$REPOSITORY_OWNER" && "$TRIGGERING_ACTOR" == "$REPOSITORY_OWNER" ]]; then
+            owner_allowed=true
+          fi
 
-            - uses: google-github-actions/setup-gcloud@v2
+          echo "owner_allowed=$owner_allowed" >> "$GITHUB_OUTPUT"
 
-            - name: Build runtime release request
-              run: |
-                  set -euo pipefail
-                  python -c 'from datetime import UTC, datetime; import json, os, pathlib; run_url = "/".join([os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], "actions", "runs", os.environ["GITHUB_RUN_ID"]]); payload = {"action": os.environ["ACTION"], "request_source": "github-actions", "requested_at": datetime.now(tz=UTC).isoformat(), "github_repository": os.environ["GITHUB_REPOSITORY"], "github_workflow": os.environ["GITHUB_WORKFLOW"], "github_run_id": os.environ["GITHUB_RUN_ID"], "github_run_url": run_url, "github_sha": os.environ["GITHUB_SHA"], "image_uri": os.environ.get("IMAGE_URI", ""), "candidate_revision_tag": os.environ.get("CANDIDATE_REVISION_TAG", "candidate"), "candidate_alias": os.environ.get("CANDIDATE_ALIAS", "candidate"), "target_alias": os.environ.get("TARGET_ALIAS", "champion"), "rollback_revision": os.environ.get("ROLLBACK_REVISION", ""), "rollback_model_version": os.environ.get("ROLLBACK_MODEL_VERSION", ""), "rollback_revision_tag": os.environ.get("ROLLBACK_REVISION_TAG", "rollback")}; pathlib.Path("runtime-release-request.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")'
+      - id: repo_config
+        uses: ./.github/actions/load-gcp-repo-config
+        with:
+          repo-vars-json: ${{ toJson(vars) }}
 
-            - name: Refresh operator host checkout
-              run: |
-                  set -euo pipefail
-                  gcloud compute ssh "$HOST_NAME" \
-                    --project "$PROJECT_ID" \
-                    --zone "$HOST_ZONE" \
-                    --command "sudo systemctl start --wait foehncast-online-compose-sync.service"
+      - id: derived
+        env:
+          ACTION_INPUT: ${{ github.event.inputs.action }}
+          IMAGE_URI_INPUT: ${{ github.event.inputs.image_uri }}
+          CANDIDATE_REVISION_TAG_INPUT: ${{ github.event.inputs.candidate_revision_tag }}
+          CANDIDATE_ALIAS_INPUT: ${{ github.event.inputs.candidate_alias }}
+          TARGET_ALIAS_INPUT: ${{ github.event.inputs.target_alias }}
+          ROLLBACK_REVISION_INPUT: ${{ github.event.inputs.rollback_revision }}
+          ROLLBACK_MODEL_VERSION_INPUT: ${{ github.event.inputs.rollback_model_version }}
+          ROLLBACK_REVISION_TAG_INPUT: ${{ github.event.inputs.rollback_revision_tag }}
+          PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
+          ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
+          ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
+          WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
+          SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
+        run: |
+          set -euo pipefail
 
-            - name: Copy runtime release request
-              run: |
-                  set -euo pipefail
-                  gcloud compute scp \
-                    --project "$PROJECT_ID" \
-                    --zone "$HOST_ZONE" \
-                    runtime-release-request.json \
-                    "$HOST_NAME:/tmp/runtime-release-request.json"
+          action="$(printf '%s' "${ACTION_INPUT:-deploy_candidate}" | tr '[:upper:]' '[:lower:]')"
+          case "$action" in
+            deploy_candidate|promote_candidate|rollback_live)
+              ;;
+            *)
+              echo "Unsupported action '$action'." >&2
+              exit 1
+              ;;
+          esac
 
-            - id: handoff
-              name: Trigger runtime release handoff
-              run: |
-                  set -euo pipefail
+          image_uri="$(printf '%s' "${IMAGE_URI_INPUT:-}" | tr -d '\r')"
 
-                  report="$(gcloud compute ssh "$HOST_NAME" \
-                    --project "$PROJECT_ID" \
-                    --zone "$HOST_ZONE" \
-                    --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json")"
+          candidate_revision_tag="$(printf '%s' "${CANDIDATE_REVISION_TAG_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          candidate_revision_tag="${candidate_revision_tag#-}"
+          candidate_revision_tag="${candidate_revision_tag%-}"
+          if [[ -z "$candidate_revision_tag" ]]; then
+            candidate_revision_tag='candidate'
+          fi
 
-                  printf '%s\n' "$report"
+          candidate_alias="$(printf '%s' "${CANDIDATE_ALIAS_INPUT:-candidate}" | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$candidate_alias" ]]; then
+            candidate_alias='candidate'
+          fi
 
-                  dag_run_id="$(printf '%s\n' "$report" | python -c 'import json, sys; print(json.load(sys.stdin)["dag_run_id"])')"
-                  report_path="$(printf '%s\n' "$report" | python -c 'import json, sys; print(json.load(sys.stdin)["report_path"])')"
+          target_alias="$(printf '%s' "${TARGET_ALIAS_INPUT:-champion}" | tr '[:upper:]' '[:lower:]')"
+          if [[ -z "$target_alias" ]]; then
+            target_alias='champion'
+          fi
 
-                  {
-                    echo "dag_run_id=$dag_run_id"
-                    echo "report_path=$report_path"
-                  } >> "$GITHUB_OUTPUT"
+          rollback_revision="$(printf '%s' "${ROLLBACK_REVISION_INPUT:-}" | tr -d '[:space:]')"
+          rollback_model_version="$(printf '%s' "${ROLLBACK_MODEL_VERSION_INPUT:-}" | tr -d '[:space:]')"
 
-                  {
-                    echo "## Runtime release handoff"
-                    echo
-                    echo "- Action: $ACTION"
-                    echo "- Operator host: $HOST_NAME"
-                    echo "- Airflow DAG: runtime_release"
-                    echo "- DAG run: $dag_run_id"
-                    echo "- Summary path: $report_path"
-                    echo
-                    echo '```json'
-                    printf '%s\n' "$report"
-                    echo '```'
-                  } >> "$GITHUB_STEP_SUMMARY"
+          rollback_revision_tag="$(printf '%s' "${ROLLBACK_REVISION_TAG_INPUT:-rollback}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          rollback_revision_tag="${rollback_revision_tag#-}"
+          rollback_revision_tag="${rollback_revision_tag%-}"
+          if [[ -z "$rollback_revision_tag" ]]; then
+            rollback_revision_tag='rollback'
+          fi
 
-    skipped:
-        needs: config
-        if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready != 'true' }}
-        runs-on: ubuntu-latest
-        steps:
-            - name: Explain skipped runtime release handoff
-              run: |
-                  {
-                    echo "## Runtime release handoff skipped"
-                    echo
-                    echo "The explicit runtime trigger contract needs all of these inputs before it can run:"
-                    echo "- GCP_PROJECT_ID"
-                    echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
-                    echo "- GCP_SERVICE_ACCOUNT_EMAIL"
-                    echo "- GCP_PROVISION_ONLINE_COMPOSE_HOST=true"
-                    echo "- GCP_ONLINE_COMPOSE_HOST_NAME"
-                    echo "- GCP_ONLINE_COMPOSE_HOST_ZONE"
-                    echo
-                    echo "Action-specific coordinates must also be present for the chosen request."
-                  } >> "$GITHUB_STEP_SUMMARY"
+          trigger_ready=false
+          if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
+            && -n "$PROJECT_ID" \
+            && -n "$ONLINE_COMPOSE_HOST_NAME" \
+            && -n "$ONLINE_COMPOSE_HOST_ZONE" \
+            && -n "$WORKLOAD_IDENTITY_PROVIDER" \
+            && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            trigger_ready=true
+          fi
+
+          case "$action" in
+            deploy_candidate)
+              if [[ -z "$image_uri" ]]; then
+                trigger_ready=false
+              fi
+              ;;
+            rollback_live)
+              if [[ -z "$rollback_revision" || -z "$rollback_model_version" ]]; then
+                trigger_ready=false
+              fi
+              ;;
+          esac
+
+          {
+            echo "action=$action"
+            echo "image_uri=$image_uri"
+            echo "candidate_revision_tag=$candidate_revision_tag"
+            echo "candidate_alias=$candidate_alias"
+            echo "target_alias=$target_alias"
+            echo "rollback_revision=$rollback_revision"
+            echo "rollback_model_version=$rollback_model_version"
+            echo "rollback_revision_tag=$rollback_revision_tag"
+            echo "trigger_ready=$trigger_ready"
+          } >> "$GITHUB_OUTPUT"
+
+  trigger:
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: ${{ needs.config.outputs.project_id }}
+      HOST_NAME: ${{ needs.config.outputs.online_compose_host_name }}
+      HOST_ZONE: ${{ needs.config.outputs.online_compose_host_zone }}
+      ACTION: ${{ needs.config.outputs.action }}
+      IMAGE_URI: ${{ needs.config.outputs.image_uri }}
+      CANDIDATE_REVISION_TAG: ${{ needs.config.outputs.candidate_revision_tag }}
+      CANDIDATE_ALIAS: ${{ needs.config.outputs.candidate_alias }}
+      TARGET_ALIAS: ${{ needs.config.outputs.target_alias }}
+      ROLLBACK_REVISION: ${{ needs.config.outputs.rollback_revision }}
+      ROLLBACK_MODEL_VERSION: ${{ needs.config.outputs.rollback_model_version }}
+      ROLLBACK_REVISION_TAG: ${{ needs.config.outputs.rollback_revision_tag }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
+          service_account: ${{ needs.config.outputs.service_account_email }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build runtime release request
+        run: |
+          set -euo pipefail
+          python -c 'from datetime import UTC, datetime; import json, os, pathlib; run_url = "/".join([os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], "actions", "runs", os.environ["GITHUB_RUN_ID"]]); payload = {"action": os.environ["ACTION"], "request_source": "github-actions", "requested_at": datetime.now(tz=UTC).isoformat(), "github_repository": os.environ["GITHUB_REPOSITORY"], "github_workflow": os.environ["GITHUB_WORKFLOW"], "github_run_id": os.environ["GITHUB_RUN_ID"], "github_run_url": run_url, "github_sha": os.environ["GITHUB_SHA"], "image_uri": os.environ.get("IMAGE_URI", ""), "candidate_revision_tag": os.environ.get("CANDIDATE_REVISION_TAG", "candidate"), "candidate_alias": os.environ.get("CANDIDATE_ALIAS", "candidate"), "target_alias": os.environ.get("TARGET_ALIAS", "champion"), "rollback_revision": os.environ.get("ROLLBACK_REVISION", ""), "rollback_model_version": os.environ.get("ROLLBACK_MODEL_VERSION", ""), "rollback_revision_tag": os.environ.get("ROLLBACK_REVISION_TAG", "rollback")}; pathlib.Path("runtime-release-request.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")'
+
+      - name: Refresh operator host checkout
+        run: |
+          set -euo pipefail
+          gcloud compute ssh "$HOST_NAME" \
+            --project "$PROJECT_ID" \
+            --zone "$HOST_ZONE" \
+            --command "sudo systemctl start --wait foehncast-online-compose-sync.service"
+
+      - name: Copy runtime release request
+        run: |
+          set -euo pipefail
+          gcloud compute scp \
+            --project "$PROJECT_ID" \
+            --zone "$HOST_ZONE" \
+            runtime-release-request.json \
+            "$HOST_NAME:/tmp/runtime-release-request.json"
+
+      - id: handoff
+        name: Trigger runtime release handoff
+        run: |
+          set -euo pipefail
+
+          report="$(gcloud compute ssh "$HOST_NAME" \
+            --project "$PROJECT_ID" \
+            --zone "$HOST_ZONE" \
+            --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json")"
+
+          printf '%s\n' "$report"
+
+          dag_run_id="$(printf '%s\n' "$report" | python -c 'import json, sys; print(json.load(sys.stdin)["dag_run_id"])')"
+          report_path="$(printf '%s\n' "$report" | python -c 'import json, sys; print(json.load(sys.stdin)["report_path"])')"
+
+          {
+            echo "dag_run_id=$dag_run_id"
+            echo "report_path=$report_path"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Runtime release handoff"
+            echo
+            echo "- Action: $ACTION"
+            echo "- Operator host: $HOST_NAME"
+            echo "- Airflow DAG: runtime_release"
+            echo "- Current receiver: retained-host Airflow adapter"
+            echo "- Target receiver: Cloud Composer without VM SSH"
+            echo "- DAG run: $dag_run_id"
+            echo "- Summary path: $report_path"
+            echo
+            echo '```json'
+            printf '%s\n' "$report"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  skipped:
+    needs: config
+    if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skipped runtime release handoff
+        run: |
+          {
+            echo "## Runtime release handoff skipped"
+            echo
+            echo "The explicit runtime trigger contract needs all of these inputs before it can run:"
+            echo "This is the current retained-host entry contract. The target managed receiver is Cloud Composer without VM SSH."
+            echo "- GCP_PROJECT_ID"
+            echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
+            echo "- GCP_SERVICE_ACCOUNT_EMAIL"
+            echo "- GCP_PROVISION_ONLINE_COMPOSE_HOST=true"
+            echo "- GCP_ONLINE_COMPOSE_HOST_NAME"
+            echo "- GCP_ONLINE_COMPOSE_HOST_ZONE"
+            echo
+            echo "Action-specific coordinates must also be present for the chosen request."
+          } >> "$GITHUB_STEP_SUMMARY"
