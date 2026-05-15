@@ -68,6 +68,36 @@ output "online_compose_runtime_service_account" {
   value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null
 }
 
+output "cloud_composer_runtime_service_account" {
+  description = "Service account intended for the Cloud Composer environment when that target is enabled."
+  value       = var.provision_cloud_composer_environment ? try(google_service_account.cloud_composer_runtime[0].email, "foehncast-composer@${var.project_id}.iam.gserviceaccount.com") : null
+}
+
+output "provision_cloud_composer_environment" {
+  description = "Whether Terraform is configured to provision the Cloud Composer environment."
+  value       = var.provision_cloud_composer_environment
+}
+
+output "configured_cloud_composer_environment_name" {
+  description = "Configured Cloud Composer environment name for the managed orchestration target."
+  value       = var.cloud_composer_environment_name
+}
+
+output "cloud_composer_environment_name" {
+  description = "Cloud Composer environment name, if provisioned."
+  value       = try(google_composer_environment.cloud_composer[0].name, null)
+}
+
+output "cloud_composer_airflow_uri" {
+  description = "Airflow web interface URI for the Cloud Composer environment, if provisioned."
+  value       = try(google_composer_environment.cloud_composer[0].config[0].airflow_uri, null)
+}
+
+output "cloud_composer_dag_gcs_prefix" {
+  description = "DAG bucket prefix for the Cloud Composer environment, if provisioned."
+  value       = try(google_composer_environment.cloud_composer[0].config[0].dag_gcs_prefix, null)
+}
+
 output "provision_cloud_run_service" {
   description = "Whether Terraform is configured to provision the Cloud Run inference service."
   value       = var.provision_cloud_run_service

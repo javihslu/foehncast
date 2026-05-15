@@ -205,7 +205,15 @@ tfvars_value_or_default() {
     [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" ]]
   }
 
+  cloud_composer_is_enabled() {
+    [[ "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == "true" ]]
+  }
+
   print_bootstrap_identity_summary() {
+    if cloud_composer_is_enabled; then
+      print_terraform_summary_line_if_present "Cloud Composer runtime service account" "$FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT"
+    fi
+
     if online_compose_is_enabled; then
       print_terraform_summary_line_if_present "Online compose runtime service account" "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT"
     fi
@@ -296,6 +304,18 @@ tfvars_value_or_default() {
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url
+  }
+
+  print_cloud_composer_summary() {
+    load_bootstrap_platform_state
+
+    if ! cloud_composer_is_enabled; then
+      return
+    fi
+
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer environment" cloud_composer_environment_name
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer Airflow URL" cloud_composer_airflow_uri
+    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer DAG bucket prefix" cloud_composer_dag_gcs_prefix
   }
 
   verify_online_compose_runtime() {
@@ -593,6 +613,8 @@ tfvars_value_or_default() {
     local current_project current_region artifact_bucket artifact_repo dataset_id table_id bigquery_location
     local feast_online_store_location feast_online_store_database_name
     local provision_cloud_run cloud_run_default cloud_run_service mlflow_tracking_uri
+    local provision_cloud_composer_environment provision_cloud_composer_environment_default
+    local cloud_composer_environment_name
     local provision_online_compose_host provision_online_compose_host_default
     local online_compose_host_name online_compose_host_zone online_compose_machine_type online_compose_disk_size_gb
     local repo_default target_repo_owner target_repo_name
@@ -648,6 +670,19 @@ tfvars_value_or_default() {
       fi
     else
       mlflow_tracking_uri=""
+    fi
+
+    provision_cloud_composer_environment_default="$(tfvars_yes_no_default provision_cloud_composer_environment)"
+
+    if prompt_yes_no "Provision an optional Cloud Composer environment now? This prepares the managed orchestration surface, but the retained host remains the active recovery path." "$provision_cloud_composer_environment_default"; then
+      provision_cloud_composer_environment=true
+    else
+      provision_cloud_composer_environment=false
+    fi
+
+    cloud_composer_environment_name="$(tfvars_value_or_default cloud_composer_environment_name "$(foehncast_default_cloud_composer_environment_name)")"
+    if [[ "$provision_cloud_composer_environment" == "true" ]]; then
+      cloud_composer_environment_name="$(prompt_with_default "Cloud Composer environment name" "$cloud_composer_environment_name")"
     fi
 
     provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"
@@ -721,6 +756,8 @@ tfvars_value_or_default() {
       "$provision_cloud_run" \
       "$cloud_run_service" \
       "$mlflow_tracking_uri" \
+      "$provision_cloud_composer_environment" \
+      "$cloud_composer_environment_name" \
       "$provision_online_compose_host" \
       "$online_compose_host_name" \
       "$online_compose_host_zone" \
@@ -861,6 +898,7 @@ else
     print_primary_hosted_api_summary
     print_cloud_run_summary
     print_online_compose_summary
+    print_cloud_composer_summary
     print_feast_runtime_summary
     verify_cloud_run_runtime
     verify_online_compose_runtime
