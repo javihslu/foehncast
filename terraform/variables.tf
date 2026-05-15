@@ -154,7 +154,7 @@ variable "cloud_composer_env_vars" {
 }
 
 variable "cloud_composer_pypi_packages" {
-  description = "Additional PyPI packages for the Cloud Composer environment."
+  description = "Additional or overriding PyPI packages merged on top of the repo-reviewed Cloud Composer baseline."
   type        = map(string)
   default     = {}
 }
