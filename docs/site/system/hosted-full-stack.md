@@ -1,60 +1,85 @@
-# Hosted Full-Stack (Transitional Operator Host)
+# Hosted Full-Stack (Retained Operator Host)
 
-FoehnCast keeps the hosted full-stack target as the current private operator lane. It runs Airflow, MLflow, the FastAPI app, and the monitoring stack on one Compute Engine host while Cloud Run carries the public API lane. This host is transitional: it keeps the current operator stack online while hosted image builds move toward Cloud Build and hosted orchestration moves toward Cloud Composer.
+FoehnCast keeps the hosted full-stack target as the private operator lane in the active shared environment. It runs Airflow, MLflow, the FastAPI app, and the monitoring stack on one Compute Engine host while Cloud Run carries the public API lane. This retained host keeps the operator stack online while hosted image builds move toward Cloud Build and hosted orchestration moves toward Cloud Composer.
 
-This page records the current hosted full-stack contract that is described by the cloud bootstrap, Terraform reference, and cloud-operator tests. It focuses on the active shared runtime target, not on future migrations.
+This page describes the hosted full-stack contract. It focuses on the active shared runtime target, not on future migrations.
 
 !!! note "Scope"
 
-    This page describes the current retained operator host contract.
-    It explains why that host is transitional rather than the intended long-term hosted control plane.
+    This page describes the validated retained operator host contract.
+    It explains why that host is a retained operator surface rather than the intended long-term hosted control plane.
     It is not the Composer cutover plan.
 
 ## Target Shape
 
 <div class="mermaid">
 flowchart LR
-    TF[Terraform baseline] --> GCP[Shared GCP resources]
-    GCP --> HOST[Online compose host]
-    GH[GitHub OIDC delivery] --> HOST
+    classDef infra fill:#f5f5f5,stroke:#333
+    classDef runner fill:#f4f1ea,stroke:#f05032
+    classDef platform fill:#fff,stroke:#4285F4
+    classDef operator fill:#fff8e1,stroke:#f57f17
 
-    BQ[(BigQuery curated features)] --> HOST
-    GCS[(GCS artifacts and Feast registry)] --> HOST
-    DS[(Datastore online store)] --> HOST
+    TF["Terraform baseline"]:::infra
+    GH["fab:fa-github GitHub Actions + OIDC"]:::runner
 
-    HOST --> APP[FastAPI app]
-    HOST --> AIR[Airflow]
-    HOST --> MLF[MLflow]
-    HOST --> MON[Prometheus + StatsD exporter + Grafana]
-    HOST --> SYNC[Repo sync timer]
-    SYNC --> MET[/metrics sync status]
-    MET --> MON
+    subgraph GCP ["fab:fa-google Hosted environment"]
+        direction LR
+        DATA["BigQuery + GCS + Datastore"]:::platform
+        HOST["Compute Engine operator host"]:::operator
+        APP["FastAPI app"]:::operator
+        AIR["Airflow"]:::operator
+        MLF["MLflow"]:::operator
+        MON["Prometheus + StatsD + Grafana"]:::operator
+        SYNC["Repo sync timer"]:::operator
+    end
+
+    TF --> DATA
+    DATA --> HOST
+    GH --> HOST
+    HOST --> APP
+    HOST --> AIR
+    HOST --> MLF
+    HOST --> MON
+    HOST --> SYNC
+    SYNC --> APP
+    APP --> MON
 </div>
 
 ## Role In The Shared Environment
 
-| Lane | Current target | Main role |
+| Lane | Concrete target | Main role |
 |------|----------------|-----------|
 | Shared API lane | Cloud Run hosted inference target | serve the public FastAPI routes |
-| Operator lane | hosted full-stack target on one VM | keep Airflow, MLflow, monitoring, and private app checks online while the managed hosted control plane is not ready yet |
+| Operator lane | hosted full-stack target on one VM | provide the active operator surface until the managed hosted control plane is ready |
 
-The important boundary is that the hosted full-stack target stays a runtime target, not a contributor environment. It depends on shared GCP storage and identity surfaces instead of local emulators, updates through the maintainer bootstrap plus remote Terraform and host sync path, and stays on the private operator side while Cloud Run owns public serving. It is a retained support lane, not the target hosted architecture.
+The hosted full-stack target stays a runtime target, not a contributor environment. It depends on shared GCP storage and identities instead of local emulators, and it stays private while Cloud Run owns public serving.
+
+## Shared Core And Hosted Differences
+
+| Shared with the local evaluator | Different in the hosted operator lane |
+|------|--------------------------------------|
+| Same Feature-Training-Inference boundaries | BigQuery, GCS, and Datastore replace local object and emulator surfaces |
+| Same FastAPI app and Feast-backed feature path | Cloud Run carries the shared public API while the host stays private |
+| Same Airflow, MLflow, and monitoring roles | one VM bundles the operator stack until the managed control plane takes over |
+| Same repository and runtime contracts | service accounts and GitHub OIDC replace local developer credentials |
+
+That makes the hosted full-stack target a retained support lane, not the target hosted architecture.
 
 ## Surface Responsibilities
 
 | Surface | Main responsibility | Must not become |
 |------|----------------------|-----------------|
 | Shared GCP baseline | provide Artifact Registry, GCS, BigQuery, Datastore, and identity foundations | the application runtime itself |
-| Online compose host | keep the current operator stack online from one VM | a contributor setup path, notebook host, or long-term orchestration authority |
+| Online compose host | keep the active operator stack online from one VM | a contributor setup path, notebook host, or long-term orchestration authority |
 | FastAPI app | serve the product and service routes | a hidden deployment control plane |
 | Airflow, MLflow, Prometheus, StatsD exporter, and Grafana | operator orchestration, tracking, monitoring, and review | the rider-facing interface |
 | GitHub OIDC delivery | run remote Terraform and image-driven deploy updates | a substitute for the runtime host |
 
-This keeps the current shared environment honest. The runtime lives on the host, while Terraform and GitHub delivery keep the dependencies and rollout path reviewable.
+This keeps the shared environment honest. The runtime lives on the host, while Terraform and GitHub delivery keep the dependencies and rollout path reviewable.
 
 ## Runtime Contract
 
-The hosted full-stack target currently relies on these shared runtime dependencies:
+The hosted full-stack target relies on these shared runtime dependencies:
 
 - BigQuery for the curated cloud feature layer
 - GCS for MLflow artifacts and Feast registry-style storage
@@ -70,11 +95,11 @@ The identity split around this target is deliberate:
 - Cloud Run uses its own narrower runtime identity for the inference-only service.
 - the online compose host uses a separate runtime identity because it still bundles Airflow, training, MLflow, Feast preparation, and the app on one VM.
 
-That online compose runtime identity is the current transition contract. It remains broader than the Cloud Run identity only because the host still owns more responsibilities today. The intended hosted direction is to remove Airflow from this VM rather than to keep widening what the VM owns.
+That online compose runtime identity is the retained-operator contract. It remains broader than the Cloud Run identity only because the host still owns more responsibilities in the active shared environment. The intended hosted direction is to remove Airflow from this VM rather than to keep widening what the VM owns.
 
 ## Bootstrap And Day-2 Delivery
 
-The hosted full-stack target is not part of the default contributor path. Its lifecycle still splits into one-time maintainer bootstrap and GitHub-managed day-2 delivery after bootstrap. For this current target, the hosted-specific contract is simple: Terraform provisions the VM and shared cloud data surfaces, the host sync refreshes the repository and runtime `.env`, and the VM app must stay private while Cloud Run remains the public API lane.
+The hosted full-stack target is not part of the default contributor path. Its lifecycle still splits into one-time maintainer bootstrap and GitHub-managed day-2 delivery after bootstrap. For this target, the hosted-specific contract is simple: Terraform provisions the VM and shared cloud data surfaces, the host sync refreshes the repository and runtime `.env`, and the VM app must stay private while Cloud Run remains the public API lane.
 
 See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed bootstrap, remote Terraform, and runtime-release handoff steps.
 
@@ -82,7 +107,7 @@ See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the 
 
 The online compose host is not meant to drift indefinitely after the first apply.
 
-The current sync contract is:
+The sync contract is:
 
 - the host installs a `foehncast-online-compose-sync` systemd timer
 - each sync fetches the configured Git ref and refreshes the hosted compose stack
@@ -98,7 +123,7 @@ This sync path matters only while the retained host still owns operator duties. 
 
 The shared hosted target keeps exposure narrow by default.
 
-The current contract is:
+The exposure contract is:
 
 - `online_compose_public_ports = []` keeps the operator host private by default
 - Airflow and MLflow stay private unless you intentionally expose their ports

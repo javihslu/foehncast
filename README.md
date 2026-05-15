@@ -8,15 +8,12 @@ The repo keeps the same Feature-Training-Inference split across local runs, host
 
 ```mermaid
 flowchart LR
-    Forecasts[Forecast APIs] --> Features[Feature pipeline]
-    Features --> Curated[Curated features]
-    Curated --> Training[Training pipeline]
-    Training --> Registry[MLflow registry]
-    Registry --> API[FastAPI predict and rank API]
-    Forecasts --> API
-    Drive[OSRM drive times] --> API
-    Curated --> Feast[Feast serving layer]
-    Feast --> API
+  Forecasts[Forecast APIs] -->|Feature path| Curated[Curated features]
+  Curated -->|Training path| Registry[MLflow registry]
+  Curated --> Feast[Feast layer]
+  Inputs[Forecast + OSRM] --> API[FastAPI API]
+  Feast --> API
+  Registry --> API
 ```
 
 ## Current Scope
@@ -35,25 +32,19 @@ flowchart LR
 FoehnCast has one supported contributor setup path: run everything locally with Docker. The shared cloud path is a separate maintainer workflow.
 
 ```mermaid
-flowchart TB
-  subgraph Contributor[Contributor path]
-    Clone[Clone repo]
-    Local[./scripts/bootstrap-local.sh]
-    Compose[Local evaluator stack]
+flowchart LR
+  subgraph Contributor[Contributor lane]
+    direction TB
+    Local[Clone + bootstrap-local.sh] --> Compose[Local stack]
   end
 
-  subgraph Maintainer[Maintainer path]
-    Shell[Google Cloud Shell]
-    Bootstrap[./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions]
-    Cloud[GitHub Actions + remote Terraform]
-    Host[Hosted full-stack control plane]
-    Run[Primary Cloud Run API]
+  subgraph Maintainer[Maintainer lane]
+    direction LR
+    Shell[Cloud Shell + bootstrap-gcp.sh] --> Release[Actions + remote TF]
   end
 
-  Clone --> Local --> Compose
-  Shell --> Bootstrap --> Cloud
-  Cloud --> Host
-  Cloud --> Run
+  Release --> Host[Hosted ops]
+  Release --> Run[Cloud Run API]
 ```
 
 ## Quick Start

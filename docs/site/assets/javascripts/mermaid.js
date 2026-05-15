@@ -2,6 +2,7 @@
     const MERMAID_MODULE_URL = "https://unpkg.com/mermaid@10.4.0/dist/mermaid.esm.min.mjs";
     const MERMAID_CONFIG = {
         startOnLoad: false,
+        htmlLabels: true,
         securityLevel: "loose",
         theme: "neutral",
     };
@@ -42,6 +43,43 @@
         });
     }
 
+    function parseSvgNumber(value) {
+        const number = Number.parseFloat(value || "0");
+        return Number.isFinite(number) ? number : 0;
+    }
+
+    function adjustClusterLabels(root) {
+        for (const svg of root.querySelectorAll(".mermaid svg")) {
+            for (const cluster of svg.querySelectorAll("g.cluster")) {
+                const rect = cluster.querySelector("rect");
+                const label = cluster.querySelector("g.cluster-label");
+                const foreignObject = label?.querySelector("foreignObject");
+                const container = foreignObject?.firstElementChild;
+                const nodeLabel = container?.querySelector(".nodeLabel");
+
+                if (!rect || !label || !foreignObject || !container || !nodeLabel) {
+                    continue;
+                }
+
+                const rectX = parseSvgNumber(rect.getAttribute("x"));
+                const rectY = parseSvgNumber(rect.getAttribute("y"));
+                const rectWidth = parseSvgNumber(rect.getAttribute("width"));
+                const padding = Math.max(10, Math.min(18, rectWidth * 0.05));
+                const labelWidth = Math.max(48, rectWidth - (padding * 2));
+
+                label.setAttribute("transform", `translate(${rectX + padding}, ${rectY})`);
+                foreignObject.setAttribute("width", String(labelWidth));
+                container.style.display = "block";
+                container.style.width = `${labelWidth}px`;
+                container.style.whiteSpace = "nowrap";
+                container.style.textAlign = "left";
+                nodeLabel.style.display = "block";
+                nodeLabel.style.width = "100%";
+                nodeLabel.style.textAlign = "left";
+            }
+        }
+    }
+
     async function renderMermaid(root) {
         const nodes = findPendingDiagrams(root);
         if (!nodes.length) {
@@ -51,6 +89,7 @@
         const mermaid = await loadMermaid();
         mermaid.initialize(MERMAID_CONFIG);
         await mermaid.run({ nodes });
+        adjustClusterLabels(root);
     }
 
     function scheduleRender(root) {

@@ -16,7 +16,7 @@ Start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/
 | GitHub OIDC delivery | remote Terraform and image-based deploys | no runtime services |
 
 ```mermaid
-flowchart LR
+flowchart TD
    TF[Terraform] --> BASE[Shared GCP baseline]
    BASE --> HOST[Hosted full-stack target]
    BASE --> RUN[Hosted inference target]

@@ -5,25 +5,30 @@ This directory holds the service definitions used by the validated local stack a
 ## Container Stack In One View
 
 ```mermaid
-flowchart LR
-	subgraph Shared[Shared runtime services]
-		Airflow[Airflow services]
+flowchart TD
+	subgraph Shared[Shared runtime]
+		direction TB
+		Airflow[Airflow]
+		Feature[Feature DAGs]
 		MLflow[MLflow]
 		API[FastAPI app]
-		Monitor[Prometheus + StatsD exporter + Grafana]
+		Monitor[Monitoring]
+		Airflow --> Feature
+		MLflow --> API --> Monitor
 	end
-	subgraph LocalOnly[Local-only services]
-		Dev[optional development_env]
+
+	subgraph LocalOnly[Local add-ons]
+		direction TB
+		Dev[Dev shell]
 		Objectstore[MinIO]
-		Emulator[Feast Datastore emulator]
+		Emulator[Feast emulator]
+		Checks[Local checks]
+		Dev --> Checks
 	end
-	Airflow --> Feature[Feature and training DAGs]
-	MLflow --> API
+
 	Objectstore --> Airflow
 	Objectstore --> API
 	Emulator --> API
-	API --> Monitor
-	Dev --> Tests[Local tools and tests]
 ```
 
 ## Runtime Role

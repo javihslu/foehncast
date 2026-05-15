@@ -1,3 +1,5 @@
+@import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css");
+
 :root {
     --fc-accent: #0f766e;
     --fc-accent-soft: #e6f4f1;
@@ -67,6 +69,48 @@
     max-width: 100%;
 }
 
-.md-sidebar--primary .md-nav--primary > .md-nav__list > .md-nav__item + .md-nav__item {
+.md-typeset .mermaid .cluster-label foreignObject {
+    overflow: visible;
+}
+
+.md-typeset .mermaid .cluster-label div,
+.md-typeset .mermaid .cluster-label .nodeLabel {
+    width: 100%;
+    text-align: left;
+}
+
+.md-typeset .mermaid .cluster-label .nodeLabel {
+    display: block;
+    padding-left: 0.15rem;
+}
+
+.md-typeset .fc-feature-grid {
+    margin-top: 1rem;
+}
+
+.md-typeset .fc-feature-grid .twemoji {
+    display: block;
+    width: 2.2rem;
+    height: 2.2rem;
+    margin: 0 auto 0.8rem;
+    color: var(--fc-accent);
+}
+
+.md-typeset .fc-feature-grid p {
+    text-align: center;
+}
+
+.md-typeset .fc-feature-grid strong {
+    display: inline-block;
+    margin-bottom: 0.2rem;
+}
+
+.md-typeset .fc-compare-note {
+    border-left: 3px solid rgba(15, 118, 110, 0.3);
+    padding-left: 1rem;
+    margin: 1rem 0;
+}
+
+.md-sidebar--primary .md-nav--primary>.md-nav__list>.md-nav__item+.md-nav__item {
     margin-top: 0.45rem;
 }

@@ -2,34 +2,47 @@
 
 FoehnCast uses the local evaluator lane as the default contributor runtime. `bootstrap-local` starts the validated service subset, resets disposable local state, runs one end-to-end feature and training hand-off, prepares Feast serving state, and verifies the app and operator contracts before it reports success.
 
-This page records the current local runtime contract that is validated by the bootstrap path and by the runtime-stack and monitoring-stack tests. It describes the current baseline, not a future migration plan.
+This page describes the default contributor runtime contract. It documents the supported baseline, not a migration plan.
 
 !!! note "Scope"
 
-    This page describes the current validated local evaluator target.
+    This page describes the validated local evaluator target.
     It is not a roadmap.
-    Future changes should be documented after they are chosen and implemented.
+    Future changes belong here only after the target changes.
 
 ## Target Shape
 
 <div class="mermaid">
 flowchart LR
-    BOOT[./scripts/bootstrap-local.sh] --> AIR[Airflow plus Postgres metadata]
-    BOOT --> APP[FastAPI app]
-    BOOT --> MLF[MLflow]
-    BOOT --> OBJ[MinIO objectstore]
-    BOOT --> FEAST[Feast Datastore emulator]
-    BOOT --> MON[Prometheus plus StatsD exporter plus Grafana]
+    classDef pipeline fill:#e1f5fe,stroke:#01579b
+    classDef registry fill:#fff,stroke:#d32f2f
+    classDef app fill:#222,stroke:#333,color:#fff
+    classDef storage fill:#fff,stroke:#9370db
+    classDef monitor fill:#fff,stroke:#f57f17
 
-    AIR --> FEAT[feature_pipeline DAG]
-    FEAT --> CUR[(Curated feature data)]
-    FEAT --> REQ[training-request asset]
-    REQ --> TRN[training_pipeline DAG]
-    TRN --> REG[(MLflow registry)]
-    REG --> APP
+    subgraph LocalStack ["fab:fa-docker Local stack"]
+        direction LR
+        AIR["Airflow"]:::pipeline
+        FEAT["Feature DAG"]:::pipeline
+        CUR["Curated feature data"]:::storage
+        REQ["Training-request asset"]:::pipeline
+        TRN["Training DAG"]:::pipeline
+        REG["MLflow registry"]:::registry
+        FEAST["Feast emulator"]:::storage
+        APP["FastAPI app"]:::app
+        MON["Prometheus + StatsD + Grafana"]:::monitor
+    end
+
+    AIR --> FEAT
+    AIR --> TRN
+    FEAT --> CUR
+    FEAT --> REQ
     CUR --> FEAST
-    APP --> MET[/metrics]
-    MET --> MON
+    REQ --> TRN
+    TRN --> REG
+    REG --> APP
+    FEAST --> APP
+    APP --> MON
 </div>
 
 The local evaluator is a real runtime target, not a mock environment:
@@ -55,7 +68,7 @@ If the preferred local ports are already occupied, the bootstrap moves the bindi
 
 ## Runtime Surfaces
 
-| Surface | Current role in the local evaluator | Must not become |
+| Surface | Role in the local evaluator | Must not become |
 |------|--------------------------------------|-----------------|
 | FastAPI app | serve `/health`, `/spots`, `/predict`, `/rank`, `/features/online`, and `/metrics` | a hidden training or operator control plane |
 | Airflow plus Postgres metadata database | run feature and training orchestration with asset hand-offs | a notebook-only demo path |
@@ -71,7 +84,7 @@ This keeps the local lane close to the hosted architecture. The object-access la
 
 The local evaluator reports success only after the runtime proves several real contracts.
 
-The current verification path includes:
+The verification path includes:
 
 - Airflow component health checks for the webserver, dag-processor, scheduler, triggerer, and metadata database
 - an Airflow API health payload check instead of treating `200 OK` alone as enough
@@ -87,7 +100,7 @@ That makes the local lane more than a container smoke test. It exercises the sam
 
 The local evaluator resets disposable state aggressively, but it still keeps the important contracts explicit.
 
-The current split is:
+The state split is:
 
 - disposable Airflow metadata and logs are cleared by the bootstrap path
 - curated features and MLflow artifacts use the MinIO-backed local objectstore baseline for the run

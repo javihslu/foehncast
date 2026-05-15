@@ -1,170 +1,69 @@
 # Interfaces and Surfaces
 
-FoehnCast exposes different surfaces for riders, service clients, operators, delivery, and public-safe docs. This page records that boundary directly so readers do not have to reconstruct it from several other system pages.
+FoehnCast exposes five surface classes: rider, service, operator, delivery, and public-safe docs. This page defines who each surface is for and what should stay private.
 
 !!! note "Scope"
 
-    This page describes the current validated surface boundary.
-    It is not a proposal for a new product UI or admin model.
-    New routes or tools should be placed into one of these surface classes explicitly.
+    This page defines exposure boundaries.
+    Use runtime pages for deployed targets.
+    Use workflow pages for maintainer procedures.
 
 ## Surface Map
 
 <div class="mermaid">
 flowchart LR
-    subgraph Rider["Rider-facing demo surfaces"]
-        DASH[Streamlit rider console]
-        DEMO[/features/online/demo]
-    end
+    classDef public fill:#f5f5f5,stroke:#333
+    classDef service fill:#e1f5fe,stroke:#01579b
+    classDef operator fill:#fff8e1,stroke:#f57f17
+    classDef evidence fill:#ececff,stroke:#9370db
 
-    subgraph Service["Service endpoints"]
-        HEALTH[/health]
-        SPOTS[/spots]
-        PRED[/predict]
-        RANK[/rank]
-        FEAT[/features/online]
-    end
+    RIDER["Rider demos<br/>Streamlit and /features/online/demo"]:::public
+    SERVICE["Service routes<br/>/health, /spots, /predict, /rank, /features/online"]:::service
+    OPERATOR["Private operator surfaces<br/>/metrics, Airflow, MLflow, Prometheus, Grafana"]:::operator
+    DELIVERY["fab:fa-github Delivery<br/>GitHub Actions, Terraform, bootstrap"]:::public
+    EVIDENCE["Public-safe evidence<br/>Docs, summaries, screenshots"]:::evidence
 
-    subgraph Operator["Operator surfaces"]
-        MET[/metrics]
-        AIR[Airflow]
-        MLF[MLflow]
-        PROM[Prometheus]
-        GRAF[Grafana]
-    end
-
-    subgraph Delivery["Delivery surfaces"]
-        GHA[GitHub Actions]
-        TF[Terraform]
-        BSTR[Bootstrap scripts]
-    end
-
-    subgraph PublicSafe["Public-safe docs and evidence"]
-        DOCS[Docs pages]
-        EVID[Rendered summaries and screenshots]
-    end
-
-    DASH --> PRED
-    DASH --> RANK
-    DEMO --> FEAT
-    PRED --> MET
-    RANK --> MET
-    MET --> PROM
-    PROM --> GRAF
-    GHA --> TF
+    RIDER --> SERVICE
+    DELIVERY --> SERVICE
+    SERVICE --> OPERATOR
+    OPERATOR -. "Rendered outputs only" .-> EVIDENCE
 </div>
 
-The important split is that not every HTTP route is rider-facing, and not every visible screen is safe to treat as public documentation.
+The important split is simple: not every HTTP route is rider-facing, and not every visible screen is safe to treat as public documentation.
 
-## Runtime Lanes
+## Surface Classes
 
-| Lane | Current target | Main role | Exposure |
-|------|----------------|-----------|----------|
-| Local evaluator lane | local Compose stack | run the full evaluation surface on one machine | local-only |
-| Shared API lane | hosted inference target on Cloud Run | expose the public product and service routes | public |
-| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private app checks online while the managed hosted control plane is still transitional | private by default |
+| Surface class | Examples | Main audience | Default exposure |
+|------|----------|---------------|------------------|
+| Rider-facing demo surfaces | Streamlit rider console and `/features/online/demo` | rider, reviewer, contributor | public-safe when shown as screenshots, rendered examples, or a deliberate local demo |
+| Service endpoints | `/health`, `/spots`, `/predict`, `/rank`, and `/features/online` | clients, smoke tests, and app-side integrations | service-only |
+| Operator surfaces | `/metrics`, Airflow, MLflow, Prometheus, and Grafana | maintainer or deployment operator | private by default |
+| Delivery surfaces | GitHub Actions, Terraform, and bootstrap helpers | maintainer | review-controlled and not runtime-facing |
+| Public-safe docs and evidence | docs pages, rendered summaries, and screenshots | reviewer, fork reader, course audience | public-safe |
 
-The surface classes stay the same even as the hosted control plane changes. Today the operator lane still uses the retained host. The intended hosted direction is to keep the same operator-versus-public boundary while moving hosted build and orchestration into Google-managed services.
+## Exposure Rules
 
-## Current Surface Classes
-
-| Surface class | Current examples | Primary audience | Default exposure |
-|------|------------------|------------------|------------------|
-| Rider-facing demo surfaces | Streamlit live demo and `/features/online/demo` | rider, reviewer, contributor | public-safe when shown as screenshots, rendered examples, or a deliberate local demo |
-| Service endpoints | `/health`, `/spots`, `/predict`, `/rank`, and `/features/online` | clients, smoke tests, support services, and app-side integrations | service-only |
-| Operator dashboards and control planes | `/metrics`, Airflow, MLflow, Prometheus, and Grafana | maintainer or deployment operator | private by default, except for the hosted app route itself |
-| Delivery surfaces | GitHub Actions workflows, Terraform apply paths, and bootstrap helpers | maintainer | review-controlled and not runtime-facing |
-| Public-safe docs and evidence | docs pages, rendered markdown, summary JSON-derived charts, and screenshots | reviewer, fork reader, course audience | public-safe |
-
-So a surface can be technically reachable without being part of the rider-facing product boundary. The clearest example is `/metrics`: it is an application endpoint, but it belongs to the operator monitoring contract rather than to the public product surface.
-
-## Rider-Facing Demo Surfaces
-
-The current rider-facing layer is intentionally small.
-
-| Surface | What it does today | Must not become |
-|------|---------------------|-----------------|
-| Streamlit rider console | loads live predictions and rankings, shows configured rider profile, and presents rider-facing cards and tables | an operator dashboard or deployment control plane |
-| `/features/online/demo` | gives a lightweight manual page that calls `/features/online` against the running app | the main product UI |
-
-The Streamlit app is a real evaluation surface, not a separate hidden model path. It reuses the same prediction and ranking helpers as the API. The online-features demo is narrower: it exists to make the optional Feast-backed lookup path easy to test manually without turning that lookup into the product itself.
-
-## Service API Surfaces
-
-The current service API stays request-focused.
-
-| Endpoint | Current responsibility |
-|------|-------------------------|
-| `/health` | report readiness plus the served model alias and model version |
-| `/spots` | return the configured spot set |
-| `/predict` | return per-spot forecast rows with continuous `quality_index` values |
-| `/rank` | score the prediction payload for the configured rider profile |
-| `/features/online` | return Feast-backed online feature rows for app-side integrations |
-
-These endpoints are service surfaces, not hidden training or promotion paths. `/predict` and `/rank` schedule background monitoring work after they build the response payload, but they do not take on the rest of the operator monitoring stack.
-
-## Operator Surfaces
-
-The operator layer is where orchestration, tracking, monitoring, and review live.
-
-| Surface | Current role |
-|------|--------------|
-| `/metrics` | expose the composed Prometheus payload for app-owned monitoring signals |
-| Airflow | run and inspect feature and training orchestration |
-| MLflow | track runs, model versions, and registry aliases |
-| Prometheus | scrape time-series targets |
-| Grafana | visualize dashboards and evaluate alert rules |
-
-This operator layer stays separate from the rider-facing and public-docs layers on purpose. The checked-in monitoring config disables anonymous Grafana access, public dashboards, and embedding by default. The local bootstrap applies local-only overrides only so a local run can verify provisioning without changing the hosted policy.
-
-## Delivery Surfaces
-
-The delivery layer is separate from the runtime operator layer.
-
-| Surface | Current role |
-|------|--------------|
-| GitHub Actions | lint, test, build, publish, and reviewed deploy or Terraform workflows |
-| Terraform | declare the cloud contract and apply reviewed infrastructure changes |
-| Bootstrap helpers | perform one-time environment setup and repository-variable seeding |
-
-These surfaces are not the runtime orchestrator. GitHub Actions advances reviewed delivery. Today the runtime scheduling, retry, and backfill surface still lives on the retained hosted Airflow path, and the target hosted orchestrator is Cloud Composer.
-See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed delivery-versus-runtime ownership and retry or backfill rules.
-
-## Public-Safe Docs And Evidence
-
-The public docs site is a separate surface class, not a mirror of the live control plane.
-
-Preferred public-safe evidence sources are:
-
-- docs pages that summarize the current contracts
-- rendered markdown excerpts and summary-derived charts
-- screenshots of rider-facing or operator surfaces when explanation needs a picture
-- persisted summary artifacts under `airflow/reports/` or retained event history under `.state/monitoring/` when you are showing structure rather than sensitive live state
-
-Avoid treating these as public documentation surfaces:
-
-- live Grafana embeds
-- live Airflow or MLflow admin views
-- private hosted operator URLs pasted directly into public docs
-
-That rule keeps the docs understandable in review without leaking a live control plane into the public site.
+- `/metrics` is an operator surface even though it is an app route.
+- Streamlit and `/features/online/demo` are evaluation surfaces, not deployment control planes.
+- GitHub Actions and Terraform advance reviewed delivery, but they do not own runtime scheduling, retries, or backfills.
+- Public docs should use rendered evidence or screenshots instead of live Airflow, MLflow, Prometheus, or Grafana views.
 
 ## Exposure By Runtime Mode
 
 | Runtime mode | Product or service surface | Operator-only surface |
 |------|-----------------------------|-----------------------|
-| Local evaluator | local app routes, local Streamlit demo, optional online-features demo | local Airflow, MLflow, Prometheus, and Grafana |
-| Operator lane | no public app route by default | Airflow, MLflow, Prometheus, and Grafana stay private unless deliberately exposed |
+| Local evaluator | local app routes, local Streamlit demo, and the optional online-features demo | local Airflow, MLflow, Prometheus, and Grafana |
 | Shared API lane | hosted inference API only | no hosted Airflow or MLflow container in that target |
+| Operator lane | no public app route by default | Airflow, MLflow, Prometheus, and Grafana stay private unless deliberately exposed |
 | Public docs site | rendered docs and evidence only | no live control planes |
 
-The same rule holds in the shared hosted environment: app routes form the product and service surface, while operator tools stay private unless an operator intentionally publishes them. See [Hosted Full-Stack](hosted-full-stack.md) and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the hosted operator-lane and rollback rules.
+The same split applies in local and cloud runtimes: app routes form the product and service surface, while operator tools stay private unless an operator intentionally publishes them.
 
 ## Why This Boundary Works
 
 - it lets the rider-facing demo reuse the real serving path without turning the product into an admin console
 - it keeps service endpoints narrow enough for smoke tests and client integrations
-- it leaves orchestration, tracking, monitoring, and alerting on the operator side
+- it keeps orchestration, tracking, monitoring, and alerting on the operator side
 - it gives the public docs stable evidence sources that do not depend on exposing private hosted dashboards
 
 See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), [Local Evaluator](local-evaluator.md), and [Hosted Full-Stack](hosted-full-stack.md) for the surrounding runtime contracts.

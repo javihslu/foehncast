@@ -1,45 +1,44 @@
 # Use Case and Data
 
-FoehnCast is not a generic forecast portal. It is a decision tool for one rider profile and a fixed set of Swiss kite spots, built around a simple question: where is the best session worth driving to next?
+FoehnCast is a trip-planning tool for one rider profile and a fixed set of Swiss kite spots. It answers one question: where is the best session worth driving to next?
 
-!!! note "Scope matters here"
+The scope stays intentionally narrow. The project ranks a small known spot set for one rider baseline instead of trying to be a universal weather portal.
 
-    The project stays intentionally narrow.
-    It ranks a small set of known spots for one rider baseline instead of trying to be a universal weather product.
-
-## Use Case In One View
-
-<div class="grid cards">
-<ul>
-<li>
-<p><strong>Rider</strong></p>
-<p>The baseline user is one rider based in Schwyz with a fixed quiver and weight profile.</p>
-</li>
-<li>
-<p><strong>Decision</strong></p>
-<p>The output is not just a forecast. It is a ranked session choice across multiple spots.</p>
-</li>
-<li>
-<p><strong>Personalization</strong></p>
-<p>Drive time, rider profile, and shore-specific wind context matter alongside raw weather.</p>
-</li>
-<li>
-<p><strong>Scope</strong></p>
-<p>The system is intentionally limited to six Swiss lake spots so the ranking logic stays concrete and testable.</p>
-</li>
-</ul>
-</div>
+## Decision Model
 
 <div class="mermaid">
-flowchart LR
-    WX[Weather forecasts] --> QUAL[Per-spot quality prediction]
-    SPOT[Spot metadata and shore orientation] --> QUAL
-    QUAL --> RANK[Ranked session options]
-    RIDER[Rider profile] --> RANK
-    DRIVE[OSRM drive time] --> RANK
+flowchart TD
+        WX[Weather forecasts] --> QUAL[Per-spot quality]
+        SPOT[Spot metadata and shore orientation] --> QUAL
+        QUAL --> RANK[Rank session options]
+        WINDOW[Rideable time window] --> RANK
+        RIDER[Rider profile] --> RANK
+        DRIVE[OSRM drive time] --> RANK
 </div>
 
-## Rider Profile
+## What Shapes The Ranking
+
+<div class="grid cards" markdown>
+
+- **Wind quality**
+
+    The model predicts how good each spot looks for the configured rider profile.
+
+- **Session window**
+
+    Longer rideable periods score better than short spikes.
+
+- **Drive time**
+
+    Distance matters because the system is choosing a trip, not only a forecast.
+
+- **Spot fit**
+
+    Shore orientation and local spot rules shape whether the forecast is useful.
+
+</div>
+
+## Rider Baseline
 
 | Field | Baseline value |
 |-------|----------------|
@@ -48,18 +47,6 @@ flowchart LR
 | Quiver | 5 / 7 / 8 / 10 / 12 m2 |
 
 This baseline keeps the ranking problem consistent across the project. The model does not try to optimize for every possible rider at once.
-
-## What The System Ranks
-
-The ranking layer combines more than one signal.
-
-| Factor | Why it matters |
-|--------|----------------|
-| Predicted quality index | identifies whether a spot looks rideable and how good the session could be |
-| Session duration | rewards spots that stay rideable for longer windows |
-| Drive time | discounts distant options that are not worth the trip |
-
-That is why the system is better described as a trip-planning tool than as a plain weather dashboard.
 
 ## Spots in Scope
 
@@ -72,23 +59,23 @@ That is why the system is better described as a trip-planning tool than as a pla
 | Walensee | SG | intermediate | lake | 220°-320° |
 | Thunersee | BE | advanced | lake | 220°-330° |
 
-These are not example rows. They are the actual fixed spot set used in the current configuration baseline.
+These six spots define the ranking scope.
 
-## Data Sources
+## Main Inputs
 
-| Source | Role in the project | Current status |
-|--------|---------------------|----------------|
-| Open-Meteo | primary forecast and archive weather source | implemented |
-| OSRM | drive-time personalization for ranking | implemented |
-| MeteoSwiss | not part of the current runtime contract | not active |
+| Input | Role |
+|-------|------|
+| Open-Meteo | forecast weather inputs for feature generation and prediction |
+| OSRM | drive-time inputs for trip ranking |
+| Spot metadata | local wind context, shore orientation, and spot-level rules |
 
-Open-Meteo supplies the forecast data and OSRM contributes travel-time ranking inputs. MeteoSwiss is not part of the current stack.
+Open-Meteo supplies the weather signal. OSRM supplies travel time. Spot metadata keeps the ranking grounded in the local riding context.
 
-## Why The Scope Is Fixed
+## Why The Scope Stays Fixed
 
 - It keeps the labeling and ranking problem aligned with one real rider scenario.
 - It makes route-time personalization meaningful instead of theoretical.
-- It avoids turning the course project into a generic weather portal with weak decision support.
+- It avoids turning the project into a generic weather portal with weak decision support.
 - It keeps implementation work focused on one concrete product question.
 
-See [Architecture](architecture.md) for the current system structure and [Feature Pipeline](feature-pipeline.md) for how the data moves through the stack.
+See [Architecture](architecture.md) for the system structure and [Feature Pipeline](feature-pipeline.md) for how the data moves through the stack.

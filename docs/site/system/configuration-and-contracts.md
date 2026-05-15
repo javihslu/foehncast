@@ -1,12 +1,12 @@
 # Configuration and Contracts
 
-FoehnCast keeps workload configuration, runtime wiring, infrastructure inputs, and generated runtime state separate on purpose. This page describes that current contract so readers do not have to reconstruct it from `config.yaml`, `src/foehncast/config.py`, the repository notes, and the operator docs.
+FoehnCast keeps workload configuration, runtime wiring, infrastructure inputs, and generated runtime state separate. This page describes that contract so readers do not have to reconstruct it from `config.yaml`, `src/foehncast/config.py`, the repository notes, and the operator docs.
 
 The goal is not to document every environment variable in isolation. The goal is to make the ownership boundary explicit: what the package owns, what the runtime injects, and what infrastructure or operator tooling should keep outside the package config.
 
 !!! note "Scope"
 
-    This page describes the current validated configuration boundary.
+    This page describes the validated configuration boundary.
     It is not a proposal for a future settings system.
     New settings should follow these ownership rules unless the architecture changes first.
 
@@ -14,20 +14,20 @@ The goal is not to document every environment variable in isolation. The goal is
 
 <div class="mermaid">
 flowchart LR
-    YAML[config.yaml] --> PY[src/foehncast/config.py]
-    ENV[.env and environment variables] --> PY
-    TF[Terraform and GitHub delivery variables] --> ENV
-    PY --> APP[App, DAGs, training, inference]
-    ENV --> FEASTCFG[.state/feast/feature_store.runtime.yaml]
-    FEASTCFG --> FEAST[Feast runtime]
-    APP --> MON[.state and airflow/reports contracts]
+    TF["Terraform and GitHub delivery variables"] --> ENV[".env and environment variables"]
+    YAML["config.yaml"] --> PY["src/foehncast/config.py"]
+    ENV --> PY
+    PY --> APP["App, DAGs, training, inference"]
+    APP --> MON[".state and airflow/reports contracts"]
+    ENV --> FEASTCFG[".state/feast/feature_store.runtime.yaml"]
+    FEASTCFG --> FEAST["Feast runtime"]
 </div>
 
-The important rule is that the package should own workload semantics, while runtime and infrastructure layers own deployment-specific wiring.
+The important rule is that the package owns workload semantics, while runtime and infrastructure layers own deployment-specific wiring.
 
 ## Ownership Boundary
 
-| Surface | Owns | Current examples | Must not become |
+| Surface | Owns | Example values | Must not become |
 |------|------|------------------|-----------------|
 | `config.yaml` | workload defaults and app-facing contracts | rider profile, spot list, API source settings, validation rules, model features, labeling bands, MLflow names, inference weights, monitoring thresholds | a dump of project IDs, service names, bind hosts, or deployment topology |
 | `.env` and environment variables | concrete runtime wiring for one local or hosted instance | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_BIGQUERY_*`, `MLFLOW_TRACKING_URI`, bind hosts, Feast source selection | the source of truth for rider, spot, or model semantics |
@@ -42,12 +42,12 @@ This split keeps the workload code smaller and clearer. The package does not nee
 
 The checked-in YAML owns the stable workload and product contract.
 
-| Section | What it controls today |
+| Section | What it controls |
 |------|-------------------------|
 | `rider` | baseline rider profile and home location used by ranking |
 | `api` | upstream weather and routing source settings |
 | `spots` | the fixed spot list and shore metadata |
-| `storage` | the default curated-storage mode, currently `s3` or `bigquery` |
+| `storage` | the curated-storage mode and its supported values, including `s3` and `bigquery` |
 | `warehouse` | retained warehouse contracts for curated features and prediction events |
 | `validation` | required columns, completeness rules, and accepted numeric ranges |
 | `model` | algorithm choice, feature sets, target field, split ratio, and seed |
@@ -56,13 +56,13 @@ The checked-in YAML owns the stable workload and product contract.
 | `inference` | live horizon and ranking weights |
 | `monitoring` | drift threshold, evaluation window, and local retention knobs |
 
-This is why the current training and inference pages can point back to `config.yaml` for feature lists, ranking weights, and label semantics without treating those values as runtime secrets.
+This is why the training and inference pages can point back to `config.yaml` for feature lists, ranking weights, and label semantics without treating those values as runtime secrets.
 
 ## What Runtime Wiring Resolves
 
 `src/foehncast/config.py` keeps the YAML and the runtime wiring separate instead of mutating one into the other.
 
-The current resolution rules are:
+The resolution rules are:
 
 - `FOEHNCAST_CONFIG_PATH` can point the loader at a different YAML file when needed
 - the loader caches the checked-in YAML, but runtime helpers resolve environment overrides when the caller asks for storage or MLflow settings
@@ -79,11 +79,11 @@ The test contract in `tests/test_config.py` already checks the most important be
 
 That means the package does not need a second handwritten runtime config file just to switch from local to hosted wiring.
 
-## Current Runtime Wiring Examples
+## Runtime Wiring Examples
 
 The checked-in `.env.example` shows the kind of values that belong in runtime wiring.
 
-| Runtime surface | Current examples |
+| Runtime surface | Example values |
 |------|------------------|
 | Curated storage binding | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ENDPOINT`, `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` |
 | MLflow connection | `MLFLOW_TRACKING_URI`, `MLFLOW_ARTIFACT_DESTINATION` |
@@ -93,25 +93,25 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 
 These values describe one concrete runtime instance. They should stay overridable because the local evaluator, hosted full-stack target, and hosted inference target do not all bind to the same services.
 
-In the shared hosted path today, the full-stack target still represents the current operator lane. That lane is transitional, so the runtime wiring should stay explicit instead of being treated as a permanent deployment shape.
+In the shared hosted path, the full-stack target represents the active operator lane. That lane is a retained operator surface, so the runtime wiring should stay explicit instead of being treated as a permanent deployment shape.
 
 ## Cloud Runtime Inventory
 
 The shared cloud path uses four value surfaces plus identity-backed auth. The simple split is this: delivery surfaces carry reviewed hosted identifiers and toggles, runtime surfaces carry concrete per-environment wiring, and identities carry cloud access.
 
-| Source surface | What shows up there today | Owned by | Consumed by | Secret rule |
+| Source surface | Example values | Owned by | Consumed by | Secret rule |
 |------|---------------------------|----------|-------------|-------------|
 | checked-in examples and repo defaults | `.env.example` placeholders, `terraform/terraform.tfvars.example`, checked-in operator docs | repository | bootstrap prompts, local operators, reviewers | structural examples only; never live credentials |
 | bootstrap outputs in the working tree | `.env`, `terraform/terraform.tfvars`, Terraform outputs echoed by `./scripts/bootstrap-gcp.sh` | maintainer running bootstrap for one environment | local preview applies, bootstrap verification, `scripts/configure-github-actions.sh` | hosted identifiers and toggles only; not a long-term secret store |
 | GitHub repository variables | `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_ARTIFACT_REPOSITORY`, `GCP_BIGQUERY_*`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT_EMAIL`, Cloud Run sizing and enablement flags | GitHub delivery control plane, normally synced from Terraform outputs | `.github/workflows/terraform.yml`, image-publish workflows, repo-config action | structural delivery contract only; do not store runtime passwords, API tokens, or key files here |
-| runtime `.env` and hosted runtime env vars | `MLFLOW_TRACKING_URI`, `AIRFLOW__API_AUTH__JWT_SECRET`, `FOEHNCAST_GRAFANA_ADMIN_*`, `GRAFANA_API_*`, `cloud_run_env_vars`, `online_compose_env_vars` | runtime operator or platform for one running surface | local evaluator, current operator lane, shared API lane, Grafana and Airflow auth checks | concrete runtime wiring; secret-bearing values should stay local-only or move to Secret Manager or another managed secret path |
+| runtime `.env` and hosted runtime env vars | `MLFLOW_TRACKING_URI`, `AIRFLOW__API_AUTH__JWT_SECRET`, `FOEHNCAST_GRAFANA_ADMIN_*`, `GRAFANA_API_*`, `cloud_run_env_vars`, `online_compose_env_vars` | runtime operator or platform for one running surface | local evaluator, active operator lane, shared API lane, Grafana and Airflow auth checks | concrete runtime wiring; secret-bearing values should stay local-only or move to Secret Manager or another managed secret path |
 | identity-backed auth surfaces | GitHub OIDC, Cloud Run service account, compose-host VM service account | repository admin plus GCP IAM | GitHub workflows and hosted runtimes | prefer identities over stored cloud credentials; not a secret distribution path |
 
-This inventory keeps the current boundary explicit:
+This inventory keeps the boundary explicit:
 
 - `config.yaml` keeps workload semantics.
 - `terraform/terraform.tfvars` and GitHub repository variables keep structural hosted rollout inputs.
-- runtime `.env` and hosted env injections carry concrete per-environment wiring for the local evaluator, the current operator lane, or the shared API lane.
+- runtime `.env` and hosted env injections carry concrete per-environment wiring for the local evaluator, the active operator lane, or the shared API lane.
 - secret-bearing runtime values should not move into committed examples or repository variables just because they are cloud-facing.
 
 This page inventories where those values live. [Delivery and Operator Workflow](delivery-and-operator-workflow.md) owns the maintainer bootstrap, repository-variable sync, and remote-apply runbook that moves between those surfaces.
@@ -120,7 +120,7 @@ This page inventories where those values live. [Delivery and Operator Workflow](
 
 The storage boundary is intentionally narrow.
 
-The current curated-storage contract is:
+The curated-storage contract is:
 
 - `s3` is the local MinIO-backed baseline
 - `bigquery` is the hosted analytical baseline
@@ -136,7 +136,7 @@ This matters because retained monitoring facts belong in retained event history 
 
 ## Feast And Monitoring Runtime State
 
-Two generated state areas are part of the current contract even though they are not workload config.
+Two generated state areas are part of the runtime contract even though they are not workload config.
 
 | Generated surface | Why it exists |
 |------|----------------|
