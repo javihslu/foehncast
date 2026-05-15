@@ -93,6 +93,8 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 
 These values describe one concrete runtime instance. They should stay overridable because the local evaluator, hosted full-stack target, and hosted inference target do not all bind to the same services.
 
+In the shared hosted path today, the full-stack target still represents the current operator lane. That lane is transitional, so the runtime wiring should stay explicit instead of being treated as a permanent deployment shape.
+
 ## Cloud Runtime Inventory
 
 The shared cloud path uses four value surfaces plus identity-backed auth. The simple split is this: delivery surfaces carry reviewed hosted identifiers and toggles, runtime surfaces carry concrete per-environment wiring, and identities carry cloud access.
@@ -102,14 +104,14 @@ The shared cloud path uses four value surfaces plus identity-backed auth. The si
 | checked-in examples and repo defaults | `.env.example` placeholders, `terraform/terraform.tfvars.example`, checked-in operator docs | repository | bootstrap prompts, local operators, reviewers | structural examples only; never live credentials |
 | bootstrap outputs in the working tree | `.env`, `terraform/terraform.tfvars`, Terraform outputs echoed by `./scripts/bootstrap-gcp.sh` | maintainer running bootstrap for one environment | local preview applies, bootstrap verification, `scripts/configure-github-actions.sh` | hosted identifiers and toggles only; not a long-term secret store |
 | GitHub repository variables | `GCP_PROJECT_ID`, `GCP_LOCATION`, `GCP_ARTIFACT_REPOSITORY`, `GCP_BIGQUERY_*`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_SERVICE_ACCOUNT_EMAIL`, Cloud Run sizing and enablement flags | GitHub delivery control plane, normally synced from Terraform outputs | `.github/workflows/terraform.yml`, image-publish workflows, repo-config action | structural delivery contract only; do not store runtime passwords, API tokens, or key files here |
-| runtime `.env` and hosted runtime env vars | `MLFLOW_TRACKING_URI`, `AIRFLOW__API_AUTH__JWT_SECRET`, `FOEHNCAST_GRAFANA_ADMIN_*`, `GRAFANA_API_*`, `cloud_run_env_vars`, `online_compose_env_vars` | runtime operator or platform for one running surface | local evaluator, operator lane, shared API lane, Grafana and Airflow auth checks | concrete runtime wiring; secret-bearing values should stay local-only or move to Secret Manager or another managed secret path |
+| runtime `.env` and hosted runtime env vars | `MLFLOW_TRACKING_URI`, `AIRFLOW__API_AUTH__JWT_SECRET`, `FOEHNCAST_GRAFANA_ADMIN_*`, `GRAFANA_API_*`, `cloud_run_env_vars`, `online_compose_env_vars` | runtime operator or platform for one running surface | local evaluator, current operator lane, shared API lane, Grafana and Airflow auth checks | concrete runtime wiring; secret-bearing values should stay local-only or move to Secret Manager or another managed secret path |
 | identity-backed auth surfaces | GitHub OIDC, Cloud Run service account, compose-host VM service account | repository admin plus GCP IAM | GitHub workflows and hosted runtimes | prefer identities over stored cloud credentials; not a secret distribution path |
 
 This inventory keeps the current boundary explicit:
 
 - `config.yaml` keeps workload semantics.
 - `terraform/terraform.tfvars` and GitHub repository variables keep structural hosted rollout inputs.
-- runtime `.env` and hosted env injections carry concrete per-environment wiring for the local evaluator, operator lane, or shared API lane.
+- runtime `.env` and hosted env injections carry concrete per-environment wiring for the local evaluator, the current operator lane, or the shared API lane.
 - secret-bearing runtime values should not move into committed examples or repository variables just because they are cloud-facing.
 
 This page inventories where those values live. [Delivery and Operator Workflow](delivery-and-operator-workflow.md) owns the maintainer bootstrap, repository-variable sync, and remote-apply runbook that moves between those surfaces.

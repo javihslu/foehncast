@@ -1,11 +1,12 @@
 # Architecture
 
-FoehnCast keeps the same Feature-Training-Inference split in every runtime mode. What changes is the surrounding lane: the local evaluator, the public API lane on Cloud Run, or the private operator lane on the retained host.
+FoehnCast keeps the same Feature-Training-Inference split in every runtime mode. What changes is the supporting delivery and operator lane around that split. Today the shared cloud path has a public API lane on Cloud Run and a private operator lane on a retained host. That operator lane is transitional while hosted image builds move toward Cloud Build and hosted orchestration moves toward Cloud Composer.
 
 !!! note "How to read this page"
 
     The validated baseline is the local Compose stack.
-    The shared cloud path splits into a public API lane on Cloud Run and a private operator lane on the retained host.
+    The shared cloud path today splits into a public API lane on Cloud Run and a private retained operator lane.
+    The intended hosted direction keeps Cloud Run as the public API, moves hosted image builds to Cloud Build, and moves hosted orchestration to Cloud Composer.
     The hosted paths use the same feature, training, and inference modules, but move storage, auth, and runtime services onto GCP in different ways.
     The rider-facing demo and prediction outputs are not the same thing as operator dashboards, and Grafana is not treated as the main product UI.
 
@@ -58,11 +59,11 @@ Grafana stays on the operator side of that boundary. The rider-facing experience
 
 ## Runtime Lanes
 
-| Lane | Current target | Main role | Exposure |
-|------|----------------|-----------|----------|
-| Local evaluator lane | local Compose stack | validate the full system on one machine | local-only |
-| Shared API lane | hosted inference target on Cloud Run | serve the shared FastAPI product and service routes | public |
-| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private app checks online | private by default |
+| Lane | Current target | State | Main role | Exposure |
+|------|----------------|-------|-----------|----------|
+| Local evaluator lane | local Compose stack | stable baseline | validate the full system on one machine | local-only |
+| Shared API lane | hosted inference target on Cloud Run | active hosted target | serve the shared FastAPI product and service routes | public |
+| Operator lane | hosted full-stack target on one GCP host | active but transitional | keep Airflow, MLflow, monitoring, and private app checks online while the hosted control plane is simplified | private by default |
 
 ## Stable Pipeline Boundaries
 
@@ -71,7 +72,7 @@ Grafana stays on the operator side of that boundary. The rider-facing experience
 | Feature pipeline | Collect data, engineer curated rows, validate them, and store the result | local Airflow DAG plus the configured storage backend |
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
 | Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
-| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow plus the retained hosted Airflow control plane |
+| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow today; retained-host Airflow today; Cloud Composer is the target hosted orchestrator |
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
 | Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana operator stack |
 
@@ -90,17 +91,20 @@ flowchart LR
 | Target | Deploys | Leaves out | Primary use |
 |------|---------|------------|-------------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, Grafana, MinIO, the Feast Datastore emulator, and optional `development_env` tooling | shared GCP baseline | default development and evaluation |
-| Hosted full-stack target (operator lane) | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | retained operator control plane and orchestration surface of record |
+| Hosted full-stack target (transitional operator lane) | Airflow, MLflow, FastAPI, Prometheus, a StatsD exporter, and Grafana on one GCP host | `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | keep current operator duties online while the hosted build and orchestration contracts are cleaned up |
 | Hosted inference target (API lane) | FastAPI only, backed by shared GCP services | Airflow, hosted MLflow container, `development_env`, notebooks, docs build tooling, local MinIO, and local emulators | primary hosted API surface |
-| GitHub automation | image publishing and Terraform workflows | runtime services | shared cloud day-2 delivery, not a runtime target |
+| Managed hosted direction | Cloud Build for hosted runtime images and Cloud Composer for hosted Airflow workloads | VM-owned orchestration and host-built image responsibility | intended steady hosted build and orchestration path |
+| GitHub automation | review, workflow dispatch, and Terraform workflows | runtime services | shared cloud delivery control plane, not a runtime target |
 
-The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. The hosted full-stack target stays private by default and keeps the operator stack online when Airflow, MLflow, and monitoring need to stay together.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run already owns the public API lane. The retained host stays private by default and is treated as a transitional operator surface, not as the desired long-term hosted control plane.
 
-See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the active hosted topology and exposure contract.
+See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the current hosted topology, the transitional retained-host contract, and the intended managed direction.
 
-## Orchestration Surface Of Record
+## Hosted Orchestration Direction
 
-Hosted Airflow on the private operator lane remains the runtime orchestration surface for this horizon. The detailed GitHub-versus-runtime boundary, runtime handoff, and recovery ownership stay in [Delivery and Operator Workflow](delivery-and-operator-workflow.md).
+Today the private operator lane still runs the hosted Airflow surface used for scheduling, retries, backfills, and runtime release handoff. That is the current operational contract.
+
+The target hosted control plane is Cloud Composer. The managed cutover should replace host-owned Airflow responsibilities without changing the core feature, training, and inference split. The detailed current-versus-target boundary stays in [Delivery and Operator Workflow](delivery-and-operator-workflow.md).
 
 ## Current Local Architecture
 
@@ -123,7 +127,7 @@ flowchart TD
 
 The Airflow control plane reflects those hand-offs directly. The feature pipeline owns the curated-row and Feast-sync publication steps, then emits a training-request asset. The training pipeline is scheduled from that asset rather than a direct DAG-to-DAG trigger, so the Assets view shows the real dependency graph between feature persistence, Feast serving preparation, model training, evaluation, and registration.
 
-## Hosted Runtime Detail
+## Hosted Runtime Detail Today
 
 <div class="mermaid">
 flowchart LR
@@ -152,7 +156,7 @@ flowchart LR
     OSRM2[OSRM] --> RAPI
 </div>
 
-The hosted lanes reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the private operator lane. The second shows the public API lane.
+The hosted lanes reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the retained private operator lane that exists today. The second shows the public API lane on Cloud Run. The managed hosted direction changes the build and orchestration plane around those diagrams; it does not change the core pipeline split.
 
 ## Representative Validation
 
@@ -169,6 +173,7 @@ The hosted lanes reuse the same application boundaries, but they deploy differen
 - The personalized ranking logic stays in the inference layer.
 - Feature engineering and training remain reusable across local and hosted paths.
 - Hosted changes mostly affect storage, auth, orchestration, and image delivery.
+- The retained operator lane is a support structure for the current hosted path, not the desired long-term hosted design.
 - Feast layers on top of the same curated features instead of splitting the design.
 
 ## Storage Contract

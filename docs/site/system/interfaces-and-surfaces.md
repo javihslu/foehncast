@@ -62,7 +62,9 @@ The important split is that not every HTTP route is rider-facing, and not every 
 |------|----------------|-----------|----------|
 | Local evaluator lane | local Compose stack | run the full evaluation surface on one machine | local-only |
 | Shared API lane | hosted inference target on Cloud Run | expose the public product and service routes | public |
-| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private app checks online | private by default |
+| Operator lane | hosted full-stack target on one GCP host | keep Airflow, MLflow, monitoring, and private app checks online while the managed hosted control plane is still transitional | private by default |
+
+The surface classes stay the same even as the hosted control plane changes. Today the operator lane still uses the retained host. The intended hosted direction is to keep the same operator-versus-public boundary while moving hosted build and orchestration into Google-managed services.
 
 ## Current Surface Classes
 
@@ -125,7 +127,7 @@ The delivery layer is separate from the runtime operator layer.
 | Terraform | declare the cloud contract and apply reviewed infrastructure changes |
 | Bootstrap helpers | perform one-time environment setup and repository-variable seeding |
 
-These surfaces are not the runtime orchestrator. For this horizon, GitHub Actions advances reviewed delivery, while hosted Airflow on GCP remains the runtime scheduling, retry, and backfill surface.
+These surfaces are not the runtime orchestrator. GitHub Actions advances reviewed delivery. Today the runtime scheduling, retry, and backfill surface still lives on the retained hosted Airflow path, and the target hosted orchestrator is Cloud Composer.
 See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed delivery-versus-runtime ownership and retry or backfill rules.
 
 ## Public-Safe Docs And Evidence
