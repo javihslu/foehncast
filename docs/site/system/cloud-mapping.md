@@ -41,38 +41,37 @@ FoehnCast has one public hosted lane and one private operator lane. Cloud Run se
 | Build surface | Cloud Build | active | private or platform-only | publish reviewed hosted runtime images to Artifact Registry |
 | Delivery lane | GitHub Actions plus Terraform plus OIDC | active review gate | not a runtime surface | publish reviewed artifacts and apply reviewed infrastructure changes |
 
-## Shared Core And Deployment Differences
+## Same Core, Different Support Stack
 
 <div class="mermaid">
 flowchart TD
-    %% Colors
     classDef core fill:#f5f5f5,stroke:#333
     classDef local fill:#e1f5fe,stroke:#01579b
     classDef cloud fill:#fff8e1,stroke:#f57f17
 
-    CORE["Shared core and pipeline boundaries"]:::core
+    CORE["Shared FTI core\nFeature -> Training -> Inference"]:::core
 
     subgraph LocalSurface ["fab:fa-docker Local lane"]
-        direction LR
-        LSUP["Airflow + MLflow + metrics"]:::local
+        direction TB
+        LSUP["Airflow + MLflow + monitoring"]:::local
         LAPP["MinIO + Feast + app"]:::local
         LSUP --> LAPP
     end
 
     subgraph CloudSurface ["fab:fa-google Cloud lane"]
-        direction LR
+        direction TB
+        COPS["Cloud Composer + operator tools"]:::cloud
         CDATA["BigQuery + GCS + Datastore"]:::cloud
         CAPI["Cloud Run API"]:::cloud
-        COPS["Operator lane"]:::cloud
+        COPS --> CDATA
         CDATA --> CAPI
-        CDATA --> COPS
     end
 
     CORE --> LocalSurface
     CORE --> CloudSurface
 </div>
 
-The shared core stays the same. Local and cloud differ mainly in the support surfaces around that core.
+The main pipeline stays the same. Local and cloud mostly differ in the support tools around it.
 
 ## Mapping Principle
 
@@ -82,6 +81,17 @@ The shared core stays the same. Local and cloud differ mainly in the support sur
 - Cloud services replace the local support services used for evaluation and development.
 - Hosted deployment keeps development-only assets, notebooks, docs build tooling, and local emulators out of the runtime surface.
 - The app remains a deployable container because inference is a service, not a DAG.
+
+## What Stays The Same
+
+These parts should stay the same in local and cloud.
+
+- `config.yaml` keeps the same meaning in both paths
+- the feature, training, and inference boundaries stay the same
+- the Airflow DAG logic and runtime release contract stay the same
+- the FastAPI routes and `/metrics` contract stay the same
+- the reviewed container images and app code stay the same
+- DVC should sit on top of the local curated-data-to-training path and CI, not inside the hosted runtime
 
 ## Surface Exposure In Cloud
 
@@ -156,17 +166,36 @@ Cloud Composer is the hosted orchestration surface. Terraform provisions the Clo
 
 A reviewed DAG and source bundle syncs to the Composer DAG bucket. Terraform seeds the reviewed PyPI baseline required by the checked-in DAG bundle and merges extra `cloud_composer_pypi_packages` overrides on top. The repo exposes a reviewed runtime release entry that reaches the Composer Airflow API, plus a reviewed Secret Manager-backed env-ref path for Composer. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
-## Hosted Service Mapping
+## Local To Cloud Mapping
 
-| Concern | Hosted implementation |
-|---------|----------------------|
-| FastAPI app | Cloud Run API lane for shared traffic |
-| Hosted image builds | GitHub-reviewed workflows submit Cloud Build builds that publish app, Airflow, and MLflow runtime images to Artifact Registry |
-| Airflow orchestration | Cloud Composer |
-| MLflow tracking | managed operator surface with GCS-backed artifacts |
-| Monitoring | private operator surface |
-| Curated storage | BigQuery |
-| Feast serving path | same logical feature view against cloud storage |
+<div class="mermaid">
+flowchart TD
+    classDef local fill:#e1f5fe,stroke:#01579b
+    classDef cloud fill:#fff8e1,stroke:#f57f17
+
+    L1["Local Airflow"]:::local --> C1["Cloud Composer"]:::cloud
+    L2["Local app container"]:::local --> C2["Cloud Run"]:::cloud
+    L3["MinIO for raw files and artifacts"]:::local --> C3["GCS"]:::cloud
+    L4["MinIO curated feature objects"]:::local --> C4["BigQuery"]:::cloud
+    L5["Feast parquet export"]:::local --> C5["BigQuery table or view"]:::cloud
+    L6["Datastore emulator"]:::local --> C6["Datastore-mode Firestore"]:::cloud
+</div>
+
+| Local | Same idea | Cloud |
+|------|-----------|-------|
+| FastAPI app container | same app routes and `/metrics` | Cloud Run API lane |
+| Local Docker image builds | same reviewed images | GitHub workflows + Cloud Build + Artifact Registry |
+| Local Airflow | same DAGs and runtime release contract | Cloud Composer |
+| Local MLflow + MinIO artifacts | same run tracking and registry | managed MLflow + GCS artifacts |
+| Prometheus + StatsD + Grafana | same operator monitoring | private hosted operator monitoring |
+| MinIO for raw files and artifact-style blobs | same object storage role | GCS |
+| MinIO curated feature objects | same curated feature contract | BigQuery |
+| Feast parquet export | same Feast offline source | BigQuery table or view |
+| Datastore emulator | same Feast online-serving boundary | Datastore-mode Firestore |
+| Streamlit and `/features/online/demo` | same rider demo role | public-safe demo or screenshots, not an operator control plane |
+| `development_env` and notebooks | same local-only helper role | no hosted runtime equivalent |
+
+This is role matching, not a literal copy. Some local tools map to hosted services. Some helpers simply stay local.
 
 ## Cloud Pipeline Shape
 

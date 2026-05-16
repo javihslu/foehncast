@@ -922,7 +922,7 @@ def test_orchestration_docs_describe_hosted_composer_architecture() -> None:
     )
     assert "Cloud Build is the hosted image build surface." in cloud_mapping
     assert (
-        "GitHub-reviewed workflows submit Cloud Build builds that publish app, Airflow, and MLflow runtime images to Artifact Registry"
+        "reviewed GitHub workflows submit Cloud Build builds that publish hosted runtime images to Artifact Registry"
         in cloud_mapping
     )
     assert (
