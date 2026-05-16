@@ -8,7 +8,7 @@ This page describes what is measured, where the evidence comes from, and how ope
 
     This page describes the validated monitoring contract.
     It focuses on the monitoring evidence and boundaries.
-    It does not treat the retained host as the desired long-term hosted control plane.
+    It does not redefine the hosted build or orchestration plan.
 
 ## Signal Path
 
@@ -46,7 +46,7 @@ The public-versus-private surface rule itself is documented in [Interfaces and S
 | `.state/monitoring/prediction-events.jsonl` | durable evidence | retained prediction-event history by model version and the history source for local S3-backed monitoring readers |
 | `foehncast_monitoring.prediction_events` warehouse table | durable evidence | hosted BigQuery-backed prediction-event history for Cloud Run and other cloud-native readers |
 | `.state/monitoring/prediction-log.jsonl` | bounded local working set | recent prediction rows retained for local request-side drift evaluation; not a fallback history source |
-| `.state/online-compose-sync/last-success.json` | durable evidence | latest hosted sync success marker |
+| `.state/hosted-sync/last-success.json` | durable evidence | latest hosted sync success marker |
 | app `/metrics` | composed scrape surface | app-owned monitoring state and summary-derived metrics |
 | StatsD exporter | scrape surface | Evidently-backed drift metrics |
 | Prometheus and Grafana | operator tooling | time-series storage, dashboards, and alert evaluation |

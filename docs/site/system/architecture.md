@@ -1,13 +1,12 @@
 # Architecture
 
-FoehnCast keeps the same Feature-Training-Inference split in every runtime. The cloud path adds a public API lane on Cloud Run and a private operator lane for Airflow, MLflow, monitoring, and private app checks. In the active shared environment that operator lane is implemented on a retained host, while image builds move to Cloud Build and orchestration moves to Cloud Composer.
+FoehnCast keeps the same Feature-Training-Inference split in every runtime. The cloud path adds a public API lane on Cloud Run and a private operator lane for Airflow, MLflow, and monitoring. Image builds run through Cloud Build and orchestration runs on Cloud Composer.
 
 !!! note "How to read this page"
 
     Start with the local Compose stack.
     In the cloud, Cloud Run is the public API lane.
-    The retained host is the active implementation of the private operator lane.
-    The target hosted direction keeps Cloud Run and moves build and orchestration into managed services.
+    Cloud Composer is the hosted orchestration surface.
     Rider-facing screens are separate from operator dashboards.
 
 ## System In One View
@@ -69,7 +68,7 @@ Grafana stays on the operator side. The rider-facing experience comes from the a
 |------|----------------|-------|-----------|----------|
 | Local evaluator lane | local Compose stack | stable baseline | validate the full system on one machine | local-only |
 | Shared API lane | hosted inference target on Cloud Run | active hosted target | serve the shared FastAPI product and service routes | public |
-| Operator lane | hosted full-stack target on one GCP host | implemented on retained host | provide the private operator surface for Airflow, MLflow, monitoring, and private app checks | private by default |
+| Operator lane | Cloud Composer plus managed operator services | active hosted operator surface | provide the private operator surface for Airflow, MLflow, and monitoring | private by default |
 
 ## Stable Pipeline Boundaries
 
@@ -78,7 +77,7 @@ Grafana stays on the operator side. The rider-facing experience comes from the a
 | Feature pipeline | Collect data, engineer curated rows, validate them, and store the result | local Airflow DAG plus the configured storage backend |
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
 | Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
-| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow in the local evaluator; retained-host Airflow in the active shared environment; Cloud Composer is the target hosted orchestrator |
+| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow in the local evaluator; Cloud Composer in the hosted environment |
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
 | Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana operator stack |
 
@@ -103,8 +102,8 @@ flowchart LR
     subgraph HostedTargets ["fab:fa-google Hosted lanes"]
         direction TB
         RUN["Cloud Run API"]:::cloud
-        HOST["Operator lane"]:::cloud
-        MGD["Managed plane"]:::cloud
+        CMP["Cloud Composer"]:::cloud
+        CB["Cloud Build"]:::cloud
     end
 
     CORE --> LocalTarget
@@ -114,14 +113,13 @@ flowchart LR
 | Target | What runs | Main use |
 |------|-----------|----------|
 | Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, StatsD exporter, Grafana, MinIO, Feast emulator, and optional `development_env` | default development and evaluation |
-| Hosted full-stack target | Airflow, MLflow, FastAPI, Prometheus, StatsD exporter, and Grafana on one GCP host | provide the active operator surface while the managed hosted control plane is not yet in place |
 | Hosted inference target | FastAPI only, backed by shared GCP services | primary hosted API surface |
-| Managed hosted direction | Cloud Build for runtime images and Cloud Composer for hosted Airflow workloads | intended steady hosted build and orchestration path |
+| Hosted operator target | Cloud Build for runtime images, Cloud Composer for hosted Airflow workloads, and managed operator services for MLflow and monitoring | hosted build, orchestration, and operator surface |
 | GitHub automation | review, workflow dispatch, and Terraform workflows | shared cloud delivery control plane |
 
-The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. The retained host stays private by default and is treated as a retained operator surface, not as the long-term hosted control plane.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. Cloud Composer owns hosted orchestration. The operator services stay private by default.
 
-See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the active hosted topology, the retained-host contract, and the intended managed direction.
+See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the hosted topology and managed service boundaries.
 
 ## Shared Core Vs Runtime Differences
 
@@ -133,9 +131,9 @@ See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.
 
 Read the left column as the stable design. Read the other columns as deployment choices around that design.
 
-## Hosted Orchestration Direction
+## Hosted Orchestration
 
-The private operator lane runs the hosted Airflow surface used for scheduling, retries, backfills, and runtime release handoff in the active shared environment. The target hosted control plane is Cloud Composer. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the active-versus-target boundary.
+Cloud Composer runs the hosted Airflow surface used for scheduling, retries, backfills, and runtime release handoff. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the delivery boundary.
 
 ## Local Evaluator Architecture
 
@@ -175,7 +173,7 @@ flowchart LR
 
 The Airflow control plane reflects those hand-offs directly. The feature pipeline owns curated-row and Feast-sync publication, then emits a training-request asset. The training pipeline starts from that asset instead of a direct DAG-to-DAG trigger, so the Assets view shows the real dependency graph between feature persistence, Feast serving preparation, model training, evaluation, and registration.
 
-## Active Hosted Runtime Detail
+## Hosted Runtime Detail
 
 <div class="mermaid">
 flowchart LR
@@ -188,15 +186,15 @@ flowchart LR
         APPDATA["BigQuery + Datastore"]:::data
     end
 
-    subgraph Host ["fab:fa-google Ops lane"]
+    subgraph ManagedOps ["fab:fa-google Managed ops"]
         direction TB
-        HOPS["Airflow + MLflow"]:::operator
-        HAPI["FastAPI app"]:::operator
-        HOPS --> HAPI
+        CMP["Cloud Composer"]:::operator
+        MLF["MLflow"]:::operator
+        CMP --> MLF
     end
 
-    OPSDATA --> HOPS
-    APPDATA --> HAPI
+    OPSDATA --> CMP
+    APPDATA --> CMP
 </div>
 
 <div class="mermaid">
