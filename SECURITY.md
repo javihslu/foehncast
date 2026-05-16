@@ -16,3 +16,9 @@ If you discover a security vulnerability, please report it by opening a private 
 
 - Dependencies are pinned via `uv.lock`.
 - Automated vulnerability scanning via GitHub Dependabot.
+
+### Accepted Transitive Risks
+
+| Package | Via | Severity | Status | Rationale |
+|---------|-----|----------|--------|-----------|
+| `diskcache` (pickle deserialization) | `dvc` → `dvc-data` | moderate | no fix available | DVC-internal cache on local filesystem only; not imported by application code; not present in the production container; exploitation requires local filesystem write access to the DVC cache directory |
