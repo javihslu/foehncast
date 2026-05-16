@@ -36,9 +36,9 @@ flowchart TD
     end
 </div>
 
-The split matters because the local path is the supported onboarding path, while the cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
+The local path is the supported onboarding path. The cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
 
-The remote workflow lands on two hosted runtime surfaces: Cloud Run for the public API lane and Cloud Composer for hosted orchestration, scheduling, and recovery. Cloud Build publishes runtime images.
+The remote workflow lands on two hosted runtime surfaces: Cloud Run for the public API lane and Cloud Composer for orchestration, scheduling, and recovery. Cloud Build publishes runtime images.
 
 ## Supported Paths
 
@@ -61,21 +61,21 @@ This path does not require local `gcloud`, Terraform, or GitHub Actions reposito
 
 ## One-Time Shared Cloud Bootstrap
 
-The cloud bootstrap is a maintainer workflow, not a second onboarding path. The preferred first-time environment is Google Cloud Shell. That keeps admin tools off the default evaluator machine and matches the supported no-local-install path.
+The cloud bootstrap is a maintainer workflow, not a second onboarding path. The preferred environment is Google Cloud Shell so admin tools stay off the default evaluator machine.
 
 For the initial shared-cloud setup, run:
 
 `./scripts/bootstrap-gcp.sh --bootstrap-only --configure-github-actions`
 
-The script is interactive by design. It asks the operator to authenticate with `gcloud`, choose or create the target project and billing context, confirm the hosted identifiers and data surfaces, choose which hosted targets to enable, and sync the GitHub repository variables that the remote workflow uses later.
+The script is interactive. It walks the operator through `gcloud` authentication, project and billing selection, hosted-target choices, and GitHub repository-variable sync.
 
-In `--bootstrap-only` mode, the script prepares the remote Terraform control plane, prints the remote-state and identity handoff, and leaves the broader hosted apply to the remote workflow. It also writes `.env` and `terraform/terraform.tfvars` in the working tree so the local checkout reflects the selected project and platform identifiers.
+In `--bootstrap-only` mode the script prepares the remote Terraform backend, prints the handoff summary, and leaves the broader hosted apply to the remote workflow. It writes `.env` and `terraform/terraform.tfvars` so the local checkout reflects the selected project.
 
-When the script runs a normal apply instead of bootstrap-only mode, it verifies both hosted lanes. Cloud Run must answer `/health`, `/spots`, and `/metrics`, and the operator host must keep its app URL private.
+In normal apply mode the script also verifies both hosted lanes: Cloud Run must answer `/health`, `/spots`, and `/metrics`, and the operator host must keep its app URL private.
 
 ## Reviewed Day-2 Delivery
 
-After the one-time bootstrap establishes OIDC, the remote backend, and the repository-variable contract, GitHub Actions becomes the primary operator surface for Terraform-managed changes.
+After the one-time bootstrap establishes OIDC and the remote backend, GitHub Actions becomes the primary surface for Terraform-managed changes.
 
 | Surface | Purpose |
 |------|---------|
@@ -87,11 +87,11 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request to the Composer Airflow API |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
-The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
+The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted-target toggles. Cloud Run settings such as instance count, container port, CPU, and memory are also repo-variable-backed.
 
-GitHub publishes the repo-managed DAG and source bundle into the Composer DAG bucket. Composer gets a reviewed PyPI baseline for the checked-in DAG bundle and can consume reviewed `sm://...` Secret Manager env references through the shared runtime env helper.
+GitHub publishes the repo-managed DAG and source bundle into the Composer DAG bucket. Composer gets a reviewed PyPI baseline for the checked-in DAG bundle and can consume `sm://...` Secret Manager env references through the shared runtime env helper.
 
-Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
+Repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secrets belong in the runtime environment or a managed secret path. Both hosted lanes read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the full inventory.
 
 ## Hosted Orchestration
 
@@ -118,14 +118,12 @@ GitHub Actions may trigger reviewed delivery workflows, but runtime scheduling d
 
 ## Runtime Release Trigger Contract
 
-GitHub now has exactly one reviewed handoff into runtime execution.
+GitHub has exactly one reviewed handoff into runtime execution.
 
 <div class="mermaid">
 flowchart LR
     GHW["fab:fa-github Runtime release workflow"] --> TARGET["reviewed receiver selection"]
-<div class="mermaid">
-flowchart LR
-    GHW["fab:fa-github Runtime release workflow"] --> AUTH["OIDC + access token"]
+    TARGET --> AUTH["OIDC + access token"]
     AUTH --> API["Composer Airflow API"]
     API --> DAG["runtime_release DAG"]
     DAG --> REPORT["runtime-release-latest.json"]
@@ -208,14 +206,14 @@ These boundaries stay explicit across the scripts, Terraform reference, and work
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 
-The same split also keeps cloud retirement reviewable. Destroy and cleanup stay separate workflow commands, and cleanup only runs the follow-up actions the operator selected.
+The same split keeps cloud retirement reviewable. Destroy and cleanup stay separate workflow commands, and cleanup only runs the follow-up actions the operator selected.
 
 ## Why This Workflow Works
 
-- it gives contributors one supported setup path instead of parallel onboarding stories
-- it keeps the one-time cloud bootstrap explicit and interactive, which is safer for project, billing, and hosted-target choices
-- it moves normal day-2 infrastructure changes into GitHub Actions so operators do not need local Terraform for routine work
-- it keeps shared-cloud configuration reviewable because Terraform outputs, repository variables, and workflow behavior are tied together by regression tests
-- it uses managed orchestration through Cloud Composer instead of VM-owned scheduling
+- contributors get one supported setup path instead of parallel onboarding stories
+- the one-time cloud bootstrap is explicit and interactive, which is safer for project, billing, and hosted-target choices
+- day-2 infrastructure changes run through GitHub Actions so operators do not need local Terraform
+- Terraform outputs, repository variables, and workflow behavior are tied together by regression tests
+- managed orchestration through Cloud Composer replaces VM-owned scheduling
 
 See [Interfaces and Surfaces](interfaces-and-surfaces.md), [Hosted Full-Stack](hosted-full-stack.md), [Cloud Mapping](cloud-mapping.md), and [Monitoring](monitoring.md) for the surrounding runtime and exposure boundaries.
