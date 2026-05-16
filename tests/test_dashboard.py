@@ -123,4 +123,4 @@ def test_load_dashboard_data_combines_predictions_rankings_and_metadata(
 
 
 def test_horizon_caption_describes_hour_based_contract() -> None:
-    assert "14 forecast hours" in dashboard.horizon_caption(14)
+    assert "14 hours" in dashboard.horizon_caption(14)

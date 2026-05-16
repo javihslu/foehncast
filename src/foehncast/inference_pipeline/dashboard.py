@@ -109,10 +109,7 @@ def build_ranking_frame(ranked_spots: list[dict[str, Any]]) -> pd.DataFrame:
 def horizon_caption(hours: int) -> str:
     """Describe the currently supported live forecast window."""
     unit = "hour" if hours == 1 else "hours"
-    return (
-        "The live demo follows the current inference contract: "
-        f"{hours} forecast {unit} from the active Open-Meteo pull."
-    )
+    return f"Forecast window: {hours} {unit} from the current Open-Meteo pull."
 
 
 def load_dashboard_data(spot_ids: list[str] | None = None) -> dict[str, Any]:
