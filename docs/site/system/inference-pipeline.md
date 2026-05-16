@@ -1,14 +1,14 @@
 # Inference Pipeline
 
-FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs locally, on Cloud Run, and on the private operator lane. Cloud Run is the shared public API. The operator-lane app stays private and supports internal checks on the hosted operator surface.
+FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs locally, on Cloud Run, and on the private operator lane. Cloud Run is the shared public API. The operator-lane app stays private for internal checks.
 
 This page describes what the running app owns and what stays optional or operator-controlled.
 
 !!! note "Scope"
 
     This page describes the validated inference-path contract.
-    It does not redefine the hosted build or orchestration plan.
-    The serving contract stays stable even as the surrounding hosted control plane moves toward Cloud Build and Cloud Composer.
+    It does not redefine orchestration or the hosted build.
+    The serving contract stays stable regardless of hosted control-plane changes.
 
 ## Inference Shape
 
@@ -56,13 +56,13 @@ flowchart LR
     OUT --> MON
 </div>
 
-The important boundary is that inference stays request-focused:
+Inference stays request-focused:
 
 - the app resolves configured spots and fetches fresh forecast data on demand
 - the serving model is loaded from the registry alias that represents the live contract
 - prediction and ranking reuse the same forecast payload instead of forking into separate pipelines
 - the Feast lookup path stays optional and does not gate the main prediction surface
-- monitoring is triggered from the request path, but the operator metrics surface stays separate
+- monitoring is triggered from the request path but the operator metrics surface stays separate
 
 ## Endpoint Responsibilities
 
@@ -152,18 +152,22 @@ The monitoring hand-off is:
 
 This keeps the inference service responsible for request-side facts while leaving dashboards, alert rules, and long-range operator review to the monitoring stack.
 
-## Serving Targets
+## Runtime Role
 
-The same FastAPI app runs in the local evaluator, on Cloud Run, and on the private operator host. Cloud Run owns the shared public API. The operator host keeps the app available only for private checks next to the other hosted operator services.
+| Runtime mode | Inference role |
+|------|---------------------|
+| Local evaluator | FastAPI app serves predictions from locally-registered MLflow model |
+| Cloud Run | shared public API with the same serving contract |
+| Private operator host | internal checks next to other hosted operator services |
 
 See [Architecture](architecture.md) for the lane summary and [Hosted Full-Stack](hosted-full-stack.md) for the hosted exposure and transition rules.
 
 ## Why This Structure Works
 
-- it keeps live requests narrow enough to verify through simple route and dashboard tests
-- it reuses the shared feature contract instead of inventing a serving-only schema
-- it ties responses back to a concrete registry version without giving the app promotion authority
-- it lets one FastAPI contract run locally, on Cloud Run, and on the hosted operator surface without changing the serving contract
-- it keeps the Feast lookup path useful for integration checks while leaving prediction and ranking available from the core app alone
+- live requests stay narrow enough to verify through simple route and dashboard tests
+- the shared feature contract is reused instead of inventing a serving-only schema
+- responses tie back to a concrete registry version without giving the app promotion authority
+- one FastAPI contract runs locally, on Cloud Run, and on the operator surface without contract changes
+- the Feast lookup path is useful for integration checks while prediction and ranking work from the core app alone
 
 See [Architecture](architecture.md), [Training Pipeline](training-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding system boundaries.
