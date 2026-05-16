@@ -20,15 +20,12 @@ def reset_config_cache(monkeypatch: pytest.MonkeyPatch) -> None:
         "STORAGE_BACKEND",
         "STORAGE_S3_BUCKET",
         "STORAGE_S3_ENDPOINT",
-        "OBJECTSTORE_BUCKET",
         "STORAGE_BIGQUERY_PROJECT_ID",
         "STORAGE_BIGQUERY_DATASET",
         "STORAGE_BIGQUERY_TABLE",
         "GCP_PROJECT_ID",
         "GOOGLE_CLOUD_PROJECT",
         "MLFLOW_TRACKING_URI",
-        "OBJECTSTORE_ENDPOINT",
-        "FSSPEC_S3_ENDPOINT_URL",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -50,7 +47,7 @@ def _write_config(path: Path) -> None:
     )
 
 
-def _write_legacy_runtime_config(path: Path) -> None:
+def _write_obsolete_runtime_config(path: Path) -> None:
     path.write_text(
         yaml.safe_dump(
             {
@@ -127,36 +124,22 @@ def test_runtime_resolution_does_not_mutate_cached_yaml_values(
     assert config.get_mlflow_tracking_uri() == "http://localhost:5001"
 
 
-def test_objectstore_bucket_overrides_s3_bucket(
+def test_obsolete_yaml_runtime_fields_are_ignored_without_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config_path = tmp_path / "config.yaml"
-    _write_config(config_path)
-
-    config.load_config(config_path)
-    monkeypatch.setenv("OBJECTSTORE_BUCKET", "compatibility-bucket")
-
-    storage_config = config.get_storage_config()
-
-    assert storage_config["s3_bucket"] == "compatibility-bucket"
-
-
-def test_legacy_runtime_fields_still_resolve_without_env(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    config_path = tmp_path / "config.yaml"
-    _write_legacy_runtime_config(config_path)
+    _write_obsolete_runtime_config(config_path)
 
     config.load_config(config_path)
 
     storage_config = config.get_storage_config()
 
-    assert storage_config["s3_bucket"] == "legacy-bucket"
-    assert storage_config["s3_endpoint"] == "http://legacy-objectstore:9000"
-    assert storage_config["bigquery_project_id"] == "yaml-project"
-    assert storage_config["bigquery_dataset"] == "yaml_dataset"
-    assert storage_config["bigquery_table"] == "yaml_table"
-    assert config.get_mlflow_tracking_uri() == "http://legacy-mlflow:5001"
+    assert storage_config["s3_bucket"] == "foehncast-data"
+    assert "s3_endpoint" not in storage_config
+    assert "bigquery_project_id" not in storage_config
+    assert storage_config["bigquery_dataset"] == "foehncast"
+    assert storage_config["bigquery_table"] == "forecast_features"
+    assert config.get_mlflow_tracking_uri() == "http://localhost:5001"
 
 
 def test_storage_config_exposes_default_warehouse_contracts(tmp_path: Path) -> None:
@@ -193,11 +176,11 @@ def test_storage_config_resolves_custom_warehouse_contracts_from_yaml(
             {
                 "storage": {
                     "backend": "bigquery",
-                    "bigquery_dataset": "curated_features",
-                    "bigquery_table": "feature_rows",
                 },
                 "warehouse": {
                     "curated_features": {
+                        "dataset": "curated_features",
+                        "table": "feature_rows",
                         "partition_granularity": "day",
                         "cluster_fields": ["spot_id", "dataset_name"],
                         "retention_days": 365,

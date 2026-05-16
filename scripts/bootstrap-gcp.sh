@@ -635,7 +635,7 @@ tfvars_value_or_default() {
     ensure_billing_linked "$current_project"
 
     current_region="$(prompt_with_default "GCP region" "$current_region")"
-    artifact_bucket="${GCP_BUCKET_NAME:-$(read_tfvars_value_from_file "$TFVARS_FILE" artifact_bucket_name)}"
+    artifact_bucket="${GCP_ARTIFACT_BUCKET_NAME:-$(read_tfvars_value_from_file "$TFVARS_FILE" artifact_bucket_name)}"
     if [[ -z "$artifact_bucket" || "$artifact_bucket" == "foehncast-data" || "$artifact_bucket" == "foehncast-artifacts-your-gcp-project" ]]; then
       artifact_bucket="$(foehncast_default_artifact_bucket_name "$current_project")"
     fi

@@ -1,10 +1,12 @@
-.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare
+.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
 JUPYTER_TOKEN ?= foehncast-local
 TF_REMOTE_ARGS ?= plan
 SMOKE_BOOTSTRAP_ARGS ?=
+NOTEBOOK_REVIEW_BACKEND ?= s3
+NOTEBOOK_REVIEW_DIR ?=
 LOCAL_ONLY_COMPOSE := COMPOSE_PROFILES=local-only docker compose
 
 help:  ## Show this help
@@ -86,3 +88,6 @@ notebook-stop:  ## Stop the container-backed notebook server by restarting devel
 
 feast-prepare:  ## Export stored features and apply the local Feast repo for DATASET=$(DATASET)
 	cd $(ROOT_DIR) && ./scripts/prepare-feast-local.sh $(DATASET)
+
+notebook-review-compare:  ## Compare backend-tagged notebook review summaries for NOTEBOOK_REVIEW_BACKEND=$(NOTEBOOK_REVIEW_BACKEND)
+	cd $(ROOT_DIR) && uv run python -m foehncast.feature_pipeline.notebook_review compare --backend $(NOTEBOOK_REVIEW_BACKEND) $(if $(NOTEBOOK_REVIEW_DIR),--review-dir $(NOTEBOOK_REVIEW_DIR),)

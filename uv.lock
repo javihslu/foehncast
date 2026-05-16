@@ -1049,6 +1049,7 @@ dependencies = [
     { name = "evidently" },
     { name = "fastapi" },
     { name = "google-cloud-bigquery" },
+    { name = "google-cloud-secret-manager" },
     { name = "google-cloud-storage" },
     { name = "matplotlib" },
     { name = "mlflow" },
@@ -1086,6 +1087,7 @@ requires-dist = [
     { name = "evidently", specifier = ">=0.7.21" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "google-cloud-bigquery", specifier = ">=3.30.0" },
+    { name = "google-cloud-secret-manager", specifier = ">=2.23.0" },
     { name = "google-cloud-storage", specifier = ">=2.19.0" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mlflow", specifier = ">=3.0" },
@@ -1436,6 +1438,23 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8f/69/1389655f6949d0da0c1c5a359e64aece0a199ba177b33b7a070aa86bf672/google_cloud_datastore-2.24.0.tar.gz", hash = "sha256:f087c02a6aa4ac68bbf17f0c048ae3ee355856bf09c51439bfba193741387792", size = 266157, upload-time = "2026-03-30T22:49:52.688Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5b/88/357efc6b331fd29155dcb92a5dfb0030a8a6feddb7bbf8a6215defbed6c7/google_cloud_datastore-2.24.0-py3-none-any.whl", hash = "sha256:81f1d1c12c2906f59507f72742545ab04c38f62ed70b0542057e3cf04a53aa65", size = 207690, upload-time = "2026-03-30T22:47:49.48Z" },
+]
+
+[[package]]
+name = "google-cloud-secret-manager"
+version = "2.28.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpc-google-iam-v1" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/a3/c0d4535d841b65421a043e32b3a4acc66431da8e0f99534204112322ec04/google_cloud_secret_manager-2.28.0.tar.gz", hash = "sha256:5763f42a449c27597fb42d40fa93e2c56b02dbceba0c41da202fb97e810cb278", size = 279947, upload-time = "2026-05-07T08:04:34.515Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/ee/b69997ea7dfa1e23b6d6e872022727e16d1286ccce6c8ae526b0fe5f0ca5/google_cloud_secret_manager-2.28.0-py3-none-any.whl", hash = "sha256:15bcb9d7d3442d842ebac94e2d6e428a11d79cf1aeb91a005a0576f257643317", size = 225578, upload-time = "2026-05-07T08:03:11.54Z" },
 ]
 
 [[package]]

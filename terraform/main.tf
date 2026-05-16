@@ -9,6 +9,8 @@ locals {
   feast_registry_uri                = "gs://${var.artifact_bucket_name}/feast/registry.db"
   feast_staging_uri                 = "gs://${var.artifact_bucket_name}/feast/staging"
   feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
+  prediction_event_dataset_id       = "foehncast_monitoring"
+  prediction_event_table_id         = "prediction_events"
   cloud_run_env_vars = merge(
     {
       GCP_PROJECT_ID                       = var.project_id
@@ -29,6 +31,7 @@ locals {
       FOEHNCAST_FEAST_BIGQUERY_LOCATION    = var.bigquery_location
       FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
       FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
+      FOEHNCAST_PIPELINE_REPORT_DIR        = "gs://${var.artifact_bucket_name}/airflow/reports"
     },
     var.cloud_run_env_vars,
   )
@@ -44,7 +47,6 @@ locals {
       AIRFLOW__API_AUTH__JWT_SECRET                 = random_password.airflow_api_auth_jwt_secret.result
       GCP_PROJECT_ID                                = var.project_id
       GCP_LOCATION                                  = var.region
-      GCP_BUCKET_NAME                               = var.artifact_bucket_name
       MLFLOW_ARTIFACT_DESTINATION                   = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
       STORAGE_BACKEND                               = "bigquery"
       STORAGE_BIGQUERY_PROJECT_ID                   = var.project_id
@@ -60,17 +62,33 @@ locals {
       FOEHNCAST_FEAST_BIGQUERY_LOCATION             = var.bigquery_location
       FOEHNCAST_FEAST_BIGQUERY_TABLE                = local.feast_bigquery_table
       FOEHNCAST_FEAST_DATASTORE_DATABASE            = var.feast_online_store_database_name
+      FOEHNCAST_PIPELINE_REPORT_DIR                 = "gs://${var.artifact_bucket_name}/airflow/reports"
       FOEHNCAST_APP_IMAGE                           = local.online_compose_app_image
       FOEHNCAST_AIRFLOW_IMAGE                       = local.online_compose_airflow_image
       FOEHNCAST_MLFLOW_IMAGE                        = local.online_compose_mlflow_image
     },
     var.online_compose_env_vars,
   )
+  cloud_composer_secret_resource_paths = {
+    for env_name, secret_id in var.cloud_composer_secret_env_vars :
+    env_name => (
+      can(regex("^projects/[^/]+/secrets/[^/]+(?:/versions/[^/]+)?$", trimspace(secret_id)))
+      ? trimspace(secret_id)
+      : "projects/${var.project_id}/secrets/${trimspace(secret_id)}"
+    )
+  }
+  cloud_composer_secret_iam_ids = {
+    for env_name, secret_id in local.cloud_composer_secret_resource_paths :
+    env_name => regexreplace(secret_id, "/versions/[^/]+$", "")
+  }
+  cloud_composer_secret_env_var_refs = {
+    for env_name, secret_id in local.cloud_composer_secret_resource_paths :
+    env_name => "sm://${secret_id}"
+  }
   cloud_composer_env_vars = merge(
     {
       GCP_PROJECT_ID                        = var.project_id
       GCP_LOCATION                          = var.region
-      GCP_BUCKET_NAME                       = var.artifact_bucket_name
       GOOGLE_CLOUD_PROJECT                  = var.project_id
       MLFLOW_ARTIFACT_DESTINATION           = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
       MLFLOW_TRACKING_URI                   = var.mlflow_tracking_uri
@@ -88,23 +106,26 @@ locals {
       FOEHNCAST_FEAST_BIGQUERY_LOCATION     = var.bigquery_location
       FOEHNCAST_FEAST_BIGQUERY_TABLE        = local.feast_bigquery_table
       FOEHNCAST_FEAST_DATASTORE_DATABASE    = var.feast_online_store_database_name
+      FOEHNCAST_PIPELINE_REPORT_DIR         = "gs://${var.artifact_bucket_name}/airflow/reports"
       FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH = "gs://${var.artifact_bucket_name}/airflow/reports/runtime-release-latest.json"
     },
     var.cloud_composer_env_vars,
+    local.cloud_composer_secret_env_var_refs,
   )
   cloud_composer_pypi_packages = merge(
     {
-      evidently             = ">=0.7.21"
-      feast                 = "[gcp]>=0.63.0"
-      google-cloud-bigquery = ">=3.30.0"
-      google-cloud-storage  = ">=2.19.0"
-      matplotlib            = ">=3.8"
-      mlflow                = ">=3.0"
-      pandas                = ">=2.0"
-      pyarrow               = ">=14.0"
-      pyyaml                = ">=6.0"
-      requests              = ">=2.31"
-      scikit-learn          = ">=1.5"
+      evidently                   = ">=0.7.21"
+      feast                       = "[gcp]>=0.63.0"
+      google-cloud-bigquery       = ">=3.30.0"
+      google-cloud-secret-manager = ">=2.23.0"
+      google-cloud-storage        = ">=2.19.0"
+      matplotlib                  = ">=3.8"
+      mlflow                      = ">=3.0"
+      pandas                      = ">=2.0"
+      pyarrow                     = ">=14.0"
+      pyyaml                      = ">=6.0"
+      requests                    = ">=2.31"
+      scikit-learn                = ">=1.5"
     },
     var.cloud_composer_pypi_packages,
   )
@@ -274,6 +295,57 @@ locals {
     },
   ]
 
+  prediction_event_schema = [
+    {
+      name        = "prediction_timestamp"
+      type        = "TIMESTAMP"
+      mode        = "REQUIRED"
+      description = "Timestamp when the prediction payload was recorded."
+    },
+    {
+      name        = "forecast_time"
+      type        = "TIMESTAMP"
+      mode        = "NULLABLE"
+      description = "Forecast timestamp associated with the predicted quality row."
+    },
+    {
+      name        = "quality_index"
+      type        = "FLOAT"
+      mode        = "REQUIRED"
+      description = "Predicted quality index for one forecast row."
+    },
+    {
+      name        = "endpoint"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Serving endpoint that produced the prediction payload."
+    },
+    {
+      name        = "model_version"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Resolved model version used for the prediction."
+    },
+    {
+      name        = "spot_id"
+      type        = "STRING"
+      mode        = "REQUIRED"
+      description = "Stable spot identifier from config.yaml."
+    },
+    {
+      name        = "spot_name"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "Human-readable spot name at prediction time."
+    },
+    {
+      name        = "requested_spot_ids"
+      type        = "STRING"
+      mode        = "NULLABLE"
+      description = "JSON-encoded requested spot ids from the inference request."
+    },
+  ]
+
   required_services = toset([
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
@@ -285,6 +357,7 @@ locals {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "run.googleapis.com",
+    "secretmanager.googleapis.com",
     "sqladmin.googleapis.com",
     "sts.googleapis.com",
   ])
@@ -360,6 +433,29 @@ resource "google_bigquery_table" "forecast_features" {
   time_partitioning {
     type  = "DAY"
     field = "forecast_time"
+  }
+}
+
+resource "google_bigquery_dataset" "monitoring_store" {
+  dataset_id                 = local.prediction_event_dataset_id
+  location                   = var.bigquery_location
+  description                = "FoehnCast retained inference monitoring facts"
+  delete_contents_on_destroy = false
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_bigquery_table" "prediction_events" {
+  dataset_id          = google_bigquery_dataset.monitoring_store.dataset_id
+  table_id            = local.prediction_event_table_id
+  description         = "Retained prediction-event history for hosted inference monitoring"
+  deletion_protection = false
+  schema              = jsonencode(local.prediction_event_schema)
+  clustering          = ["model_version", "endpoint", "spot_id"]
+
+  time_partitioning {
+    type  = "DAY"
+    field = "prediction_timestamp"
   }
 }
 
@@ -492,6 +588,12 @@ resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
   member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_bigquery_dataset_iam_member" "cloud_run_monitoring_bigquery_editor" {
+  dataset_id = google_bigquery_dataset.monitoring_store.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_project_iam_member" "online_compose_bigquery_job_user" {
   count = var.provision_online_compose_host ? 1 : 0
 
@@ -545,6 +647,14 @@ resource "google_bigquery_dataset_iam_member" "online_compose_bigquery_editor" {
   count = var.provision_online_compose_host ? 1 : 0
 
   dataset_id = google_bigquery_dataset.feature_store.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
+}
+
+resource "google_bigquery_dataset_iam_member" "online_compose_monitoring_bigquery_editor" {
+  count = var.provision_online_compose_host ? 1 : 0
+
+  dataset_id = google_bigquery_dataset.monitoring_store.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
@@ -624,6 +734,14 @@ resource "google_bigquery_dataset_iam_member" "cloud_composer_bigquery_editor" {
   member     = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "cloud_composer_secret_accessor" {
+  for_each = var.provision_cloud_composer_environment ? local.cloud_composer_secret_iam_ids : {}
+
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
+}
+
 resource "google_cloud_run_v2_service" "app" {
   count               = var.provision_cloud_run_service ? 1 : 0
   name                = var.cloud_run_service_name
@@ -679,6 +797,7 @@ resource "google_cloud_run_v2_service" "app" {
     google_project_iam_member.cloud_run_bigquery_read_session_user,
     google_project_iam_member.cloud_run_datastore_user,
     google_bigquery_dataset_iam_member.cloud_run_bigquery_reader,
+    google_bigquery_dataset_iam_member.cloud_run_monitoring_bigquery_editor,
   ]
 }
 
@@ -789,6 +908,7 @@ resource "google_compute_instance" "online_compose" {
     google_storage_bucket_iam_member.online_compose_bucket_admin,
     google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,
     google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
+    google_bigquery_dataset_iam_member.online_compose_monitoring_bigquery_editor,
   ]
 }
 
@@ -833,6 +953,7 @@ resource "google_composer_environment" "cloud_composer" {
     google_storage_bucket_iam_member.cloud_composer_bucket_admin,
     google_storage_bucket_iam_member.cloud_composer_bucket_metadata_reader,
     google_bigquery_dataset_iam_member.cloud_composer_bigquery_editor,
+    google_secret_manager_secret_iam_member.cloud_composer_secret_accessor,
   ]
 }
 

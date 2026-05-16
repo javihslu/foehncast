@@ -56,7 +56,7 @@ def test_render_runtime_config_uses_bigquery_bindings(
     monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
     monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
     monkeypatch.setenv("GCP_PROJECT_ID", "demo-project")
-    monkeypatch.setenv("GCP_BUCKET_NAME", "demo-bucket")
+    monkeypatch.setenv("FOEHNCAST_FEAST_GCS_BUCKET", "demo-bucket")
     monkeypatch.setenv("FOEHNCAST_FEAST_BIGQUERY_DATASET", "feast_runtime")
     monkeypatch.setenv("FOEHNCAST_FEAST_BIGQUERY_LOCATION", "EU")
 
@@ -92,7 +92,7 @@ def test_render_runtime_config_uses_hosted_contract_defaults(
     monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
     monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
     monkeypatch.setenv("GCP_PROJECT_ID", "demo-project")
-    monkeypatch.setenv("GCP_BUCKET_NAME", "demo-bucket")
+    monkeypatch.setenv("FOEHNCAST_FEAST_GCS_BUCKET", "demo-bucket")
     monkeypatch.delenv("FOEHNCAST_FEAST_BIGQUERY_DATASET", raising=False)
     monkeypatch.delenv("FOEHNCAST_FEAST_BIGQUERY_LOCATION", raising=False)
     monkeypatch.delenv("FOEHNCAST_FEAST_DATASTORE_DATABASE", raising=False)
@@ -124,7 +124,7 @@ def test_render_runtime_config_allows_datastore_overrides(
     monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
     monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
     monkeypatch.setenv("GCP_PROJECT_ID", "demo-project")
-    monkeypatch.setenv("GCP_BUCKET_NAME", "demo-bucket")
+    monkeypatch.setenv("FOEHNCAST_FEAST_GCS_BUCKET", "demo-bucket")
     monkeypatch.setenv("FOEHNCAST_FEAST_DATASTORE_DATABASE", "custom-feast-db")
     monkeypatch.setenv("FOEHNCAST_FEAST_DATASTORE_NAMESPACE", "serving")
 

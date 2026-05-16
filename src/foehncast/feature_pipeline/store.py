@@ -32,10 +32,6 @@ class FeatureStoreBackend(ABC):
     def read_features(self, spot_id: str, dataset: str) -> pd.DataFrame:
         raise NotImplementedError
 
-    @abstractmethod
-    def list_datasets(self) -> list[str]:
-        raise NotImplementedError
-
 
 class S3FeatureStoreBackend(FeatureStoreBackend):
     def write_features(self, df: pd.DataFrame, spot_id: str, dataset: str) -> None:
@@ -50,21 +46,6 @@ class S3FeatureStoreBackend(FeatureStoreBackend):
             _s3_feature_path(self.storage_config, spot_id, dataset),
             storage_options=_s3_storage_options(self.storage_config),
         )
-
-    def list_datasets(self) -> list[str]:
-        filesystem = _s3_filesystem(self.storage_config)
-        root = _s3_bucket(self.storage_config)
-        if not filesystem.exists(root):
-            return []
-
-        datasets = []
-        for entry in filesystem.ls(root, detail=True):
-            if entry["type"] != "directory":
-                continue
-            name = entry["name"].removeprefix(f"{root}/")
-            if name:
-                datasets.append(name)
-        return sorted(datasets)
 
 
 class BigQueryFeatureStoreBackend(FeatureStoreBackend):
@@ -83,9 +64,6 @@ class BigQueryFeatureStoreBackend(FeatureStoreBackend):
             dataset=dataset,
         )
 
-    def list_datasets(self) -> list[str]:
-        return _list_datasets_bigquery(self.storage_config)
-
 
 def _storage_backend(storage_config: dict[str, Any]) -> str:
     backend = storage_config["backend"]
@@ -102,15 +80,14 @@ def _s3_bucket(storage_config: dict[str, Any]) -> str:
 
 
 def _objectstore_credentials() -> tuple[str | None, str | None]:
-    access_key = env_value("OBJECTSTORE_ACCESS_KEY", "FSSPEC_S3_KEY")
-    secret_key = env_value("OBJECTSTORE_SECRET_KEY", "FSSPEC_S3_SECRET")
+    access_key = env_value("AWS_ACCESS_KEY_ID")
+    secret_key = env_value("AWS_SECRET_ACCESS_KEY")
     return access_key, secret_key
 
 
 def _s3_endpoint(storage_config: dict[str, Any]) -> str | None:
-    return env_value(
-        "OBJECTSTORE_ENDPOINT", "FSSPEC_S3_ENDPOINT_URL"
-    ) or storage_config.get("s3_endpoint")
+    endpoint = str(storage_config.get("s3_endpoint", "")).strip()
+    return endpoint or None
 
 
 def _s3_storage_options(storage_config: dict[str, Any]) -> dict[str, Any]:
@@ -393,20 +370,6 @@ def _read_features_bigquery(
     return result
 
 
-def _list_datasets_bigquery(storage_config: dict[str, Any]) -> list[str]:
-    if _bigquery_not_found(storage_config):
-        return []
-
-    client = _bigquery_client(storage_config)
-    query = f"""
-    SELECT DISTINCT dataset_name
-    FROM `{_bigquery_table_id(storage_config)}`
-    ORDER BY dataset_name
-    """
-    rows = client.query(query).result()
-    return [row[_BQ_DATASET_COLUMN] for row in rows]
-
-
 def _ensure_s3_bucket(storage_config: dict[str, Any]) -> None:
     filesystem = _s3_filesystem(storage_config)
     bucket = _s3_bucket(storage_config)
@@ -436,8 +399,3 @@ def read_features(spot_id: str, dataset: str) -> pd.DataFrame:
     return _feature_store(get_storage_config()).read_features(
         spot_id=spot_id, dataset=dataset
     )
-
-
-def list_datasets() -> list[str]:
-    """List available datasets in the configured feature store."""
-    return _feature_store(get_storage_config()).list_datasets()

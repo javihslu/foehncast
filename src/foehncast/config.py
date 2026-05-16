@@ -137,32 +137,18 @@ def get_storage_config() -> dict[str, Any]:
         or str(storage.get("backend", "")).strip()
         or _DEFAULT_STORAGE_BACKEND
     )
-    storage["s3_bucket"] = (
-        env_value("STORAGE_S3_BUCKET", "OBJECTSTORE_BUCKET")
-        or str(storage.get("s3_bucket", "")).strip()
-        or _DEFAULT_STORAGE_S3_BUCKET
-    )
+    storage["s3_bucket"] = env_value("STORAGE_S3_BUCKET") or _DEFAULT_STORAGE_S3_BUCKET
 
-    s3_endpoint = (
-        env_value(
-            "STORAGE_S3_ENDPOINT",
-            "OBJECTSTORE_ENDPOINT",
-            "FSSPEC_S3_ENDPOINT_URL",
-        )
-        or str(storage.get("s3_endpoint", "")).strip()
-    )
+    s3_endpoint = env_value("STORAGE_S3_ENDPOINT")
     if s3_endpoint:
         storage["s3_endpoint"] = s3_endpoint
     else:
         storage.pop("s3_endpoint", None)
 
-    bigquery_project_id = (
-        env_value(
-            "STORAGE_BIGQUERY_PROJECT_ID",
-            "GCP_PROJECT_ID",
-            "GOOGLE_CLOUD_PROJECT",
-        )
-        or str(storage.get("bigquery_project_id", "")).strip()
+    bigquery_project_id = env_value(
+        "STORAGE_BIGQUERY_PROJECT_ID",
+        "GCP_PROJECT_ID",
+        "GOOGLE_CLOUD_PROJECT",
     )
     if bigquery_project_id:
         storage["bigquery_project_id"] = bigquery_project_id
@@ -170,14 +156,10 @@ def get_storage_config() -> dict[str, Any]:
         storage.pop("bigquery_project_id", None)
 
     storage["bigquery_dataset"] = (
-        env_value("STORAGE_BIGQUERY_DATASET")
-        or str(storage.get("bigquery_dataset", "")).strip()
-        or _DEFAULT_BIGQUERY_DATASET
+        env_value("STORAGE_BIGQUERY_DATASET") or _DEFAULT_BIGQUERY_DATASET
     )
     storage["bigquery_table"] = (
-        env_value("STORAGE_BIGQUERY_TABLE")
-        or str(storage.get("bigquery_table", "")).strip()
-        or _DEFAULT_BIGQUERY_TABLE
+        env_value("STORAGE_BIGQUERY_TABLE") or _DEFAULT_BIGQUERY_TABLE
     )
 
     storage["warehouse_contracts"] = {
@@ -214,11 +196,7 @@ def get_mlflow_config() -> dict[str, Any]:
 
 def get_mlflow_tracking_uri() -> str:
     """Return the resolved MLflow tracking URI."""
-    return (
-        env_value("MLFLOW_TRACKING_URI")
-        or str(get_mlflow_config().get("tracking_uri", "")).strip()
-        or _DEFAULT_MLFLOW_TRACKING_URI
-    )
+    return env_value("MLFLOW_TRACKING_URI") or _DEFAULT_MLFLOW_TRACKING_URI
 
 
 def get_inference_config() -> dict[str, Any]:

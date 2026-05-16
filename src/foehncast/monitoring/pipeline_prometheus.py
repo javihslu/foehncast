@@ -116,6 +116,30 @@ def build_feature_pipeline_prometheus_registry(
         labelnames=("dataset", "storage_backend"),
         registry=registry,
     )
+    drifted_spots = Gauge(
+        "foehncast_feature_pipeline_drifted_spot_count",
+        "Drifted spot count for the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    dataset_drift_detected = Gauge(
+        "foehncast_feature_pipeline_dataset_drift_detected",
+        "Whether data drift was detected in the latest feature-pipeline summary.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    feature_persistence_ready = Gauge(
+        "foehncast_feature_pipeline_feature_persistence_ready",
+        "Whether the feature pipeline completed at the persistence boundary.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    training_handoff_ready = Gauge(
+        "foehncast_feature_pipeline_training_handoff_ready",
+        "Whether the latest feature-pipeline summary is ready to hand off to training.",
+        labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
     skipped_spots = Gauge(
         "foehncast_feature_pipeline_skipped_spot_count",
         "Skipped spot count for the latest feature-pipeline summary.",
@@ -188,6 +212,9 @@ def build_feature_pipeline_prometheus_registry(
         dataset = str(summary.get("dataset", "unknown"))
         storage_backend = str(summary.get("storage_backend", "unknown"))
         run_labels = (dataset, storage_backend)
+        drifted_spot_count = int(
+            summary.get("drifted_spot_count", len(summary.get("drifted_spots", [])))
+        )
 
         run_success.labels(*run_labels).set(
             float(summary.get("run_status") == "succeeded")
@@ -222,6 +249,28 @@ def build_feature_pipeline_prometheus_registry(
                 _stage_state_value(stage, summary)
             )
         stored_spots.labels(*run_labels).set(float(summary.get("stored_spot_count", 0)))
+        drifted_spots.labels(*run_labels).set(float(drifted_spot_count))
+        dataset_drift_detected.labels(*run_labels).set(
+            float(summary.get("dataset_drift_detected", drifted_spot_count > 0))
+        )
+        feature_persistence_ready.labels(*run_labels).set(
+            float(
+                summary.get(
+                    "feature_persistence_ready",
+                    summary.get("run_status") == "succeeded"
+                    and int(summary.get("stored_spot_count", 0)) > 0,
+                )
+            )
+        )
+        training_handoff_ready.labels(*run_labels).set(
+            float(
+                summary.get(
+                    "training_handoff_ready",
+                    str(summary.get("training_handoff_state", "")).strip().lower()
+                    == "ready",
+                )
+            )
+        )
         skipped_spots.labels(*run_labels).set(
             float(summary.get("skipped_spot_count", 0))
         )

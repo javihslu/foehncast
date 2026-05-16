@@ -13,11 +13,12 @@ on:
           - promote_candidate
           - rollback_live
       airflow_target:
-        description: Reviewed Airflow receiver for the runtime release handoff
+        description: Reviewed Airflow receiver selection for the runtime release handoff
         required: true
-        default: retained_host
+        default: auto
         type: choice
         options:
+          - auto
           - retained_host
           - composer_airflow
       image_uri:
@@ -69,6 +70,7 @@ jobs:
       online_compose_host_name: ${{ steps.repo_config.outputs.online_compose_host_name }}
       online_compose_host_zone: ${{ steps.repo_config.outputs.online_compose_host_zone }}
       cloud_composer_airflow_uri: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
+      requested_airflow_target: ${{ steps.derived.outputs.requested_airflow_target }}
       airflow_target: ${{ steps.derived.outputs.airflow_target }}
       action: ${{ steps.derived.outputs.action }}
       image_uri: ${{ steps.derived.outputs.image_uri }}
@@ -116,6 +118,7 @@ jobs:
           PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
           ARTIFACT_BUCKET_NAME: ${{ steps.repo_config.outputs.artifact_bucket_name }}
           PROVISION_CLOUD_COMPOSER_ENVIRONMENT: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
+          CLOUD_COMPOSER_AIRFLOW_ACCESS_READY: ${{ steps.repo_config.outputs.cloud_composer_airflow_access_ready }}
           CLOUD_COMPOSER_AIRFLOW_URI: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
           PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
           ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
@@ -126,7 +129,8 @@ jobs:
           set -euo pipefail
 
           action="$(printf '%s' "${ACTION_INPUT:-deploy_candidate}" | tr '[:upper:]' '[:lower:]')"
-          airflow_target="$(printf '%s' "${AIRFLOW_TARGET_INPUT:-retained_host}" | tr '[:upper:]' '[:lower:]')"
+          requested_airflow_target="$(printf '%s' "${AIRFLOW_TARGET_INPUT:-auto}" | tr '[:upper:]' '[:lower:]')"
+          airflow_target="$requested_airflow_target"
 
           case "$action" in
             deploy_candidate|promote_candidate|rollback_live)
@@ -137,11 +141,11 @@ jobs:
               ;;
           esac
 
-          case "$airflow_target" in
-            retained_host|composer_airflow)
+          case "$requested_airflow_target" in
+            auto|retained_host|composer_airflow)
               ;;
             *)
-              echo "Unsupported airflow target '$airflow_target'." >&2
+              echo "Unsupported airflow target '$requested_airflow_target'." >&2
               exit 1
               ;;
           esac
@@ -175,22 +179,51 @@ jobs:
             rollback_revision_tag='rollback'
           fi
 
+          composer_access_ready="$(printf '%s' "${CLOUD_COMPOSER_AIRFLOW_ACCESS_READY:-false}" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$composer_access_ready" != 'true' ]]; then
+            composer_access_ready='false'
+          fi
+
           trigger_ready=false
+          composer_trigger_ready=false
+          retained_host_trigger_ready=false
           if [[ -n "$PROJECT_ID" \
             && -n "$WORKLOAD_IDENTITY_PROVIDER" \
             && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
+            if [[ "$PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == 'true' \
+              && -n "$CLOUD_COMPOSER_AIRFLOW_URI" \
+              && -n "$ARTIFACT_BUCKET_NAME" \
+              && "$composer_access_ready" == 'true' ]]; then
+              composer_trigger_ready=true
+            fi
+
+            if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
+              && -n "$ONLINE_COMPOSE_HOST_NAME" \
+              && -n "$ONLINE_COMPOSE_HOST_ZONE" ]]; then
+              retained_host_trigger_ready=true
+            fi
+
+            case "$requested_airflow_target" in
+              auto)
+                if [[ "$composer_trigger_ready" == 'true' ]]; then
+                  airflow_target='composer_airflow'
+                else
+                  airflow_target='retained_host'
+                fi
+                ;;
+              retained_host|composer_airflow)
+                airflow_target="$requested_airflow_target"
+                ;;
+            esac
+
             case "$airflow_target" in
               retained_host)
-                if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
-                  && -n "$ONLINE_COMPOSE_HOST_NAME" \
-                  && -n "$ONLINE_COMPOSE_HOST_ZONE" ]]; then
+                if [[ "$retained_host_trigger_ready" == 'true' ]]; then
                   trigger_ready=true
                 fi
                 ;;
               composer_airflow)
-                if [[ "$PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == 'true' \
-                  && -n "$CLOUD_COMPOSER_AIRFLOW_URI" \
-                  && -n "$ARTIFACT_BUCKET_NAME" ]]; then
+                if [[ "$composer_trigger_ready" == 'true' ]]; then
                   trigger_ready=true
                 fi
                 ;;
@@ -212,6 +245,7 @@ jobs:
 
           {
             echo "action=$action"
+            echo "requested_airflow_target=$requested_airflow_target"
             echo "airflow_target=$airflow_target"
             echo "image_uri=$image_uri"
             echo "candidate_revision_tag=$candidate_revision_tag"
@@ -232,6 +266,7 @@ jobs:
       ARTIFACT_BUCKET_NAME: ${{ needs.config.outputs.artifact_bucket_name }}
       HOST_NAME: ${{ needs.config.outputs.online_compose_host_name }}
       HOST_ZONE: ${{ needs.config.outputs.online_compose_host_zone }}
+      REQUESTED_AIRFLOW_TARGET: ${{ needs.config.outputs.requested_airflow_target }}
       AIRFLOW_TARGET: ${{ needs.config.outputs.airflow_target }}
       CLOUD_COMPOSER_AIRFLOW_URI: ${{ needs.config.outputs.cloud_composer_airflow_uri }}
       ACTION: ${{ needs.config.outputs.action }}
@@ -263,7 +298,9 @@ jobs:
       - name: Build runtime release request
         run: |
           set -euo pipefail
-          python -c 'from datetime import UTC, datetime; import json, os, pathlib; run_url = "/".join([os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], "actions", "runs", os.environ["GITHUB_RUN_ID"]]); payload = {"action": os.environ["ACTION"], "request_source": "github-actions", "requested_at": datetime.now(tz=UTC).isoformat(), "github_repository": os.environ["GITHUB_REPOSITORY"], "github_workflow": os.environ["GITHUB_WORKFLOW"], "github_run_id": os.environ["GITHUB_RUN_ID"], "github_run_url": run_url, "github_sha": os.environ["GITHUB_SHA"], "image_uri": os.environ.get("IMAGE_URI", ""), "candidate_revision_tag": os.environ.get("CANDIDATE_REVISION_TAG", "candidate"), "candidate_alias": os.environ.get("CANDIDATE_ALIAS", "candidate"), "target_alias": os.environ.get("TARGET_ALIAS", "champion"), "rollback_revision": os.environ.get("ROLLBACK_REVISION", ""), "rollback_model_version": os.environ.get("ROLLBACK_MODEL_VERSION", ""), "rollback_revision_tag": os.environ.get("ROLLBACK_REVISION_TAG", "rollback")}; pathlib.Path("runtime-release-request.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")'
+          PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}" \
+            python3 -m foehncast.runtime_release write-request-from-env \
+              --output-file runtime-release-request.json
 
       - name: Refresh operator host checkout
         if: ${{ env.AIRFLOW_TARGET == 'retained_host' }}
@@ -289,8 +326,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          selected_receiver="retained-host Airflow adapter"
-          selected_auth_path="GitHub OIDC plus SSH to retained host"
+          selected_receiver="retained-host Airflow API adapter"
+          selected_auth_path="GitHub OIDC plus SSH to retained host and host-local Airflow API"
 
           if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
             selected_receiver="Composer Airflow API"
@@ -299,14 +336,13 @@ jobs:
             report="$(FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH="gs://${ARTIFACT_BUCKET_NAME}/airflow/reports/runtime-release-latest.json" \
               uv run ./scripts/trigger-runtime-release.sh \
                 --request-file runtime-release-request.json \
-                --airflow-trigger-mode airflow_api \
                 --airflow-api-base-url "${CLOUD_COMPOSER_AIRFLOW_URI%/}/api/v1" \
                 --airflow-api-health-endpoint /health)"
           else
             report="$(gcloud compute ssh "$HOST_NAME" \
               --project "$PROJECT_ID" \
               --zone "$HOST_ZONE" \
-              --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json")"
+              --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json --airflow-api-base-url http://127.0.0.1:8080/api/v2 --airflow-api-health-endpoint /monitor/health")"
           fi
 
           printf '%s\n' "$report"
@@ -323,8 +359,12 @@ jobs:
             echo "## Runtime release handoff"
             echo
             echo "- Action: $ACTION"
+            echo "- Requested receiver: $REQUESTED_AIRFLOW_TARGET"
+            if [[ "$REQUESTED_AIRFLOW_TARGET" == "auto" ]]; then
+              echo "- Selection rule: prefer Composer Airflow when the managed URI, artifact bucket, and access-ready contract are ready; otherwise fallback to retained-host Airflow API adapter"
+            fi
             echo "- Selected receiver: $selected_receiver"
-            echo "- Fallback receiver: retained-host Airflow adapter"
+            echo "- Fallback receiver: retained-host Airflow API adapter"
             echo "- Auth path: $selected_auth_path"
             if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
               echo "- Composer access assumption: the GitHub service account already maps to an Airflow user or role"
@@ -345,6 +385,7 @@ jobs:
     if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready != 'true' }}
     runs-on: ubuntu-latest
     env:
+      REQUESTED_AIRFLOW_TARGET: ${{ needs.config.outputs.requested_airflow_target }}
       AIRFLOW_TARGET: ${{ needs.config.outputs.airflow_target }}
     steps:
       - name: Explain skipped runtime release handoff
@@ -352,12 +393,30 @@ jobs:
           {
             echo "## Runtime release handoff skipped"
             echo
+            echo "- Requested receiver: $REQUESTED_AIRFLOW_TARGET"
             echo "The selected runtime trigger contract needs all of these inputs before it can run:"
             echo "- GCP_PROJECT_ID"
             echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
             echo "- GCP_SERVICE_ACCOUNT_EMAIL"
-            if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
+            if [[ "$REQUESTED_AIRFLOW_TARGET" == "auto" ]]; then
+              echo
+              echo "Automatic receiver selection prefers Composer Airflow when the managed URI, artifact bucket, and access-ready contract are ready, and otherwise falls back to the retained-host Airflow API adapter."
+              echo
+              echo "Composer automatic selection requires:"
               echo "- GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT=true"
+              echo "- GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=true"
+              echo "- GCP_CLOUD_COMPOSER_AIRFLOW_URI"
+              echo "- GCP_ARTIFACT_BUCKET_NAME"
+              echo
+              echo "Composer handoff also assumes the GitHub service account already maps to an Airflow user or role."
+              echo
+              echo "Retained-host fallback requires:"
+              echo "- GCP_PROVISION_ONLINE_COMPOSE_HOST=true"
+              echo "- GCP_ONLINE_COMPOSE_HOST_NAME"
+              echo "- GCP_ONLINE_COMPOSE_HOST_ZONE"
+            elif [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
+              echo "- GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT=true"
+              echo "- GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=true"
               echo "- GCP_CLOUD_COMPOSER_AIRFLOW_URI"
               echo "- GCP_ARTIFACT_BUCKET_NAME"
               echo

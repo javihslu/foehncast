@@ -5,7 +5,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REQUEST_FILE=""
 DAG_ID="runtime_release"
-AIRFLOW_TRIGGER_MODE="${FOEHNCAST_AIRFLOW_TRIGGER_MODE:-local_cli}"
 AIRFLOW_API_BASE_URL="${FOEHNCAST_AIRFLOW_API_BASE_URL:-http://127.0.0.1:8080/api/v2}"
 AIRFLOW_API_HEALTH_ENDPOINT="${FOEHNCAST_AIRFLOW_API_HEALTH_ENDPOINT:-/monitor/health}"
 AIRFLOW_API_AUTH_TOKEN="${FOEHNCAST_AIRFLOW_AUTH_TOKEN:-}"
@@ -15,19 +14,11 @@ source "${ROOT_DIR}/scripts/cli-common.sh"
 source "${ROOT_DIR}/scripts/airflow-api-common.sh"
 
 usage() {
-  echo "Usage: $0 --request-file path [--airflow-trigger-mode local_cli|airflow_api] [--airflow-api-base-url url] [--airflow-api-health-endpoint path]" >&2
-}
-
-run_airflow_api_helper() {
-  airflow_api_helper_run "$@"
+  echo "Usage: $0 --request-file path [--airflow-api-base-url url] [--airflow-api-health-endpoint path]" >&2
 }
 
 run_runtime_release_helper() {
   env PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m foehncast.runtime_release "$@"
-}
-
-normalized_airflow_trigger_mode() {
-  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
 airflow_api_health_url() {
@@ -75,7 +66,7 @@ build_airflow_api_dag_run_payload() {
     "$normalized_request"
 }
 
-trigger_airflow_dag_run_via_api() {
+trigger_airflow_dag_run() {
   local normalized_request="$1"
   local dag_run_id="$2"
   local logical_date="$3"
@@ -88,8 +79,11 @@ trigger_airflow_dag_run_via_api() {
     -X POST
     -H "Accept: application/json"
     -H "Content-Type: application/json"
-    -H "Authorization: Bearer ${AIRFLOW_API_AUTH_TOKEN}"
   )
+
+  if [[ -n "$AIRFLOW_API_AUTH_TOKEN" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${AIRFLOW_API_AUTH_TOKEN}")
+  fi
 
   request_url="${AIRFLOW_API_BASE_URL%/}/dags/${DAG_ID}/dagRuns"
   payload="$(build_airflow_api_dag_run_payload "$dag_run_id" "$logical_date" "$normalized_request")"
@@ -97,32 +91,11 @@ trigger_airflow_dag_run_via_api() {
   curl "${curl_args[@]}" "$request_url" --data "$payload" >/dev/null
 }
 
-trigger_airflow_dag_run_via_local_cli() {
-  local normalized_request="$1"
-  local dag_run_id="$2"
-  local logical_date="$3"
-  local compose_args=(
-    -f "$ROOT_DIR/docker-compose.yml"
-    -f "$ROOT_DIR/docker-compose.cloud.yml"
-    --env-file "$ROOT_DIR/.env"
-  )
-
-  docker compose "${compose_args[@]}" exec -T airflow-webserver \
-    airflow dags trigger "$DAG_ID" \
-    --logical-date "$logical_date" \
-    --run-id "$dag_run_id" \
-    --conf "$normalized_request" >/dev/null
-}
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --request-file)
       shift
       REQUEST_FILE="$(require_cli_option_value "--request-file" "${1:-}" usage)"
-      ;;
-    --airflow-trigger-mode)
-      shift
-      AIRFLOW_TRIGGER_MODE="$(require_cli_option_value "--airflow-trigger-mode" "${1:-}" usage)"
       ;;
     --airflow-api-base-url)
       shift
@@ -145,23 +118,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-AIRFLOW_TRIGGER_MODE="$(normalized_airflow_trigger_mode "$AIRFLOW_TRIGGER_MODE")"
-case "$AIRFLOW_TRIGGER_MODE" in
-  local_cli|airflow_api)
-    ;;
-  *)
-    echo "Unsupported airflow trigger mode '$AIRFLOW_TRIGGER_MODE'." >&2
-    exit 1
-    ;;
-esac
-
 if [[ "${AIRFLOW_API_HEALTH_ENDPOINT}" != /* ]]; then
   AIRFLOW_API_HEALTH_ENDPOINT="/${AIRFLOW_API_HEALTH_ENDPOINT}"
-fi
-
-if [[ "$AIRFLOW_TRIGGER_MODE" == "airflow_api" && -z "$AIRFLOW_API_AUTH_TOKEN" ]]; then
-  echo "Set FOEHNCAST_AIRFLOW_AUTH_TOKEN when --airflow-trigger-mode airflow_api is selected." >&2
-  exit 1
 fi
 
 if [[ -z "$REQUEST_FILE" || ! -f "$REQUEST_FILE" ]]; then
@@ -174,12 +132,7 @@ dag_run_id="runtime_release__$(date -u +"%Y-%m-%dT%H-%M-%SZ")"
 logical_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 verify_airflow_api_health 90 2 >&2
-
-if [[ "$AIRFLOW_TRIGGER_MODE" == "airflow_api" ]]; then
-  trigger_airflow_dag_run_via_api "$normalized_request" "$dag_run_id" "$logical_date"
-else
-  trigger_airflow_dag_run_via_local_cli "$normalized_request" "$dag_run_id" "$logical_date"
-fi
+trigger_airflow_dag_run "$normalized_request" "$dag_run_id" "$logical_date"
 
 wait_for_airflow_dag_run_state "$DAG_ID" "$dag_run_id" success 120 2 >&2
 

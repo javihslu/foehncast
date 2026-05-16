@@ -73,12 +73,13 @@ This means labeling is part of the training contract, not part of the inference 
 
 ## Training Boundary
 
-Training reads stored feature rows by spot and dataset, then rebuilds schema-derived time, direction, and gust features before labeling. That compatibility step keeps older stored slices usable when the curated schema gains new derived fields.
+Training reads stored curated feature rows by spot and dataset, then labels them directly. The curated storage contract is expected to already include the engineered columns required by labeling and the configured model feature list.
 
 The training contract is:
 
 - the input comes from stored curated features, not raw forecast payloads
-- derived feature rebuilding is a compatibility guard, not a substitute for the feature pipeline
+- stored curated rows must already satisfy the validated feature schema used by labeling and training
+- training does not rebuild missing derived columns from partial stored slices
 - the configured feature list and target column remain explicit in `config.yaml`
 - the supported model families are tree-based, with `random_forest` and `gradient_boosting` as the supported algorithms
 - one MLflow run records parameters, regression metrics, class-bucket accuracy metrics, row counts, feature counts, and a feature-importance plot when the estimator exposes importances

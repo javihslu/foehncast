@@ -40,6 +40,7 @@ else:
         os.getenv("AIRFLOW_AUTO_RETRAIN_MODE"),
         default="always",
     )
+    training_request_stage = "Production"
     curated_feature_store_asset = Asset(
         name=f"{feature_dataset}_curated_feature_store",
         uri=curated_feature_store_asset_uri(feature_dataset),
@@ -50,7 +51,10 @@ else:
     )
     training_request_asset = Asset(
         name=f"{feature_dataset}_production_training_request",
-        uri=training_request_asset_uri(feature_dataset, stage="production"),
+        uri=training_request_asset_uri(
+            feature_dataset,
+            stage=training_request_stage,
+        ),
     )
 
     with DAG(
@@ -88,6 +92,10 @@ else:
             task_id="store_feature_set",
             python_callable=store_feature_pipeline_job_context,
             op_args=[validate_feature_set.output],
+            op_kwargs={
+                "auto_retraining_mode": auto_retrain_mode,
+                "training_request_stage": training_request_stage,
+            },
         )
 
         prepare_feast_feature_store = PythonOperator(

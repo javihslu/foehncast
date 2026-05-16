@@ -29,12 +29,14 @@ from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation, validation_snapshot
 from foehncast.monitoring.drift import detect_data_drift, push_drift_metrics
 from foehncast.monitoring.pipeline_metrics import (
+    build_feature_pipeline_handoff_summary,
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
     build_training_pipeline_run_summary,
     emit_feature_pipeline_run_summary,
     emit_training_pipeline_run_summary,
     read_training_pipeline_run_summary,
+    read_training_pipeline_run_summary_history,
 )
 from foehncast.pipeline_state import FeaturePipelineState, TrainingPipelineState
 from foehncast.pipeline_stage_tracking import (
@@ -197,6 +199,9 @@ def _feature_pipeline_metric_count(
 
 def _feature_pipeline_result(
     feature_context: FeaturePipelineState,
+    *,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> dict[str, object]:
     context = _copy_feature_pipeline_context(feature_context)
     expected_spots = list(context.expected_spots)
@@ -209,6 +214,13 @@ def _feature_pipeline_result(
     stage_failure_counts = {
         str(stage): int(count) for stage, count in context.stage_failure_counts.items()
     }
+    handoff = build_feature_pipeline_handoff_summary(
+        dataset=context.dataset,
+        stored_spots=stored_spots,
+        drifted_spots=drifted_spots,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
 
     return {
         "dataset": context.dataset,
@@ -224,10 +236,9 @@ def _feature_pipeline_result(
         "engineered_spot_count": len(engineered_spots),
         "validated_spot_count": len(validated_spots),
         "stored_spot_count": len(stored_spots),
-        "drifted_spot_count": len(drifted_spots),
         "stage_durations_seconds": stage_durations_seconds,
         "stage_failure_counts": stage_failure_counts,
-        "dataset_drift_detected": bool(drifted_spots),
+        **handoff,
     }
 
 
@@ -236,6 +247,8 @@ def _emit_feature_pipeline_summary(
     *,
     run_status: str,
     error: str | None = None,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> None:
     context = _copy_feature_pipeline_context(feature_context)
     run_dir = context.run_dir
@@ -260,11 +273,14 @@ def _emit_feature_pipeline_summary(
             engineered_spots=[],
             validated_spots=[],
             stored_spots=[],
+            drifted_spots=[],
             stage_durations_seconds=dict(context.stage_durations_seconds),
             stage_failure_counts=dict(context.stage_failure_counts),
             spot_summaries=[],
             run_status=run_status,
             error=error,
+            auto_retraining_mode=auto_retraining_mode,
+            training_request_stage=training_request_stage,
         )
         emit_feature_pipeline_run_summary(summary)
         return
@@ -307,11 +323,14 @@ def _emit_feature_pipeline_summary(
         engineered_spots=list(context.engineered_spots),
         validated_spots=list(context.validated_spots),
         stored_spots=list(context.stored_spots),
+        drifted_spots=list(context.drifted_spots),
         stage_durations_seconds=dict(context.stage_durations_seconds),
         stage_failure_counts=dict(context.stage_failure_counts),
         spot_summaries=spot_summaries,
         run_status=run_status,
         error=error,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
     )
     emit_feature_pipeline_run_summary(summary)
 
@@ -506,6 +525,9 @@ def validate_feature_pipeline_context(
 
 def _store_feature_pipeline_context_state(
     feature_context: FeaturePipelineState,
+    *,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> dict[str, object]:
     context = _copy_feature_pipeline_context(feature_context)
     run_dir = context.run_dir
@@ -564,6 +586,8 @@ def _store_feature_pipeline_context_state(
                     context,
                     run_status="failed",
                     error=str(exc),
+                    auto_retraining_mode=auto_retraining_mode,
+                    training_request_stage=training_request_stage,
                 )
                 raise
 
@@ -585,6 +609,8 @@ def _store_feature_pipeline_context_state(
                 context,
                 run_status="failed",
                 error=error,
+                auto_retraining_mode=auto_retraining_mode,
+                training_request_stage=training_request_stage,
             )
             raise ValueError(error)
 
@@ -595,18 +621,32 @@ def _store_feature_pipeline_context_state(
             stage="store",
             started_at=started_at,
         )
-        _emit_feature_pipeline_summary(context, run_status="succeeded")
-        return _feature_pipeline_result(context)
+        _emit_feature_pipeline_summary(
+            context,
+            run_status="succeeded",
+            auto_retraining_mode=auto_retraining_mode,
+            training_request_stage=training_request_stage,
+        )
+        return _feature_pipeline_result(
+            context,
+            auto_retraining_mode=auto_retraining_mode,
+            training_request_stage=training_request_stage,
+        )
     except Exception:
         raise
 
 
 def store_feature_pipeline_context(
     feature_context: dict[str, object],
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> dict[str, object]:
     """Store validated features, emit drift metrics, and return retraining context."""
+    resolved_mode = resolve_auto_retraining_mode(auto_retraining_mode, default=None)
     return _store_feature_pipeline_context_state(
-        FeaturePipelineState.from_payload(feature_context)
+        FeaturePipelineState.from_payload(feature_context),
+        auto_retraining_mode=resolved_mode,
+        training_request_stage=training_request_stage,
     )
 
 
@@ -646,25 +686,44 @@ def _log_feature_pipeline_job_context(feature_result: dict[str, object]) -> None
     metrics["dataset_drift_detected"] = float(
         feature_result.get("dataset_drift_detected", False)
     )
+    metrics["feature_persistence_ready"] = float(
+        feature_result.get("feature_persistence_ready", False)
+    )
+    metrics["training_handoff_ready"] = float(
+        feature_result.get("training_handoff_ready", False)
+    )
 
     with mlflow.start_run(run_name=f"feature-{feature_result['dataset']}-refresh"):
-        mlflow.log_params(
-            {
-                "dataset": feature_result["dataset"],
-                "storage_backend": feature_result["storage_backend"],
-                "stored_spots": ",".join(feature_result.get("stored_spots", [])),
-                "drifted_spots": ",".join(feature_result.get("drifted_spots", [])),
-            }
-        )
+        params = {
+            "dataset": feature_result["dataset"],
+            "storage_backend": feature_result["storage_backend"],
+            "stored_spots": ",".join(feature_result.get("stored_spots", [])),
+            "drifted_spots": ",".join(feature_result.get("drifted_spots", [])),
+        }
+        if feature_result.get("training_handoff_mode"):
+            params["training_handoff_mode"] = str(
+                feature_result["training_handoff_mode"]
+            )
+        if feature_result.get("training_request_stage"):
+            params["training_request_stage"] = str(
+                feature_result["training_request_stage"]
+            )
+        mlflow.log_params(params)
         for name, value in metrics.items():
             mlflow.log_metric(name, value)
 
 
 def store_feature_pipeline_job_context(
     feature_context: dict[str, object],
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> dict[str, object]:
     """Store validated features and log the final Airflow-friendly refresh context."""
-    result = store_feature_pipeline_context(feature_context)
+    result = store_feature_pipeline_context(
+        feature_context,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
     _log_feature_pipeline_job_context(result)
     return result
 
@@ -783,12 +842,24 @@ def should_auto_retrain(
     return bool(feature_result.get("dataset_drift_detected", False))
 
 
-def _run_feature_pipeline_result(dataset: str = "train") -> dict[str, object]:
+def _run_feature_pipeline_result(
+    dataset: str = "train",
+    *,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
+) -> dict[str, object]:
     """Run the feature pipeline and return stored spots plus retraining context."""
     feature_context = _fetch_feature_pipeline_context_state(dataset=dataset)
     feature_context = _engineer_feature_pipeline_context_state(feature_context)
     feature_context = _validate_feature_pipeline_context_state(feature_context)
-    return _store_feature_pipeline_context_state(feature_context)
+    return _store_feature_pipeline_context_state(
+        feature_context,
+        auto_retraining_mode=resolve_auto_retraining_mode(
+            auto_retraining_mode,
+            default=None,
+        ),
+        training_request_stage=training_request_stage,
+    )
 
 
 def run_feature_pipeline(dataset: str = "train") -> list[str]:
@@ -823,9 +894,18 @@ def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
         return stored_spots
 
 
-def run_feature_pipeline_job_context(dataset: str = "train") -> dict[str, object]:
+def run_feature_pipeline_job_context(
+    dataset: str = "train",
+    *,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
+) -> dict[str, object]:
     """Run the feature pipeline and return Airflow-friendly retraining context."""
-    result = _run_feature_pipeline_result(dataset=dataset)
+    result = _run_feature_pipeline_result(
+        dataset=dataset,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
     _log_feature_pipeline_job_context(result)
     return result
 
@@ -836,10 +916,28 @@ def _training_summary_state(
     requested_stage: str,
     training_run_id: str | None = None,
 ) -> TrainingPipelineState:
+    summary: dict[str, Any] = {}
+
     try:
-        summary = read_training_pipeline_run_summary(dataset)
+        latest_summary = read_training_pipeline_run_summary(dataset)
     except FileNotFoundError:
-        summary = {}
+        latest_summary = {}
+
+    if not training_run_id or latest_summary.get("training_run_id") in {
+        None,
+        training_run_id,
+    }:
+        summary = latest_summary
+    else:
+        try:
+            summary_history = read_training_pipeline_run_summary_history(dataset)
+        except FileNotFoundError:
+            summary_history = []
+
+        for candidate in reversed(summary_history):
+            if candidate.get("training_run_id") == training_run_id:
+                summary = candidate
+                break
 
     return TrainingPipelineState.from_summary(
         dataset=dataset,

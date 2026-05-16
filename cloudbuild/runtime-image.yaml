@@ -20,6 +20,9 @@ options:
   dynamicSubstitutions: true
   logging: CLOUD_LOGGING_ONLY
 
+images:
+  - "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
 substitutions:
   _BUILD_CONTEXT: .
   _DOCKERFILE: containers/app/Dockerfile
