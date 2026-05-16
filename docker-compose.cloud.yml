@@ -1,4 +1,0 @@
-services:
-  development_env:
-    profiles:
-      - local-only

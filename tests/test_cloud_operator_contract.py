@@ -1798,14 +1798,14 @@ def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> 
     assert "Persistent=true" in template
     assert "compose_args=(" in template
     assert "-f /opt/foehncast/docker-compose.yml" in template
-    assert "-f /opt/foehncast/docker-compose.cloud.yml" in template
+    assert "docker-compose.cloud.yml" not in template
     assert "--env-file /opt/foehncast/.env" in template
     assert (
         'docker compose "$${compose_args[@]}" pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer'
         in template
     )
     assert (
-        "docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build"
+        "docker compose -f /opt/foehncast/docker-compose.yml --env-file /opt/foehncast/.env up -d --no-build"
         in template
     )
     assert "--build" not in template
