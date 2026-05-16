@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: hashicorp/setup-terraform@v4.0.0
+      - uses: hashicorp/setup-terraform@v4.0.1
       - run: terraform -chdir=terraform init -backend=false
       - run: terraform -chdir=terraform fmt -check
       - run: terraform -chdir=terraform validate
