@@ -124,21 +124,17 @@ jobs:
       - id: submit
         name: Submit Cloud Build
         env:
-          BUILD_CONTEXT: .
-          DOCKERFILE: containers/app/Dockerfile
           LATEST_TAG: ${{ steps.image.outputs.latest_tag }}
         run: |
           set -euo pipefail
 
           substitutions=(
-            "_BUILD_CONTEXT=${BUILD_CONTEXT}"
-            "_DOCKERFILE=${DOCKERFILE}"
             "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"
             "_COMMIT_SHA=${GITHUB_SHA}"
             "_FLOATING_TAG=${LATEST_TAG}"
           )
           IFS=,
-          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config cloudbuild/runtime-image.yaml --substitutions "${substitutions[*]}" --format='value(id)')"
+          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config cloudbuild/app.yaml --substitutions "${substitutions[*]}" --format='value(id)')"
           unset IFS
           echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
 
