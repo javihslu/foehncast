@@ -37,8 +37,9 @@ markdown_extensions:
   - tables
   - pymdownx.emoji:
       # yaml-language-server-disable Unresolved tag
-      emoji_index: !!python/name:material.extensions.emoji.twemoji
-      # yaml-language-server-disable Unresolved tag
+      emoji_index:
+        !!python/name:material.extensions.emoji.twemoji # yaml-language-server-disable Unresolved tag
+
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.details
   - pymdownx.highlight:
@@ -73,3 +74,4 @@ nav:
       - Seasonality: system/seasonality.md
   - Operations:
       - Monitoring: system/monitoring.md
+      - Composer DAG Validation: system/composer-dag-validation.md
