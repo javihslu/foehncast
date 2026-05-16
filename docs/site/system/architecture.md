@@ -60,7 +60,7 @@ See [Interfaces and Surfaces](interfaces-and-surfaces.md) for the dedicated publ
 | Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, Prometheus, and Grafana |
 | Public docs and rendered evidence | course reviewer, fork reader, maintainer | public-safe | docs pages, evaluation markdown, summary JSON-derived charts, and screenshots |
 
-Grafana stays on the operator side. The rider-facing experience comes from the app layer. Public docs should therefore show rendered evidence or screenshots, not live embeds of private dashboards.
+Grafana stays on the operator side. The rider-facing experience comes from the app layer. Public docs show rendered evidence or screenshots, not live embeds of private dashboards.
 
 ## Runtime Lanes
 
@@ -121,7 +121,7 @@ flowchart LR
 | Airflow | scheduled or asset-triggered runtime execution | curated-feature, Feast-sync, training-request, MLflow, evaluation, and registry assets |
 | FastAPI | live serving | `/predict`, `/rank`, `/spots`, `/features/online`, `/metrics` |
 
-The runtime orchestration layer models the main data products as Airflow assets. In the validated local stack, the feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. DVC mirrors the offline feature and training boundaries for reproducible reruns, but it does not replace the Airflow asset graph.
+The runtime orchestration layer models main data products as Airflow assets. The feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. DVC mirrors the offline feature and training boundaries for reproducible reruns but does not replace the Airflow asset graph.
 
 ## Deployment Targets
 
@@ -157,7 +157,7 @@ flowchart LR
 | Hosted operator target | Cloud Build for runtime images, Cloud Composer for hosted Airflow workloads, and managed operator services for MLflow and monitoring | hosted build, orchestration, and operator surface |
 | GitHub automation | review, workflow dispatch, and Terraform workflows | shared cloud delivery control plane |
 
-The hosted targets deploy runtime services only. Development assets, notebooks, docs build tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. Cloud Composer owns hosted orchestration. The operator services stay private by default.
+The hosted targets deploy runtime services only. Development assets, notebooks, docs tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. Cloud Composer owns hosted orchestration. Operator services stay private by default.
 
 See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the hosted topology and managed service boundaries.
 
@@ -211,7 +211,7 @@ flowchart LR
     APP --> MON
 </div>
 
-The Airflow control plane reflects those hand-offs directly. The feature pipeline owns curated-row and Feast-sync publication, then emits a training-request asset. The training pipeline starts from that asset instead of a direct DAG-to-DAG trigger, so the Assets view shows the real dependency graph between feature persistence, Feast serving preparation, model training, evaluation, and registration.
+The Airflow control plane reflects those hand-offs directly. The feature pipeline owns curated-row and Feast-sync publication, then emits a training-request asset. The training pipeline starts from that asset instead of a direct DAG-to-DAG trigger, so the Assets view shows the real dependency graph.
 
 ## Hosted Runtime Detail
 
@@ -255,7 +255,7 @@ flowchart LR
     DATA --> RAPI
 </div>
 
-The hosted lanes reuse the same application boundaries, but they deploy different runtime surfaces. The first diagram shows the retained private operator lane used in the active shared environment. The second shows the public API lane on Cloud Run. The managed hosted direction changes the build and orchestration plane around those diagrams; it does not change the core pipeline split.
+The hosted lanes reuse the same application boundaries but deploy different runtime surfaces. The first diagram shows the private operator lane. The second shows the public API lane on Cloud Run. Changing the build and orchestration plane does not change the core pipeline split.
 
 ## Representative Validation
 
@@ -269,10 +269,10 @@ The hosted lanes reuse the same application boundaries, but they deploy differen
 
 ## Why This Architecture Holds Up
 
-- The personalized ranking logic stays in the inference layer.
-- Feature engineering and training remain reusable across local and hosted paths.
+- Personalized ranking stays in the inference layer.
+- Feature engineering and training are reusable across local and hosted paths.
 - Hosted changes mostly affect storage, auth, orchestration, and image delivery.
-- The retained operator lane supports the active hosted path, but it is not the desired long-term hosted design.
+- The retained operator lane supports the active hosted path but is not the desired long-term design.
 - Feast layers on top of the same curated features instead of splitting the design.
 
 ## Storage Contract
