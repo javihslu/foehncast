@@ -119,7 +119,7 @@ jobs:
           service_account: ${{ needs.config.outputs.service_account_email }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@v3
         with:
           project_id: ${{ needs.config.outputs.project_id }}
 
