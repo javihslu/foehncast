@@ -64,6 +64,10 @@ def train(dataset: str) -> None:
     from foehncast.config import get_model_config, get_rider_config
     from foehncast.training_pipeline.evaluate import compute_metrics
     from foehncast.training_pipeline.label import label_dataset
+    from foehncast.training_pipeline.provenance import (
+        get_git_commit,
+        hash_parquet_files,
+    )
     from foehncast.training_pipeline.train import train_model
 
     data_dir = _project_root() / "data" / dataset
@@ -116,6 +120,9 @@ def train(dataset: str) -> None:
     metrics["training_feature_count"] = len(feature_columns)
     metrics["train_row_count"] = len(features_train)
     metrics["test_row_count"] = len(features_test)
+
+    metrics["data_hash"] = hash_parquet_files(data_dir)
+    metrics["git_commit"] = get_git_commit()
 
     metrics_path = reports_dir / "train_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")

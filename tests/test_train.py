@@ -304,6 +304,8 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         "_model_pip_requirements",
         lambda: ["scikit-learn==1.8.0", "cloudpickle==3.1.1"],
     )
+    monkeypatch.setattr(train, "get_git_commit", lambda: "abc1234")
+    monkeypatch.setattr(train, "hash_dataframe", lambda df: "fakehash" * 8)
 
     run_id = train.run_training_pipeline(model_config, dataset="validation")
 
@@ -326,3 +328,5 @@ def test_run_training_pipeline_logs_mlflow_artifacts(
         "cloudpickle==3.1.1",
     ]
     assert logged["feature_plot"] == model_config["features"]
+    assert logged["params"]["git_commit"] == "abc1234"
+    assert logged["params"]["data_hash"] == "fakehash" * 8

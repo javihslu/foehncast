@@ -81,7 +81,47 @@ Grafana stays on the operator side. The rider-facing experience comes from the a
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
 | Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana operator stack |
 
-The orchestration layer models the main data products as Airflow assets. In the validated local stack, the feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets.
+## DVC And Airflow
+
+The same feature and training boundaries are driven by two different control paths.
+
+- DVC is the reproducible path for local reruns and CI. It tracks file dependencies and outputs in `dvc.yaml`.
+- Airflow is the runtime control plane. It schedules DAG runs, handles retries, and shows asset hand-offs.
+- Inference is neither a DVC stage nor an Airflow DAG. The FastAPI app serves live requests from the registered model and online feature surfaces.
+
+<div class="mermaid">
+flowchart LR
+    classDef ctl fill:#f5f5f5,stroke:#333
+    classDef pipe fill:#e1f5fe,stroke:#01579b
+    classDef store fill:#ececff,stroke:#9370db
+    classDef serve fill:#fff8e1,stroke:#f57f17
+
+    subgraph DVCPath ["DVC reproducibility path"]
+        DVCY["dvc.yaml"]:::ctl --> DVCCLI["python -m foehncast.dvc_stages"]:::ctl
+    end
+
+    subgraph AirflowPath ["Airflow runtime path"]
+        FDAG["feature_dag"]:::ctl --> FEAT["Feature pipeline"]:::pipe
+        TDAG["training_dag"]:::ctl --> TRAIN["Training pipeline"]:::pipe
+    end
+
+    DVCCLI --> FEAT
+    DVCCLI --> TRAIN
+    FEAT --> CUR["Curated dataset"]:::store
+    CUR --> TRAIN
+    CUR --> FEAST["Feast serving prep"]:::store
+    TRAIN --> REG["MLflow model + reports"]:::store
+    FEAST --> API["FastAPI inference"]:::serve
+    REG --> API
+</div>
+
+| Path | Main job | Main outputs |
+|------|----------|--------------|
+| DVC | repeatable offline reruns in local or CI contexts | `data/${dataset}`, `reports/train_metrics.json`, `reports/feature_importance.png` |
+| Airflow | scheduled or asset-triggered runtime execution | curated-feature, Feast-sync, training-request, MLflow, evaluation, and registry assets |
+| FastAPI | live serving | `/predict`, `/rank`, `/spots`, `/features/online`, `/metrics` |
+
+The runtime orchestration layer models the main data products as Airflow assets. In the validated local stack, the feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. DVC mirrors the offline feature and training boundaries for reproducible reruns, but it does not replace the Airflow asset graph.
 
 ## Deployment Targets
 

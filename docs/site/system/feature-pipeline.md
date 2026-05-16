@@ -59,6 +59,16 @@ Each stage has one clear job:
 | Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through the hosted storage surfaces |
 | Hosted inference target | consumes the curated layer through the app and Feast; it does not run the feature DAG itself |
 
+## DVC Mapping
+
+For reproducible local and CI runs, DVC collapses the offline feature path into one `curate` stage.
+
+| DVC stage | Covers | Stops at |
+|------|--------|----------|
+| `curate` | ingest, engineer, validate, and local curated-data materialization | `data/<dataset>/` parquet outputs |
+
+That means DVC proves the curated-data hand-off, not the full runtime orchestration. Airflow still owns the Feast-sync and training-request assets used in the running stack.
+
 ## Notebook Review Surface
 
 The repo keeps one runtime-aware notebook review surface at `notebooks/feat_01_ingest_validation.ipynb`. The notebook runs the same feature-pipeline steps in either lane, writes a backend-tagged summary to `.state/notebook_reviews/feature_pipeline_summary_<backend>.json`, and can compare the stable output fields in place when the other backend artifact already exists.
