@@ -84,12 +84,14 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `terraform/terraform.tfvars` | interactive bootstrap input, not the day-2 source of truth |
 | runtime image workflows | submit reviewed hosted image builds to Cloud Build and publish images to Artifact Registry |
 | `.github/workflows/publish-composer-dags.yml` | publish the reviewed DAG and source bundle to the provisioned Composer DAG bucket |
-| `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into hosted Airflow while the retained host still owns that handoff |
+| `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into the selected Airflow receiver while the retained host remains the default handoff |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
 
 GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle, but runtime secret delivery and the reviewed runtime release entry still need separate cutover work.
+
+The runtime trigger now has an explicit reviewed receiver selection contract as well: `retained_host` stays the default reviewed receiver while the Composer Airflow URI and access path are being prepared, and operators can choose `composer_airflow` deliberately when those prerequisites are ready.
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
@@ -135,17 +137,20 @@ GitHub now has exactly one reviewed handoff into runtime execution.
 
 <div class="mermaid">
 flowchart LR
-    GHW["fab:fa-github Runtime release workflow"] --> SSH["OIDC + SSH to retained host"]
+    GHW["fab:fa-github Runtime release workflow"] --> TARGET["reviewed receiver selection"]
+    TARGET --> SSH["OIDC + SSH to retained host"]
+    TARGET --> API["OIDC + access token to Composer Airflow API"]
     SSH --> SCRIPT["trigger-runtime-release.sh"]
+    API --> SCRIPT
     SCRIPT --> DAG["runtime_release DAG"]
     DAG --> REPORT["runtime-release-latest.json"]
     REPORT --> SUMMARY["GitHub workflow summary"]
 </div>
 
 - signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
-- receiver: `./scripts/trigger-runtime-release.sh` runs on the retained operator host and triggers the hosted Airflow `runtime_release` DAG locally
-- auth path: GitHub Actions uses OIDC into the deployer service account and Compute Engine SSH; GitHub does not store Airflow credentials or call a public Airflow endpoint
-- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target; on the retained host the default remains `airflow/reports/runtime-release-latest.json`
+- receiver: Trigger Runtime Release keeps `retained_host` as the default reviewed receiver and can intentionally choose `composer_airflow` once the Composer Airflow URI and access path are ready
+- auth path: the retained-host path uses GitHub OIDC plus Compute Engine SSH; the Composer path uses GitHub OIDC plus a Google access token for the Composer Airflow API and assumes the GitHub service account already maps to an Airflow user or role
+- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target; on the retained host the default remains `airflow/reports/runtime-release-latest.json`, while the Composer path reads the durable `gs://...` report contract derived from the artifact bucket
 
 Supported actions:
 
@@ -153,7 +158,7 @@ Supported actions:
 - `promote_candidate`
 - `rollback_live`
 
-This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary. It is the active contract, not the intended long-term hosted entry path. The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step.
+This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary. It is the active contract, not the intended long-term hosted entry path. The default still points at the retained host; Composer handoff is opt-in until the access path is ready. The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step.
 
 ## Composer Readiness Requirements
 
@@ -178,7 +183,7 @@ Operators should retry work on the same plane that owns it instead of jumping be
 | Situation | Where to act | Normal procedure | Minimum evidence |
 |------|---------------|------------------|------------------|
 | Terraform or image publication fails before any runtime request is sent | GitHub Actions | fix the reviewed delivery input, then rerun the failed GitHub workflow | GitHub workflow URL plus the updated workflow summary |
-| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates so the retained operator host refreshes and the hosted Airflow `runtime_release` DAG records a new acknowledgement | GitHub workflow URL plus the configured runtime release summary target |
+| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates and the same selected receiver so the retained operator host or the Composer API handoff records a new acknowledgement | GitHub workflow URL plus the configured runtime release summary target |
 | a feature slice failed or needs replay for one logical date | hosted Airflow on the retained operator host | SSH to the host, verify Airflow health, trigger `feature_pipeline` with an explicit logical date, and wait for the DAG to succeed | logical date, feature DAG run id, and `airflow/reports/feature-pipeline-<dataset>-latest.json` |
 | a replayed feature slice should refresh training state too | hosted Airflow on the retained operator host | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run instead of treating training as a separate first step | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
 | training must be rerun without replaying feature ingestion | hosted Airflow on the retained operator host | use a manual `training_pipeline` run only when the curated feature slice already exists and the operator is intentionally choosing the requested stage in DAG config | training DAG run id, requested stage, model version, and training summary JSON |

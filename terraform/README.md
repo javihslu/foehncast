@@ -144,6 +144,8 @@ Before a later Composer cutover, this repo still needs explicit contract surface
 
 The repo now covers two Composer readiness seams directly: the reviewed DAG and source bundle sync path, and the reviewed Composer PyPI package baseline for the checked-in DAG bundle. Terraform merges later `cloud_composer_pypi_packages` overrides on top of that baseline so follow-up slices can extend the package set without replacing the known-good contract.
 
+The repo also exposes the Composer Airflow URI through the GitHub delivery contract, so Trigger Runtime Release can select Composer explicitly while the retained host stays the default fallback until the managed access path is ready.
+
 These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption. Private package indexes, non-PyPI or system-level dependencies, secret injection, and the reviewed runtime release entry still remain separate cutover work.
 
 ## What The Hosted Paths Expose
@@ -206,6 +208,7 @@ Set these GitHub repository variables:
 - `GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT`
 - `GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME`
 - `GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX` when Composer is enabled
+- `GCP_CLOUD_COMPOSER_AIRFLOW_URI` when Composer is enabled
 - `GCP_PROVISION_ONLINE_COMPOSE_HOST`
 - `GCP_ONLINE_COMPOSE_HOST_NAME`
 - `GCP_ONLINE_COMPOSE_HOST_ZONE`

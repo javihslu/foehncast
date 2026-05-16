@@ -280,7 +280,9 @@ verify_airflow_api_health() {
   airflow_api_verify_health \
     "$AIRFLOW_HEALTH_URL" \
     "Timed out waiting for Airflow health endpoint to report all required components healthy." \
-    "$@"
+    "${1:-60}" \
+    "${2:-2}" \
+    ""
 }
 
 stop_ci_smoke_airflow_orchestration_services() {
@@ -324,6 +326,7 @@ wait_for_airflow_dag_run_state() {
     "Timed out waiting for Airflow DAG '$dag_id' to reach state '$expected_state'." \
     "$max_attempts" \
     "$sleep_seconds" \
+    "" \
     "${helper_args[@]}"
 }
 

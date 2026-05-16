@@ -9,11 +9,17 @@ airflow_api_verify_health() {
   local timeout_message="$2"
   local max_attempts="${3:-60}"
   local sleep_seconds="${4:-2}"
+  local auth_token="${5:-}"
   local payload=""
   local attempt
+  local -a curl_args=(-fsS)
+
+  if [[ -n "$auth_token" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${auth_token}")
+  fi
 
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "$health_url" 2>/dev/null)"; then
+    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 "${curl_args[@]}" "$health_url" 2>/dev/null)"; then
       if printf '%s' "$payload" | airflow_api_helper_run health; then
         return 0
       fi
@@ -36,14 +42,23 @@ airflow_api_wait_for_dag_run_state() {
   local timeout_message="$4"
   local max_attempts="${5:-120}"
   local sleep_seconds="${6:-2}"
-  shift 6
-  local helper_args=("$@")
+  local auth_token="${7:-}"
+  local -a helper_args=()
   local payload=""
   local status
   local attempt
+  local -a curl_args=(-fsS)
+
+  if (( $# > 7 )); then
+    helper_args=("${@:8}")
+  fi
+
+  if [[ -n "$auth_token" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${auth_token}")
+  fi
 
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 -fsS "${airflow_api_base_url}/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date" 2>/dev/null)"; then
+    if payload="$(curl --retry 1 --retry-all-errors --retry-delay 0 "${curl_args[@]}" "${airflow_api_base_url}/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date" 2>/dev/null)"; then
       if printf '%s' "$payload" | airflow_api_helper_run dag-run --expected-state "$expected_state" "${helper_args[@]}"; then
         return 0
       else
