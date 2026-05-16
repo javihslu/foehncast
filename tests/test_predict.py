@@ -556,6 +556,11 @@ def test_metrics_endpoint_returns_prometheus_payload(
         "render_hosted_sync_prometheus_metrics",
         lambda: hosted_sync_payload,
     )
+    monkeypatch.setattr(
+        serve,
+        "render_inference_prometheus_metrics",
+        lambda: b"",
+    )
     client = TestClient(serve.app)
 
     response = client.get("/metrics")
