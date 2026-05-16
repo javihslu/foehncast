@@ -29,6 +29,9 @@ data/unit_contract_eval/*
 *.csv
 !data/unit_contract_eval/*.parquet
 
+# DVC pipeline outputs
+reports/
+
 # Keys and secrets
 keys/
 *.pem

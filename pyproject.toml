@@ -35,6 +35,8 @@ dev = [
     "pytest-mock>=3.0",
     "ipykernel>=6.0",
     "jupyterlab>=4.2.0",
+    "dvc>=3.50",
+    "dvc-s3>=3.0",
 ]
 docs = [
     "mkdocs-material>=9.6.0",

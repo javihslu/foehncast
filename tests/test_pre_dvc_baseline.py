@@ -220,13 +220,11 @@ def test_hosted_operator_terraform_exposes_cloud_run_and_composer_contract() -> 
 # ---------------------------------------------------------------------------
 
 
-def test_no_dvc_yaml_exists() -> None:
-    """DVC has not been introduced; this test will be removed when #273 lands."""
+def test_dvc_pipeline_definition_exists() -> None:
+    """DVC stages are now defined; validate the pipeline file is present."""
     repo_root = Path(__file__).resolve().parent.parent
-    assert not (repo_root / "dvc.yaml").exists(), (
-        "dvc.yaml found — remove this pre-DVC guard"
-    )
-    assert not (repo_root / ".dvc").is_dir(), ".dvc/ found — remove this pre-DVC guard"
+    assert (repo_root / "dvc.yaml").exists(), "dvc.yaml must exist"
+    assert (repo_root / ".dvc").is_dir(), ".dvc/ must exist"
 
 
 # ---------------------------------------------------------------------------
