@@ -141,12 +141,12 @@ def _cloud_runtime_config() -> dict[str, Any]:
             "Feast BigQuery runtime binding requires GCP_PROJECT_ID or FOEHNCAST_FEAST_PROJECT_ID"
         )
 
-    bucket_name = env_value("FOEHNCAST_FEAST_GCS_BUCKET", "GCP_BUCKET_NAME")
+    bucket_name = env_value("FOEHNCAST_FEAST_GCS_BUCKET")
     registry = env_value("FOEHNCAST_FEAST_REGISTRY")
     if not registry:
         if not bucket_name:
             raise ValueError(
-                "Feast cloud runtime binding requires FOEHNCAST_FEAST_REGISTRY or GCP_BUCKET_NAME"
+                "Feast cloud runtime binding requires FOEHNCAST_FEAST_REGISTRY or FOEHNCAST_FEAST_GCS_BUCKET"
             )
         registry = f"gs://{bucket_name}/feast/registry.db"
 
@@ -154,7 +154,7 @@ def _cloud_runtime_config() -> dict[str, Any]:
     if not staging_location:
         if not bucket_name:
             raise ValueError(
-                "Feast cloud runtime binding requires FOEHNCAST_FEAST_GCS_STAGING_LOCATION or GCP_BUCKET_NAME"
+                "Feast cloud runtime binding requires FOEHNCAST_FEAST_GCS_STAGING_LOCATION or FOEHNCAST_FEAST_GCS_BUCKET"
             )
         staging_location = f"gs://{bucket_name}/feast/staging"
 

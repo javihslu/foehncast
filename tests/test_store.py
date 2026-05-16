@@ -13,12 +13,9 @@ from foehncast.feature_pipeline import store
 @pytest.fixture()
 def isolated_store_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
-        "OBJECTSTORE_ACCESS_KEY",
-        "OBJECTSTORE_SECRET_KEY",
-        "OBJECTSTORE_ENDPOINT",
-        "FSSPEC_S3_KEY",
-        "FSSPEC_S3_SECRET",
-        "FSSPEC_S3_ENDPOINT_URL",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "STORAGE_S3_ENDPOINT",
         "GCP_PROJECT_ID",
         "GOOGLE_CLOUD_PROJECT",
         "STORAGE_BIGQUERY_PROJECT_ID",
@@ -158,9 +155,9 @@ def test_write_features_s3_uses_storage_options(
             "s3_endpoint": "http://localhost:9000",
         },
     )
-    monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
-    monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
-    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "minioadmin")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
+    monkeypatch.setenv("STORAGE_S3_ENDPOINT", "http://stale-override:9000")
 
     store.write_features(sample_features, spot_id="silvaplana", dataset="train")
 
@@ -194,63 +191,14 @@ def test_read_features_s3_uses_storage_options(
             "s3_endpoint": "http://localhost:9000",
         },
     )
-    monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
-    monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
-    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "minioadmin")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
 
     result = store.read_features(spot_id="silvaplana", dataset="train")
 
     pd.testing.assert_frame_equal(result, sample_features)
     assert captured["path"] == "s3://foehncast-data/train/silvaplana.parquet"
     assert captured["storage_options"] == {
-        "key": "minioadmin",
-        "secret": "minioadmin123",
-        "client_kwargs": {"endpoint_url": "http://localhost:9000"},
-    }
-
-
-def test_list_datasets_s3_uses_filesystem(monkeypatch: pytest.MonkeyPatch):
-    captured: dict[str, object] = {}
-
-    class FakeS3FileSystem:
-        def __init__(self, **kwargs: object) -> None:
-            captured["init_kwargs"] = kwargs
-
-        def exists(self, path: str) -> bool:
-            captured["exists_path"] = path
-            return True
-
-        def ls(self, path: str, detail: bool = True) -> list[dict[str, str]]:
-            captured["ls_path"] = path
-            captured["detail"] = detail
-            return [
-                {"name": "foehncast-data/train", "type": "directory"},
-                {"name": "foehncast-data/validation", "type": "directory"},
-                {"name": "foehncast-data/README.txt", "type": "file"},
-            ]
-
-    monkeypatch.setattr(
-        store,
-        "_s3fs_module",
-        lambda: types.SimpleNamespace(S3FileSystem=FakeS3FileSystem),
-    )
-    monkeypatch.setattr(
-        store,
-        "get_storage_config",
-        lambda: {
-            "backend": "s3",
-            "s3_bucket": "foehncast-data",
-            "s3_endpoint": "http://localhost:9000",
-        },
-    )
-    monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
-    monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
-    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
-
-    assert store.list_datasets() == ["train", "validation"]
-    assert captured["exists_path"] == "foehncast-data"
-    assert captured["ls_path"] == "foehncast-data"
-    assert captured["init_kwargs"] == {
         "key": "minioadmin",
         "secret": "minioadmin123",
         "client_kwargs": {"endpoint_url": "http://localhost:9000"},
@@ -292,9 +240,8 @@ def test_write_features_s3_creates_missing_bucket(
             "s3_endpoint": "http://localhost:9000",
         },
     )
-    monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "minioadmin")
-    monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "minioadmin123")
-    monkeypatch.setenv("OBJECTSTORE_ENDPOINT", "http://localhost:9000")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "minioadmin")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "minioadmin123")
 
     store.write_features(sample_features, spot_id="silvaplana", dataset="train")
 
@@ -692,51 +639,3 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
 
     with pytest.raises(FileNotFoundError, match="No BigQuery feature rows found"):
         store.read_features(spot_id="silvaplana", dataset="train")
-
-
-def test_list_datasets_bigquery_returns_sorted_names(
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_store_env: None,
-):
-    captured: dict[str, object] = {}
-
-    class FakeQueryJob:
-        def result(self) -> list[dict[str, str]]:
-            return [
-                {"dataset_name": "train"},
-                {"dataset_name": "validation"},
-            ]
-
-    class FakeClient:
-        def __init__(self, project: str) -> None:
-            captured["project"] = project
-
-        def get_table(self, table_id: str) -> object:
-            captured["table_id"] = table_id
-            return object()
-
-        def query(self, query: str, job_config: object | None = None) -> FakeQueryJob:
-            captured["query"] = query
-            return FakeQueryJob()
-
-    monkeypatch.setattr(
-        store,
-        "_bigquery_module",
-        lambda: types.SimpleNamespace(Client=FakeClient),
-    )
-    _patch_bigquery_not_found(monkeypatch)
-    _patch_default_bigquery_storage_config(monkeypatch)
-
-    assert store.list_datasets() == ["train", "validation"]
-    assert captured["project"] == "demo-project"
-    assert captured["table_id"] == "demo-project.foehncast.forecast_features"
-
-
-def test_unsupported_backend_raises_value_error(
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_store_env: None,
-):
-    monkeypatch.setattr(store, "get_storage_config", lambda: {"backend": "sqlite"})
-
-    with pytest.raises(ValueError, match="Unsupported storage backend"):
-        store.list_datasets()

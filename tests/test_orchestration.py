@@ -525,7 +525,7 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
     monkeypatch.setattr(
         orchestration,
         "_run_feature_pipeline_result",
-        lambda dataset="train": {
+        lambda dataset="train", auto_retraining_mode=None, training_request_stage="Production": {
             "dataset": dataset,
             "storage_backend": "s3",
             "stored_spots": ["silvaplana", "urnersee"],
@@ -538,10 +538,18 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
                 "store": 0,
             },
             "dataset_drift_detected": True,
+            "feature_persistence_ready": True,
+            "training_handoff_ready": True,
+            "training_handoff_mode": auto_retraining_mode or "off",
+            "training_request_stage": training_request_stage,
         },
     )
 
-    result = orchestration.run_feature_pipeline_job_context(dataset="train")
+    result = orchestration.run_feature_pipeline_job_context(
+        dataset="train",
+        auto_retraining_mode="drift",
+        training_request_stage="Production",
+    )
 
     assert result == {
         "dataset": "train",
@@ -556,6 +564,10 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
             "store": 0,
         },
         "dataset_drift_detected": True,
+        "feature_persistence_ready": True,
+        "training_handoff_ready": True,
+        "training_handoff_mode": "drift",
+        "training_request_stage": "Production",
     }
     assert logged["tracking_uri"] == "https://mlflow.example.com"
     assert logged["experiment_name"] == "foehncast"
@@ -565,6 +577,8 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
         "storage_backend": "s3",
         "stored_spots": "silvaplana,urnersee",
         "drifted_spots": "silvaplana",
+        "training_handoff_mode": "drift",
+        "training_request_stage": "Production",
     }
     assert logged["metrics"] == {
         "stored_spot_count": 2,
@@ -576,6 +590,8 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
         "validate_failure_count": 0.0,
         "store_failure_count": 0.0,
         "dataset_drift_detected": 1.0,
+        "feature_persistence_ready": 1.0,
+        "training_handoff_ready": 1.0,
     }
 
 
@@ -676,6 +692,107 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
     )
 
 
+def test_evaluate_training_run_uses_matching_history_when_latest_summary_is_other_run(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    emitted: dict[str, object] = {}
+    logged: dict[str, object] = {}
+    logged: dict[str, object] = {}
+
+    clear_tracking_uri_env(monkeypatch)
+
+    run = SimpleNamespace(
+        data=SimpleNamespace(
+            metrics={
+                "mae": 0.5,
+                "training_input_row_count": 240.0,
+                "training_feature_count": 18.0,
+                "training_train_row_count": 180.0,
+                "training_test_row_count": 60.0,
+            }
+        )
+    )
+
+    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+    monkeypatch.setattr(
+        orchestration,
+        "get_mlflow_tracking_uri",
+        lambda: "http://localhost:5001",
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "generate_evaluation_report",
+        lambda metrics, output_path: str(tmp_path / "evaluation.md"),
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "read_training_pipeline_run_summary",
+        lambda dataset="train": {
+            "dataset": dataset,
+            "requested_stage": "Production",
+            "training_run_id": "run-old",
+            "stage_durations_seconds": {
+                "train": 2.7,
+                "evaluate": 0.4,
+                "register": 0.3,
+            },
+            "stage_failure_counts": {"train": 0, "evaluate": 0, "register": 0},
+            "training_row_count": 1008,
+            "training_feature_count": 14,
+            "train_row_count": 806,
+            "test_row_count": 202,
+            "run_metrics": {"mae": 0.2},
+        },
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "read_training_pipeline_run_summary_history",
+        lambda dataset=None: [
+            {
+                "dataset": dataset or "train",
+                "requested_stage": "Production",
+                "training_run_id": "run-target",
+                "stage_durations_seconds": {"train": 1.9},
+                "stage_failure_counts": {
+                    "train": 0,
+                    "evaluate": 0,
+                    "register": 0,
+                },
+                "training_row_count": 240,
+                "training_feature_count": 18,
+                "train_row_count": 180,
+                "test_row_count": 60,
+                "run_metrics": {
+                    "training_input_row_count": 240.0,
+                    "training_feature_count": 18.0,
+                    "training_train_row_count": 180.0,
+                    "training_test_row_count": 60.0,
+                },
+            }
+        ],
+    )
+    _capture_emitted_summary(
+        monkeypatch,
+        "emit_training_pipeline_run_summary",
+        emitted,
+    )
+
+    report_path = orchestration.evaluate_training_run(
+        "run-target",
+        dataset="train",
+        requested_stage="Production",
+    )
+
+    assert report_path == str(tmp_path / "evaluation.md")
+    assert emitted["summary"]["training_run_id"] == "run-target"
+    assert emitted["summary"]["training_row_count"] == 240
+    assert emitted["summary"]["training_feature_count"] == 18
+    assert emitted["summary"]["train_row_count"] == 180
+    assert emitted["summary"]["test_row_count"] == 60
+    assert emitted["summary"]["stage_states"]["train"] == "succeeded"
+
+
 def test_training_run_metrics_and_params_normalize_mlflow_run_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -759,6 +876,7 @@ def test_run_training_pipeline_step_emits_training_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     emitted: dict[str, object] = {}
+    logged: dict[str, object] = {}
 
     run = SimpleNamespace(
         data=SimpleNamespace(
@@ -778,7 +896,7 @@ def test_run_training_pipeline_step_emits_training_summary(
         "run_training_pipeline",
         lambda dataset="train": "run-123",
     )
-    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run))
+    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
     _capture_emitted_summary(
         monkeypatch,
         "emit_training_pipeline_run_summary",

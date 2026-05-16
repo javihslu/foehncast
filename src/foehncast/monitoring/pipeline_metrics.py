@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Callable
 
 import mlflow
 
+from foehncast._json import write_pretty_json
 from foehncast._report_store import (
     history_json_paths,
     read_json_object,
+    report_json_paths,
     report_history_dir,
+    report_object_path,
     write_history_copy,
     write_json_object,
 )
@@ -20,6 +25,7 @@ from foehncast.monitoring.pipeline_contracts import (
     FEATURE_PIPELINE_STAGES,
     TRAINING_PIPELINE_METRIC_CONTRACT,
     TRAINING_PIPELINE_STAGES,
+    build_feature_pipeline_handoff_summary,
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
     build_training_pipeline_run_summary,
@@ -28,26 +34,40 @@ from foehncast.monitoring.pipeline_contracts import (
 )
 from foehncast.paths import project_root
 
-ReportDirFactory = Callable[[], Path]
+ReportLocation = str | Path
+ReportDirFactory = Callable[[], ReportLocation]
+PIPELINE_REPORT_DIR_ENV = "FOEHNCAST_PIPELINE_REPORT_DIR"
 
 
 def _default_report_dir() -> Path:
     return project_root() / "airflow" / "reports"
 
 
-def _resolve_report_dir(report_dir: ReportDirFactory | None = None) -> Path:
-    return (report_dir or _default_report_dir)()
+def configured_pipeline_report_dir() -> ReportLocation:
+    configured_dir = os.environ.get(PIPELINE_REPORT_DIR_ENV, "").strip()
+    if not configured_dir:
+        return _default_report_dir()
+    if configured_dir.startswith("gs://"):
+        return configured_dir.rstrip("/")
+    return Path(configured_dir)
 
 
-def _summary_history_dir(*, report_dir: ReportDirFactory | None = None) -> Path:
+def _resolve_report_dir(report_dir: ReportDirFactory | None = None) -> ReportLocation:
+    return (report_dir or configured_pipeline_report_dir)()
+
+
+def _summary_history_dir(
+    *,
+    report_dir: ReportDirFactory | None = None,
+) -> ReportLocation:
     return report_history_dir(_resolve_report_dir(report_dir))
 
 
-def _write_summary_json(path: Path, summary: dict[str, Any]) -> None:
+def _write_summary_json(path: ReportLocation, summary: dict[str, Any]) -> None:
     write_json_object(path, summary)
 
 
-def _read_summary_json(path: Path) -> dict[str, Any]:
+def _read_summary_json(path: ReportLocation) -> dict[str, Any]:
     return read_json_object(
         path,
         error_message="Pipeline monitoring summary must decode to a JSON object.",
@@ -58,16 +78,20 @@ def feature_pipeline_summary_path(
     dataset: str = "train",
     *,
     report_dir: ReportDirFactory | None = None,
-) -> Path:
-    return _resolve_report_dir(report_dir) / f"feature-pipeline-{dataset}-latest.json"
+) -> ReportLocation:
+    return report_object_path(
+        _resolve_report_dir(report_dir),
+        f"feature-pipeline-{dataset}-latest.json",
+    )
 
 
 def feature_pipeline_summary_paths(
     *,
     report_dir: ReportDirFactory | None = None,
-) -> list[Path]:
-    return sorted(
-        _resolve_report_dir(report_dir).glob("feature-pipeline-*-latest.json")
+) -> list[ReportLocation]:
+    return report_json_paths(
+        _resolve_report_dir(report_dir),
+        "feature-pipeline-*-latest.json",
     )
 
 
@@ -75,7 +99,7 @@ def feature_pipeline_summary_history_paths(
     dataset: str | None = None,
     *,
     report_dir: ReportDirFactory | None = None,
-) -> list[Path]:
+) -> list[ReportLocation]:
     pattern = "feature-pipeline-*.json"
     if dataset is not None:
         pattern = f"feature-pipeline-{dataset}-*.json"
@@ -86,16 +110,20 @@ def training_pipeline_summary_path(
     dataset: str = "train",
     *,
     report_dir: ReportDirFactory | None = None,
-) -> Path:
-    return _resolve_report_dir(report_dir) / f"training-pipeline-{dataset}-latest.json"
+) -> ReportLocation:
+    return report_object_path(
+        _resolve_report_dir(report_dir),
+        f"training-pipeline-{dataset}-latest.json",
+    )
 
 
 def training_pipeline_summary_paths(
     *,
     report_dir: ReportDirFactory | None = None,
-) -> list[Path]:
-    return sorted(
-        _resolve_report_dir(report_dir).glob("training-pipeline-*-latest.json")
+) -> list[ReportLocation]:
+    return report_json_paths(
+        _resolve_report_dir(report_dir),
+        "training-pipeline-*-latest.json",
     )
 
 
@@ -103,7 +131,7 @@ def training_pipeline_summary_history_paths(
     dataset: str | None = None,
     *,
     report_dir: ReportDirFactory | None = None,
-) -> list[Path]:
+) -> list[ReportLocation]:
     pattern = "training-pipeline-*.json"
     if dataset is not None:
         pattern = f"training-pipeline-{dataset}-*.json"
@@ -114,7 +142,7 @@ def write_feature_pipeline_run_summary(
     summary: dict[str, Any],
     *,
     report_dir: ReportDirFactory | None = None,
-) -> Path:
+) -> ReportLocation:
     summary_path = feature_pipeline_summary_path(
         str(summary["dataset"]),
         report_dir=report_dir,
@@ -166,7 +194,7 @@ def write_training_pipeline_run_summary(
     summary: dict[str, Any],
     *,
     report_dir: ReportDirFactory | None = None,
-) -> Path:
+) -> ReportLocation:
     summary_path = training_pipeline_summary_path(
         str(summary["dataset"]),
         report_dir=report_dir,
@@ -220,7 +248,7 @@ def _write_summary_history(
     prefix: str,
     dataset: str,
     report_dir: ReportDirFactory | None = None,
-) -> Path:
+) -> ReportLocation:
     return write_history_copy(
         _resolve_report_dir(report_dir),
         prefix=f"{prefix}-{dataset}",
@@ -229,12 +257,34 @@ def _write_summary_history(
 
 
 def feature_pipeline_summary_metrics(summary: dict[str, Any]) -> dict[str, float]:
+    drifted_spot_count = int(
+        summary.get("drifted_spot_count", len(summary.get("drifted_spots", [])))
+    )
+    feature_persistence_ready = bool(
+        summary.get(
+            "feature_persistence_ready",
+            summary.get("run_status") == "succeeded"
+            and int(summary.get("stored_spot_count", 0)) > 0,
+        )
+    )
+    training_handoff_ready = bool(
+        summary.get(
+            "training_handoff_ready",
+            str(summary.get("training_handoff_state", "")).strip().lower() == "ready",
+        )
+    )
     metrics = {
         "feature_expected_spot_count": float(summary["expected_spot_count"]),
         "feature_fetched_spot_count": float(summary["fetched_spot_count"]),
         "feature_engineered_spot_count": float(summary["engineered_spot_count"]),
         "feature_validated_spot_count": float(summary["validated_spot_count"]),
         "feature_stored_spot_count": float(summary["stored_spot_count"]),
+        "feature_drifted_spot_count": float(drifted_spot_count),
+        "feature_dataset_drift_detected": float(
+            summary.get("dataset_drift_detected", drifted_spot_count > 0)
+        ),
+        "feature_feature_persistence_ready": float(feature_persistence_ready),
+        "feature_training_handoff_ready": float(training_handoff_ready),
         "feature_skipped_spot_count": float(summary["skipped_spot_count"]),
         "feature_failed_spot_count": float(summary["failed_spot_count"]),
     }
@@ -311,22 +361,36 @@ def training_pipeline_summary_metrics(summary: dict[str, Any]) -> dict[str, floa
 def _emit_summary(
     summary: dict[str, Any],
     *,
-    writer: Callable[[dict[str, Any]], Path],
+    writer: Callable[[dict[str, Any]], ReportLocation],
     metrics_builder: Callable[[dict[str, Any]], dict[str, float]],
     artifact_path: str,
     mlflow_module: Any,
-) -> Path:
+) -> ReportLocation:
     summary_path = writer(summary)
     active_run = getattr(mlflow_module, "active_run", lambda: None)()
     if active_run is None:
         return summary_path
 
     mlflow_module.log_metrics(metrics_builder(summary))
+
+    if str(summary_path).startswith("gs://"):
+        filename = str(summary_path).rsplit("/", 1)[-1]
+        with tempfile.TemporaryDirectory(
+            prefix="foehncast-pipeline-summary-"
+        ) as temp_dir:
+            staged_summary_path = Path(temp_dir) / filename
+            write_pretty_json(staged_summary_path, summary)
+            mlflow_module.log_artifact(
+                str(staged_summary_path),
+                artifact_path=artifact_path,
+            )
+        return summary_path
+
     mlflow_module.log_artifact(str(summary_path), artifact_path=artifact_path)
     return summary_path
 
 
-def emit_feature_pipeline_run_summary(summary: dict[str, Any]) -> Path:
+def emit_feature_pipeline_run_summary(summary: dict[str, Any]) -> ReportLocation:
     """Persist the latest summary and mirror stable metrics into MLflow if active."""
     return _emit_summary(
         summary,
@@ -337,7 +401,7 @@ def emit_feature_pipeline_run_summary(summary: dict[str, Any]) -> Path:
     )
 
 
-def emit_training_pipeline_run_summary(summary: dict[str, Any]) -> Path:
+def emit_training_pipeline_run_summary(summary: dict[str, Any]) -> ReportLocation:
     """Persist the latest summary and mirror stable training metrics into MLflow if active."""
     return _emit_summary(
         summary,
@@ -353,6 +417,7 @@ __all__ = [
     "FEATURE_PIPELINE_METRIC_CONTRACT",
     "TRAINING_PIPELINE_STAGES",
     "TRAINING_PIPELINE_METRIC_CONTRACT",
+    "build_feature_pipeline_handoff_summary",
     "build_feature_pipeline_run_summary",
     "build_feature_pipeline_spot_summary",
     "build_training_pipeline_run_summary",

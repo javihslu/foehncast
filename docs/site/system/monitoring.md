@@ -43,8 +43,9 @@ The public-versus-private surface rule itself is documented in [Interfaces and S
 | Source | Kind | What it shows |
 |------|------|---------------|
 | `airflow/reports/*.json` | durable evidence | latest feature and training pipeline summaries plus history |
-| `.state/monitoring/prediction-events.jsonl` | durable evidence | retained prediction-event history by model version |
-| `.state/monitoring/prediction-log.jsonl` | durable working set | recent prediction history for prediction-side drift evaluation |
+| `.state/monitoring/prediction-events.jsonl` | durable evidence | retained prediction-event history by model version and the history source for local S3-backed monitoring readers |
+| `foehncast_monitoring.prediction_events` warehouse table | durable evidence | hosted BigQuery-backed prediction-event history for Cloud Run and other cloud-native readers |
+| `.state/monitoring/prediction-log.jsonl` | bounded local working set | recent prediction rows retained for local request-side drift evaluation; not a fallback history source |
 | `.state/online-compose-sync/last-success.json` | durable evidence | latest hosted sync success marker |
 | app `/metrics` | composed scrape surface | app-owned monitoring state and summary-derived metrics |
 | StatsD exporter | scrape surface | Evidently-backed drift metrics |
@@ -56,7 +57,7 @@ Durable files survive restarts and support audits. Runtime counters on `/metrics
 
 The serving application publishes one composed Prometheus payload on `/metrics`. It includes feature and training summary metrics, retained prediction-history metrics, hosted sync status metrics, and in-process scheduling or execution counters.
 
-Drift detection is backed by Evidently and exported through StatsD. Feature drift compares reference and current feature datasets on shared columns. Prediction drift compares retained prediction history across reference and recent windows. Emitted StatsD metrics are mapped into Prometheus as `foehncast_drift_metric`.
+Drift detection is backed by Evidently and exported through StatsD. Feature drift compares reference and current feature datasets on shared columns. Prediction drift compares retained prediction history across reference and recent windows, using retained JSONL history locally and the BigQuery warehouse contract on hosted BigQuery-backed runtimes. Emitted StatsD metrics are mapped into Prometheus as `foehncast_drift_metric`.
 
 This keeps the operator scrape path simple: Prometheus reads the app surface for app-owned monitoring state and the StatsD exporter for drift metrics.
 

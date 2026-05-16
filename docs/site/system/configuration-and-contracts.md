@@ -30,7 +30,7 @@ The important rule is that the package owns workload semantics, while runtime an
 | Surface | Owns | Example values | Must not become |
 |------|------|------------------|-----------------|
 | `config.yaml` | workload defaults and app-facing contracts | rider profile, spot list, API source settings, validation rules, model features, labeling bands, MLflow names, inference weights, monitoring thresholds | a dump of project IDs, service names, bind hosts, or deployment topology |
-| `.env` and environment variables | concrete runtime wiring for one local or hosted instance | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_BIGQUERY_*`, `MLFLOW_TRACKING_URI`, bind hosts, Feast source selection | the source of truth for rider, spot, or model semantics |
+| `.env` and environment variables | concrete runtime wiring for one local or hosted instance | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `STORAGE_BIGQUERY_*`, `MLFLOW_TRACKING_URI`, bind hosts, Feast source selection | the source of truth for rider, spot, or model semantics |
 | `terraform/terraform.tfvars` and GitHub delivery variables | infrastructure desired state and hosted rollout inputs | regions, buckets, service names, machine shape, OIDC, remote Terraform state, Cloud Run and hosted-host toggles | the place where model features, ranking weights, or validation rules live |
 | `feature_repo/feature_store*.yaml` | checked-in Feast reference configuration | local reference config and cloud example config | a replacement for the base application config |
 | `.state/feast/feature_store.runtime.yaml` | rendered runtime Feast binding | active repo path, registry path, online-store binding, offline source target | a hand-maintained checked-in config file |
@@ -66,7 +66,7 @@ The resolution rules are:
 
 - `FOEHNCAST_CONFIG_PATH` can point the loader at a different YAML file when needed
 - the loader caches the checked-in YAML, but runtime helpers resolve environment overrides when the caller asks for storage or MLflow settings
-- storage wiring resolves from environment first, then from legacy YAML runtime fields if they still exist, then from local-safe defaults
+- storage wiring resolves from environment first, then from local-safe defaults
 - MLflow experiment and model naming stay in YAML, while `MLFLOW_TRACKING_URI` remains runtime wiring
 - the resolved storage config also exposes explicit warehouse contracts for curated features and prediction events
 
@@ -74,7 +74,7 @@ The test contract in `tests/test_config.py` already checks the most important be
 
 - environment overrides apply after the initial YAML load
 - runtime resolution does not mutate the cached YAML values
-- legacy runtime fields still resolve when present
+- obsolete YAML runtime wiring is ignored instead of being treated as active config
 - default and custom warehouse contracts stay explicit instead of being inferred indirectly
 
 That means the package does not need a second handwritten runtime config file just to switch from local to hosted wiring.
@@ -85,7 +85,7 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 
 | Runtime surface | Example values |
 |------|------------------|
-| Curated storage binding | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ENDPOINT`, `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` |
+| Curated storage binding | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` |
 | MLflow connection | `MLFLOW_TRACKING_URI`, `MLFLOW_ARTIFACT_DESTINATION` |
 | Local service exposure | `APP_BIND_HOST`, `AIRFLOW_BIND_HOST`, `PROMETHEUS_PORT`, `GRAFANA_PORT` |
 | Monitoring history path | `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` |
@@ -129,7 +129,7 @@ The curated-storage contract is:
 The runtime layer also keeps the warehouse contracts explicit instead of burying them in ad hoc SQL or monitoring code:
 
 - curated features default to the `foehncast.forecast_features` table contract with day partitioning on `forecast_time`
-- prediction events default to the `foehncast_monitoring.prediction_events` table contract with day partitioning on `prediction_timestamp`
+- prediction events default to the `foehncast_monitoring.prediction_events` table contract with day partitioning on `prediction_timestamp`; BigQuery-backed hosted runtimes use that warehouse table as the durable prediction-history source
 - both contracts keep explicit clustering and retention settings
 
 This matters because retained monitoring facts belong in retained event history and warehouse tables, not in restart-sensitive request counters or implicit table names.
@@ -141,8 +141,8 @@ Two generated state areas are part of the runtime contract even though they are 
 | Generated surface | Why it exists |
 |------|----------------|
 | `.state/feast/feature_store.runtime.yaml` | binds the running environment to the checked-in Feast repo without forcing operators to hand-edit a second runtime YAML |
-| `.state/monitoring/prediction-log.jsonl` | bounded local working set for request-side drift checks |
-| `.state/monitoring/prediction-events.jsonl` | retained local prediction-event history contract that can be redirected to shared storage |
+| `.state/monitoring/prediction-log.jsonl` | bounded local working set derived from prediction writes for request-side drift checks |
+| `.state/monitoring/prediction-events.jsonl` | retained local prediction-event history contract and the durable history source for local S3-backed runtimes |
 | `airflow/reports/feature-pipeline-*-latest.json` | persisted pipeline summary that the app republishes through `/metrics` for Prometheus and Grafana |
 
 These files are runtime artifacts. They are inspectable and useful, but they are not part of the checked-in workload contract and should not be promoted into `config.yaml`.

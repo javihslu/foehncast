@@ -98,7 +98,7 @@ def test_load_training_data_concatenates_spot_frames(
     assert target_series.name == model_config["target"]
 
 
-def test_load_training_data_adds_time_features_before_labeling(
+def test_load_training_data_requires_stored_curated_feature_schema(
     monkeypatch: pytest.MonkeyPatch,
     model_config: dict[str, object],
     labeled_training_df: pd.DataFrame,
@@ -134,16 +134,16 @@ def test_load_training_data_adds_time_features_before_labeling(
 
     monkeypatch.setattr(train, "label_dataset", _label_dataset)
 
-    features_df, _ = train.load_training_data()
+    with pytest.raises(KeyError, match="Training data is missing required columns"):
+        train.load_training_data()
 
-    assert "hour_of_day_sin" in logged["columns_before_labeling"]
-    assert "hour_of_day_cos" in logged["columns_before_labeling"]
-    assert "day_of_year_sin" in logged["columns_before_labeling"]
-    assert "day_of_year_cos" in logged["columns_before_labeling"]
-    assert "wind_direction_10m_sin" in logged["columns_before_labeling"]
-    assert "wind_direction_10m_cos" in logged["columns_before_labeling"]
-    assert "gust_excess_10m" in logged["columns_before_labeling"]
-    assert list(features_df.columns) == model_config["features"]
+    assert "hour_of_day_sin" not in logged["columns_before_labeling"]
+    assert "hour_of_day_cos" not in logged["columns_before_labeling"]
+    assert "day_of_year_sin" not in logged["columns_before_labeling"]
+    assert "day_of_year_cos" not in logged["columns_before_labeling"]
+    assert "wind_direction_10m_sin" not in logged["columns_before_labeling"]
+    assert "wind_direction_10m_cos" not in logged["columns_before_labeling"]
+    assert "gust_excess_10m" not in logged["columns_before_labeling"]
 
 
 def test_load_training_data_raises_when_no_data_is_available(

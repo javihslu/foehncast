@@ -118,6 +118,26 @@ def test_local_bootstrap_uses_shared_env_file_helpers() -> None:
     )
 
 
+def test_local_bootstrap_routes_mlflow_objectstore_wiring_through_storage_runtime_vars() -> (
+    None
+):
+    bootstrap = _read_text("scripts/bootstrap-local.sh")
+
+    assert (
+        'export STORAGE_S3_ENDPOINT="${STORAGE_S3_ENDPOINT:-http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_PORT}}"'
+        in bootstrap
+    )
+    assert (
+        'export MLFLOW_S3_ENDPOINT_URL="${MLFLOW_S3_ENDPOINT_URL:-$STORAGE_S3_ENDPOINT}"'
+        in bootstrap
+    )
+    assert (
+        'export MLFLOW_ARTIFACT_DESTINATION="${MLFLOW_ARTIFACT_DESTINATION:-s3://${STORAGE_S3_BUCKET}/mlflow/artifacts}"'
+        in bootstrap
+    )
+    assert "OBJECTSTORE_ENDPOINT=" not in _read_text(".env.example")
+
+
 def test_local_bootstrap_uses_shared_payload_check_helpers() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
     helper = _read_text("scripts/payload-check-common.sh")

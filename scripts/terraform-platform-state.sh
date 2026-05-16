@@ -187,7 +187,7 @@ foehncast_cloud_env_pairs() {
 
   printf 'GCP_PROJECT_ID\t%s\n' "$project_id"
   printf 'GCP_LOCATION\t%s\n' "$location"
-  printf 'GCP_BUCKET_NAME\t%s\n' "$artifact_bucket_name"
+  printf 'GCP_ARTIFACT_BUCKET_NAME\t%s\n' "$artifact_bucket_name"
   printf 'MLFLOW_ARTIFACT_DESTINATION\t%s\n' "gs://${artifact_bucket_name}/mlflow/artifacts"
   printf 'STORAGE_BIGQUERY_PROJECT_ID\t%s\n' "$project_id"
   printf 'STORAGE_BIGQUERY_DATASET\t%s\n' "$bigquery_dataset"
@@ -288,6 +288,7 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
   FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_composer_environment provision_cloud_composer_environment)"
   FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_composer_environment_name cloud_composer_environment_name)"
+    FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_composer_airflow_access_ready cloud_composer_airflow_access_ready)"
   FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX="$(trimmed_terraform_output_value "$terraform_dir" cloud_composer_dag_gcs_prefix)"
   FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI="$(optional_terraform_output_value "$terraform_dir" cloud_composer_airflow_uri)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
@@ -298,6 +299,9 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_ONLINE_COMPOSE_DISK_SIZE_GB="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_disk_size_gb online_compose_disk_size_gb)"
   FOEHNCAST_TF_STATE_BUCKET="${FOEHNCAST_TF_PROJECT_ID}-foehncast-tfstate"
   FOEHNCAST_TF_STATE_PREFIX="terraform/state"
+  if ! terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY"; then
+    FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=false
+  fi
 }
 
 terraform_repo_variable_names() {
@@ -326,6 +330,7 @@ terraform_repo_variable_names() {
     GCP_MLFLOW_TRACKING_URI \
     GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT \
     GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME \
+    GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY \
     GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX \
     GCP_CLOUD_COMPOSER_AIRFLOW_URI \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
@@ -364,6 +369,7 @@ terraform_repo_variable_pairs() {
   printf 'GCP_CLOUD_RUN_MEMORY\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MEMORY"
   printf 'GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"
   printf 'GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME"
+    printf 'GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY"
   printf 'GCP_PROVISION_ONLINE_COMPOSE_HOST\t%s\n' "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST"
   printf 'GCP_ONLINE_COMPOSE_HOST_NAME\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME"
   printf 'GCP_ONLINE_COMPOSE_HOST_ZONE\t%s\n' "$FOEHNCAST_TF_ONLINE_COMPOSE_HOST_ZONE"

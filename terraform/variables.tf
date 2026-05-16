@@ -135,6 +135,12 @@ variable "cloud_composer_environment_name" {
   default     = "foehncast-composer"
 }
 
+variable "cloud_composer_airflow_access_ready" {
+  description = "Whether the reviewed GitHub runtime-release identity is already mapped to a usable Airflow user or role for the Cloud Composer environment."
+  type        = bool
+  default     = false
+}
+
 variable "cloud_composer_image_version" {
   description = "Managed Airflow image version for the Cloud Composer environment."
   type        = string
@@ -151,6 +157,19 @@ variable "cloud_composer_env_vars" {
   description = "Additional environment variables for the Cloud Composer environment."
   type        = map(string)
   default     = {}
+}
+
+variable "cloud_composer_secret_env_vars" {
+  description = "Secret Manager secret names or resource paths rendered as sm:// environment bindings for the Cloud Composer environment."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition = alltrue([
+      for _, secret in var.cloud_composer_secret_env_vars : trimspace(secret) != ""
+    ])
+    error_message = "cloud_composer_secret_env_vars values must not be empty."
+  }
 }
 
 variable "cloud_composer_pypi_packages" {

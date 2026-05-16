@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Any
 
 from foehncast._json import json_object_mapping, read_json_file, write_pretty_json
@@ -194,6 +195,23 @@ def _normalized_string(value: Any, *, default: str = "") -> str:
     return normalized or default
 
 
+def _normalized_airflow_target(value: Any, *, default: str = "") -> str:
+    return _normalized_string(value, default=default).lower()
+
+
+def _github_run_url_from_env(environ: Mapping[str, Any]) -> str:
+    configured_url = _normalized_string(environ.get("GITHUB_RUN_URL"))
+    if configured_url:
+        return configured_url
+
+    server_url = _normalized_string(environ.get("GITHUB_SERVER_URL")).rstrip("/")
+    repository = _normalized_string(environ.get("GITHUB_REPOSITORY")).strip("/")
+    run_id = _normalized_string(environ.get("GITHUB_RUN_ID"))
+    if server_url and repository and run_id:
+        return "/".join([server_url, repository, "actions", "runs", run_id])
+    return ""
+
+
 def normalize_runtime_release_request(
     request: Mapping[str, Any] | str | None,
 ) -> dict[str, str]:
@@ -219,6 +237,14 @@ def normalize_runtime_release_request(
         "github_run_id": _normalized_string(payload.get("github_run_id")),
         "github_run_url": _normalized_string(payload.get("github_run_url")),
         "github_sha": _normalized_string(payload.get("github_sha")),
+        "requested_airflow_target": _normalized_airflow_target(
+            payload.get("requested_airflow_target"),
+            default="unspecified",
+        ),
+        "selected_airflow_target": _normalized_airflow_target(
+            payload.get("selected_airflow_target"),
+            default="",
+        ),
         "image_uri": _normalized_string(payload.get("image_uri")),
         "candidate_revision_tag": _normalized_string(
             payload.get("candidate_revision_tag"),
@@ -242,6 +268,13 @@ def normalize_runtime_release_request(
         ).lower(),
     }
 
+    if not normalized_request["selected_airflow_target"] and normalized_request[
+        "requested_airflow_target"
+    ] in {"retained_host", "composer_airflow"}:
+        normalized_request["selected_airflow_target"] = normalized_request[
+            "requested_airflow_target"
+        ]
+
     if not normalized_request["requested_at"]:
         normalized_request["requested_at"] = datetime.now(tz=UTC).isoformat()
 
@@ -255,6 +288,57 @@ def normalize_runtime_release_request(
             raise ValueError("rollback_live requests require rollback_model_version.")
 
     return normalized_request
+
+
+def runtime_release_request_from_env(
+    environ: Mapping[str, Any] | None = None,
+    *,
+    requested_at: str | None = None,
+) -> dict[str, str]:
+    """Build a normalized runtime release request from workflow environment values."""
+    env = os.environ if environ is None else environ
+    return normalize_runtime_release_request(
+        {
+            "action": env.get("ACTION"),
+            "request_source": env.get("REQUEST_SOURCE", "github-actions"),
+            "requested_at": requested_at or datetime.now(tz=UTC).isoformat(),
+            "github_repository": env.get("GITHUB_REPOSITORY"),
+            "github_workflow": env.get("GITHUB_WORKFLOW"),
+            "github_run_id": env.get("GITHUB_RUN_ID"),
+            "github_run_url": _github_run_url_from_env(env),
+            "github_sha": env.get("GITHUB_SHA"),
+            "requested_airflow_target": env.get(
+                "REQUESTED_AIRFLOW_TARGET",
+                "unspecified",
+            ),
+            "selected_airflow_target": env.get("AIRFLOW_TARGET", ""),
+            "image_uri": env.get("IMAGE_URI", ""),
+            "candidate_revision_tag": env.get("CANDIDATE_REVISION_TAG", "candidate"),
+            "candidate_alias": env.get("CANDIDATE_ALIAS", "candidate"),
+            "target_alias": env.get("TARGET_ALIAS", "champion"),
+            "rollback_revision": env.get("ROLLBACK_REVISION", ""),
+            "rollback_model_version": env.get("ROLLBACK_MODEL_VERSION", ""),
+            "rollback_revision_tag": env.get("ROLLBACK_REVISION_TAG", "rollback"),
+        }
+    )
+
+
+def write_runtime_release_request_file(
+    output_path: str | Path,
+    *,
+    environ: Mapping[str, Any] | None = None,
+    requested_at: str | None = None,
+) -> Path:
+    """Persist a normalized runtime release request built from environment values."""
+    output_file = Path(output_path)
+    write_pretty_json(
+        output_file,
+        runtime_release_request_from_env(
+            environ,
+            requested_at=requested_at,
+        ),
+    )
+    return output_file
 
 
 def normalized_runtime_release_request_json(
@@ -277,6 +361,8 @@ def build_runtime_release_summary(
         "generated_at": normalized_request["requested_at"],
         "state": "accepted",
         "runtime_receiver": "hosted_airflow",
+        "requested_airflow_target": normalized_request["requested_airflow_target"],
+        "selected_airflow_target": normalized_request["selected_airflow_target"],
         "dag_id": dag_id,
         "dag_run_id": _normalized_string(dag_run_id, default="manual"),
         "action": normalized_request["action"],
@@ -357,6 +443,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m foehncast.runtime_release")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    write_request_parser = subparsers.add_parser("write-request-from-env")
+    write_request_parser.add_argument("--output-file", required=True)
+
     normalize_parser = subparsers.add_parser("normalize-request")
     normalize_parser.add_argument("--request-file", required=True)
 
@@ -371,24 +460,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "normalize-request":
-        request_json = Path(args.request_file).read_text(encoding="utf-8")
-        print(normalized_runtime_release_request_json(request_json))
-        return 0
+    try:
+        if args.command == "write-request-from-env":
+            print(write_runtime_release_request_file(args.output_file))
+            return 0
 
-    if args.command == "verify-report":
-        report_path = args.report_path or None
-        print(
-            json.dumps(
-                verify_runtime_release_summary(
-                    args.expected_run_id,
-                    report_path=report_path,
-                ),
-                indent=2,
-                sort_keys=True,
+        if args.command == "normalize-request":
+            request_json = Path(args.request_file).read_text(encoding="utf-8")
+            print(normalized_runtime_release_request_json(request_json))
+            return 0
+
+        if args.command == "verify-report":
+            report_path = args.report_path or None
+            print(
+                json.dumps(
+                    verify_runtime_release_summary(
+                        args.expected_run_id,
+                        report_path=report_path,
+                    ),
+                    indent=2,
+                    sort_keys=True,
+                )
             )
-        )
-        return 0
+            return 0
+    except (FileNotFoundError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
 
     parser.error(f"Unsupported command: {args.command}")
     return 2
@@ -401,11 +498,13 @@ if __name__ == "__main__":  # pragma: no cover - module entry point
 __all__ = [
     "ALLOWED_RUNTIME_RELEASE_ACTIONS",
     "build_runtime_release_summary",
+    "runtime_release_request_from_env",
     "normalize_runtime_release_request",
     "normalized_runtime_release_request_json",
     "read_runtime_release_summary",
     "record_runtime_release_request",
     "runtime_release_report_dir",
+    "write_runtime_release_request_file",
     "runtime_release_summary_history_paths",
     "runtime_release_summary_path",
     "verify_runtime_release_summary",

@@ -136,6 +136,10 @@ def test_feature_dag_defaults_to_airflow_schedule(
     assert operators[1].kwargs["op_args"] == ["output:fetch_feature_inputs"]
     assert operators[2].kwargs["op_args"] == ["output:engineer_feature_set"]
     assert operators[3].kwargs["op_args"] == ["output:validate_feature_set"]
+    assert operators[3].kwargs["op_kwargs"] == {
+        "auto_retraining_mode": "always",
+        "training_request_stage": "Production",
+    }
     assert operators[4].kwargs["op_kwargs"] == {"dataset": "train"}
     assert [asset.uri for asset in operators[4].kwargs["outlets"]] == [
         curated_feature_store_asset_uri("train"),
@@ -174,6 +178,10 @@ def test_feature_dag_supports_manual_override_dataset_and_disabled_retraining(
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": "validation",
         "run_key": "{{ run_id }}",
+    }
+    assert operators[3].kwargs["op_kwargs"] == {
+        "auto_retraining_mode": None,
+        "training_request_stage": "Production",
     }
     assert operators[4].kwargs["op_kwargs"] == {"dataset": "validation"}
 

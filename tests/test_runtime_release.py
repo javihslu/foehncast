@@ -103,10 +103,273 @@ def test_normalized_runtime_release_request_json_sorts_payload_keys() -> None:
     assert request_json.index('"action"') < request_json.index('"candidate_alias"')
 
 
+def test_normalize_runtime_release_request_tracks_airflow_targets() -> None:
+    request = runtime_release.normalize_runtime_release_request(
+        {
+            "action": "promote_candidate",
+            "requested_airflow_target": "AUTO",
+            "selected_airflow_target": "COMPOSER_AIRFLOW",
+        }
+    )
+
+    assert request["requested_airflow_target"] == "auto"
+    assert request["selected_airflow_target"] == "composer_airflow"
+
+
+def test_runtime_release_request_from_env_builds_normalized_payload() -> None:
+    request = runtime_release.runtime_release_request_from_env(
+        {
+            "ACTION": "PROMOTE_CANDIDATE",
+            "GITHUB_SERVER_URL": "https://github.com/",
+            "GITHUB_REPOSITORY": "javihslu/foehncast",
+            "GITHUB_WORKFLOW": "Trigger Runtime Release",
+            "GITHUB_RUN_ID": "42",
+            "GITHUB_SHA": "abc123",
+            "REQUESTED_AIRFLOW_TARGET": "AUTO",
+            "AIRFLOW_TARGET": "COMPOSER_AIRFLOW",
+            "CANDIDATE_ALIAS": "Candidate",
+        },
+        requested_at="2026-05-16T12:00:00+00:00",
+    )
+
+    assert request["action"] == "promote_candidate"
+    assert request["requested_at"] == "2026-05-16T12:00:00+00:00"
+    assert (
+        request["github_run_url"]
+        == "https://github.com/javihslu/foehncast/actions/runs/42"
+    )
+    assert request["requested_airflow_target"] == "auto"
+    assert request["selected_airflow_target"] == "composer_airflow"
+    assert request["candidate_alias"] == "candidate"
+
+
+def test_write_runtime_release_request_file_persists_normalized_payload(
+    tmp_path: Path,
+) -> None:
+    request_path = runtime_release.write_runtime_release_request_file(
+        tmp_path / "runtime-release-request.json",
+        environ={
+            "ACTION": "DEPLOY_CANDIDATE",
+            "GITHUB_SERVER_URL": "https://github.com",
+            "GITHUB_REPOSITORY": "javihslu/foehncast",
+            "GITHUB_WORKFLOW": "Trigger Runtime Release",
+            "GITHUB_RUN_ID": "99",
+            "GITHUB_SHA": "def456",
+            "REQUESTED_AIRFLOW_TARGET": "retained_host",
+            "IMAGE_URI": "europe-west6-docker.pkg.dev/demo/foehncast/foehncast-app:sha-123",
+        },
+        requested_at="2026-05-16T12:05:00+00:00",
+    )
+
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    assert request["action"] == "deploy_candidate"
+    assert request["requested_at"] == "2026-05-16T12:05:00+00:00"
+    assert request["requested_airflow_target"] == "retained_host"
+    assert request["selected_airflow_target"] == "retained_host"
+    assert request["image_uri"]
+
+
+def test_main_write_request_from_env_writes_request_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("ACTION", "PROMOTE_CANDIDATE")
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "javihslu/foehncast")
+    monkeypatch.setenv("GITHUB_WORKFLOW", "Trigger Runtime Release")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setenv("GITHUB_SHA", "abc123")
+
+    request_path = tmp_path / "runtime-release-request.json"
+
+    exit_code = runtime_release.main(
+        [
+            "write-request-from-env",
+            "--output-file",
+            str(request_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (
+        json.loads(request_path.read_text(encoding="utf-8"))["action"]
+        == "promote_candidate"
+    )
+
+
+def test_main_normalize_request_prints_normalized_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    request_path = tmp_path / "runtime-release-request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "action": "PROMOTE_CANDIDATE",
+                "requested_airflow_target": "AUTO",
+                "selected_airflow_target": "Composer_Airflow",
+                "candidate_alias": "Candidate",
+                "target_alias": "Champion",
+                "github_repository": "javihslu/foehncast",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = runtime_release.main(
+        [
+            "normalize-request",
+            "--request-file",
+            str(request_path),
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["action"] == "promote_candidate"
+    assert payload["requested_airflow_target"] == "auto"
+    assert payload["selected_airflow_target"] == "composer_airflow"
+    assert payload["candidate_alias"] == "candidate"
+    assert payload["target_alias"] == "champion"
+
+
+def test_main_normalize_request_reports_validation_errors_on_stderr(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    request_path = tmp_path / "runtime-release-request.json"
+    request_path.write_text(json.dumps(["promote_candidate"]) + "\n", encoding="utf-8")
+
+    exit_code = runtime_release.main(
+        [
+            "normalize-request",
+            "--request-file",
+            str(request_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Runtime release request must decode to a JSON object." in captured.err
+
+
+def test_main_verify_report_prints_local_verified_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(runtime_release, "project_root", lambda: tmp_path)
+    report_path = tmp_path / "airflow" / "reports" / "runtime-release-latest.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps({"dag_run_id": "runtime_release__ok"}) + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = runtime_release.main(
+        [
+            "verify-report",
+            "--expected-run-id",
+            "runtime_release__ok",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dag_run_id"] == "runtime_release__ok"
+    assert payload["report_path"] == str(report_path)
+
+
+def test_main_verify_report_reports_missing_summary_on_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(runtime_release, "project_root", lambda: tmp_path)
+
+    exit_code = runtime_release.main(
+        [
+            "verify-report",
+            "--expected-run-id",
+            "runtime_release__missing",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "Runtime release report was not written to" in captured.err
+
+
+def test_main_verify_report_reports_mismatched_run_id_on_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(runtime_release, "project_root", lambda: tmp_path)
+    report_path = tmp_path / "airflow" / "reports" / "runtime-release-latest.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps({"dag_run_id": "runtime_release__actual"}) + "\n",
+        encoding="utf-8",
+    )
+
+    exit_code = runtime_release.main(
+        [
+            "verify-report",
+            "--expected-run-id",
+            "runtime_release__expected",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert (
+        "runtime release report does not match dag run 'runtime_release__expected'"
+        in captured.err
+    )
+
+
+def test_main_verify_report_prints_gcs_verified_summary(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_storage = _FakeStorageClient()
+    fake_storage.objects[
+        ("demo-bucket", "airflow/reports/runtime-release-latest.json")
+    ] = json.dumps({"dag_run_id": "runtime_release__ok"}) + "\n"
+    monkeypatch.setattr(runtime_release, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setenv(
+        "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH",
+        "gs://demo-bucket/airflow/reports/runtime-release-latest.json",
+    )
+
+    exit_code = runtime_release.main(
+        [
+            "verify-report",
+            "--expected-run-id",
+            "runtime_release__ok",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dag_run_id"] == "runtime_release__ok"
+    assert (
+        payload["report_path"]
+        == "gs://demo-bucket/airflow/reports/runtime-release-latest.json"
+    )
+
+
 def test_build_runtime_release_summary_normalizes_deploy_candidate_request() -> None:
     summary = runtime_release.build_runtime_release_summary(
         {
             "action": "DEPLOY_CANDIDATE",
+            "requested_airflow_target": "auto",
+            "selected_airflow_target": "composer_airflow",
             "image_uri": "europe-west6-docker.pkg.dev/demo/foehncast/foehncast-app:sha-123",
             "candidate_revision_tag": "Candidate",
             "candidate_alias": "Candidate",
@@ -128,6 +391,8 @@ def test_build_runtime_release_summary_normalizes_deploy_candidate_request() -> 
     assert summary["dag_id"] == "runtime_release"
     assert summary["dag_run_id"] == "runtime_release__2026-05-14T10-00-00Z"
     assert summary["runtime_receiver"] == "hosted_airflow"
+    assert summary["requested_airflow_target"] == "auto"
+    assert summary["selected_airflow_target"] == "composer_airflow"
 
 
 def test_build_runtime_release_summary_requires_rollback_coordinates() -> None:
@@ -148,6 +413,8 @@ def test_write_runtime_release_summary_persists_latest_and_history(
         "generated_at": "2026-05-14T11:00:00+00:00",
         "state": "accepted",
         "runtime_receiver": "hosted_airflow",
+        "requested_airflow_target": "auto",
+        "selected_airflow_target": "composer_airflow",
         "dag_id": "runtime_release",
         "dag_run_id": "runtime_release__2026-05-14T11-00-00Z",
         "action": "promote_candidate",
@@ -174,6 +441,7 @@ def test_write_runtime_release_summary_persists_latest_and_history(
     assert (
         _read_json(latest_path)["dag_run_id"] == "runtime_release__2026-05-14T11-00-00Z"
     )
+    assert _read_json(latest_path)["selected_airflow_target"] == "composer_airflow"
     history_paths = runtime_release.runtime_release_summary_history_paths()
     assert len(history_paths) == 1
     assert history_paths[0].name == "runtime-release-20260514T110000000000Z.json"
@@ -212,6 +480,8 @@ def test_write_runtime_release_summary_supports_gcs_location(
         "generated_at": "2026-05-14T11:00:00+00:00",
         "state": "accepted",
         "runtime_receiver": "hosted_airflow",
+        "requested_airflow_target": "auto",
+        "selected_airflow_target": "composer_airflow",
         "dag_id": "runtime_release",
         "dag_run_id": "runtime_release__2026-05-14T11-00-00Z",
         "action": "promote_candidate",

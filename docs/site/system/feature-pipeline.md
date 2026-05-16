@@ -59,6 +59,18 @@ Each stage has one clear job:
 | Active shared environment | the same DAG and curated contract write to BigQuery and keep Feast downstream through the hosted storage surfaces |
 | Hosted inference target | consumes the curated layer through the app and Feast; it does not run the feature DAG itself |
 
+## Notebook Review Surface
+
+The repo keeps one runtime-aware notebook review surface at `notebooks/feat_01_ingest_validation.ipynb`. The notebook runs the same feature-pipeline steps in either lane, writes a backend-tagged summary to `.state/notebook_reviews/feature_pipeline_summary_<backend>.json`, and can compare the stable output fields in place when the other backend artifact already exists.
+
+Outside the notebook, the same parity check is available as a normal repo command:
+
+```bash
+make notebook-review-compare NOTEBOOK_REVIEW_BACKEND=s3
+```
+
+That command compares the stable review fields across the S3 and BigQuery summaries and leaves the expected runtime-specific differences, such as backend name and storage target, out of the pass or fail decision.
+
 ## Stage Responsibilities
 
 | Stage | Main responsibility | Must not become |

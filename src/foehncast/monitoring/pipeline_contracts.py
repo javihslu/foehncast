@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from foehncast.airflow_assets import training_request_asset_uri
 from foehncast.feature_pipeline.validate import validation_snapshot
 from foehncast.monitoring._common import safe_float
 from foehncast.pipeline_stage_tracking import (
@@ -25,6 +26,15 @@ FEATURE_PIPELINE_METRIC_CONTRACT: dict[str, tuple[str, ...]] = {
         "engineered_spot_count",
         "validated_spot_count",
         "stored_spot_count",
+        "drifted_spot_count",
+        "dataset_drift_detected",
+        "pipeline_terminal_stage",
+        "feature_persistence_ready",
+        "training_handoff_mode",
+        "training_handoff_state",
+        "training_handoff_ready",
+        "training_request_stage",
+        "training_request_asset_uri",
         "stage_durations_seconds",
         "stage_failure_counts",
         "skipped_spot_count",
@@ -216,6 +226,59 @@ def _max_numeric_abs_delta(
     return safe_float(delta)
 
 
+def _normalized_training_request_stage(stage: str | None) -> str:
+    candidate = (stage or "Production").strip()
+    return candidate or "Production"
+
+
+def build_feature_pipeline_handoff_summary(
+    *,
+    dataset: str,
+    stored_spots: list[str],
+    drifted_spots: list[str] | None = None,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
+    run_status: str = "succeeded",
+) -> dict[str, Any]:
+    """Describe where the feature pipeline ends and how it hands off to training."""
+    resolved_stage = _normalized_training_request_stage(training_request_stage)
+    resolved_mode = (
+        str(auto_retraining_mode).strip().lower()
+        if auto_retraining_mode is not None
+        else "off"
+    )
+    resolved_drifted_spots = [str(spot_id) for spot_id in list(drifted_spots or [])]
+    feature_persistence_ready = run_status == "succeeded" and bool(stored_spots)
+
+    if resolved_mode == "off":
+        training_handoff_state = "disabled"
+    elif not feature_persistence_ready:
+        training_handoff_state = "not_ready"
+    elif resolved_mode == "always":
+        training_handoff_state = "ready"
+    elif resolved_mode == "drift":
+        training_handoff_state = (
+            "ready" if resolved_drifted_spots else "waiting_for_drift"
+        )
+    else:
+        training_handoff_state = "unknown"
+
+    return {
+        "drifted_spot_count": int(len(resolved_drifted_spots)),
+        "dataset_drift_detected": bool(resolved_drifted_spots),
+        "pipeline_terminal_stage": FEATURE_PIPELINE_STAGES[-1],
+        "feature_persistence_ready": feature_persistence_ready,
+        "training_handoff_mode": resolved_mode,
+        "training_handoff_state": training_handoff_state,
+        "training_handoff_ready": training_handoff_state == "ready",
+        "training_request_stage": resolved_stage,
+        "training_request_asset_uri": training_request_asset_uri(
+            dataset,
+            stage=resolved_stage,
+        ),
+    }
+
+
 def build_feature_pipeline_spot_summary(
     *,
     spot_id: str,
@@ -312,13 +375,24 @@ def build_feature_pipeline_run_summary(
     engineered_spots: list[str],
     validated_spots: list[str],
     stored_spots: list[str],
+    drifted_spots: list[str] | None = None,
     stage_durations_seconds: dict[str, float] | None,
     stage_failure_counts: dict[str, int] | None,
     spot_summaries: list[dict[str, Any]],
     run_status: str,
     error: str | None = None,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
 ) -> dict[str, Any]:
     """Build the persisted run summary for one end-to-end feature pipeline run."""
+    handoff = build_feature_pipeline_handoff_summary(
+        dataset=dataset,
+        stored_spots=stored_spots,
+        drifted_spots=drifted_spots,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+        run_status=run_status,
+    )
     return {
         "contract_version": 1,
         "generated_at": datetime.now(tz=UTC).isoformat(),
@@ -331,11 +405,13 @@ def build_feature_pipeline_run_summary(
         "engineered_spots": engineered_spots,
         "validated_spots": validated_spots,
         "stored_spots": stored_spots,
+        "drifted_spots": list(drifted_spots or []),
         "expected_spot_count": int(len(expected_spots)),
         "fetched_spot_count": int(len(fetched_spots)),
         "engineered_spot_count": int(len(engineered_spots)),
         "validated_spot_count": int(len(validated_spots)),
         "stored_spot_count": int(len(stored_spots)),
+        **handoff,
         "stage_states": _stage_states(
             stage_names=FEATURE_PIPELINE_STAGES,
             stage_durations_seconds=stage_durations_seconds,

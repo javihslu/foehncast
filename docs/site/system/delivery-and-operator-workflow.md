@@ -84,14 +84,14 @@ After the one-time bootstrap establishes OIDC, the remote backend, and the repos
 | `terraform/terraform.tfvars` | interactive bootstrap input, not the day-2 source of truth |
 | runtime image workflows | submit reviewed hosted image builds to Cloud Build and publish images to Artifact Registry |
 | `.github/workflows/publish-composer-dags.yml` | publish the reviewed DAG and source bundle to the provisioned Composer DAG bucket |
-| `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into the selected Airflow receiver while the retained host remains the default handoff |
+| `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request into the selected Airflow receiver while the default `auto` mode prefers Composer only after its access-ready contract is true and otherwise falls back to the retained host |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted target toggles. Lower-level Cloud Run settings such as minimum and maximum instance count, container port, CPU, and memory stay repo-variable-backed instead of becoming manual workflow inputs.
 
-GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle, but runtime secret delivery and the reviewed runtime release entry still need separate cutover work.
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle, Trigger Runtime Release now prefers Composer Airflow automatically when the managed URI, artifact bucket, and access-ready contract are all in place, and Composer can now consume reviewed `sm://...` Secret Manager env references through the shared runtime env helper. Runtime secret delivery for other hosted paths and the full cutover away from the retained-host fallback still need separate follow-up work.
 
-The runtime trigger now has an explicit reviewed receiver selection contract as well: `retained_host` stays the default reviewed receiver while the Composer Airflow URI and access path are being prepared, and operators can choose `composer_airflow` deliberately when those prerequisites are ready.
+The runtime trigger now has an explicit reviewed receiver selection contract as well: `auto` is the default reviewed selection mode, it prefers `composer_airflow` only when the managed URI, artifact bucket, and access-ready contract are all present, and it otherwise falls back to `retained_host` while that path remains active. Operators can still choose `retained_host` or `composer_airflow` deliberately when they want to override the automatic selection.
 
 Checked-in examples and bootstrap outputs can seed the contract, but GitHub repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secret-bearing values belong in the runtime environment or a managed secret path instead of the repository-variable sync. Both hosted lanes still read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the reviewed inventory.
 
@@ -101,7 +101,7 @@ The shared environment still depends on the retained operator host in a few spec
 
 | Responsibility | Why it still uses the host | Target direction |
 |------|-----------------------------|------------------|
-| runtime release handoff | GitHub still refreshes the VM checkout over SSH and triggers the host-local `runtime_release` DAG | reviewed request should reach Composer without VM SSH |
+| runtime release handoff | GitHub still refreshes the VM checkout over SSH and reaches the host-local Airflow API adapter for the `runtime_release` DAG | reviewed request should reach Composer without VM SSH |
 | hosted DAG execution and recovery | retries, backfills, and manual replay still assume host-local Airflow | Composer should own hosted orchestration and recovery |
 | sync evidence and private operator checks | the host still writes `.state/online-compose-sync/last-success.json` and keeps operator surfaces online | shrink or replace this VM role after orchestration leaves the host |
 
@@ -148,9 +148,9 @@ flowchart LR
 </div>
 
 - signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
-- receiver: Trigger Runtime Release keeps `retained_host` as the default reviewed receiver and can intentionally choose `composer_airflow` once the Composer Airflow URI and access path are ready
-- auth path: the retained-host path uses GitHub OIDC plus Compute Engine SSH; the Composer path uses GitHub OIDC plus a Google access token for the Composer Airflow API and assumes the GitHub service account already maps to an Airflow user or role
-- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target; on the retained host the default remains `airflow/reports/runtime-release-latest.json`, while the Composer path reads the durable `gs://...` report contract derived from the artifact bucket
+- receiver: Trigger Runtime Release now defaults to `auto`, prefers `composer_airflow` when the managed URI, artifact bucket, and access-ready contract are ready, and otherwise falls back to `retained_host`; operators can still choose either reviewed receiver deliberately
+- auth path: the retained-host path uses GitHub OIDC plus Compute Engine SSH to reach the host-local Airflow API; the Composer path uses GitHub OIDC plus a Google access token for the Composer Airflow API and assumes the GitHub service account already maps to an Airflow user or role
+- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target with requested and selected receiver metadata; on the retained host the default remains `airflow/reports/runtime-release-latest.json`, while the Composer path reads the durable `gs://...` report contract derived from the artifact bucket
 
 Supported actions:
 
@@ -168,11 +168,11 @@ Cloud Composer is now provisionable as a managed-Airflow readiness surface, but 
 |------|--------------------|-----------------------------------------------|
 | DAG packaging | DAGs currently arrive through the retained host checkout and compose-mounted repo path | a reviewed DAG delivery path that does not depend on a VM checkout |
 | Python dependencies | Terraform now seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle | extend or replace that baseline when later Composer work needs private indexes, non-PyPI or system-level dependencies, or broader DAG coverage |
-| Secrets and runtime config | the retained host reads runtime configuration from the VM-local environment and service identity | a managed secret and runtime-config path for hosted orchestration |
-| Network and API reachability | the current trigger contract reaches Airflow through VM SSH and host-local API access | a reviewed runtime-release entry path that reaches Composer without VM SSH |
+| Secrets and runtime config | the retained host still reads VM-local environment, and Composer can now consume reviewed `sm://...` Secret Manager env references resolved by the shared runtime helper | broader managed secret and runtime-config delivery across the hosted orchestration surface |
+| Network and API reachability | the current trigger contract keeps retained-host SSH as the default path and exposes an opt-in Composer Airflow API path | a managed default Airflow access path that no longer depends on retained-host SSH |
 | Operator access model | retries, backfills, and recovery currently assume SSH to the retained host | a clear managed operator access model for Composer-owned orchestration |
 
-GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, and Terraform now seeds the reviewed Composer PyPI package baseline needed by that checked-in DAG bundle. The baseline still allows extra `cloud_composer_pypi_packages` overrides for follow-up slices, but it does not yet solve secret injection or the reviewed runtime release entry without VM SSH.
+GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket. This creates a reviewed DAG delivery path that does not depend on a VM checkout for the checked-in DAG and source bundle. It intentionally publishes the DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo`, and Terraform now seeds the reviewed Composer PyPI package baseline needed by that checked-in DAG bundle. The baseline still allows extra `cloud_composer_pypi_packages` overrides for follow-up slices, and Composer can now receive reviewed `sm://...` Secret Manager env bindings resolved by the shared runtime helper, but it does not yet make the Composer API handoff the default runtime release path or cover every hosted secret-delivery surface.
 
 The runtime release acknowledgement path is now portable as well: the same DAG can keep writing the reviewed summary to the retained-host default path today, or to a durable storage target such as `gs://...` when the managed orchestration path is ready to own that evidence directly.
 
@@ -215,7 +215,7 @@ Rollback uses the runtime trigger contract instead of direct GitHub runtime muta
 - `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
 - `.github/workflows/trigger-runtime-release.yml` is the single reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
 - `.github/workflows/promote-candidate.yml` and `.github/workflows/rollback-live-release.yml` stay as blocked redirect workflows so the old entry points do not continue mutating runtime state directly
-- the configured runtime release summary target records the acknowledged handoff on the runtime side; on the retained host the default remains `airflow/reports/runtime-release-latest.json`
+- the configured runtime release summary target records the acknowledged handoff on the runtime side, including requested and selected receiver metadata; on the retained host the default remains `airflow/reports/runtime-release-latest.json`
 - reopening the hosted VM app on port `8000` is not part of rollback; the shared environment treats that as misconfiguration
 
 VM retirement is a separate question. The VM stays online only while Airflow, MLflow, and monitoring still define the retained control plane. Airflow should leave the VM before that host is treated as steady state.

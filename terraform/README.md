@@ -41,7 +41,8 @@ Terraform can provision:
 - required Google APIs
 - Artifact Registry for app images used by the Cloud Run path
 - a GCS bucket for shared artifacts
-- a BigQuery dataset and feature table
+- a BigQuery dataset and table for curated features
+- a BigQuery dataset and table for retained prediction-event monitoring history
 - GitHub OIDC trust and deploy identities
 - an inference-only Cloud Run service
 - an optional Cloud Composer environment for managed Airflow readiness work
@@ -49,6 +50,7 @@ Terraform can provision:
 
 The Cloud Run service remains inference-only. The full online stack is the compose-host path. Cloud Composer is provisionable as a managed orchestration target, but the retained host remains the active orchestration and recovery surface until a later cutover replaces the VM handoff.
 When Composer is enabled, Terraform also seeds `FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH` to a durable `gs://<artifact-bucket>/airflow/reports/runtime-release-latest.json` target so the future managed runtime handoff does not depend on a writable VM checkout for its acknowledgement record.
+Terraform also seeds `FOEHNCAST_PIPELINE_REPORT_DIR` to the shared `gs://<artifact-bucket>/airflow/reports` prefix across hosted surfaces so feature and training summaries can be written once and then read consistently by retained-host Airflow, Cloud Composer, and the Cloud Run `/metrics` surface.
 Terraform also seeds a reviewed Composer PyPI package baseline for the checked-in DAG bundle and merges any extra `cloud_composer_pypi_packages` entries on top of that baseline.
 
 ## Deployment Scope Rule
@@ -76,8 +78,9 @@ When `provision_cloud_run_service = true`, provide:
 - `mlflow_tracking_uri` pointing to a reachable MLflow service
 - any extra runtime configuration in `cloud_run_env_vars`
 
-Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
+Terraform already injects the default BigQuery storage environment for the Cloud Run service using the managed curated-feature dataset and table IDs. Cloud Run should rely on its runtime service account for auth, not on mounted key files.
 That runtime service account includes both BigQuery job access and BigQuery Storage API read-session access so pandas-backed BigQuery reads can succeed without falling back to mounted credentials.
+Terraform also provisions the retained `foehncast_monitoring.prediction_events` warehouse table and grants the Cloud Run runtime identity dataset-editor access there so hosted inference can append and read durable prediction-event history without a writable local filesystem contract.
 Terraform also injects the Feast runtime env contract for the hosted app path: the service gets `FOEHNCAST_FEAST_SOURCE=bigquery`, the managed bucket-backed registry and staging paths, the fully-qualified curated BigQuery table reference used by the rendered Feast runtime config, and the named Datastore-mode database used for Feast online serving.
 
 This Cloud Run runtime identity is intentionally narrower than the other hosted identities. It exists to serve the inference API, not to act as the general operator or deployment account.
@@ -100,7 +103,7 @@ The app exposes that status through Prometheus `/metrics`, and Grafana shows it 
 
 Terraform also creates a Firestore Datastore-mode database for Feast online serving. Using a named database keeps this setup separate from any default Firestore state in the project.
 
-The VM uses a dedicated service account with access to Artifact Registry pulls, BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
+The VM uses a dedicated service account with access to Artifact Registry pulls, BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits for curated features and retained prediction-event history, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
 
 That broader VM identity is transitional by design. GitHub delivery uses the separate `github-actions-deployer` identity, and Cloud Run uses the separate `foehncast-cloud-run` runtime identity. The online compose host keeps the broader `foehncast-online-compose` identity only because the current VM still combines operator, training, and serving responsibilities on one machine.
 
@@ -118,6 +121,18 @@ The online host starts:
 By default, `online_compose_public_ports = []`, so the retained operator host stays private. If you need a public operator UI, add the specific port deliberately.
 
 The compose-host path is the simplest way to keep the whole stack online without forcing Airflow into Cloud Run.
+
+## Managed Orchestration Target Inputs
+
+When `provision_cloud_composer_environment = true`, provide:
+
+- any non-secret runtime configuration in `cloud_composer_env_vars`
+- any Secret Manager-backed runtime configuration in `cloud_composer_secret_env_vars`
+- `cloud_composer_airflow_access_ready = true` only after the reviewed GitHub runtime-release identity already maps to a usable Airflow user or role
+
+`cloud_composer_secret_env_vars` accepts plain secret names in the current project or full `projects/.../secrets/...` resource paths, with optional `/versions/...` suffixes when you need a non-latest version. Terraform renders those entries into `sm://...` environment bindings, grants the `foehncast-composer` runtime identity `roles/secretmanager.secretAccessor` on the referenced secrets, and the shared `foehncast.env.env_value(...)` helper resolves them inside DAG and package code at runtime.
+
+`cloud_composer_airflow_access_ready` is an explicit control-plane readiness flag. Keep it `false` until the GitHub OIDC deployer identity can actually authenticate to the Composer Airflow API with the reviewed role mapping. Trigger Runtime Release now uses that flag together with the Composer Airflow URI and artifact bucket contract before `auto` selection prefers Composer.
 
 ## Transitional VM-Specific Surface
 
@@ -137,16 +152,16 @@ Terraform can provision an optional Cloud Composer environment today. The curren
 
 Before a later Composer cutover, this repo still needs explicit contract surfaces for:
 
-- secrets and runtime-config delivery for managed orchestration
+- broader secrets and runtime-config delivery for managed orchestration
 - network and API reachability for managed Airflow
-- reviewed runtime release entry without VM SSH
+- default runtime release cutover away from retained-host SSH
 - operator access rules for retries, backfills, and recovery
 
-The repo now covers two Composer readiness seams directly: the reviewed DAG and source bundle sync path, and the reviewed Composer PyPI package baseline for the checked-in DAG bundle. Terraform merges later `cloud_composer_pypi_packages` overrides on top of that baseline so follow-up slices can extend the package set without replacing the known-good contract.
+The repo now covers four Composer readiness seams directly: the reviewed DAG and source bundle sync path, the reviewed Composer PyPI package baseline for the checked-in DAG bundle, a reviewed Secret Manager env-ref path rendered from `cloud_composer_secret_env_vars` and resolved by the shared runtime helper, and an explicit `cloud_composer_airflow_access_ready` flag that keeps the runtime trigger from preferring Composer before the GitHub identity mapping is actually ready. Terraform merges later `cloud_composer_pypi_packages` overrides on top of that baseline so follow-up slices can extend the package set without replacing the known-good contract.
 
-The repo also exposes the Composer Airflow URI through the GitHub delivery contract, so Trigger Runtime Release can select Composer explicitly while the retained host stays the default fallback until the managed access path is ready.
+The repo also exposes the Composer Airflow URI and `cloud_composer_airflow_access_ready` through the GitHub delivery contract, so Trigger Runtime Release can prefer Composer automatically only when the managed access path is actually ready, while the retained host stays the explicit fallback.
 
-These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption. Private package indexes, non-PyPI or system-level dependencies, secret injection, and the reviewed runtime release entry still remain separate cutover work.
+These are readiness requirements, not resources this directory manages yet. The durable runtime release summary target is the one exception already wired into the Composer env contract, because later managed handoff work needs a storage-backed acknowledgement path before it can remove the retained-host report assumption. Private package indexes, non-PyPI or system-level dependencies, broader secret injection beyond the reviewed Composer env-ref path, and making the Composer API handoff the default runtime release path still remain separate cutover work.
 
 ## What The Hosted Paths Expose
 
@@ -183,7 +198,7 @@ The repository uses two image-publication workflows that share one hosted build 
 
 Artifact Registry is the canonical hosted image registry in this contract. GHCR convenience artifacts, if published separately, are not the default hosted deployment path.
 
-The Composer DAG bundle path plus the reviewed Composer PyPI baseline narrow the VM-checkout and dependency-installation gaps, but the reviewed runtime release entry without VM SSH and managed secret or runtime-config delivery still belong to later orchestration issues.
+The Composer DAG bundle path, the reviewed Composer PyPI baseline, and the reviewed Composer secret-env path narrow the VM-checkout, dependency-installation, and managed-secret gaps, but making the Composer API handoff the default runtime release path and broader managed secret or runtime-config delivery still belong to later orchestration issues.
 
 Set these GitHub repository variables:
 

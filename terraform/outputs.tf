@@ -38,6 +38,16 @@ output "bigquery_feature_table_id" {
   value       = try(google_bigquery_table.forecast_features.table_id, var.bigquery_feature_table_id)
 }
 
+output "prediction_event_dataset_id" {
+  description = "BigQuery dataset for retained prediction-event history."
+  value       = google_bigquery_dataset.monitoring_store.dataset_id
+}
+
+output "prediction_event_table_id" {
+  description = "BigQuery table for retained prediction-event history."
+  value       = google_bigquery_table.prediction_events.table_id
+}
+
 output "feast_online_store_location" {
   description = "Location of the Firestore Datastore-mode database used by Feast online serving."
   value       = try(google_firestore_database.feast_online_store.location_id, var.feast_online_store_location)
@@ -86,6 +96,11 @@ output "configured_cloud_composer_environment_name" {
 output "cloud_composer_environment_name" {
   description = "Cloud Composer environment name, if provisioned."
   value       = try(google_composer_environment.cloud_composer[0].name, null)
+}
+
+output "cloud_composer_airflow_access_ready" {
+  description = "Whether the reviewed GitHub runtime-release identity is ready to access the Cloud Composer Airflow API."
+  value       = var.cloud_composer_airflow_access_ready
 }
 
 output "cloud_composer_airflow_uri" {

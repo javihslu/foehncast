@@ -8,11 +8,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from foehncast.monitoring import (
-    pipeline_metric_export,
-    pipeline_metrics,
-    pipeline_summary_store,
-)
+import foehncast._report_store as report_store
+from foehncast.monitoring import pipeline_metrics
 
 
 class _ArtifactLoggingMlflow:
@@ -27,6 +24,65 @@ class _ArtifactLoggingMlflow:
 
     def log_artifact(self, path: str, artifact_path: str | None = None) -> None:
         self._logged["artifact"] = (path, artifact_path)
+
+
+class _FakeStorageBlob:
+    def __init__(
+        self,
+        bucket_name: str,
+        object_name: str,
+        objects: dict[tuple[str, str], str],
+    ) -> None:
+        self.bucket_name = bucket_name
+        self.name = object_name
+        self._objects = objects
+
+    def upload_from_string(
+        self,
+        data: str,
+        *,
+        content_type: str | None = None,
+    ) -> None:
+        del content_type
+        self._objects[(self.bucket_name, self.name)] = data
+
+    def exists(self) -> bool:
+        return (self.bucket_name, self.name) in self._objects
+
+    def download_as_text(self, *, encoding: str = "utf-8") -> str:
+        del encoding
+        if not self.exists():
+            raise FileNotFoundError(self.name)
+        return self._objects[(self.bucket_name, self.name)]
+
+
+class _FakeStorageBucket:
+    def __init__(self, bucket_name: str, objects: dict[tuple[str, str], str]) -> None:
+        self.bucket_name = bucket_name
+        self._objects = objects
+
+    def blob(self, object_name: str) -> _FakeStorageBlob:
+        return _FakeStorageBlob(self.bucket_name, object_name, self._objects)
+
+
+class _FakeStorageClient:
+    def __init__(self) -> None:
+        self.objects: dict[tuple[str, str], str] = {}
+
+    def bucket(self, bucket_name: str) -> _FakeStorageBucket:
+        return _FakeStorageBucket(bucket_name, self.objects)
+
+    def list_blobs(
+        self,
+        bucket_name: str,
+        *,
+        prefix: str = "",
+    ) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(name=object_name)
+            for stored_bucket, object_name in sorted(self.objects)
+            if stored_bucket == bucket_name and object_name.startswith(prefix)
+        ]
 
 
 def _read_json(path: Path) -> dict[str, object]:
@@ -97,6 +153,44 @@ def test_build_feature_pipeline_spot_summary_normalizes_validation_fields() -> N
     assert summary["validation"]["range_violation_count"] == 1
 
 
+def test_build_feature_pipeline_run_summary_tracks_persistence_and_training_handoff() -> (
+    None
+):
+    summary = pipeline_metrics.build_feature_pipeline_run_summary(
+        dataset="train",
+        storage_backend="bigquery",
+        expected_spots=["silvaplana"],
+        fetched_spots=["silvaplana"],
+        engineered_spots=["silvaplana"],
+        validated_spots=["silvaplana"],
+        stored_spots=["silvaplana"],
+        drifted_spots=["silvaplana"],
+        stage_durations_seconds={"store": 3.5},
+        stage_failure_counts={
+            "fetch": 0,
+            "engineer": 0,
+            "validate": 0,
+            "store": 0,
+        },
+        spot_summaries=[],
+        run_status="succeeded",
+        auto_retraining_mode="drift",
+        training_request_stage="Production",
+    )
+
+    assert summary["drifted_spot_count"] == 1
+    assert summary["dataset_drift_detected"] is True
+    assert summary["pipeline_terminal_stage"] == "store"
+    assert summary["feature_persistence_ready"] is True
+    assert summary["training_handoff_mode"] == "drift"
+    assert summary["training_handoff_state"] == "ready"
+    assert summary["training_handoff_ready"] is True
+    assert summary["training_request_stage"] == "Production"
+    assert summary["training_request_asset_uri"] == (
+        "x-foehncast://airflow/training-request/train/production"
+    )
+
+
 def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
     monkeypatch,
     tmp_path: Path,
@@ -108,11 +202,22 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
 
     summary = {
         "dataset": "notebook_eval",
+        "run_status": "succeeded",
         "expected_spot_count": 1,
         "fetched_spot_count": 1,
         "engineered_spot_count": 1,
         "validated_spot_count": 1,
         "stored_spot_count": 1,
+        "drifted_spot_count": 1,
+        "dataset_drift_detected": True,
+        "feature_persistence_ready": True,
+        "training_handoff_mode": "always",
+        "training_handoff_state": "ready",
+        "training_handoff_ready": True,
+        "training_request_stage": "Production",
+        "training_request_asset_uri": (
+            "x-foehncast://airflow/training-request/notebook_eval/production"
+        ),
         "stage_durations_seconds": {"fetch": 12.5, "store": 3.5},
         "stage_failure_counts": {
             "fetch": 0,
@@ -145,6 +250,10 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
         "monitoring/feature_pipeline",
     )
     assert logged["metrics"]["feature_stored_spot_count"] == 1.0
+    assert logged["metrics"]["feature_drifted_spot_count"] == 1.0
+    assert logged["metrics"]["feature_dataset_drift_detected"] == 1.0
+    assert logged["metrics"]["feature_feature_persistence_ready"] == 1.0
+    assert logged["metrics"]["feature_training_handoff_ready"] == 1.0
     assert logged["metrics"]["feature_engineered_spot_count"] == 1.0
     assert logged["metrics"]["feature_validated_spot_count"] == 1.0
     assert logged["metrics"]["feature_fetch_duration_seconds"] == 12.5
@@ -156,6 +265,122 @@ def test_emit_feature_pipeline_run_summary_writes_json_and_logs_mlflow(
     )
     assert len(history_paths) == 1
     assert _read_json(history_paths[0])["dataset"] == "notebook_eval"
+
+
+def test_emit_feature_pipeline_run_summary_supports_gcs_report_dir(
+    monkeypatch,
+) -> None:
+    logged: dict[str, object] = {}
+    fake_storage = _FakeStorageClient()
+
+    monkeypatch.setattr(report_store, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setenv(
+        "FOEHNCAST_PIPELINE_REPORT_DIR",
+        "gs://demo-bucket/airflow/reports",
+    )
+    monkeypatch.setattr(pipeline_metrics, "mlflow", _ArtifactLoggingMlflow(logged))
+
+    summary = {
+        "dataset": "train",
+        "generated_at": "2026-05-16T12:00:00+00:00",
+        "run_status": "succeeded",
+        "expected_spot_count": 1,
+        "fetched_spot_count": 1,
+        "engineered_spot_count": 1,
+        "validated_spot_count": 1,
+        "stored_spot_count": 1,
+        "drifted_spot_count": 0,
+        "dataset_drift_detected": False,
+        "feature_persistence_ready": True,
+        "training_handoff_mode": "always",
+        "training_handoff_state": "ready",
+        "training_handoff_ready": True,
+        "training_request_stage": "Production",
+        "training_request_asset_uri": (
+            "x-foehncast://airflow/training-request/train/production"
+        ),
+        "stage_durations_seconds": {"fetch": 12.5, "store": 3.5},
+        "stage_failure_counts": {
+            "fetch": 0,
+            "engineer": 0,
+            "validate": 0,
+            "store": 0,
+        },
+        "skipped_spot_count": 0,
+        "failed_spot_count": 0,
+        "spots": [
+            {
+                "spot_id": "silvaplana",
+                "status": "stored",
+                "error": None,
+                "ingest": {"rows": 24, "column_count": 3},
+                "engineering": {"rows": 24},
+                "validation": {"is_valid": True, "range_violation_count": 0},
+                "storage": {"stored_rows": 24, "max_numeric_abs_delta": 0.0},
+                "feast": {"projection_ready": True},
+            }
+        ],
+    }
+
+    summary_path = pipeline_metrics.emit_feature_pipeline_run_summary(summary)
+
+    assert (
+        summary_path
+        == "gs://demo-bucket/airflow/reports/feature-pipeline-train-latest.json"
+    )
+    assert (
+        json.loads(
+            fake_storage.objects[
+                ("demo-bucket", "airflow/reports/feature-pipeline-train-latest.json")
+            ]
+        )["dataset"]
+        == "train"
+    )
+    assert pipeline_metrics.read_feature_pipeline_run_summary("train") == summary
+    assert pipeline_metrics.feature_pipeline_summary_history_paths("train") == [
+        "gs://demo-bucket/airflow/reports/history/feature-pipeline-train-20260516T120000000000Z.json"
+    ]
+    assert Path(str(logged["artifact"][0])).name == "feature-pipeline-train-latest.json"
+    assert logged["artifact"][1] == "monitoring/feature_pipeline"
+
+
+def test_write_training_pipeline_run_summary_supports_gcs_report_dir(
+    monkeypatch,
+) -> None:
+    fake_storage = _FakeStorageClient()
+
+    monkeypatch.setattr(report_store, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setenv(
+        "FOEHNCAST_PIPELINE_REPORT_DIR",
+        "gs://demo-bucket/airflow/reports",
+    )
+
+    summary = {
+        "dataset": "train",
+        "generated_at": "2026-05-16T13:00:00+00:00",
+        "requested_stage": "Production",
+        "training_run_id": "run-123",
+        "training_row_count": 240,
+        "training_feature_count": 18,
+        "train_row_count": 180,
+        "test_row_count": 60,
+        "evaluation_report_exists": True,
+        "registered_model_version": "7",
+        "stage_durations_seconds": {},
+        "stage_failure_counts": {},
+        "run_metrics": {},
+    }
+
+    summary_path = pipeline_metrics.write_training_pipeline_run_summary(summary)
+
+    assert (
+        summary_path
+        == "gs://demo-bucket/airflow/reports/training-pipeline-train-latest.json"
+    )
+    assert pipeline_metrics.read_training_pipeline_run_summary("train") == summary
+    assert pipeline_metrics.training_pipeline_summary_history_paths("train") == [
+        "gs://demo-bucket/airflow/reports/history/training-pipeline-train-20260516T130000000000Z.json"
+    ]
 
 
 def test_feature_pipeline_stage_overview_flattens_summary() -> None:
@@ -236,64 +461,6 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
     )
     assert len(history_paths) == 1
     assert _read_json(history_paths[0])["training_run_id"] == "run-123"
-
-
-def test_compatibility_monitoring_modules_delegate_to_pipeline_metrics(
-    tmp_path: Path,
-) -> None:
-    logged: dict[str, object] = {}
-    summary = {
-        "dataset": "train",
-        "generated_at": "2026-05-12T10:00:00+00:00",
-        "run_status": "succeeded",
-        "storage_backend": "feast",
-        "expected_spot_count": 1,
-        "fetched_spot_count": 1,
-        "engineered_spot_count": 1,
-        "validated_spot_count": 1,
-        "stored_spot_count": 1,
-        "stage_durations_seconds": {"fetch": 12.5},
-        "stage_failure_counts": {"fetch": 0},
-        "skipped_spot_count": 0,
-        "failed_spot_count": 0,
-        "spots": [
-            {
-                "spot_id": "silvaplana",
-                "ingest": {"rows": 168, "source_unit_contract_confirmed": True},
-                "engineering": {"rows": 168},
-                "validation": {"is_valid": True, "range_violation_count": 0},
-                "storage": {"stored_rows": 168, "max_numeric_abs_delta": 0.0},
-                "feast": {"projection_ready": True},
-            }
-        ],
-    }
-
-    summary_path = pipeline_metric_export.emit_feature_pipeline_run_summary(
-        summary,
-        writer=lambda payload: (
-            pipeline_summary_store.write_feature_pipeline_run_summary(
-                payload,
-                report_dir=lambda: tmp_path,
-            )
-        ),
-        mlflow_module=_ArtifactLoggingMlflow(logged),
-    )
-
-    assert summary_path == pipeline_metrics.feature_pipeline_summary_path(
-        "train",
-        report_dir=lambda: tmp_path,
-    )
-    assert _read_json(summary_path) == summary
-    assert (
-        pipeline_summary_store.read_feature_pipeline_run_summary(
-            report_dir=lambda: tmp_path,
-        )
-        == summary
-    )
-    assert logged["metrics"] == pipeline_metrics.feature_pipeline_summary_metrics(
-        summary
-    )
-    assert logged["artifact"] == (str(summary_path), "monitoring/feature_pipeline")
 
 
 def test_feature_pipeline_summary_history_preserves_latest_contract(
