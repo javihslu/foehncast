@@ -142,14 +142,27 @@ Scrape interval is 15 seconds. Alert rules are evaluated at the same interval.
 
 ## Alert Rules
 
-The checked-in rules at `prometheus_config/alerting_rules.yml` cover four failure modes:
+Alerting uses two evaluation tiers so domain alerts fire even if Grafana is unavailable.
 
-| Alert | Severity | Trigger | What it guards |
-|------|----------|---------|----------------|
-| `AppDown` | critical | app target unreachable for 2 min | serving availability |
-| `HighRequestLatency` | warning | p95 latency above 2 s for 5 min | request performance |
-| `PredictionErrorRateHigh` | warning | error rate above 0.1/s for 5 min | prediction reliability |
-| `StatsdExporterDown` | warning | StatsD target unreachable for 5 min | drift pipeline availability |
+### Prometheus-native rules
+
+The checked-in rules at `prometheus_config/alerting_rules.yml` cover service health and domain health:
+
+| Alert | Group | Severity | Trigger | What it guards |
+|------|-------|----------|---------|----------------|
+| `AppDown` | service-health | critical | app target unreachable for 2 min | serving availability |
+| `HighRequestLatency` | service-health | warning | p95 latency above 2 s for 5 min | request performance |
+| `PredictionErrorRateHigh` | service-health | warning | error rate above 0.1/s for 5 min | prediction reliability |
+| `StatsdExporterDown` | service-health | warning | StatsD target unreachable for 5 min | drift pipeline availability |
+| `PredictionMonitoringScheduleFailure` | domain-health | warning | schedule failures in last 15 min | background monitoring scheduling |
+| `PredictionMonitoringExecutionFailure` | domain-health | warning | execution failures in last 15 min | background monitoring execution |
+| `FeaturePipelineStageFailure` | domain-health | warning | any feature stage failure count > 0 | feature pipeline reliability |
+| `TrainingPipelineStageFailure` | domain-health | warning | any training stage failure count > 0 | training pipeline reliability |
+| `HostedSyncStale` | domain-health | warning | no sync success for 15 min | hosted environment freshness |
+
+### Grafana-provisioned rules
+
+The Grafana alerting provisioning at `grafana_work/etc/provisioning/alerting/foehncast-alert-rules.yml` evaluates the same domain signals with dashboard-linked context. These rules are tied to specific Grafana panels and provide richer annotation when the operator is working inside the dashboard.
 
 All rules, the contact point, and the alert routing policy are checked into the repository so the alerting contract is reviewable without a live Grafana instance.
 

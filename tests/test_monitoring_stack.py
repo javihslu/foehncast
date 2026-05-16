@@ -73,6 +73,28 @@ def test_statsd_mapping_preserves_drift_metric_labels() -> None:
     assert mapping["mappings"][0]["name"] == "foehncast_drift_metric"
 
 
+def test_prometheus_alerting_rules_cover_service_and_domain_health() -> None:
+    rules = _read_yaml("prometheus_config/alerting_rules.yml")
+    groups = {g["name"]: g for g in rules["groups"]}
+
+    service = {r["alert"]: r for r in groups["foehncast-service-health"]["rules"]}
+    assert groups["foehncast-service-health"]["interval"] == "30s"
+    assert "AppDown" in service
+    assert "HighRequestLatency" in service
+    assert "PredictionErrorRateHigh" in service
+    assert "StatsdExporterDown" in service
+    assert service["AppDown"]["labels"]["severity"] == "critical"
+
+    domain = {r["alert"]: r for r in groups["foehncast-domain-health"]["rules"]}
+    assert groups["foehncast-domain-health"]["interval"] == "1m"
+    assert "PredictionMonitoringScheduleFailure" in domain
+    assert "PredictionMonitoringExecutionFailure" in domain
+    assert "FeaturePipelineStageFailure" in domain
+    assert "TrainingPipelineStageFailure" in domain
+    assert "HostedSyncStale" in domain
+    assert all(r["labels"]["severity"] == "warning" for r in domain.values())
+
+
 def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
     datasource = _read_yaml(
         "grafana_work/etc/provisioning/datasources/foehncast-prometheus-datasource.yml"

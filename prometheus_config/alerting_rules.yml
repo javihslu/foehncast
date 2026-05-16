@@ -37,3 +37,51 @@ groups:
         annotations:
           summary: "StatsD exporter is down"
           description: "The statsd_exporter target has been unreachable for more than 5 minutes."
+
+  - name: foehncast-domain-health
+    interval: 1m
+    rules:
+      - alert: PredictionMonitoringScheduleFailure
+        expr: sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="failed"}[15m])) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prediction monitoring schedule failures"
+          description: "Background prediction-monitoring scheduling failures detected for {{ $labels.endpoint }}."
+
+      - alert: PredictionMonitoringExecutionFailure
+        expr: sum by (endpoint) (increase(foehncast_prediction_monitoring_execution_total{result="failed"}[15m])) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prediction monitoring execution failures"
+          description: "Background prediction-monitoring execution failures detected for {{ $labels.endpoint }}."
+
+      - alert: FeaturePipelineStageFailure
+        expr: max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature pipeline stage failure"
+          description: "Feature pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.storage_backend }}."
+
+      - alert: TrainingPipelineStageFailure
+        expr: max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Training pipeline stage failure"
+          description: "Training pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.requested_stage }}."
+
+      - alert: HostedSyncStale
+        expr: (time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)) > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hosted sync stale"
+          description: "Hosted compose sync for {{ $labels.git_ref }}/{{ $labels.compose_deploy_mode }} has not reported success for more than 15 minutes."
