@@ -67,6 +67,52 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest tests/ -v
 
+  dvc:
+    if: ${{ github.actor == github.repository_owner && (github.event_name ==
+      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: astral-sh/setup-uv@v8.1.0
+      - run: uv sync --frozen
+      - name: Validate pipeline DAG
+        run: uv run dvc dag
+      - name: Check parameter drift
+        run: |
+          diff_output=$(uv run dvc params diff 2>&1) || true
+          echo "$diff_output"
+          if echo "$diff_output" | grep -q '"new"'; then
+            echo "::warning::DVC parameters have changed — run 'dvc repro' to update dvc.lock"
+          fi
+      - name: Verify lockfile is committed
+        run: |
+          if [ ! -f dvc.lock ]; then
+            echo "::error::dvc.lock is missing — run 'dvc repro' to generate it"
+            exit 1
+          fi
+          if ! git diff --quiet dvc.lock; then
+            echo "::error::dvc.lock has uncommitted changes"
+            exit 1
+          fi
+      - name: Check source dependencies exist
+        run: |
+          uv run python -c "
+          import yaml, sys
+          from pathlib import Path
+          dvc = yaml.safe_load(Path('dvc.yaml').read_text())
+          missing = []
+          for name, stage in dvc['stages'].items():
+              for dep in stage.get('deps', []):
+                  if dep.startswith('src/') and not Path(dep).exists():
+                      missing.append(f'{name}: {dep}')
+          if missing:
+              print('Missing source dependencies:', file=sys.stderr)
+              for m in missing:
+                  print(f'  {m}', file=sys.stderr)
+              sys.exit(1)
+          print('All source dependencies present')
+          "
+
   docs:
     if: ${{ github.actor == github.repository_owner && (github.event_name ==
       'pull_request' || github.triggering_actor == github.repository_owner) }}

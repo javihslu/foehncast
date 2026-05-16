@@ -157,3 +157,26 @@ def test_dvc_params_reference_valid_config_keys() -> None:
                             f"{stage_name}: param '{key}' not in config.yaml"
                         )
                         node = node[part]
+
+
+# ---------------------------------------------------------------------------
+# 7. DVC source dependencies exist on disk
+# ---------------------------------------------------------------------------
+
+
+def test_dvc_source_deps_exist() -> None:
+    """Every src/ dependency referenced in dvc.yaml must exist."""
+    dvc = _load_dvc_yaml()
+    missing = []
+    for name, stage in dvc["stages"].items():
+        for dep in stage.get("deps", []):
+            if dep.startswith("src/") and not (REPO_ROOT / dep).exists():
+                missing.append(f"{name}: {dep}")
+    assert not missing, f"Missing source dependencies: {missing}"
+
+
+def test_dvc_lockfile_exists() -> None:
+    """dvc.lock must be committed alongside dvc.yaml."""
+    assert (REPO_ROOT / "dvc.lock").exists(), (
+        "dvc.lock is missing — run 'dvc repro' to generate it"
+    )
