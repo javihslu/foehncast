@@ -1,0 +1,40 @@
+stages:
+  curate:
+    cmd: python -m foehncast.dvc_stages curate --dataset ${dataset}
+    deps:
+      - src/foehncast/feature_pipeline/ingest.py
+      - src/foehncast/feature_pipeline/engineer.py
+      - src/foehncast/feature_pipeline/validate.py
+      - src/foehncast/feature_pipeline/store.py
+      - src/foehncast/dvc_stages.py
+      - config.yaml
+    params:
+      - config.yaml:
+          - spots
+          - model.features
+    outs:
+      - data/${dataset}:
+          persist: true
+
+  train:
+    cmd: python -m foehncast.dvc_stages train --dataset ${dataset}
+    deps:
+      - src/foehncast/training_pipeline/train.py
+      - src/foehncast/training_pipeline/evaluate.py
+      - src/foehncast/training_pipeline/label.py
+      - src/foehncast/dvc_stages.py
+      - data/${dataset}
+      - config.yaml
+    params:
+      - config.yaml:
+          - model
+          - rider_profile
+    metrics:
+      - reports/train_metrics.json:
+          cache: false
+    plots:
+      - reports/feature_importance.png:
+          cache: false
+
+params:
+  - dataset: train

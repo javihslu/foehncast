@@ -1,0 +1,5 @@
+[core]
+    remote = local-objectstore
+['remote "local-objectstore"']
+    url = s3://foehncast-data/dvc
+    endpointurl = http://127.0.0.1:9000
