@@ -93,6 +93,20 @@ def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
     assert any(
         panel["title"] == "Training Stage State" for panel in dashboard["panels"]
     )
+    assert any(
+        panel["title"] == "Inference Operations" and panel["type"] == "row"
+        for panel in dashboard["panels"]
+    )
+    assert any(
+        panel["title"] == "Request Latency (p50 / p95 / p99)"
+        for panel in dashboard["panels"]
+    )
+    assert any(
+        panel["title"] == "Request Rate by Endpoint" for panel in dashboard["panels"]
+    )
+    assert any(
+        panel["title"] == "HTTP Error Rate (4xx / 5xx)" for panel in dashboard["panels"]
+    )
 
 
 def test_grafana_alerting_provisions_background_monitoring_rules() -> None:

@@ -29,6 +29,10 @@ from foehncast.monitoring.pipeline_prometheus import (
 from foehncast.monitoring.hosted_sync_prometheus import (
     render_hosted_sync_prometheus_metrics,
 )
+from foehncast.monitoring.inference_prometheus import (
+    InferenceMetricsMiddleware,
+    render_inference_prometheus_metrics,
+)
 from foehncast.monitoring.prediction_monitoring_prometheus import (
     record_prediction_monitoring_execution,
     record_prediction_monitoring_schedule,
@@ -117,12 +121,14 @@ def _metrics_payload() -> bytes:
         + render_hosted_sync_prometheus_metrics()
         # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_monitoring_prometheus_metrics()
+        + render_inference_prometheus_metrics()
     )
 
 
 def create_app() -> FastAPI:
     """Build the serving application for health and inference endpoints."""
     app = FastAPI(title="FoehnCast API", version="0.1.0")
+    app.add_middleware(InferenceMetricsMiddleware)
 
     @app.get("/health")
     def health() -> dict[str, str]:
