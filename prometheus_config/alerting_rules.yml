@@ -1,0 +1,39 @@
+groups:
+  - name: foehncast-service-health
+    interval: 30s
+    rules:
+      - alert: AppDown
+        expr: up{job="foehncast_app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FoehnCast app is down"
+          description: "The foehncast_app target has been unreachable for more than 2 minutes."
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, rate(foehncast_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 request latency"
+          description: "95th percentile request latency exceeds 2 seconds for 5 minutes."
+
+      - alert: PredictionErrorRateHigh
+        expr: rate(foehncast_prediction_errors_total[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated prediction error rate"
+          description: "Prediction errors are occurring at more than 0.1/s over the last 15 minutes."
+
+      - alert: StatsdExporterDown
+        expr: up{job="statsd_exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "StatsD exporter is down"
+          description: "The statsd_exporter target has been unreachable for more than 5 minutes."

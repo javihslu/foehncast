@@ -1,5 +1,8 @@
 # FoehnCast
 
+[![CI](https://github.com/javihslu/foehncast/actions/workflows/ci.yml/badge.svg)](https://github.com/javihslu/foehncast/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 FoehnCast ranks Swiss kiteboarding spots for one rider profile. It combines weather forecasts, engineered wind features, drive-time data, and a trained quality model to answer one practical question: which spot is worth the trip next?
 
 The repo keeps the same Feature-Training-Inference split across local runs, hosted deployment, and CI/CD. This front page stays short on purpose. Detailed setup and architecture notes live in the project docs: <https://javihslu.github.io/foehncast/>.
@@ -82,6 +85,26 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
 ```
 
 For the rider-facing demo, run `uv run streamlit run ui/app.py` from the repo root. The dashboard uses the same prediction and ranking modules as the API, shows the configured rider profile and current serving model version, and follows the current 14-hour live inference window.
+
+### Reproducible pipelines (DVC)
+
+Data and training stages are versioned with [DVC](https://dvc.org). With the local stack running:
+
+```bash
+dvc repro          # run the full pipeline (ingest → curate → train)
+dvc metrics show   # show latest training metrics
+```
+
+DVC uses the local MinIO instance as its S3 remote. See `dvc.yaml` for stage definitions.
+
+### Running tests
+
+```bash
+make test          # full suite (pytest)
+make coverage      # full suite with coverage report
+make lint          # ruff lint check
+make check         # lint + test
+```
 
 ## Shared Cloud Automation
 
