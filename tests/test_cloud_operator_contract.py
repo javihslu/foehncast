@@ -719,13 +719,9 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
     assert "gcloud builds submit ." in submit_step["run"]
-    assert "--config cloudbuild/runtime-image.yaml" in submit_step["run"]
-    assert '"_BUILD_CONTEXT=${BUILD_CONTEXT}"' in submit_step["run"]
-    assert '"_DOCKERFILE=${DOCKERFILE}"' in submit_step["run"]
-    assert '"_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"' in submit_step["run"]
-    assert '"_FLOATING_TAG=${LATEST_TAG}"' in submit_step["run"]
-    assert "BUILD_CONTEXT: ." in workflow_text
-    assert "DOCKERFILE: containers/app/Dockerfile" in workflow_text
+    assert "--config cloudbuild/app.yaml" in submit_step["run"]
+    assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
+    assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
     assert "docker/setup-buildx-action" not in workflow_text
     assert "docker/build-push-action" not in workflow_text
     assert "docker/metadata-action" not in workflow_text
@@ -1300,11 +1296,9 @@ def test_publish_runtime_images_uses_cloud_build_artifact_registry_contract() ->
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
     assert "gcloud builds submit ." in submit_step["run"]
-    assert "--config cloudbuild/runtime-image.yaml" in submit_step["run"]
-    assert '"_BUILD_CONTEXT=${BUILD_CONTEXT}"' in submit_step["run"]
-    assert '"_DOCKERFILE=${DOCKERFILE}"' in submit_step["run"]
-    assert '"_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"' in submit_step["run"]
-    assert '"_FLOATING_TAG=${LATEST_TAG}"' in submit_step["run"]
+    assert '--config "${CLOUDBUILD_CONFIG}"' in submit_step["run"]
+    assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
+    assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
     assert "ghcr.io" not in workflow_text
     assert "docker/login-action" not in workflow_text
     assert "docker/build-push-action" not in workflow_text
