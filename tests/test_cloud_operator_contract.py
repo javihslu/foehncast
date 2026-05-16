@@ -746,11 +746,9 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         "promote_candidate",
         "rollback_live",
     ]
-    assert dispatch_inputs["airflow_target"]["default"] == "auto"
+    assert dispatch_inputs["airflow_target"]["default"] == "composer_airflow"
     assert dispatch_inputs["airflow_target"]["type"] == "choice"
     assert dispatch_inputs["airflow_target"]["options"] == [
-        "auto",
-        "retained_host",
         "composer_airflow",
     ]
     assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
@@ -764,10 +762,7 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         "artifact_bucket_name",
         "workload_identity_provider",
         "service_account_email",
-        "online_compose_host_name",
-        "online_compose_host_zone",
         "cloud_composer_airflow_uri",
-        "requested_airflow_target",
         "airflow_target",
         "action",
         "image_uri",
@@ -786,10 +781,6 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
     derived_step = _workflow_step(workflow, "config", "derived")
     assert derived_step["env"]["ACTION_INPUT"] == "${{ github.event.inputs.action }}"
     assert (
-        derived_step["env"]["AIRFLOW_TARGET_INPUT"]
-        == "${{ github.event.inputs.airflow_target }}"
-    )
-    assert (
         derived_step["env"]["ARTIFACT_BUCKET_NAME"]
         == "${{ steps.repo_config.outputs.artifact_bucket_name }}"
     )
@@ -805,21 +796,13 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         derived_step["env"]["CLOUD_COMPOSER_AIRFLOW_URI"]
         == "${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}"
     )
-    assert (
-        derived_step["env"]["PROVISION_ONLINE_COMPOSE_HOST"]
-        == "${{ steps.repo_config.outputs.provision_online_compose_host }}"
-    )
+    assert "PROVISION_ONLINE_COMPOSE_HOST" not in derived_step.get("env", {})
     assert "deploy_candidate|promote_candidate|rollback_live" in derived_step["run"]
-    assert "auto|retained_host|composer_airflow" in derived_step["run"]
     assert (
         "composer_access_ready=\"$(printf '%s' \"${CLOUD_COMPOSER_AIRFLOW_ACCESS_READY:-false}\" | tr '[:upper:]' '[:lower:]')\""
         in derived_step["run"]
     )
     assert "trigger_ready=false" in derived_step["run"]
-    assert (
-        'echo "requested_airflow_target=$requested_airflow_target"'
-        in derived_step["run"]
-    )
     assert 'echo "airflow_target=$airflow_target"' in derived_step["run"]
     assert 'echo "trigger_ready=$trigger_ready"' in derived_step["run"]
 
@@ -832,18 +815,9 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         trigger_job["env"]["ARTIFACT_BUCKET_NAME"]
         == "${{ needs.config.outputs.artifact_bucket_name }}"
     )
-    assert (
-        trigger_job["env"]["HOST_NAME"]
-        == "${{ needs.config.outputs.online_compose_host_name }}"
-    )
-    assert (
-        trigger_job["env"]["HOST_ZONE"]
-        == "${{ needs.config.outputs.online_compose_host_zone }}"
-    )
-    assert (
-        trigger_job["env"]["REQUESTED_AIRFLOW_TARGET"]
-        == "${{ needs.config.outputs.requested_airflow_target }}"
-    )
+    assert "HOST_NAME" not in trigger_job["env"]
+    assert "HOST_ZONE" not in trigger_job["env"]
+    assert "REQUESTED_AIRFLOW_TARGET" not in trigger_job["env"]
     assert (
         trigger_job["env"]["AIRFLOW_TARGET"]
         == "${{ needs.config.outputs.airflow_target }}"
@@ -854,7 +828,7 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
     )
 
     setup_uv_step = _workflow_step(workflow, "trigger", "Set up uv")
-    assert setup_uv_step["if"] == "${{ env.AIRFLOW_TARGET == 'composer_airflow' }}"
+    assert "if" not in setup_uv_step
     assert setup_uv_step["uses"] == "astral-sh/setup-uv@v8.1.0"
 
     composer_deps_step = _workflow_step(
@@ -862,7 +836,7 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         "trigger",
         "Install Composer trigger dependencies",
     )
-    assert composer_deps_step["if"] == "${{ env.AIRFLOW_TARGET == 'composer_airflow' }}"
+    assert "if" not in composer_deps_step
     assert "uv sync --frozen" in composer_deps_step["run"]
 
     payload_step = _workflow_step(workflow, "trigger", "Build runtime release request")
@@ -877,16 +851,9 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
     )
     assert "--output-file runtime-release-request.json" in payload_step["run"]
 
-    refresh_step = _workflow_step(workflow, "trigger", "Refresh operator host checkout")
-    assert refresh_step["if"] == "${{ env.AIRFLOW_TARGET == 'retained_host' }}"
-    assert "gcloud compute ssh" in refresh_step["run"]
-    assert "foehncast-online-compose-sync.service" in refresh_step["run"]
-    assert "--wait" in refresh_step["run"]
-
-    copy_step = _workflow_step(workflow, "trigger", "Copy runtime release request")
-    assert copy_step["if"] == "${{ env.AIRFLOW_TARGET == 'retained_host' }}"
-    assert "gcloud compute scp" in copy_step["run"]
-    assert "/tmp/runtime-release-request.json" in copy_step["run"]
+    trigger_step_names = [s["name"] for s in trigger_job["steps"] if "name" in s]
+    assert "Refresh operator host checkout" not in trigger_step_names
+    assert "Copy runtime release request" not in trigger_step_names
 
     handoff_step = _workflow_step(
         workflow, "trigger", "Trigger runtime release handoff"
@@ -896,27 +863,10 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
     assert "--airflow-api-base-url" in handoff_step["run"]
     assert "--airflow-api-health-endpoint /health" in handoff_step["run"]
     assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in handoff_step["run"]
-    assert (
-        "./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json --airflow-api-base-url http://127.0.0.1:8080/api/v2 --airflow-api-health-endpoint /monitor/health"
-        in handoff_step["run"]
-    )
-    assert (
-        'selected_receiver="retained-host Airflow API adapter"' in handoff_step["run"]
-    )
-    assert 'selected_receiver="Composer Airflow API"' in handoff_step["run"]
-    assert (
-        'echo "- Requested receiver: $REQUESTED_AIRFLOW_TARGET"' in handoff_step["run"]
-    )
-    assert (
-        "Selection rule: prefer Composer Airflow when the managed URI, artifact bucket, and access-ready contract are ready; otherwise fallback to retained-host Airflow API adapter"
-        in handoff_step["run"]
-    )
+    assert "retained" not in handoff_step["run"].lower()
+    assert "ssh" not in handoff_step["run"].lower()
+    assert 'echo "- Receiver: Composer Airflow API"' in handoff_step["run"]
     assert 'echo "- Airflow DAG: runtime_release"' in handoff_step["run"]
-    assert 'echo "- Selected receiver: $selected_receiver"' in handoff_step["run"]
-    assert (
-        'echo "- Fallback receiver: retained-host Airflow API adapter"'
-        in handoff_step["run"]
-    )
     assert (
         "GitHub OIDC plus Google access token to Composer Airflow"
         in handoff_step["run"]
@@ -931,22 +881,14 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
         workflow, "skipped", "Explain skipped runtime release handoff"
     )
     assert (
-        "The selected runtime trigger contract needs all of these inputs before it can run:"
+        "The Composer Airflow trigger contract needs all of these inputs before it can run:"
         in skipped_step["run"]
     )
-    assert (
-        'echo "- Requested receiver: $REQUESTED_AIRFLOW_TARGET"' in skipped_step["run"]
-    )
-    assert (
-        "Automatic receiver selection prefers Composer Airflow when the managed URI, artifact bucket, and access-ready contract are ready"
-        in skipped_step["run"]
-    )
+    assert "retained" not in skipped_step["run"].lower()
     assert "GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=true" in skipped_step["run"]
-    assert "Retained-host fallback requires:" in skipped_step["run"]
-    assert "GCP_PROVISION_ONLINE_COMPOSE_HOST=true" in skipped_step["run"]
     assert "GCP_CLOUD_COMPOSER_AIRFLOW_URI" in skipped_step["run"]
     assert (
-        "Composer handoff also assumes the GitHub service account already maps to an Airflow user or role."
+        "the GitHub service account already maps to an Airflow user or role"
         in skipped_step["run"]
     )
 
