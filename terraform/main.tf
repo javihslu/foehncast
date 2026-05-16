@@ -545,6 +545,37 @@ resource "google_artifact_registry_repository_iam_member" "cloud_build_writer" {
   member     = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
 }
 
+# ---------------------------------------------------------------------------
+# Dedicated Cloud Build service account (least-privilege alternative to the
+# default Cloud Build SA).  Builds are submitted by GitHub Actions via the
+# github_deployer SA; the build itself runs as this SA when
+# --service-account is passed to `gcloud builds submit`.
+# ---------------------------------------------------------------------------
+
+resource "google_service_account" "cloud_build" {
+  account_id   = "foehncast-cloud-build"
+  display_name = "FoehnCast Cloud Build"
+}
+
+resource "google_artifact_registry_repository_iam_member" "cloud_build_sa_writer" {
+  location   = google_artifact_registry_repository.containers.location
+  repository = google_artifact_registry_repository.containers.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.cloud_build.email}"
+}
+
+resource "google_project_iam_member" "cloud_build_sa_log_writer" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloud_build.email}"
+}
+
+resource "google_service_account_iam_member" "github_deployer_impersonate_cloud_build" {
+  service_account_id = google_service_account.cloud_build.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.github_deployer.email}"
+}
+
 resource "google_artifact_registry_repository_iam_member" "cloud_run_reader" {
   location   = google_artifact_registry_repository.containers.location
   repository = google_artifact_registry_repository.containers.name
