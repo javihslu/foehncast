@@ -12,6 +12,14 @@ on:
           - deploy_candidate
           - promote_candidate
           - rollback_live
+      airflow_target:
+        description: Reviewed Airflow receiver for the runtime release handoff
+        required: true
+        default: retained_host
+        type: choice
+        options:
+          - retained_host
+          - composer_airflow
       image_uri:
         description: Immutable image URI for deploy_candidate requests
         required: false
@@ -55,10 +63,13 @@ jobs:
     outputs:
       owner_allowed: ${{ steps.flags.outputs.owner_allowed }}
       project_id: ${{ steps.repo_config.outputs.project_id }}
+      artifact_bucket_name: ${{ steps.repo_config.outputs.artifact_bucket_name }}
       workload_identity_provider: ${{ steps.repo_config.outputs.workload_identity_provider }}
       service_account_email: ${{ steps.repo_config.outputs.service_account_email }}
       online_compose_host_name: ${{ steps.repo_config.outputs.online_compose_host_name }}
       online_compose_host_zone: ${{ steps.repo_config.outputs.online_compose_host_zone }}
+      cloud_composer_airflow_uri: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
+      airflow_target: ${{ steps.derived.outputs.airflow_target }}
       action: ${{ steps.derived.outputs.action }}
       image_uri: ${{ steps.derived.outputs.image_uri }}
       candidate_revision_tag: ${{ steps.derived.outputs.candidate_revision_tag }}
@@ -94,6 +105,7 @@ jobs:
       - id: derived
         env:
           ACTION_INPUT: ${{ github.event.inputs.action }}
+          AIRFLOW_TARGET_INPUT: ${{ github.event.inputs.airflow_target }}
           IMAGE_URI_INPUT: ${{ github.event.inputs.image_uri }}
           CANDIDATE_REVISION_TAG_INPUT: ${{ github.event.inputs.candidate_revision_tag }}
           CANDIDATE_ALIAS_INPUT: ${{ github.event.inputs.candidate_alias }}
@@ -102,6 +114,9 @@ jobs:
           ROLLBACK_MODEL_VERSION_INPUT: ${{ github.event.inputs.rollback_model_version }}
           ROLLBACK_REVISION_TAG_INPUT: ${{ github.event.inputs.rollback_revision_tag }}
           PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
+          ARTIFACT_BUCKET_NAME: ${{ steps.repo_config.outputs.artifact_bucket_name }}
+          PROVISION_CLOUD_COMPOSER_ENVIRONMENT: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
+          CLOUD_COMPOSER_AIRFLOW_URI: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
           PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
           ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
           ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
@@ -111,11 +126,22 @@ jobs:
           set -euo pipefail
 
           action="$(printf '%s' "${ACTION_INPUT:-deploy_candidate}" | tr '[:upper:]' '[:lower:]')"
+          airflow_target="$(printf '%s' "${AIRFLOW_TARGET_INPUT:-retained_host}" | tr '[:upper:]' '[:lower:]')"
+
           case "$action" in
             deploy_candidate|promote_candidate|rollback_live)
               ;;
             *)
               echo "Unsupported action '$action'." >&2
+              exit 1
+              ;;
+          esac
+
+          case "$airflow_target" in
+            retained_host|composer_airflow)
+              ;;
+            *)
+              echo "Unsupported airflow target '$airflow_target'." >&2
               exit 1
               ;;
           esac
@@ -150,13 +176,25 @@ jobs:
           fi
 
           trigger_ready=false
-          if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
-            && -n "$PROJECT_ID" \
-            && -n "$ONLINE_COMPOSE_HOST_NAME" \
-            && -n "$ONLINE_COMPOSE_HOST_ZONE" \
+          if [[ -n "$PROJECT_ID" \
             && -n "$WORKLOAD_IDENTITY_PROVIDER" \
             && -n "$SERVICE_ACCOUNT_EMAIL" ]]; then
-            trigger_ready=true
+            case "$airflow_target" in
+              retained_host)
+                if [[ "$PROVISION_ONLINE_COMPOSE_HOST" == 'true' \
+                  && -n "$ONLINE_COMPOSE_HOST_NAME" \
+                  && -n "$ONLINE_COMPOSE_HOST_ZONE" ]]; then
+                  trigger_ready=true
+                fi
+                ;;
+              composer_airflow)
+                if [[ "$PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == 'true' \
+                  && -n "$CLOUD_COMPOSER_AIRFLOW_URI" \
+                  && -n "$ARTIFACT_BUCKET_NAME" ]]; then
+                  trigger_ready=true
+                fi
+                ;;
+            esac
           fi
 
           case "$action" in
@@ -174,6 +212,7 @@ jobs:
 
           {
             echo "action=$action"
+            echo "airflow_target=$airflow_target"
             echo "image_uri=$image_uri"
             echo "candidate_revision_tag=$candidate_revision_tag"
             echo "candidate_alias=$candidate_alias"
@@ -190,8 +229,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PROJECT_ID: ${{ needs.config.outputs.project_id }}
+      ARTIFACT_BUCKET_NAME: ${{ needs.config.outputs.artifact_bucket_name }}
       HOST_NAME: ${{ needs.config.outputs.online_compose_host_name }}
       HOST_ZONE: ${{ needs.config.outputs.online_compose_host_zone }}
+      AIRFLOW_TARGET: ${{ needs.config.outputs.airflow_target }}
+      CLOUD_COMPOSER_AIRFLOW_URI: ${{ needs.config.outputs.cloud_composer_airflow_uri }}
       ACTION: ${{ needs.config.outputs.action }}
       IMAGE_URI: ${{ needs.config.outputs.image_uri }}
       CANDIDATE_REVISION_TAG: ${{ needs.config.outputs.candidate_revision_tag }}
@@ -210,12 +252,21 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set up uv
+        if: ${{ env.AIRFLOW_TARGET == 'composer_airflow' }}
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install Composer trigger dependencies
+        if: ${{ env.AIRFLOW_TARGET == 'composer_airflow' }}
+        run: uv sync --frozen
+
       - name: Build runtime release request
         run: |
           set -euo pipefail
           python -c 'from datetime import UTC, datetime; import json, os, pathlib; run_url = "/".join([os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], "actions", "runs", os.environ["GITHUB_RUN_ID"]]); payload = {"action": os.environ["ACTION"], "request_source": "github-actions", "requested_at": datetime.now(tz=UTC).isoformat(), "github_repository": os.environ["GITHUB_REPOSITORY"], "github_workflow": os.environ["GITHUB_WORKFLOW"], "github_run_id": os.environ["GITHUB_RUN_ID"], "github_run_url": run_url, "github_sha": os.environ["GITHUB_SHA"], "image_uri": os.environ.get("IMAGE_URI", ""), "candidate_revision_tag": os.environ.get("CANDIDATE_REVISION_TAG", "candidate"), "candidate_alias": os.environ.get("CANDIDATE_ALIAS", "candidate"), "target_alias": os.environ.get("TARGET_ALIAS", "champion"), "rollback_revision": os.environ.get("ROLLBACK_REVISION", ""), "rollback_model_version": os.environ.get("ROLLBACK_MODEL_VERSION", ""), "rollback_revision_tag": os.environ.get("ROLLBACK_REVISION_TAG", "rollback")}; pathlib.Path("runtime-release-request.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")'
 
       - name: Refresh operator host checkout
+        if: ${{ env.AIRFLOW_TARGET == 'retained_host' }}
         run: |
           set -euo pipefail
           gcloud compute ssh "$HOST_NAME" \
@@ -224,6 +275,7 @@ jobs:
             --command "sudo systemctl start --wait foehncast-online-compose-sync.service"
 
       - name: Copy runtime release request
+        if: ${{ env.AIRFLOW_TARGET == 'retained_host' }}
         run: |
           set -euo pipefail
           gcloud compute scp \
@@ -237,10 +289,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          report="$(gcloud compute ssh "$HOST_NAME" \
-            --project "$PROJECT_ID" \
-            --zone "$HOST_ZONE" \
-            --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json")"
+          selected_receiver="retained-host Airflow adapter"
+          selected_auth_path="GitHub OIDC plus SSH to retained host"
+
+          if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
+            selected_receiver="Composer Airflow API"
+            selected_auth_path="GitHub OIDC plus Google access token to Composer Airflow"
+            export FOEHNCAST_AIRFLOW_AUTH_TOKEN="$(gcloud auth print-access-token)"
+            report="$(FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH="gs://${ARTIFACT_BUCKET_NAME}/airflow/reports/runtime-release-latest.json" \
+              uv run ./scripts/trigger-runtime-release.sh \
+                --request-file runtime-release-request.json \
+                --airflow-trigger-mode airflow_api \
+                --airflow-api-base-url "${CLOUD_COMPOSER_AIRFLOW_URI%/}/api/v1" \
+                --airflow-api-health-endpoint /health)"
+          else
+            report="$(gcloud compute ssh "$HOST_NAME" \
+              --project "$PROJECT_ID" \
+              --zone "$HOST_ZONE" \
+              --command "cd /opt/foehncast && ./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json")"
+          fi
 
           printf '%s\n' "$report"
 
@@ -256,10 +323,15 @@ jobs:
             echo "## Runtime release handoff"
             echo
             echo "- Action: $ACTION"
-            echo "- Operator host: $HOST_NAME"
+            echo "- Selected receiver: $selected_receiver"
+            echo "- Fallback receiver: retained-host Airflow adapter"
+            echo "- Auth path: $selected_auth_path"
+            if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
+              echo "- Composer access assumption: the GitHub service account already maps to an Airflow user or role"
+            else
+              echo "- Operator host: $HOST_NAME"
+            fi
             echo "- Airflow DAG: runtime_release"
-            echo "- Current receiver: retained-host Airflow adapter"
-            echo "- Target receiver: Cloud Composer without VM SSH"
             echo "- DAG run: $dag_run_id"
             echo "- Summary path: $report_path"
             echo
@@ -272,20 +344,29 @@ jobs:
     needs: config
     if: ${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready != 'true' }}
     runs-on: ubuntu-latest
+    env:
+      AIRFLOW_TARGET: ${{ needs.config.outputs.airflow_target }}
     steps:
       - name: Explain skipped runtime release handoff
         run: |
           {
             echo "## Runtime release handoff skipped"
             echo
-            echo "The explicit runtime trigger contract needs all of these inputs before it can run:"
-            echo "This is the current retained-host entry contract. The target managed receiver is Cloud Composer without VM SSH."
+            echo "The selected runtime trigger contract needs all of these inputs before it can run:"
             echo "- GCP_PROJECT_ID"
             echo "- GCP_WORKLOAD_IDENTITY_PROVIDER"
             echo "- GCP_SERVICE_ACCOUNT_EMAIL"
-            echo "- GCP_PROVISION_ONLINE_COMPOSE_HOST=true"
-            echo "- GCP_ONLINE_COMPOSE_HOST_NAME"
-            echo "- GCP_ONLINE_COMPOSE_HOST_ZONE"
+            if [[ "$AIRFLOW_TARGET" == "composer_airflow" ]]; then
+              echo "- GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT=true"
+              echo "- GCP_CLOUD_COMPOSER_AIRFLOW_URI"
+              echo "- GCP_ARTIFACT_BUCKET_NAME"
+              echo
+              echo "Composer handoff also assumes the GitHub service account already maps to an Airflow user or role."
+            else
+              echo "- GCP_PROVISION_ONLINE_COMPOSE_HOST=true"
+              echo "- GCP_ONLINE_COMPOSE_HOST_NAME"
+              echo "- GCP_ONLINE_COMPOSE_HOST_ZONE"
+            fi
             echo
             echo "Action-specific coordinates must also be present for the chosen request."
           } >> "$GITHUB_STEP_SUMMARY"

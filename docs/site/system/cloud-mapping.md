@@ -176,6 +176,8 @@ Cloud Composer is the target managed orchestration direction, and Terraform can 
 
 A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket. Terraform also seeds the reviewed PyPI baseline required by the checked-in DAG bundle and merges extra `cloud_composer_pypi_packages` overrides on top. Secret and runtime-config injection, and a reviewed runtime release entry that reaches the managed Airflow surface directly, still need to stop depending on the retained operator host. The retained host remains the active orchestration authority until those boundaries move. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the detailed active-versus-target delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
+The runtime trigger now exposes an explicit receiver selection contract: the retained host stays the default handoff, and Composer Airflow can be selected deliberately once the Composer URI and access path are ready.
+
 ## Active And Target Hosted Mapping
 
 | Concern | Active hosted path | Target hosted direction |

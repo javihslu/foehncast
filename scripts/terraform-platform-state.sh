@@ -289,6 +289,7 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_composer_environment provision_cloud_composer_environment)"
   FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_composer_environment_name cloud_composer_environment_name)"
   FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX="$(trimmed_terraform_output_value "$terraform_dir" cloud_composer_dag_gcs_prefix)"
+  FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI="$(optional_terraform_output_value "$terraform_dir" cloud_composer_airflow_uri)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
   FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_host_name online_compose_host_name)"
@@ -326,6 +327,7 @@ terraform_repo_variable_names() {
     GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT \
     GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME \
     GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX \
+    GCP_CLOUD_COMPOSER_AIRFLOW_URI \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
     GCP_ONLINE_COMPOSE_HOST_NAME \
     GCP_ONLINE_COMPOSE_HOST_ZONE \
@@ -374,6 +376,10 @@ terraform_repo_variable_pairs() {
 
   if terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX"; then
     printf 'GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX"
+  fi
+
+  if terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"; then
+    printf 'GCP_CLOUD_COMPOSER_AIRFLOW_URI\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"
   fi
 
   if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then

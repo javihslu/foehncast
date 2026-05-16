@@ -39,6 +39,7 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ),
     ("GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME", "cloud_composer_environment_name"),
     ("GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX", "cloud_composer_dag_gcs_prefix"),
+    ("GCP_CLOUD_COMPOSER_AIRFLOW_URI", "cloud_composer_airflow_uri"),
     ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
     ("GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
     ("GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
@@ -720,7 +721,7 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
     assert "docker/metadata-action" not in workflow_text
 
 
-def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_contract() -> (
+def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_contract() -> (
     None
 ):
     workflow = _workflow_yaml(".github/workflows/trigger-runtime-release.yml")
@@ -735,6 +736,12 @@ def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_con
         "promote_candidate",
         "rollback_live",
     ]
+    assert dispatch_inputs["airflow_target"]["default"] == "retained_host"
+    assert dispatch_inputs["airflow_target"]["type"] == "choice"
+    assert dispatch_inputs["airflow_target"]["options"] == [
+        "retained_host",
+        "composer_airflow",
+    ]
     assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
     assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
     assert dispatch_inputs["target_alias"]["default"] == "champion"
@@ -743,10 +750,13 @@ def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_con
     assert set(config_job["outputs"]) == {
         "owner_allowed",
         "project_id",
+        "artifact_bucket_name",
         "workload_identity_provider",
         "service_account_email",
         "online_compose_host_name",
         "online_compose_host_zone",
+        "cloud_composer_airflow_uri",
+        "airflow_target",
         "action",
         "image_uri",
         "candidate_revision_tag",
@@ -764,17 +774,39 @@ def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_con
     derived_step = _workflow_step(workflow, "config", "derived")
     assert derived_step["env"]["ACTION_INPUT"] == "${{ github.event.inputs.action }}"
     assert (
+        derived_step["env"]["AIRFLOW_TARGET_INPUT"]
+        == "${{ github.event.inputs.airflow_target }}"
+    )
+    assert (
+        derived_step["env"]["ARTIFACT_BUCKET_NAME"]
+        == "${{ steps.repo_config.outputs.artifact_bucket_name }}"
+    )
+    assert (
+        derived_step["env"]["PROVISION_CLOUD_COMPOSER_ENVIRONMENT"]
+        == "${{ steps.repo_config.outputs.provision_cloud_composer_environment }}"
+    )
+    assert (
+        derived_step["env"]["CLOUD_COMPOSER_AIRFLOW_URI"]
+        == "${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}"
+    )
+    assert (
         derived_step["env"]["PROVISION_ONLINE_COMPOSE_HOST"]
         == "${{ steps.repo_config.outputs.provision_online_compose_host }}"
     )
     assert "deploy_candidate|promote_candidate|rollback_live" in derived_step["run"]
+    assert "retained_host|composer_airflow" in derived_step["run"]
     assert "trigger_ready=false" in derived_step["run"]
+    assert 'echo "airflow_target=$airflow_target"' in derived_step["run"]
     assert 'echo "trigger_ready=$trigger_ready"' in derived_step["run"]
 
     trigger_job = workflow["jobs"]["trigger"]
     assert (
         trigger_job["if"]
         == "${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready == 'true' }}"
+    )
+    assert (
+        trigger_job["env"]["ARTIFACT_BUCKET_NAME"]
+        == "${{ needs.config.outputs.artifact_bucket_name }}"
     )
     assert (
         trigger_job["env"]["HOST_NAME"]
@@ -784,42 +816,86 @@ def test_trigger_runtime_release_workflow_uses_current_retained_host_handoff_con
         trigger_job["env"]["HOST_ZONE"]
         == "${{ needs.config.outputs.online_compose_host_zone }}"
     )
+    assert (
+        trigger_job["env"]["AIRFLOW_TARGET"]
+        == "${{ needs.config.outputs.airflow_target }}"
+    )
+    assert (
+        trigger_job["env"]["CLOUD_COMPOSER_AIRFLOW_URI"]
+        == "${{ needs.config.outputs.cloud_composer_airflow_uri }}"
+    )
+
+    setup_uv_step = _workflow_step(workflow, "trigger", "Set up uv")
+    assert setup_uv_step["if"] == "${{ env.AIRFLOW_TARGET == 'composer_airflow' }}"
+    assert setup_uv_step["uses"] == "astral-sh/setup-uv@v8.1.0"
+
+    composer_deps_step = _workflow_step(
+        workflow,
+        "trigger",
+        "Install Composer trigger dependencies",
+    )
+    assert composer_deps_step["if"] == "${{ env.AIRFLOW_TARGET == 'composer_airflow' }}"
+    assert "uv sync --frozen" in composer_deps_step["run"]
 
     payload_step = _workflow_step(workflow, "trigger", "Build runtime release request")
     assert "runtime-release-request.json" in payload_step["run"]
     assert "github_run_url" in payload_step["run"]
 
     refresh_step = _workflow_step(workflow, "trigger", "Refresh operator host checkout")
+    assert refresh_step["if"] == "${{ env.AIRFLOW_TARGET == 'retained_host' }}"
     assert "gcloud compute ssh" in refresh_step["run"]
     assert "foehncast-online-compose-sync.service" in refresh_step["run"]
     assert "--wait" in refresh_step["run"]
 
     copy_step = _workflow_step(workflow, "trigger", "Copy runtime release request")
+    assert copy_step["if"] == "${{ env.AIRFLOW_TARGET == 'retained_host' }}"
     assert "gcloud compute scp" in copy_step["run"]
     assert "/tmp/runtime-release-request.json" in copy_step["run"]
 
     handoff_step = _workflow_step(
         workflow, "trigger", "Trigger runtime release handoff"
     )
+    assert "uv run ./scripts/trigger-runtime-release.sh" in handoff_step["run"]
+    assert "gcloud auth print-access-token" in handoff_step["run"]
+    assert "--airflow-trigger-mode airflow_api" in handoff_step["run"]
+    assert "--airflow-api-base-url" in handoff_step["run"]
+    assert "--airflow-api-health-endpoint /health" in handoff_step["run"]
+    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in handoff_step["run"]
     assert (
         "./scripts/trigger-runtime-release.sh --request-file /tmp/runtime-release-request.json"
         in handoff_step["run"]
     )
+    assert 'selected_receiver="retained-host Airflow adapter"' in handoff_step["run"]
+    assert 'selected_receiver="Composer Airflow API"' in handoff_step["run"]
     assert 'echo "- Airflow DAG: runtime_release"' in handoff_step["run"]
+    assert 'echo "- Selected receiver: $selected_receiver"' in handoff_step["run"]
     assert (
-        'echo "- Current receiver: retained-host Airflow adapter"'
+        'echo "- Fallback receiver: retained-host Airflow adapter"'
         in handoff_step["run"]
     )
     assert (
-        'echo "- Target receiver: Cloud Composer without VM SSH"' in handoff_step["run"]
+        "GitHub OIDC plus Google access token to Composer Airflow"
+        in handoff_step["run"]
+    )
+    assert (
+        "Composer access assumption: the GitHub service account already maps to an Airflow user or role"
+        in handoff_step["run"]
     )
     assert 'echo "## Runtime release handoff"' in handoff_step["run"]
 
     skipped_step = _workflow_step(
         workflow, "skipped", "Explain skipped runtime release handoff"
     )
-    assert "This is the current retained-host entry contract." in skipped_step["run"]
-    assert "Cloud Composer without VM SSH" in skipped_step["run"]
+    assert (
+        "The selected runtime trigger contract needs all of these inputs before it can run:"
+        in skipped_step["run"]
+    )
+    assert "GCP_PROVISION_ONLINE_COMPOSE_HOST=true" in skipped_step["run"]
+    assert "GCP_CLOUD_COMPOSER_AIRFLOW_URI" in skipped_step["run"]
+    assert (
+        "Composer handoff also assumes the GitHub service account already maps to an Airflow user or role."
+        in skipped_step["run"]
+    )
 
 
 def test_orchestration_docs_describe_current_host_path_and_target_composer_readiness() -> (
@@ -847,6 +923,8 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket."
         in workflow_doc
     )
+    assert "explicit reviewed receiver selection contract" in workflow_doc
+    assert "retained_host` stays the default reviewed receiver" in workflow_doc
     assert "configured runtime release summary target" in workflow_doc
     assert (
         "reviewed runtime release entry still need separate cutover work"
@@ -874,6 +952,7 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         "A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket."
         in cloud_mapping
     )
+    assert "explicit receiver selection contract" in cloud_mapping
     assert (
         "a reviewed runtime release entry that reaches the managed Airflow surface directly"
         in cloud_mapping
@@ -892,6 +971,7 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
     assert "reviewed runtime release entry without VM SSH" in terraform_readme
     assert "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" in terraform_readme
     assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in terraform_readme
+    assert "GCP_CLOUD_COMPOSER_AIRFLOW_URI" in terraform_readme
 
 
 def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
@@ -1049,17 +1129,33 @@ def test_rollback_live_release_workflow_redirects_to_runtime_trigger_contract() 
     )
 
 
-def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
+def test_trigger_runtime_release_script_supports_local_and_api_airflow_contracts() -> (
+    None
+):
     script = _read_text("scripts/trigger-runtime-release.sh")
     cli_common = _read_text("scripts/cli-common.sh")
     helper = _read_text("scripts/airflow-api-common.sh")
 
     assert "require_cli_option_value()" in cli_common
-    assert "Usage: $0 --request-file path" in script
-    assert 'AIRFLOW_API_BASE_URL="http://127.0.0.1:8080/api/v2"' in script
+    assert (
+        "Usage: $0 --request-file path [--airflow-trigger-mode local_cli|airflow_api] [--airflow-api-base-url url] [--airflow-api-health-endpoint path]"
+        in script
+    )
+    assert (
+        'AIRFLOW_TRIGGER_MODE="${FOEHNCAST_AIRFLOW_TRIGGER_MODE:-local_cli}"' in script
+    )
+    assert (
+        'AIRFLOW_API_BASE_URL="${FOEHNCAST_AIRFLOW_API_BASE_URL:-http://127.0.0.1:8080/api/v2}"'
+        in script
+    )
+    assert (
+        'AIRFLOW_API_HEALTH_ENDPOINT="${FOEHNCAST_AIRFLOW_API_HEALTH_ENDPOINT:-/monitor/health}"'
+        in script
+    )
+    assert 'AIRFLOW_API_AUTH_TOKEN="${FOEHNCAST_AIRFLOW_AUTH_TOKEN:-}"' in script
     assert 'source "${ROOT_DIR}/scripts/cli-common.sh"' in script
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in script
-    assert "${AIRFLOW_API_BASE_URL}/monitor/health" in script
+    assert '"$(airflow_api_health_url)"' in script
     assert "python3 -m foehncast.airflow_api" in helper
     assert (
         "${airflow_api_base_url}/dags/${dag_id}/dagRuns?limit=20&order_by=-start_date"
@@ -1068,12 +1164,21 @@ def test_trigger_runtime_release_script_uses_local_airflow_contract() -> None:
     assert "run_airflow_api_helper" in script
     assert "airflow_api_verify_health \\" in script
     assert "airflow_api_wait_for_dag_run_state \\" in script
+    assert "trigger_airflow_dag_run_via_api" in script
+    assert "trigger_airflow_dag_run_via_local_cli" in script
+    assert "--airflow-trigger-mode" in script
+    assert "--airflow-api-base-url" in script
+    assert "--airflow-api-health-endpoint" in script
     assert "python3 -m foehncast.runtime_release" in script
     assert "run_runtime_release_helper" in script
     assert 'PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in helper
     assert "normalize-request" in script
     assert (
         'REQUEST_FILE="$(require_cli_option_value "--request-file" "${1:-}" usage)"'
+        in script
+    )
+    assert (
+        'AIRFLOW_TRIGGER_MODE="$(normalized_airflow_trigger_mode "$AIRFLOW_TRIGGER_MODE")"'
         in script
     )
     assert 'airflow dags trigger "$DAG_ID"' in script
@@ -2280,6 +2385,10 @@ def test_local_and_runtime_release_scripts_share_airflow_shell_helper() -> None:
     assert "airflow_api_wait_for_dag_run_state()" in helper
     assert 'PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in helper
     assert "python3 -m foehncast.airflow_api" in helper
+    assert "Authorization: Bearer ${auth_token}" in helper
+    assert "eval " not in helper
+    assert "_AIRFLOW_API_AUTH_TOKEN" not in helper
+    assert "_AIRFLOW_API_VERSION" not in helper
 
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in bootstrap
     assert 'source "${ROOT_DIR}/scripts/airflow-api-common.sh"' in trigger
