@@ -84,7 +84,13 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-For the rider-facing demo, run `uv run streamlit run ui/app.py` from the repo root. The dashboard uses the same prediction and ranking modules as the API, shows the configured rider profile and current serving model version, and follows the current 14-hour live inference window.
+To run the full bootstrap and tear the stack down automatically:
+
+```bash
+make smoke-local-evaluator
+```
+
+For the rider-facing demo (requires [uv](https://docs.astral.sh/uv/) on the host), run `uv run streamlit run ui/app.py` from the repo root. The dashboard uses the same prediction and ranking modules as the API, shows the configured rider profile and current serving model version, and follows the current 14-hour live inference window.
 
 ### Reproducible pipelines (DVC)
 
