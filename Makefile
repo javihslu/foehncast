@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -40,6 +40,11 @@ test-feature:  ## Run focused feature-pipeline and orchestration tests
 	cd $(ROOT_DIR) && uv run pytest tests/test_ingest.py tests/test_engineer.py tests/test_validate.py tests/test_store.py tests/test_feast_export.py tests/test_orchestration.py tests/test_dags.py -q
 
 check: lint test  ## Run lint and the full test suite
+
+dvc-validate:  ## Validate DVC pipeline DAG, params, and lockfile
+	cd $(ROOT_DIR) && uv run dvc dag
+	cd $(ROOT_DIR) && uv run dvc params diff
+	@test -f $(ROOT_DIR)/dvc.lock || (echo "dvc.lock missing" && exit 1)
 
 docs-build:  ## Build the documentation site
 	cd $(ROOT_DIR) && uv sync --group docs && uv run mkdocs build -f docs/mkdocs.yml --strict
