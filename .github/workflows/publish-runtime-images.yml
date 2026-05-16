@@ -86,11 +86,9 @@ jobs:
       matrix:
         include:
           - image_name: foehncast-airflow
-            context: .
-            dockerfile: containers/airflow/Dockerfile
+            cloudbuild_config: cloudbuild/airflow.yaml
           - image_name: foehncast-mlflow
-            context: containers/mlflow
-            dockerfile: containers/mlflow/Dockerfile
+            cloudbuild_config: cloudbuild/mlflow.yaml
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -129,22 +127,19 @@ jobs:
         name: Submit Cloud Build
         env:
           PROJECT_ID: ${{ needs.config.outputs.project_id }}
-          BUILD_CONTEXT: ${{ matrix.context }}
-          DOCKERFILE: ${{ matrix.dockerfile }}
+          CLOUDBUILD_CONFIG: ${{ matrix.cloudbuild_config }}
           IMAGE_REPOSITORY: ${{ steps.image.outputs.image_repository }}
           LATEST_TAG: ${{ steps.image.outputs.latest_tag }}
         run: |
           set -euo pipefail
 
           substitutions=(
-            "_BUILD_CONTEXT=${BUILD_CONTEXT}"
-            "_DOCKERFILE=${DOCKERFILE}"
             "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}"
             "_COMMIT_SHA=${GITHUB_SHA}"
             "_FLOATING_TAG=${LATEST_TAG}"
           )
           IFS=,
-          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config cloudbuild/runtime-image.yaml --substitutions "${substitutions[*]}" --format='value(id)')"
+          build_id="$(gcloud builds submit . --project "${PROJECT_ID}" --config "${CLOUDBUILD_CONFIG}" --substitutions "${substitutions[*]}" --format='value(id)')"
           unset IFS
           echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
 
