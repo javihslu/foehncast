@@ -396,6 +396,41 @@ def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None
         ]["steps"][1]["value"]
         == 900
     )
+    # New: prediction monitoring and pipeline expansion panels
+    assert (
+        panels["Dataset Drift Detected"]["targets"][0]["expr"]
+        == "max by (dataset, storage_backend) (foehncast_feature_pipeline_dataset_drift_detected)"
+    )
+    assert panels["Pipeline Readiness Gates"]["targets"][0]["expr"] == (
+        "max by (dataset, storage_backend) (foehncast_feature_pipeline_training_handoff_ready)"
+    )
+    assert panels["Pipeline Readiness Gates"]["targets"][1]["expr"] == (
+        "max by (dataset, storage_backend) (foehncast_feature_pipeline_feature_persistence_ready)"
+    )
+    assert (
+        panels["Prediction Event Freshness"]["targets"][0]["expr"]
+        == "time() - max by (model_version) (foehncast_prediction_log_latest_prediction_timestamp_seconds)"
+    )
+    assert (
+        panels["Forecast Timestamp Freshness"]["targets"][0]["expr"]
+        == "time() - max by (model_version) (foehncast_prediction_log_latest_forecast_timestamp_seconds)"
+    )
+    assert (
+        panels["Prediction Monitoring Activity (15m)"]["targets"][0]["expr"]
+        == "sum by (endpoint, result) (increase(foehncast_prediction_monitoring_execution_total[15m]))"
+    )
+    assert (
+        panels["Registered Model Version"]["targets"][0]["expr"]
+        == "max by (dataset, requested_stage) (foehncast_training_pipeline_registered_model_version)"
+    )
+    assert (
+        panels["Feature Range Violations by Spot"]["targets"][0]["expr"]
+        == "sum by (dataset, storage_backend, spot) (foehncast_feature_pipeline_spot_range_violation_count)"
+    )
+    assert (
+        panels["Hosted Sync Status File Present"]["targets"][0]["expr"]
+        == "foehncast_online_compose_sync_status_file_present"
+    )
 
 
 def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default() -> (
