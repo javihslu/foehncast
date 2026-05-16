@@ -73,6 +73,11 @@ output "cloud_run_runtime_service_account" {
   value       = try(google_service_account.cloud_run_runtime.email, "foehncast-cloud-run@${var.project_id}.iam.gserviceaccount.com")
 }
 
+output "cloud_build_service_account" {
+  description = "Dedicated service account for Cloud Build image builds."
+  value       = google_service_account.cloud_build.email
+}
+
 output "online_compose_runtime_service_account" {
   description = "Service account intended for the online compose host runtime when that target is enabled."
   value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null
