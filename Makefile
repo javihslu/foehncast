@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -32,6 +32,9 @@ format:  ## Format the repository
 
 test:  ## Run the full test suite
 	cd $(ROOT_DIR) && uv run pytest -q
+
+coverage:  ## Run tests with coverage report
+	cd $(ROOT_DIR) && uv run pytest --cov --cov-report=term-missing --cov-report=html:reports/htmlcov -q
 
 test-feature:  ## Run focused feature-pipeline and orchestration tests
 	cd $(ROOT_DIR) && uv run pytest tests/test_ingest.py tests/test_engineer.py tests/test_validate.py tests/test_store.py tests/test_feast_export.py tests/test_orchestration.py tests/test_dags.py -q
