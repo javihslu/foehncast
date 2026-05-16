@@ -1,8 +1,4 @@
-"""Thin CLI entry points for DVC pipeline stages.
-
-These wrappers call the same pipeline functions that Airflow uses, but write
-outputs to the local filesystem so DVC can track them as stage artefacts.
-"""
+"""CLI entry points for DVC stages (curate + train)."""
 
 from __future__ import annotations
 
@@ -19,7 +15,7 @@ def _project_root() -> Path:
 
 
 def curate(dataset: str) -> None:
-    """Run the feature pipeline for all configured spots and export to local parquet."""
+    """Fetch, engineer and validate features for every spot, write parquet files."""
     from foehncast.config import get_spots
     from foehncast.feature_pipeline.engineer import engineer_features
     from foehncast.feature_pipeline.ingest import fetch_all_spots
@@ -33,7 +29,7 @@ def curate(dataset: str) -> None:
     spot_config = {spot["id"]: spot for spot in spots}
 
     print(f"Fetching forecasts for {len(spot_ids)} spots...")
-    forecast_frames = fetch_all_spots(spot_ids)
+    forecast_frames = fetch_all_spots()
 
     curated_count = 0
     for spot_id, forecast_df in forecast_frames.items():
@@ -46,7 +42,7 @@ def curate(dataset: str) -> None:
             shore_orientation_deg=spot_config[spot_id].get("shore_orientation_deg", 0),
         )
 
-        validation = run_validation(feature_df)
+        validation = run_validation(feature_df, spot_id)
         if not validation.is_valid:
             print(f"  {spot_id}: validation failed, skipping")
             continue
@@ -64,7 +60,7 @@ def curate(dataset: str) -> None:
 
 
 def train(dataset: str) -> None:
-    """Train the model from local curated data and write metrics to reports/."""
+    """Train on curated parquet data and write metrics + plots to reports/."""
     from foehncast.config import get_model_config, get_rider_config
     from foehncast.training_pipeline.evaluate import compute_metrics
     from foehncast.training_pipeline.label import label_dataset
@@ -125,7 +121,7 @@ def train(dataset: str) -> None:
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")
     print(f"Metrics written to {metrics_path}")
 
-    # Feature importance plot
+    # feature importance plot
     if hasattr(model, "feature_importances_"):
         import matplotlib
 
@@ -152,16 +148,13 @@ def train(dataset: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="python -m foehncast.dvc_stages",
-        description="DVC pipeline stage entry points",
-    )
+    parser = argparse.ArgumentParser(prog="python -m foehncast.dvc_stages")
     subparsers = parser.add_subparsers(dest="stage", required=True)
 
-    curate_parser = subparsers.add_parser("curate", help="Run feature curation")
+    curate_parser = subparsers.add_parser("curate")
     curate_parser.add_argument("--dataset", default="train")
 
-    train_parser = subparsers.add_parser("train", help="Run model training")
+    train_parser = subparsers.add_parser("train")
     train_parser.add_argument("--dataset", default="train")
 
     args = parser.parse_args()

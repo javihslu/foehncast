@@ -1,4 +1,4 @@
-"""Tests for the DVC pipeline definition and stage contract."""
+"""Contract tests for dvc.yaml and the DVC stage entry points."""
 
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def test_dvc_train_command_uses_dvc_stages_module() -> None:
 
 
 def test_dvc_curate_covers_feature_pipeline_stages() -> None:
-    """The curate stage wraps all four feature-pipeline stages."""
+    """Curate stage depends on ingest, engineer, validate."""
     dvc = _load_dvc_yaml()
     deps = dvc["stages"]["curate"]["deps"]
     dep_text = " ".join(deps)
@@ -93,7 +93,7 @@ def test_dvc_curate_covers_feature_pipeline_stages() -> None:
 
 
 def test_dvc_train_covers_training_pipeline_stages() -> None:
-    """The train stage wraps train + evaluate (register stays in Airflow)."""
+    """Train stage depends on train, evaluate, label."""
     dvc = _load_dvc_yaml()
     deps = dvc["stages"]["train"]["deps"]
     dep_text = " ".join(deps)
@@ -130,3 +130,30 @@ def test_dvc_stages_module_is_importable() -> None:
     assert hasattr(dvc_stages, "curate")
     assert hasattr(dvc_stages, "train")
     assert hasattr(dvc_stages, "main")
+
+
+# ---------------------------------------------------------------------------
+# 6. DVC param keys actually exist in config.yaml
+# ---------------------------------------------------------------------------
+
+
+def test_dvc_params_reference_valid_config_keys() -> None:
+    """Catch typos like rider_profile vs rider in DVC param references."""
+    dvc = _load_dvc_yaml()
+    config = yaml.safe_load((REPO_ROOT / "config.yaml").read_text())
+
+    for stage_name, stage in dvc["stages"].items():
+        for param_entry in stage.get("params", []):
+            if not isinstance(param_entry, dict):
+                continue
+            for _file, keys in param_entry.items():
+                if keys is None:
+                    continue
+                for key in keys:
+                    # walk dotted keys like "model.features"
+                    node = config
+                    for part in key.split("."):
+                        assert isinstance(node, dict) and part in node, (
+                            f"{stage_name}: param '{key}' not in config.yaml"
+                        )
+                        node = node[part]
