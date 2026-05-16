@@ -227,7 +227,7 @@ jobs:
           workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
           service_account: ${{ needs.config.outputs.service_account_email }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
