@@ -28,7 +28,7 @@ stages:
     params:
       - config.yaml:
           - model
-          - rider_profile
+          - rider
     metrics:
       - reports/train_metrics.json:
           cache: false
@@ -36,5 +36,5 @@ stages:
       - reports/feature_importance.png:
           cache: false
 
-params:
+vars:
   - dataset: train

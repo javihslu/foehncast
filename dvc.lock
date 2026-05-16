@@ -1,0 +1,214 @@
+schema: '2.0'
+stages:
+  curate:
+    cmd: python -m foehncast.dvc_stages curate --dataset train
+    deps:
+    - path: config.yaml
+      hash: md5
+      md5: cce93314edb22eb7d8ebe903134f6bc1
+      size: 6881
+    - path: src/foehncast/dvc_stages.py
+      hash: md5
+      md5: da9f98cfd4870e0e2ea47794b8614bc4
+      size: 6010
+    - path: src/foehncast/feature_pipeline/engineer.py
+      hash: md5
+      md5: 2a15251b4e9b6b5983f1a17fe37742c2
+      size: 6335
+    - path: src/foehncast/feature_pipeline/ingest.py
+      hash: md5
+      md5: 3f7bc457401217f607c5e66abab267bd
+      size: 5487
+    - path: src/foehncast/feature_pipeline/store.py
+      hash: md5
+      md5: ae0e1ce70055a6c6dc514b3cfa00b7b9
+      size: 13428
+    - path: src/foehncast/feature_pipeline/validate.py
+      hash: md5
+      md5: dee15887040f2c5f34d716c411467076
+      size: 3747
+    params:
+      config.yaml:
+        model.features:
+        - wind_speed_10m
+        - wind_speed_80m
+        - wind_gusts_10m
+        - temperature_2m
+        - relative_humidity_2m
+        - hour_of_day_sin
+        - hour_of_day_cos
+        - day_of_year_sin
+        - day_of_year_cos
+        - wind_direction_10m_sin
+        - wind_direction_10m_cos
+        - wind_steadiness
+        - gust_excess_10m
+        - shore_alignment
+        spots:
+        - id: silvaplana
+          name: Silvaplana
+          lat: 46.45
+          lon: 9.79
+          altitude_m: 1800
+          shore_orientation_deg: 225
+          ideal_wind_dir_min: 180
+          ideal_wind_dir_max: 270
+          difficulty: intermediate
+          water_type: lake
+          canton: GR
+        - id: urnersee
+          name: Urnersee
+          lat: 46.93
+          lon: 8.6
+          altitude_m: 434
+          shore_orientation_deg: 180
+          ideal_wind_dir_min: 150
+          ideal_wind_dir_max: 210
+          difficulty: intermediate
+          water_type: lake
+          canton: UR
+        - id: neuchatel
+          name: Lac de Neuchatel
+          lat: 46.85
+          lon: 6.85
+          altitude_m: 429
+          shore_orientation_deg: 270
+          ideal_wind_dir_min: 200
+          ideal_wind_dir_max: 310
+          difficulty: beginner
+          water_type: lake
+          canton: NE
+        - id: bodensee
+          name: Bodensee
+          lat: 47.63
+          lon: 9.37
+          altitude_m: 395
+          shore_orientation_deg: 180
+          ideal_wind_dir_min: 180
+          ideal_wind_dir_max: 300
+          difficulty: beginner
+          water_type: lake
+          canton: TG
+        - id: walensee
+          name: Walensee
+          lat: 47.12
+          lon: 9.22
+          altitude_m: 419
+          shore_orientation_deg: 270
+          ideal_wind_dir_min: 220
+          ideal_wind_dir_max: 320
+          difficulty: intermediate
+          water_type: lake
+          canton: SG
+        - id: thunersee
+          name: Thunersee
+          lat: 46.72
+          lon: 7.72
+          altitude_m: 558
+          shore_orientation_deg: 270
+          ideal_wind_dir_min: 220
+          ideal_wind_dir_max: 330
+          difficulty: advanced
+          water_type: lake
+          canton: BE
+    outs:
+    - path: data/train
+      hash: md5
+      md5: d25a37e5f1bef05ffed930e973561045.dir
+      size: 196480
+      nfiles: 6
+  train:
+    cmd: python -m foehncast.dvc_stages train --dataset train
+    deps:
+    - path: config.yaml
+      hash: md5
+      md5: cce93314edb22eb7d8ebe903134f6bc1
+      size: 6881
+    - path: data/train
+      hash: md5
+      md5: d25a37e5f1bef05ffed930e973561045.dir
+      size: 196480
+      nfiles: 6
+    - path: src/foehncast/dvc_stages.py
+      hash: md5
+      md5: da9f98cfd4870e0e2ea47794b8614bc4
+      size: 6010
+    - path: src/foehncast/training_pipeline/evaluate.py
+      hash: md5
+      md5: 56b6fdacd4fa1e03b964e4f0907bb941
+      size: 3231
+    - path: src/foehncast/training_pipeline/label.py
+      hash: md5
+      md5: 8070226feca8d24598d2b411a6479705
+      size: 3281
+    - path: src/foehncast/training_pipeline/train.py
+      hash: md5
+      md5: 4832c42ad6651faab684afa90ffcd507
+      size: 5735
+    params:
+      config.yaml:
+        model:
+          algorithm: random_forest
+          target: quality_index
+          raw_features:
+          - wind_speed_10m
+          - wind_speed_80m
+          - wind_speed_120m
+          - wind_direction_10m
+          - wind_direction_80m
+          - wind_gusts_10m
+          - temperature_2m
+          - precipitation
+          - relative_humidity_2m
+          - cloud_cover
+          - pressure_msl
+          - cape
+          - lifted_index
+          engineered_features:
+          - hour_of_day_sin
+          - hour_of_day_cos
+          - day_of_year_sin
+          - day_of_year_cos
+          - wind_direction_10m_sin
+          - wind_direction_10m_cos
+          - wind_steadiness
+          - gust_excess_10m
+          - gust_factor
+          - shore_alignment
+          features:
+          - wind_speed_10m
+          - wind_speed_80m
+          - wind_gusts_10m
+          - temperature_2m
+          - relative_humidity_2m
+          - hour_of_day_sin
+          - hour_of_day_cos
+          - day_of_year_sin
+          - day_of_year_cos
+          - wind_direction_10m_sin
+          - wind_direction_10m_cos
+          - wind_steadiness
+          - gust_excess_10m
+          - shore_alignment
+          test_size: 0.2
+          random_state: 42
+        rider:
+          weight_kg: 80
+          home_lat: 47.02
+          home_lon: 8.65
+          home_location: Schwyz
+          quiver_m2:
+          - 5
+          - 7
+          - 8
+          - 10
+          - 12
+    outs:
+    - path: reports/feature_importance.png
+      hash: md5
+      md5: a50fa2f74a1ea58923d10646ae4f057c
+      size: 33934
+    - path: reports/train_metrics.json
+      hash: md5
+      md5: 63d5bd4723c194d2f5ec29ed6492fe4c
+      size: 218
