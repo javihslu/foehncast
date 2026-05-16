@@ -325,12 +325,121 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "id": 36,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "max by (dataset, storage_backend) (foehncast_feature_pipeline_training_handoff_ready)",
+          "legendFormat": "{{dataset}} / {{storage_backend}} / training handoff",
+          "refId": "A"
+        },
+        {
+          "expr": "max by (dataset, storage_backend) (foehncast_feature_pipeline_feature_persistence_ready)",
+          "legendFormat": "{{dataset}} / {{storage_backend}} / persistence",
+          "refId": "B"
+        }
+      ],
+      "title": "Pipeline Readiness Gates",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "id": 35,
+      "targets": [
+        {
+          "expr": "max by (dataset, storage_backend) (foehncast_feature_pipeline_dataset_drift_detected)",
+          "legendFormat": "{{dataset}} / {{storage_backend}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Dataset Drift Detected",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 43
       },
       "id": 101,
       "panels": [],
@@ -374,7 +483,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 38
+        "y": 44
       },
       "id": 6,
       "targets": [
@@ -424,7 +533,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 38
+        "y": 44
       },
       "id": 7,
       "targets": [
@@ -446,7 +555,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 38
+        "y": 44
       },
       "id": 8,
       "targets": [
@@ -468,7 +577,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 46
+        "y": 52
       },
       "id": 9,
       "targets": [
@@ -490,7 +599,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 46
+        "y": 52
       },
       "id": 10,
       "targets": [
@@ -512,7 +621,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 46
+        "y": 52
       },
       "id": 11,
       "targets": [
@@ -557,7 +666,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 52
+        "y": 58
       },
       "id": 12,
       "targets": [
@@ -602,7 +711,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 52
+        "y": 58
       },
       "id": 13,
       "targets": [
@@ -624,7 +733,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 52
+        "y": 58
       },
       "id": 14,
       "targets": [
@@ -638,12 +747,141 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 66
+      },
+      "id": 39,
+      "targets": [
+        {
+          "expr": "sum by (endpoint, result) (increase(foehncast_prediction_monitoring_execution_total[15m]))",
+          "legendFormat": "{{endpoint}} / {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prediction Monitoring Activity (15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3600
+              },
+              {
+                "color": "red",
+                "value": 86400
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 66
+      },
+      "id": 38,
+      "targets": [
+        {
+          "expr": "time() - max by (model_version) (foehncast_prediction_log_latest_forecast_timestamp_seconds)",
+          "legendFormat": "model {{model_version}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Forecast Timestamp Freshness",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 3600
+              },
+              {
+                "color": "red",
+                "value": 86400
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 66
+      },
+      "id": 37,
+      "targets": [
+        {
+          "expr": "time() - max by (model_version) (foehncast_prediction_log_latest_prediction_timestamp_seconds)",
+          "legendFormat": "model {{model_version}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Prediction Event Freshness",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 74
       },
       "id": 102,
       "panels": [],
@@ -659,7 +897,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 61
+        "y": 75
       },
       "id": 22,
       "targets": [
@@ -681,7 +919,7 @@
         "h": 6,
         "w": 9,
         "x": 6,
-        "y": 61
+        "y": 75
       },
       "id": 23,
       "targets": [
@@ -727,7 +965,7 @@
         "h": 6,
         "w": 9,
         "x": 15,
-        "y": 61
+        "y": 75
       },
       "id": 24,
       "options": {
@@ -794,7 +1032,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 67
+        "y": 81
       },
       "id": 21,
       "options": {
@@ -828,7 +1066,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 67
+        "y": 81
       },
       "id": 25,
       "options": {
@@ -883,7 +1121,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 75
+        "y": 89
       },
       "id": 26,
       "targets": [
@@ -905,7 +1143,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 75
+        "y": 89
       },
       "id": 28,
       "targets": [
@@ -951,7 +1189,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 97
       },
       "id": 27,
       "targets": [
@@ -965,12 +1203,128 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 103
+      },
+      "id": 40,
+      "targets": [
+        {
+          "expr": "max by (dataset, requested_stage) (foehncast_training_pipeline_registered_model_version)",
+          "legendFormat": "{{dataset}} / {{requested_stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Registered Model Version",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 103
+      },
+      "id": 41,
+      "targets": [
+        {
+          "expr": "sum by (dataset, storage_backend, spot) (foehncast_feature_pipeline_spot_range_violation_count)",
+          "legendFormat": "{{dataset}} / {{spot}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Feature Range Violations by Spot",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 900
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 103
+      },
+      "id": 42,
+      "targets": [
+        {
+          "expr": "foehncast_online_compose_sync_status_file_present",
+          "legendFormat": "sync status",
+          "refId": "A"
+        }
+      ],
+      "title": "Hosted Sync Status File Present",
+      "type": "stat"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 89
+        "y": 109
       },
       "id": 103,
       "panels": [],
@@ -1009,7 +1363,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 90
+        "y": 110
       },
       "id": 29,
       "targets": [
@@ -1054,7 +1408,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 90
+        "y": 110
       },
       "id": 30,
       "targets": [
@@ -1104,7 +1458,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 98
+        "y": 118
       },
       "id": 19,
       "targets": [
@@ -1123,7 +1477,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 106
+        "y": 126
       },
       "id": 104,
       "panels": [],
@@ -1148,7 +1502,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 107
+        "y": 127
       },
       "id": 32,
       "targets": [
@@ -1189,7 +1543,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 107
+        "y": 127
       },
       "id": 33,
       "targets": [
@@ -1220,7 +1574,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 115
+        "y": 135
       },
       "id": 34,
       "targets": [
@@ -1250,6 +1604,6 @@
   "timezone": "browser",
   "title": "FoehnCast Monitoring",
   "uid": "foehncast-monitoring",
-  "version": 10,
+  "version": 11,
   "weekStart": ""
 }
