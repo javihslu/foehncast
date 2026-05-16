@@ -1,4 +1,4 @@
-"""Streamlit dashboard for the FoehnCast live demo."""
+"""Streamlit rider console for FoehnCast spot recommendations."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from foehncast.inference_pipeline.dashboard import (
 )
 
 st.set_page_config(
-    page_title="FoehnCast Live Demo",
+    page_title="FoehnCast Rider Console",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -247,12 +247,12 @@ def main() -> None:
     st.markdown(
         """
         <section class="hero-shell">
-          <p class="eyebrow">MS3 Live Demo</p>
-          <h1 class="hero-title">FoehnCast Rider Console</h1>
+          <p class="eyebrow">FoehnCast</p>
+          <h1 class="hero-title">Rider Console</h1>
           <p class="hero-lede">
-            One rider profile, six validated Swiss spots, one current serving model. This dashboard
-            reuses the live prediction and ranking modules behind the API so the demo stays on the
-            same inference path the repository already validates.
+            One rider profile, six Swiss spots, one served model. Ranked recommendations
+            combine live Open-Meteo forecasts, engineered wind features, drive-time estimates,
+            and the current champion model through the same inference path the API serves.
           </p>
         </section>
         """,
@@ -264,15 +264,15 @@ def main() -> None:
     default_spot_ids = [spot["id"] for spot in available_spots]
 
     with st.sidebar:
-        st.markdown("### Demo Scope")
+        st.markdown("### Spot Selection")
         selected_spot_ids = st.multiselect(
-            "Spot selector",
+            "Spots",
             options=default_spot_ids,
             default=default_spot_ids,
             format_func=lambda spot_id: _spot_label(spot_lookup, spot_id),
-            help="Choose the configured spots you want in the live ranking run.",
+            help="Choose the configured spots to include in the live ranking.",
         )
-        if st.button("Refresh live forecast", use_container_width=True):
+        if st.button("Refresh forecast", use_container_width=True):
             _live_dashboard_data.clear()
 
     if not selected_spot_ids:
@@ -281,12 +281,12 @@ def main() -> None:
 
     try:
         with st.spinner(
-            "Loading live forecasts, drive times, and ranked recommendations..."
+            "Loading forecasts, drive times, and ranked recommendations..."
         ):
             dashboard_data = _live_dashboard_data(tuple(selected_spot_ids))
     except Exception as exc:
         st.error(
-            "The live demo could not load the current forecast-model stack. "
+            "Could not load the current forecast and model stack. "
             "Check MLflow, network access, and the configured serving model alias."
         )
         st.exception(exc)
@@ -302,7 +302,7 @@ def main() -> None:
     with st.sidebar:
         st.markdown(_profile_card(rider_profile), unsafe_allow_html=True)
         st.caption(
-            "Drive-time ranking uses the configured rider home in config.yaml and live OSRM route estimates."
+            "Drive-time ranking uses the rider home from config.yaml and live OSRM route estimates."
         )
 
     metric_columns = st.columns(4)
@@ -325,14 +325,14 @@ def main() -> None:
     left_column, right_column = st.columns([1.25, 1.0], gap="large")
 
     with left_column:
-        st.subheader("Ranked Spot Recommendations")
+        st.subheader("Ranked Recommendations")
         st.dataframe(
             build_ranking_frame(ranked_spots),
             use_container_width=True,
             hide_index=True,
         )
         st.caption(
-            "Ranking combines peak forecast quality, rideable duration, and ride-to-drive return for the configured rider."
+            "Ranking combines peak forecast quality, rideable duration, and ride-to-drive return."
         )
 
     with right_column:
