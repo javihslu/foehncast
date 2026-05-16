@@ -23,6 +23,7 @@ from foehncast.config import (
 from foehncast.feature_pipeline.store import read_features
 from foehncast.training_pipeline.evaluate import compute_metrics
 from foehncast.training_pipeline.label import label_dataset
+from foehncast.training_pipeline.provenance import get_git_commit, hash_dataframe
 
 
 def load_training_data(dataset: str = "train") -> tuple[pd.DataFrame, pd.Series]:
@@ -118,6 +119,7 @@ def run_training_pipeline(
     mlflow.set_experiment(mlflow_config["experiment_name"])
 
     features_df, target_series = load_training_data(dataset=dataset)
+    data_hash = hash_dataframe(pd.concat([features_df, target_series], axis=1))
     (
         features_train,
         features_test,
@@ -152,6 +154,8 @@ def run_training_pipeline(
                 "test_size": resolved_model_config["test_size"],
                 "random_state": resolved_model_config["random_state"],
                 "features": ",".join(resolved_model_config["features"]),
+                "git_commit": get_git_commit(),
+                "data_hash": data_hash,
             }
         )
         mlflow.log_metrics(metrics)
