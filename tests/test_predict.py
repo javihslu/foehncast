@@ -553,7 +553,7 @@ def test_metrics_endpoint_returns_prometheus_payload(
     )
     monkeypatch.setattr(
         serve,
-        "render_online_compose_sync_prometheus_metrics",
+        "render_hosted_sync_prometheus_metrics",
         lambda: hosted_sync_payload,
     )
     client = TestClient(serve.app)
