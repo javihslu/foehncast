@@ -196,7 +196,7 @@ The repository uses two image-publication workflows that share one hosted build 
 - `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry for the retained operator host
 - `.github/workflows/publish-composer-dags.yml` syncs the reviewed DAG and source bundle into the provisioned Composer DAG bucket
 
-Artifact Registry is the canonical hosted image registry in this contract. GHCR convenience artifacts, if published separately, are not the default hosted deployment path.
+Artifact Registry is the canonical hosted image registry in this contract.
 
 The Composer DAG bundle path, the reviewed Composer PyPI baseline, and the reviewed Composer secret-env path narrow the VM-checkout, dependency-installation, and managed-secret gaps, but making the Composer API handoff the default runtime release path and broader managed secret or runtime-config delivery still belong to later orchestration issues.
 
@@ -289,8 +289,6 @@ After the first bootstrap has created the workload identity provider, deployer s
 ## Shared Repo Environment
 
 The upstream repository workflows are intended for the shared project environment. They use repository-scoped variables, package publishing, and cloud identities that belong to that shared environment.
-
-The upstream repository may also publish public GHCR images as convenience artifacts. Those images are meant to reduce setup friction, not to fund or centralize other people's deployments.
 
 The upstream workflows are guarded so jobs run only when both the original actor and the triggering actor are the repository owner.
 
