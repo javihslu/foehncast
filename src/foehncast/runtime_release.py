@@ -268,9 +268,10 @@ def normalize_runtime_release_request(
         ).lower(),
     }
 
-    if not normalized_request["selected_airflow_target"] and normalized_request[
-        "requested_airflow_target"
-    ] in {"retained_host", "composer_airflow"}:
+    if (
+        not normalized_request["selected_airflow_target"]
+        and normalized_request["requested_airflow_target"] == "composer_airflow"
+    ):
         normalized_request["selected_airflow_target"] = normalized_request[
             "requested_airflow_target"
         ]

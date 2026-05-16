@@ -155,7 +155,7 @@ def test_write_runtime_release_request_file_persists_normalized_payload(
             "GITHUB_WORKFLOW": "Trigger Runtime Release",
             "GITHUB_RUN_ID": "99",
             "GITHUB_SHA": "def456",
-            "REQUESTED_AIRFLOW_TARGET": "retained_host",
+            "REQUESTED_AIRFLOW_TARGET": "composer_airflow",
             "IMAGE_URI": "europe-west6-docker.pkg.dev/demo/foehncast/foehncast-app:sha-123",
         },
         requested_at="2026-05-16T12:05:00+00:00",
@@ -164,8 +164,8 @@ def test_write_runtime_release_request_file_persists_normalized_payload(
     request = json.loads(request_path.read_text(encoding="utf-8"))
     assert request["action"] == "deploy_candidate"
     assert request["requested_at"] == "2026-05-16T12:05:00+00:00"
-    assert request["requested_airflow_target"] == "retained_host"
-    assert request["selected_airflow_target"] == "retained_host"
+    assert request["requested_airflow_target"] == "composer_airflow"
+    assert request["selected_airflow_target"] == "composer_airflow"
     assert request["image_uri"]
 
 
