@@ -549,15 +549,15 @@ def test_composer_readiness_docs_describe_reviewed_pypi_baseline() -> None:
     assert "reviewed Composer PyPI package baseline" in terraform_readme
     assert "cloud_composer_pypi_packages" in terraform_readme
     assert (
-        "Composer now gets a reviewed PyPI baseline for the checked-in DAG bundle"
+        "Composer gets a reviewed PyPI baseline for the checked-in DAG bundle"
         in workflow_doc
     )
     assert (
-        "Terraform now seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle"
+        "Terraform seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle"
         in workflow_doc
     )
     assert (
-        "Terraform also seeds the reviewed PyPI baseline required by the checked-in DAG bundle"
+        "Terraform seeds the reviewed PyPI baseline required by the checked-in DAG bundle"
         in cloud_mapping_doc
     )
 
@@ -893,79 +893,38 @@ def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_cont
     )
 
 
-def test_orchestration_docs_describe_current_host_path_and_target_composer_readiness() -> (
-    None
-):
+def test_orchestration_docs_describe_hosted_composer_architecture() -> None:
     workflow_doc = _read_text("docs/site/system/delivery-and-operator-workflow.md")
     cloud_mapping = _read_text("docs/site/system/cloud-mapping.md")
     terraform_readme = _read_text("terraform/README.md")
 
-    assert (
-        "The current hosted orchestration path and the target managed direction are different on purpose."
-        in workflow_doc
-    )
-    assert (
-        "| Hosted Airflow surface | retained operator host | Cloud Composer |"
-        in workflow_doc
-    )
-    assert "reviewed request should reach Composer without VM SSH" in workflow_doc
-    assert (
-        "a reviewed DAG delivery path that does not depend on a VM checkout"
-        in workflow_doc
-    )
+    assert "The hosted architecture is Cloud Build plus Cloud Composer." in workflow_doc
+    assert "| Hosted Airflow surface | Cloud Composer |" in workflow_doc
     assert ".github/workflows/publish-composer-dags.yml" in workflow_doc
     assert (
-        "GitHub can now publish the repo-managed DAG and source bundle into the provisioned Composer DAG bucket."
+        "GitHub publishes the repo-managed DAG and source bundle into the Composer DAG bucket."
         in workflow_doc
     )
-    assert "explicit reviewed receiver selection contract" in workflow_doc
-    assert "`auto` is the default reviewed selection mode" in workflow_doc
+    assert "reviewed receiver selection" in workflow_doc
     assert "configured runtime release summary target" in workflow_doc
-    assert "requested and selected receiver metadata" in workflow_doc
-    assert (
-        "Trigger Runtime Release now prefers Composer Airflow automatically"
-        in workflow_doc
-    )
-    assert (
-        "Composer can now consume reviewed `sm://...` Secret Manager env references"
-        in workflow_doc
-    )
-    assert "access-ready contract are all present" in workflow_doc
-    assert (
-        "broader managed secret and runtime-config delivery across the hosted orchestration surface"
-        in workflow_doc
-    )
-    assert (
-        "The target managed direction is the same reviewed request reaching Composer without a retained-host refresh step."
-        in workflow_doc
-    )
-    assert (
-        "Terraform can provision the managed surface ahead of that cutover"
-        in workflow_doc
-    )
+    assert "requested receiver metadata" in workflow_doc
+    assert "Cloud Composer is the hosted orchestration surface" in workflow_doc
+    assert "managed secret path" in workflow_doc
 
     assert (
-        "Cloud Composer is the target managed orchestration direction, and Terraform can now provision a Cloud Composer environment for readiness work."
+        "Cloud Composer is the hosted orchestration surface. Terraform provisions the Cloud Composer environment."
         in cloud_mapping
     )
-    assert "durable GCS storage instead of a VM-local report path" in cloud_mapping
+    assert "Runtime release acknowledgements use durable GCS storage." in cloud_mapping
     assert (
-        "A reviewed DAG and source bundle can now sync to the provisioned Composer DAG bucket."
-        in cloud_mapping
-    )
-    assert "explicit receiver selection contract" in cloud_mapping
-    assert (
-        "reviewed runtime release entry that automatically prefers the managed Airflow surface"
+        "A reviewed DAG and source bundle syncs to the Composer DAG bucket."
         in cloud_mapping
     )
     assert (
-        "hosted runtime image publication already runs through Cloud Build"
+        "reviewed runtime release entry that reaches the Composer Airflow API"
         in cloud_mapping
     )
-    assert (
-        "Cloud Build is the active hosted build surface, and Cloud Composer is the intended managed orchestration direction."
-        in cloud_mapping
-    )
+    assert "Cloud Build is the hosted image build surface." in cloud_mapping
     assert (
         "GitHub-reviewed workflows submit Cloud Build builds that publish app, Airflow, and MLflow runtime images to Artifact Registry"
         in cloud_mapping
@@ -975,18 +934,14 @@ def test_orchestration_docs_describe_current_host_path_and_target_composer_readi
         in cloud_mapping
     )
     assert "FOEHNCAST_PIPELINE_REPORT_DIR" in cloud_mapping
-    assert (
-        "Cloud Run `/metrics` can read the same feature and training summary evidence"
-        in cloud_mapping
-    )
-    assert (
-        "URI, artifact bucket, and access-ready contract are all in place"
-        in cloud_mapping
-    )
+    assert "Cloud Composer, Cloud Run" in cloud_mapping
     assert "reviewed Secret Manager-backed env-ref path for Composer" in cloud_mapping
     assert (
-        "The retained host remains the active orchestration authority until those boundaries move."
+        "Cloud Composer is provisioned as the hosted orchestration surface."
         in cloud_mapping
+    )
+    assert (
+        "publish reviewed hosted runtime images to Artifact Registry" in cloud_mapping
     )
 
     assert (

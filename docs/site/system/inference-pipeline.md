@@ -163,7 +163,7 @@ See [Architecture](architecture.md) for the lane summary and [Hosted Full-Stack]
 - it keeps live requests narrow enough to verify through simple route and dashboard tests
 - it reuses the shared feature contract instead of inventing a serving-only schema
 - it ties responses back to a concrete registry version without giving the app promotion authority
-- it lets one FastAPI contract run locally, on Cloud Run, and on the retained hosted full-stack surface without changing the serving contract
+- it lets one FastAPI contract run locally, on Cloud Run, and on the hosted operator surface without changing the serving contract
 - it keeps the Feast lookup path useful for integration checks while leaving prediction and ranking available from the core app alone
 
 See [Architecture](architecture.md), [Training Pipeline](training-pipeline.md), [Monitoring](monitoring.md), and [Cloud Mapping](cloud-mapping.md) for the surrounding system boundaries.
