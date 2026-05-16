@@ -525,9 +525,7 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
     monkeypatch.setattr(
         orchestration,
         "_run_feature_pipeline_result",
-        lambda dataset="train",
-        auto_retraining_mode=None,
-        training_request_stage="Production": {
+        lambda dataset="train", auto_retraining_mode=None, training_request_stage="Production": {
             "dataset": dataset,
             "storage_backend": "s3",
             "stored_spots": ["silvaplana", "urnersee"],
