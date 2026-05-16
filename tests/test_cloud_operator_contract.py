@@ -711,10 +711,10 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
     assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
 
     auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v2"
+    assert auth_step["uses"] == "google-github-actions/auth@v3"
 
     setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
     assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
@@ -1231,10 +1231,10 @@ def test_publish_composer_dags_workflow_uses_repo_backed_composer_contract() -> 
     assert 'echo "publish_ready=$publish_ready"' in derived_step["run"]
 
     auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v2"
+    assert auth_step["uses"] == "google-github-actions/auth@v3"
 
     setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
     assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
 
     publish_step = _workflow_step(workflow, "publish", "Publish Composer DAG bundle")
@@ -1288,10 +1288,10 @@ def test_publish_runtime_images_uses_cloud_build_artifact_registry_contract() ->
     assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
 
     auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v2"
+    assert auth_step["uses"] == "google-github-actions/auth@v3"
 
     setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v2"
+    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
     assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
