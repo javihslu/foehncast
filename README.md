@@ -88,14 +88,27 @@ For the rider-facing demo, run `uv run streamlit run ui/app.py` from the repo ro
 
 ### Reproducible pipelines (DVC)
 
-Data and training stages are versioned with [DVC](https://dvc.org). With the local stack running:
+DVC is the reproducible, file-based path for the offline parts of the FTI design. It does not replace Airflow or the API.
+
+- `curate` in `dvc.yaml` runs ingest, engineer, validate, and writes curated parquet files to `data/<dataset>/`
+- `train` reads that curated dataset, labels it, trains the model, and writes metrics and plots to `reports/`
+- both stages go through `python -m foehncast.dvc_stages`, so the DVC path reuses the same feature and training modules as the rest of the repo
+- inference stays outside DVC, and model registration or alias changes stay in the MLflow and operator path
+
+| If you want to... | Use |
+|------|-----|
+| rerun offline feature and training steps locally or in CI | `dvc repro` |
+| inspect scheduled runs, retries, and asset hand-offs | Airflow |
+| serve live predictions and rankings | FastAPI app |
+
+With the local stack running:
 
 ```bash
 dvc repro          # run the full pipeline (ingest → curate → train)
 dvc metrics show   # show latest training metrics
 ```
 
-DVC uses the local MinIO instance as its S3 remote. See `dvc.yaml` for stage definitions.
+DVC tracks outputs under `data/` and `reports/`. Its checked-in remote points at the local MinIO objectstore, so cache push and pull can use the same local stack during evaluation. See `dvc.yaml` and `src/foehncast/dvc_stages.py` for the stage contract.
 
 ### Running tests
 

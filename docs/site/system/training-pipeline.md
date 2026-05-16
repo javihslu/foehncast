@@ -40,6 +40,16 @@ The training path stays explicit:
 | Active shared environment | the hosted full-stack operator lane runs the same Airflow and MLflow contract online |
 | Hosted inference target | serves a registered alias; it does not run training |
 
+## DVC Mapping
+
+For reproducible local and CI runs, DVC models the offline training path as one `train` stage.
+
+| DVC stage | Covers | Writes |
+|------|--------|--------|
+| `train` | label, train, and evaluate | `reports/train_metrics.json` and `reports/feature_importance.png` |
+
+Model registration, alias movement, and rollback stay outside `dvc repro`. Those remain MLflow- and operator-controlled runtime steps.
+
 ## Stage Responsibilities
 
 | Stage | Main responsibility | Must not become |
@@ -49,6 +59,22 @@ The training path stays explicit:
 | Evaluate | write reviewable metrics and report artifacts for one run | a second training stage or a silent model selector |
 | Register | create a versioned MLflow model and assign the requested alias | a broad deployment control plane |
 | Promote and rollback | move explicit aliases between validated model versions | retraining, relabeling, or feature regeneration |
+
+## Label Boundary
+
+### Data Lineage
+
+Every MLflow training run logs provenance params so the model can be traced back to its input data:
+
+| Param | Source | What it tells you |
+|-------|--------|-------------------|
+| `dataset` | config argument | which named dataset split was used |
+| `data_hash` | SHA-256 of the training DataFrame | whether the data content changed between runs |
+| `git_commit` | `git rev-parse --short HEAD` | which code version produced the run |
+
+The DVC path in `dvc_stages.py` writes `data_hash` and `git_commit` into the `reports/train_metrics.json` file for the same traceability outside MLflow.
+
+This bridges the DVC→MLflow lineage gap: DVC versions the curated parquet files, MLflow versions the model, and both carry a content hash so you can match them without inspecting local DVC state.
 
 ## Label Boundary
 

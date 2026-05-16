@@ -66,6 +66,18 @@ The bootstrap path resets disposable state, starts the validated service subset 
 
 If the preferred local ports are already occupied, the bootstrap moves the bindings to the next free ports and prints the resolved endpoints.
 
+## Bootstrap, DVC, And The App
+
+The local evaluator keeps three useful entry points available, but each one has a different job.
+
+| Use this | When you want | What it covers |
+|------|---------------|----------------|
+| `./scripts/bootstrap-local.sh` | the full local runtime | Docker services, Airflow asset hand-off, MLflow, Feast, monitoring, and app validation |
+| `dvc repro` | a reproducible offline rerun | `curate` and `train` from `dvc.yaml`, writing tracked outputs under `data/` and `reports/` |
+| FastAPI or Streamlit | serving behavior | live prediction, ranking, and online-feature checks |
+
+DVC is optional in the local evaluator. It is useful when you want a clean, file-based rerun of the offline feature and training path without driving the scheduler by hand. The checked-in DVC remote points at the local MinIO objectstore for cache storage, but DVC itself is not the runtime control plane and it does not replace the app, Airflow, or monitoring stack.
+
 ## Runtime Surfaces
 
 | Surface | Role in the local evaluator | Must not become |
