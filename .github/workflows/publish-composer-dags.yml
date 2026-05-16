@@ -99,7 +99,7 @@ jobs:
             - uses: actions/checkout@v6.0.2
 
             - name: Authenticate to Google Cloud
-              uses: google-github-actions/auth@v2
+              uses: google-github-actions/auth@v3
               with:
                   workload_identity_provider: ${{ needs.config.outputs.workload_identity_provider }}
                   service_account: ${{ needs.config.outputs.service_account_email }}
