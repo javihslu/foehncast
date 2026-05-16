@@ -36,7 +36,6 @@ flowchart TD
 | Surface | Role |
 |---------|------|
 | `docker-compose.yml` | shared service baseline for local runs |
-| `docker-compose.cloud.yml` | online-host overrides for the full hosted stack |
 | `docker-compose.gcp.yml` | local override when Docker services need mounted ADC for BigQuery checks |
 | `docker-compose.objectstore.yml` | local runtime extensions for MinIO-backed storage and the Feast Datastore emulator |
 | `.env` | shared runtime configuration file initialized by the bootstrap scripts |

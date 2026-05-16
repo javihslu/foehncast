@@ -194,7 +194,7 @@ Example feature replay on the retained host:
 
 ```bash
 cd /opt/foehncast
-docker compose -f docker-compose.yml -f docker-compose.cloud.yml --env-file .env exec -T airflow-webserver \
+docker compose -f docker-compose.yml --env-file .env exec -T airflow-webserver \
     airflow dags trigger feature_pipeline \
     --logical-date "2026-05-14T00:00:00Z" \
     --run-id "manual_backfill__2026-05-14T00-00-00Z"

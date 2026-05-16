@@ -114,7 +114,6 @@ app_health_url="http://127.0.0.1:8000/health"
 online_features_url="http://127.0.0.1:8000/features/online"
 compose_args=(
   -f /opt/foehncast/docker-compose.yml
-  -f /opt/foehncast/docker-compose.cloud.yml
   --env-file /opt/foehncast/.env
 )
 
@@ -222,7 +221,7 @@ gcloud auth configure-docker "${artifact_registry_host}" --quiet >/dev/null 2>&1
 
 vacuum_host_logs
 docker compose "$${compose_args[@]}" pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer
-docker compose -f /opt/foehncast/docker-compose.yml -f /opt/foehncast/docker-compose.cloud.yml --env-file /opt/foehncast/.env up -d --no-build
+docker compose -f /opt/foehncast/docker-compose.yml --env-file /opt/foehncast/.env up -d --no-build
 
 echo "Waiting for Airflow API server health..."
 verify_airflow_api_health 90 2
