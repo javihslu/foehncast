@@ -1,4 +1,4 @@
-"""Tests for Prometheus export of hosted online-compose sync state."""
+"""Tests for Prometheus export of hosted sync state."""
 
 from __future__ import annotations
 
@@ -7,22 +7,20 @@ from pathlib import Path
 
 import pytest
 
-from foehncast.monitoring import online_compose_sync_prometheus
+from foehncast.monitoring import hosted_sync_prometheus
 from tests.prometheus_assertions import metric_value
 
 
-def test_render_online_compose_sync_prometheus_metrics_reports_last_success() -> None:
-    payload = (
-        online_compose_sync_prometheus.render_online_compose_sync_prometheus_metrics(
-            {
-                "state": "succeeded",
-                "git_ref": "main",
-                "last_successful_sync_at": "2026-05-11T18:50:00Z",
-                "last_successful_commit": "abc123",
-                "compose_deploy_mode": "pull",
-            }
-        ).decode("utf-8")
-    )
+def test_render_hosted_sync_prometheus_metrics_reports_last_success() -> None:
+    payload = hosted_sync_prometheus.render_hosted_sync_prometheus_metrics(
+        {
+            "state": "succeeded",
+            "git_ref": "main",
+            "last_successful_sync_at": "2026-05-11T18:50:00Z",
+            "last_successful_commit": "abc123",
+            "compose_deploy_mode": "pull",
+        }
+    ).decode("utf-8")
 
     assert "foehncast_online_compose_sync_status_file_present 1.0" in payload
     assert metric_value(
@@ -31,27 +29,25 @@ def test_render_online_compose_sync_prometheus_metrics_reports_last_success() ->
     ) == pytest.approx(1778525400.0)
 
 
-def test_render_online_compose_sync_prometheus_metrics_handles_missing_status(
+def test_render_hosted_sync_prometheus_metrics_handles_missing_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        online_compose_sync_prometheus,
-        "_default_online_compose_sync_status_path",
+        hosted_sync_prometheus,
+        "_default_hosted_sync_status_path",
         lambda: tmp_path / "last-success.json",
     )
 
-    payload = (
-        online_compose_sync_prometheus.render_online_compose_sync_prometheus_metrics(
-            None
-        ).decode("utf-8")
+    payload = hosted_sync_prometheus.render_hosted_sync_prometheus_metrics(None).decode(
+        "utf-8"
     )
 
     assert "foehncast_online_compose_sync_status_file_present 0.0" in payload
     assert "foehncast_online_compose_sync_last_success_timestamp_seconds" in payload
 
 
-def test_read_online_compose_sync_status_loads_json(tmp_path: Path) -> None:
+def test_read_hosted_sync_status_loads_json(tmp_path: Path) -> None:
     status_path = tmp_path / "last-success.json"
     status_path.write_text(
         json.dumps(
@@ -65,9 +61,7 @@ def test_read_online_compose_sync_status_loads_json(tmp_path: Path) -> None:
         )
     )
 
-    assert online_compose_sync_prometheus.read_online_compose_sync_status(
-        status_path
-    ) == {
+    assert hosted_sync_prometheus.read_hosted_sync_status(status_path) == {
         "state": "succeeded",
         "git_ref": "main",
         "last_successful_sync_at": "2026-05-11T18:50:00Z",

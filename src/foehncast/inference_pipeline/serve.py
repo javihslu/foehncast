@@ -26,8 +26,8 @@ from foehncast.monitoring.pipeline_prometheus import (
     render_feature_pipeline_prometheus_metrics,
     render_training_pipeline_prometheus_metrics,
 )
-from foehncast.monitoring.online_compose_sync_prometheus import (
-    render_online_compose_sync_prometheus_metrics,
+from foehncast.monitoring.hosted_sync_prometheus import (
+    render_hosted_sync_prometheus_metrics,
 )
 from foehncast.monitoring.prediction_monitoring_prometheus import (
     record_prediction_monitoring_execution,
@@ -114,7 +114,7 @@ def _metrics_payload() -> bytes:
         render_feature_pipeline_prometheus_metrics()
         + render_training_pipeline_prometheus_metrics()
         + render_prediction_log_prometheus_metrics()
-        + render_online_compose_sync_prometheus_metrics()
+        + render_hosted_sync_prometheus_metrics()
         # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_monitoring_prometheus_metrics()
     )
