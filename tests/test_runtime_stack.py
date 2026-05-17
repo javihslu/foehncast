@@ -273,6 +273,64 @@ def test_development_env_is_opt_in_via_local_only_profile() -> None:
     assert compose["services"]["development_env"]["profiles"] == ["local-only"]
 
 
+def test_gcp_compose_overlay_injects_bigquery_storage_and_feast_env() -> None:
+    gcp = _read_yaml("docker-compose.gcp.yml")
+
+    runtime = gcp["x-gcp-runtime-env"]
+    assert runtime["STORAGE_BACKEND"] == "bigquery"
+    assert "GCP_PROJECT_ID" in str(runtime["STORAGE_BIGQUERY_PROJECT_ID"])
+    assert "STORAGE_BIGQUERY_DATASET" in str(
+        runtime.get("STORAGE_BIGQUERY_DATASET", "")
+    )
+
+    feast = gcp["x-feast-gcp-env"]
+    assert feast["FOEHNCAST_FEAST_SOURCE"] == "bigquery"
+    assert "gs://" in str(feast["FOEHNCAST_FEAST_REGISTRY"])
+    assert "gs://" in str(feast["FOEHNCAST_FEAST_GCS_STAGING_LOCATION"])
+    assert "FOEHNCAST_FEAST_DATASTORE_DATABASE" in feast
+
+    services = gcp["services"]
+    assert "gs://" in str(
+        services["model-registry"]["environment"]["MLFLOW_ARTIFACT_DESTINATION"]
+    )
+
+    for svc in ("app", "airflow-scheduler", "airflow-triggerer"):
+        svc_env = services[svc]["environment"]
+        assert svc_env is not None, f"{svc} missing environment in GCP overlay"
+
+    assert "gs://" in str(
+        services["app"]["environment"].get("FOEHNCAST_PIPELINE_REPORT_DIR", "")
+    )
+
+
+def test_gcp_compose_overlay_does_not_set_s3_endpoint_on_mlflow() -> None:
+    gcp = _read_yaml("docker-compose.gcp.yml")
+    mlflow_env = gcp["services"]["model-registry"]["environment"]
+
+    assert "MLFLOW_S3_ENDPOINT_URL" not in mlflow_env
+    assert "AWS_ACCESS_KEY_ID" not in mlflow_env
+    assert "AWS_SECRET_ACCESS_KEY" not in mlflow_env
+
+
+def test_mlflow_base_compose_does_not_hardcode_s3_credentials() -> None:
+    mlflow = _read_yaml("containers/mlflow/docker-compose.yml")
+    env_list = mlflow["services"]["model-registry"]["environment"]
+
+    env_keys = {e.split("=")[0] for e in env_list}
+    assert "AWS_ACCESS_KEY_ID" not in env_keys
+    assert "AWS_SECRET_ACCESS_KEY" not in env_keys
+    assert "MLFLOW_S3_ENDPOINT_URL" not in env_keys
+
+
+def test_objectstore_overlay_still_injects_s3_credentials_into_mlflow() -> None:
+    obj = _read_yaml("docker-compose.objectstore.yml")
+    mlflow_env = obj["services"]["model-registry"]["environment"]
+
+    assert "AWS_ACCESS_KEY_ID" in mlflow_env
+    assert "AWS_SECRET_ACCESS_KEY" in mlflow_env
+    assert mlflow_env["MLFLOW_S3_ENDPOINT_URL"] == "http://objectstore:9000"
+
+
 def test_runtime_images_use_validated_airflow_and_mlflow_versions() -> None:
     airflow_dockerfile = _read_text("containers/airflow/Dockerfile")
     mlflow_dockerfile = _read_text("containers/mlflow/Dockerfile")
