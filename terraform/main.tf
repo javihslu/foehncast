@@ -14,12 +14,20 @@ locals {
   feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
   prediction_event_dataset_id       = "foehncast_monitoring"
   prediction_event_table_id         = "prediction_events"
+  # When MLflow is deployed on Cloud Run, use its URL; otherwise fall back to
+  # the explicit variable (e.g. an external MLflow server).
+  mlflow_tracking_uri = (
+    var.provision_cloud_run_mlflow
+    ? google_cloud_run_v2_service.mlflow[0].uri
+    : var.mlflow_tracking_uri
+  )
+
   cloud_run_env_vars = merge(
     {
       GCP_PROJECT_ID                       = var.project_id
       GCP_LOCATION                         = var.region
       GOOGLE_CLOUD_PROJECT                 = var.project_id
-      MLFLOW_TRACKING_URI                  = var.mlflow_tracking_uri
+      MLFLOW_TRACKING_URI                  = local.mlflow_tracking_uri
       STORAGE_BACKEND                      = "bigquery"
       STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
       STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
@@ -94,7 +102,7 @@ locals {
       GCP_LOCATION                          = var.region
       GOOGLE_CLOUD_PROJECT                  = var.project_id
       MLFLOW_ARTIFACT_DESTINATION           = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      MLFLOW_TRACKING_URI                   = var.mlflow_tracking_uri
+      MLFLOW_TRACKING_URI                   = local.mlflow_tracking_uri
       STORAGE_BACKEND                       = "bigquery"
       STORAGE_BIGQUERY_PROJECT_ID           = var.project_id
       STORAGE_BIGQUERY_DATASET              = var.bigquery_dataset_id
@@ -1152,8 +1160,12 @@ resource "google_cloud_run_v2_service" "ui" {
       }
 
       env {
-        name  = "FOEHNCAST_GRAFANA_BASE_URL"
-        value = var.cloud_run_ui_grafana_url
+        name = "FOEHNCAST_GRAFANA_BASE_URL"
+        value = (
+          var.provision_cloud_run_grafana
+          ? google_cloud_run_v2_service.grafana[0].uri
+          : var.cloud_run_ui_grafana_url
+        )
       }
 
       env {

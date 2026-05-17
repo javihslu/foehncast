@@ -111,9 +111,11 @@ variable "mlflow_tracking_uri" {
 
   validation {
     condition = (
-      !var.provision_cloud_run_service || trimspace(var.mlflow_tracking_uri) != ""
+      !var.provision_cloud_run_service ||
+      var.provision_cloud_run_mlflow ||
+      trimspace(var.mlflow_tracking_uri) != ""
     )
-    error_message = "Set mlflow_tracking_uri when provision_cloud_run_service is true."
+    error_message = "Set mlflow_tracking_uri when provision_cloud_run_service is true and provision_cloud_run_mlflow is false."
   }
 }
 
