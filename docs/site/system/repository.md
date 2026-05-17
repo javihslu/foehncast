@@ -16,6 +16,7 @@ src/foehncast/
   spots/
 dags/
 containers/
+ui/
 scripts/
 terraform/
 feature_repo/
@@ -33,6 +34,7 @@ flowchart TD
   DVC[dvc.yaml + dvc_stages.py] --> REPRO[Reproducible feature + training reruns]
   DAGS[dags] --> ORCH[Airflow orchestration]
   CNT[containers] --> PACK[Containerized runtime packaging]
+  UI[ui] --> RIDER[Streamlit rider console]
   OPS[scripts + terraform] --> DELIV[Bootstrap and hosted delivery]
   TESTS[tests] --> VERIFY[Regression validation]
   DOCS[docs] --> SITE[Public documentation]
@@ -43,13 +45,14 @@ flowchart TD
 - `src/foehncast/`: the application modules for configuration, feature engineering, training, inference, monitoring, and spot metadata.
 - `src/foehncast/dvc_stages.py`: the thin CLI entry point that exposes the DVC `curate` and `train` stages.
 - `dvc.yaml`: the file-based reproducibility contract for offline feature and training reruns.
-- `dags/`: Airflow entry points for the feature and training workflows.
+- `dags/`: Airflow entry points for the feature, training, and inference workflows.
 
 | Area | What it holds |
 |------|---------------|
 | `src/foehncast/` | application code for configuration, features, training, inference, monitoring, and spot metadata |
 | `dvc.yaml` and `src/foehncast/dvc_stages.py` | reproducible local and CI reruns of the offline feature and training path |
-| `dags/` | Airflow entry points for feature and training workflows |
+| `dags/` | Airflow entry points for feature, training, and inference workflows |
+| `ui/` | Streamlit rider console application |
 | `containers/`, `scripts/`, and `terraform/` | runtime packaging, bootstrap helpers, and deployment tooling |
 | `feature_repo/`, `prometheus_config/`, and `grafana_work/` | Feast and operator-monitoring integration contracts |
 | `tests/` and `docs/` | regression coverage and public explanation |

@@ -34,6 +34,7 @@ The bootstrap starts the local evaluator stack, waits for the feature-to-trainin
 | MLflow | `http://127.0.0.1:5001` | operator surface for runs and model versions |
 | Prometheus | `http://127.0.0.1:9090` | operator surface for scraped metrics |
 | Grafana | `http://127.0.0.1:3000` | operator surface for dashboards and alerts |
+| Streamlit | `http://127.0.0.1:8501` | rider console with live rankings and model card |
 
 The objectstore UI and the Feast emulator endpoint are printed by the bootstrap helper when the stack comes up. For the full surface boundary, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).
 

@@ -41,6 +41,7 @@ Expected DAGs:
 |--------|----------|-------------|
 | `feature_pipeline` | `0 */6 * * *` | Ingest, engineer, validate, store features; trigger retraining |
 | `training_pipeline` | Asset-triggered | Train, evaluate, register model |
+| `inference_pipeline` | Asset-triggered | Predict all spots after model registration; write prediction log |
 | `runtime_release` | Manual | Record runtime release handoff |
 
 ## 3. Trigger Feature Pipeline DAG

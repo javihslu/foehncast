@@ -148,16 +148,31 @@ The monitoring hand-off is:
 
 - `/predict` and `/rank` schedule background prediction-monitoring work after a successful response payload is built
 - the background path records scheduling and execution outcomes and emits prediction-drift metrics from retained prediction history
-- `/metrics` merges durable feature and training summaries, retained prediction-log metrics, hosted-sync metrics, and in-process prediction-monitoring counters
+- `/metrics` merges durable feature and training summaries, retained prediction-log metrics, hosted-sync metrics, hindcast validation results, and in-process prediction-monitoring counters
+- hindcast validation runs hourly in the background, comparing past predictions against observed weather to measure real forecast accuracy; results persist in `.state/monitoring/hindcast-validation.json`
 
 This keeps the inference service responsible for request-side facts while leaving dashboards, alert rules, and long-range operator review to the monitoring stack.
+
+## Scheduled Inference
+
+Inference also runs as a scheduled Airflow DAG alongside the request-driven app path.
+
+The `inference_pipeline` DAG is:
+
+- triggered by the `foehncast_mlflow_model_registry` asset, meaning it runs automatically after a new model version is registered
+- executes `run_inference_pipeline_step`, which predicts across all configured spots using the champion model
+- emits the `foehncast_inference_prediction_log` asset so downstream monitoring and hindcast validation can consume fresh predictions
+- can also be triggered manually from the Airflow UI when the operator wants a batch prediction refresh
+
+This keeps the prediction-event history populated even when no rider requests arrive, which is important for hindcast validation and drift detection over time.
 
 ## Runtime Role
 
 | Runtime mode | Inference role |
 |------|---------------------|
-| Local evaluator | FastAPI app serves predictions from locally-registered MLflow model |
+| Local evaluator | FastAPI app serves predictions from locally-registered MLflow model; the `inference_pipeline` DAG runs batch predictions after model registration |
 | Cloud Run | shared public API with the same serving contract |
+| Cloud Composer | scheduled inference DAG runs batch predictions after model registration |
 | Private operator host | internal checks next to other hosted operator services |
 
 See [Architecture](architecture.md) for the lane summary and [Hosted Full-Stack](hosted-full-stack.md) for the hosted exposure and transition rules.
