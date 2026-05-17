@@ -38,7 +38,9 @@ keys/
 *.key
 *.json
 !config.json
-!grafana_work/dashboards/foehncast-overview.json
+!grafana_work/dashboards/foehncast-operations.json
+!grafana_work/dashboards/foehncast-rider.json
+!grafana_work/dashboards/foehncast-ml-diagnostics.json
 
 # Terraform
 terraform/.terraform/

@@ -365,12 +365,12 @@ verify_grafana_provisioning() {
     "$GRAFANA_HEALTH_URL" >/dev/null
 
   echo "Checking Grafana dashboard provisioning..."
-  dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-monitoring")"
+  dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-operations")"
   require_payload_patterns \
     "$dashboard_payload" \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast-monitoring"' \
-    '"title"[[:space:]]*:[[:space:]]*"FoehnCast Monitoring"' \
-    'dashboard title FoehnCast Monitoring'
+    '"uid"[[:space:]]*:[[:space:]]*"foehncast-operations"' \
+    '"title"[[:space:]]*:[[:space:]]*"FoehnCast Operations"' \
+    'dashboard title FoehnCast Operations'
 
   echo "Checking Grafana alert-rule provisioning..."
   alert_rules_payload="$(grafana_api_get "/api/v1/provisioning/alert-rules")"
@@ -478,6 +478,7 @@ FEAST_DATASET="${FEAST_DATASET:-train}"
 
 export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_USER "$ENV_FILE"
 export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_PASSWORD "$ENV_FILE"
+export_resolved_env_value FOEHNCAST_GRAFANA_ALLOW_EMBEDDING "$ENV_FILE"
 export_resolved_env_value FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM "$ENV_FILE"
 export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED "$ENV_FILE"
 export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE "$ENV_FILE"
@@ -486,6 +487,7 @@ export_resolved_env_value GRAFANA_API_PASSWORD "$ENV_FILE"
 
 ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin
 ensure_env_default FOEHNCAST_GRAFANA_ADMIN_PASSWORD foehncast-local
+ensure_env_default FOEHNCAST_GRAFANA_ALLOW_EMBEDDING true
 ensure_env_default FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM true
 ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED true
 ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE Admin

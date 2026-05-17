@@ -45,6 +45,9 @@ def test_monitoring_compose_defines_expected_services() -> None:
     assert grafana_environment["GF_SECURITY_ADMIN_PASSWORD"] == (
         "${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-admin}"
     )
+    assert grafana_environment["GF_SECURITY_ALLOW_EMBEDDING"] == (
+        "${FOEHNCAST_GRAFANA_ALLOW_EMBEDDING:-false}"
+    )
     assert grafana_environment["GF_AUTH_DISABLE_LOGIN_FORM"] == (
         "${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-false}"
     )
@@ -102,33 +105,38 @@ def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
     dashboard_provider = _read_yaml(
         "grafana_work/etc/provisioning/dashboards/default.yml"
     )["providers"][0]
-    dashboard = _read_json("grafana_work/dashboards/foehncast-overview.json")
+    ops = _read_json("grafana_work/dashboards/foehncast-operations.json")
+    rider = _read_json("grafana_work/dashboards/foehncast-rider.json")
+    ml = _read_json("grafana_work/dashboards/foehncast-ml-diagnostics.json")
 
     assert datasource["url"] == "http://prometheus:9090"
     assert datasource["uid"] == "prometheus"
     assert dashboard_provider["options"]["path"] == "/opt/grafana/dashboards"
-    assert dashboard["title"] == "FoehnCast Monitoring"
+
+    # Operations dashboard
+    assert ops["title"] == "FoehnCast Operations"
+    assert ops["uid"] == "foehncast-operations"
+    ops_panels = {p["title"]: p for p in ops["panels"]}
+    assert "Feature Stage Durations" in ops_panels
+    assert "Training Stage Durations" in ops_panels
+    assert "Request Latency Distribution" in ops_panels
+    assert "Request Rate" in ops_panels
+    assert "Error Rate" in ops_panels
+    assert "Spot Pipeline Funnel" in ops_panels
     assert any(
-        panel["title"] == "Feature Pipeline Summary Count"
-        for panel in dashboard["panels"]
+        p["type"] == "row" and p["title"] == "Inference SLIs" for p in ops["panels"]
     )
-    assert any(
-        panel["title"] == "Training Stage State" for panel in dashboard["panels"]
-    )
-    assert any(
-        panel["title"] == "Inference Operations" and panel["type"] == "row"
-        for panel in dashboard["panels"]
-    )
-    assert any(
-        panel["title"] == "Request Latency (p50 / p95 / p99)"
-        for panel in dashboard["panels"]
-    )
-    assert any(
-        panel["title"] == "Request Rate by Endpoint" for panel in dashboard["panels"]
-    )
-    assert any(
-        panel["title"] == "HTTP Error Rate (4xx / 5xx)" for panel in dashboard["panels"]
-    )
+
+    # Rider dashboard
+    assert rider["title"] == "FoehnCast Rider"
+    assert rider["uid"] == "foehncast-rider"
+
+    # ML Diagnostics dashboard
+    assert ml["title"] == "FoehnCast ML Diagnostics"
+    assert ml["uid"] == "foehncast-ml-diagnostics"
+    ml_panels = {p["title"]: p for p in ml["panels"]}
+    assert "Feature Stage States" in ml_panels
+    assert "Model Registry" in [p["title"] for p in ml["panels"] if p["type"] == "row"]
 
 
 def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
@@ -147,26 +155,26 @@ def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
         ]
         == 'sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="failed"}[15m]))'
     )
-    assert rules["FoehnCast Prediction Monitoring Schedule Failures"]["panelId"] == 12
+    assert rules["FoehnCast Prediction Monitoring Schedule Failures"]["panelId"] == 34
     assert (
         rules["FoehnCast Prediction Monitoring Execution Failures"]["data"][0]["model"][
             "expr"
         ]
         == 'sum by (endpoint) (increase(foehncast_prediction_monitoring_execution_total{result="failed"}[15m]))'
     )
-    assert rules["FoehnCast Prediction Monitoring Execution Failures"]["panelId"] == 13
+    assert rules["FoehnCast Prediction Monitoring Execution Failures"]["panelId"] == 35
     assert (
         rules["FoehnCast Prediction Monitoring Stale Success"]["data"][0]["model"][
             "expr"
         ]
         == '((time() - max by (endpoint) (foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="succeeded"})) * on (endpoint) (sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="scheduled"}[15m])) > bool 0))'
     )
-    assert rules["FoehnCast Prediction Monitoring Stale Success"]["panelId"] == 14
+    assert rules["FoehnCast Prediction Monitoring Stale Success"]["panelId"] == 36
     assert (
         rules["FoehnCast Feature Stage Failures"]["data"][0]["model"]["expr"]
         == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)"
     )
-    assert rules["FoehnCast Feature Stage Failures"]["panelId"] == 18
+    assert rules["FoehnCast Feature Stage Failures"]["panelId"] == 25
     assert rules["FoehnCast Feature Stage Failures"]["labels"]["component"] == (
         "feature-pipeline"
     )
@@ -174,7 +182,7 @@ def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
         rules["FoehnCast Training Stage Failures"]["data"][0]["model"]["expr"]
         == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)"
     )
-    assert rules["FoehnCast Training Stage Failures"]["panelId"] == 27
+    assert rules["FoehnCast Training Stage Failures"]["panelId"] == 26
     assert rules["FoehnCast Training Stage Failures"]["labels"]["component"] == (
         "training-pipeline"
     )
@@ -182,12 +190,12 @@ def test_grafana_alerting_provisions_background_monitoring_rules() -> None:
         rules["FoehnCast Hosted Sync Stale"]["data"][0]["model"]["expr"]
         == "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
     )
-    assert rules["FoehnCast Hosted Sync Stale"]["panelId"] == 19
+    assert rules["FoehnCast Hosted Sync Stale"]["panelId"] == 15
     assert rules["FoehnCast Hosted Sync Stale"]["labels"]["component"] == (
         "hosted-operator"
     )
     assert all(
-        rule["dashboardUid"] == "foehncast-monitoring" for rule in rules.values()
+        rule["dashboardUid"] == "foehncast-operations" for rule in rules.values()
     )
 
 
@@ -264,173 +272,169 @@ def test_grafana_alerting_provisions_contact_point_and_policy_tree() -> None:
     ]
 
 
-def test_grafana_dashboard_includes_feature_and_inference_drift_panels() -> None:
-    dashboard = _read_json("grafana_work/dashboards/foehncast-overview.json")
-    panels = {panel["title"]: panel for panel in dashboard["panels"]}
+def test_operations_dashboard_covers_pipeline_and_inference_metrics() -> None:
+    ops = _read_json("grafana_work/dashboards/foehncast-operations.json")
+    panels = {p["title"]: p for p in ops["panels"] if p["type"] != "row"}
 
+    # Pipeline timing
     assert (
-        panels["Feature Drift Share"]["targets"][0]["expr"]
-        == 'max by (dataset_name, dataset_version) (foehncast_drift_metric{column_name="dataset", metric_name="share_of_drifted_columns", dataset_name!="inference_predictions"})'
-    )
-    assert (
-        panels["Feature Drift Share"]["fieldConfig"]["defaults"]["thresholds"]["steps"][
-            1
-        ]["value"]
-        == 0.15
+        panels["Feature Stage Durations"]["targets"][0]["expr"]
+        == 'foehncast_feature_pipeline_stage_duration_seconds{dataset="train"}'
     )
     assert (
-        panels["Inference Drift Share"]["targets"][0]["expr"]
-        == 'max by (dataset_version) (foehncast_drift_metric{dataset_name="inference_predictions", column_name="dataset", metric_name="share_of_drifted_columns"})'
+        panels["Training Stage Durations"]["targets"][0]["expr"]
+        == 'foehncast_training_pipeline_stage_duration_seconds{dataset="train"}'
+    )
+    # Freshness
+    assert (
+        panels["Hosted Sync Age"]["targets"][0]["expr"]
+        == "time() - foehncast_online_compose_sync_last_success_timestamp_seconds"
+    )
+    # Prediction monitoring
+    assert (
+        panels["Schedule Count"]["targets"][0]["expr"]
+        == "sum(foehncast_prediction_monitoring_schedule_total)"
     )
     assert (
-        panels["Inference Drift Share"]["fieldConfig"]["defaults"]["thresholds"][
-            "steps"
-        ][2]["value"]
-        == 0.3
+        panels["Execution Count"]["targets"][0]["expr"]
+        == "sum(foehncast_prediction_monitoring_execution_total)"
     )
     assert (
-        panels["Inference Quality Drift Score"]["targets"][0]["expr"]
-        == 'max by (dataset_version) (foehncast_drift_metric{dataset_name="inference_predictions", column_name="quality_index", metric_name="drift_score"})'
+        panels["Seconds Since Last Success"]["targets"][0]["expr"]
+        == 'time() - max(foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="success"})'
+    )
+    # Inference SLIs
+    assert (
+        panels["Request Latency Distribution"]["targets"][0]["expr"]
+        == "histogram_quantile(0.50, sum(rate(foehncast_http_request_duration_seconds_bucket[5m])) by (le))"
     )
     assert (
-        panels["Prediction Log Total Rows"]["targets"][0]["expr"]
-        == "foehncast_prediction_log_total_row_count"
+        panels["Requests by Endpoint"]["targets"][0]["expr"]
+        == "sum by (endpoint) (rate(foehncast_http_requests_total[5m]))"
     )
     assert (
-        panels["Prediction Log Models"]["targets"][0]["expr"]
-        == "foehncast_prediction_log_model_count"
-    )
-    assert (
-        panels["Prediction Log Rows By Model"]["targets"][0]["expr"]
-        == "foehncast_prediction_log_row_count"
-    )
-    assert (
-        panels["Prediction Monitoring Schedule Failures (15m)"]["targets"][0]["expr"]
-        == 'sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="failed"}[15m]))'
-    )
-    assert (
-        panels["Engineered Spots"]["targets"][0]["expr"]
-        == "sum by (dataset, storage_backend) (foehncast_feature_pipeline_engineered_spot_count)"
-    )
-    assert (
-        panels["Validated Spots"]["targets"][0]["expr"]
-        == "sum by (dataset, storage_backend) (foehncast_feature_pipeline_validated_spot_count)"
-    )
-    assert (
-        panels["Feature Stage Duration"]["targets"][0]["expr"]
-        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_duration_seconds)"
-    )
-    assert (
-        panels["Feature Stage Failures"]["targets"][0]["expr"]
-        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count)"
-    )
-    assert (
-        panels["Seconds Since Last Hosted Sync"]["targets"][0]["expr"]
-        == "time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)"
-    )
-    assert (
-        panels["Prediction Monitoring Schedule Failures (15m)"]["fieldConfig"][
-            "defaults"
-        ]["thresholds"]["steps"][1]["value"]
-        == 0.5
-    )
-    assert (
-        panels["Seconds Since Last Hosted Sync"]["fieldConfig"]["defaults"][
-            "thresholds"
-        ]["steps"][1]["value"]
-        == 900
-    )
-    assert (
-        panels["Prediction Monitoring Execution Failures (15m)"]["targets"][0]["expr"]
-        == 'sum by (endpoint) (increase(foehncast_prediction_monitoring_execution_total{result="failed"}[15m]))'
-    )
-    assert (
-        panels["Prediction Monitoring Execution Failures (15m)"]["fieldConfig"][
-            "defaults"
-        ]["thresholds"]["steps"][1]["value"]
-        == 0.5
-    )
-    assert (
-        panels["Seconds Since Last Successful Monitoring"]["targets"][0]["expr"]
-        == 'time() - max by (endpoint) (foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="succeeded"})'
-    )
-    assert (
-        panels["Feature Stage State"]["targets"][0]["expr"]
-        == "max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_state)"
-    )
-    assert (
-        panels["Training Stage State"]["targets"][0]["expr"]
-        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_state)"
-    )
-    assert (
-        panels["Training Pipeline Summary Count"]["targets"][0]["expr"]
-        == "foehncast_training_pipeline_summary_count"
-    )
-    assert (
-        panels["Latest Training Run Success"]["targets"][0]["expr"]
-        == "max by (dataset, requested_stage) (foehncast_training_pipeline_run_success)"
-    )
-    assert (
-        panels["Training Stage Duration"]["targets"][0]["expr"]
-        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_duration_seconds)"
-    )
-    assert (
-        panels["Training Stage Failures"]["targets"][0]["expr"]
-        == "max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count)"
-    )
-    assert (
-        panels["Training Metrics"]["targets"][0]["expr"]
-        == 'max by (dataset, requested_stage, metric_name) (foehncast_training_pipeline_run_metric{metric_name=~"accuracy|mae|r2|rmse"})'
-    )
-    assert (
-        panels["Seconds Since Last Training Summary"]["targets"][0]["expr"]
-        == "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)"
-    )
-    assert (
-        panels["Pipeline Freshness"]["targets"][1]["expr"]
-        == "time() - max by (dataset, requested_stage) (foehncast_training_pipeline_summary_generated_timestamp_seconds)"
-    )
-    assert (
-        panels["Seconds Since Last Training Summary"]["fieldConfig"]["defaults"][
-            "thresholds"
-        ]["steps"][1]["value"]
-        == 900
-    )
-    # New: prediction monitoring and pipeline expansion panels
-    assert (
-        panels["Dataset Drift Detected"]["targets"][0]["expr"]
-        == "max by (dataset, storage_backend) (foehncast_feature_pipeline_dataset_drift_detected)"
-    )
-    assert panels["Pipeline Readiness Gates"]["targets"][0]["expr"] == (
-        "max by (dataset, storage_backend) (foehncast_feature_pipeline_training_handoff_ready)"
-    )
-    assert panels["Pipeline Readiness Gates"]["targets"][1]["expr"] == (
-        "max by (dataset, storage_backend) (foehncast_feature_pipeline_feature_persistence_ready)"
-    )
-    assert (
-        panels["Prediction Event Freshness"]["targets"][0]["expr"]
-        == "time() - max by (model_version) (foehncast_prediction_log_latest_prediction_timestamp_seconds)"
-    )
-    assert (
-        panels["Forecast Timestamp Freshness"]["targets"][0]["expr"]
-        == "time() - max by (model_version) (foehncast_prediction_log_latest_forecast_timestamp_seconds)"
-    )
-    assert (
-        panels["Prediction Monitoring Activity (15m)"]["targets"][0]["expr"]
-        == "sum by (endpoint, result) (increase(foehncast_prediction_monitoring_execution_total[15m]))"
-    )
-    assert (
-        panels["Registered Model Version"]["targets"][0]["expr"]
-        == "max by (dataset, requested_stage) (foehncast_training_pipeline_registered_model_version)"
-    )
-    assert (
-        panels["Feature Range Violations by Spot"]["targets"][0]["expr"]
-        == "sum by (dataset, storage_backend, spot) (foehncast_feature_pipeline_spot_range_violation_count)"
-    )
-    assert (
-        panels["Hosted Sync Status File Present"]["targets"][0]["expr"]
+        panels["Sync Status File"]["targets"][0]["expr"]
         == "foehncast_online_compose_sync_status_file_present"
     )
+    assert panels["Spot Pipeline Funnel"]["targets"][0]["expr"] == (
+        'foehncast_feature_pipeline_expected_spot_count{dataset="train"}'
+    )
+    assert len(panels["Spot Pipeline Funnel"]["targets"]) == 5
+
+
+def test_ml_diagnostics_dashboard_covers_drift_and_training_metrics() -> None:
+    ml = _read_json("grafana_work/dashboards/foehncast-ml-diagnostics.json")
+    panels = {p["title"]: p for p in ml["panels"] if p["type"] != "row"}
+
+    # Drift overview
+    assert (
+        panels["Feature Drift Score"]["targets"][0]["expr"]
+        == 'foehncast_drift_metric{dataset_name=~".+",metric_name="drift_score"}'
+    )
+    assert (
+        panels["Inference Drift Score"]["targets"][0]["expr"]
+        == 'foehncast_drift_metric{dataset_name="inference_predictions",metric_name="drift_score"}'
+    )
+    # Training metrics
+    assert (
+        panels["Accuracy"]["targets"][0]["expr"]
+        == 'foehncast_training_pipeline_run_metric{dataset="train",metric_name="accuracy"}'
+    )
+    assert (
+        panels["RMSE"]["targets"][0]["expr"]
+        == 'foehncast_training_pipeline_run_metric{dataset="train",metric_name="rmse"}'
+    )
+    # Model registry
+    assert (
+        panels["Model Version"]["targets"][0]["expr"]
+        == 'foehncast_training_pipeline_registered_model_version{dataset="train"}'
+    )
+    # Feature pipeline detail
+    assert (
+        panels["Range Violations per Spot"]["targets"][0]["expr"]
+        == 'foehncast_feature_pipeline_spot_range_violation_count{dataset="train"}'
+    )
+    assert (
+        panels["Training Handoff Ready"]["targets"][0]["expr"]
+        == 'foehncast_feature_pipeline_training_handoff_ready{dataset="train"}'
+    )
+    assert (
+        panels["Prediction Freshness"]["targets"][0]["expr"]
+        == "time() - max(foehncast_prediction_log_latest_prediction_timestamp_seconds)"
+    )
+    # Collapsed rows contain spot-level and column-drift detail
+    collapsed = {
+        p["title"]: p for p in ml["panels"] if p["type"] == "row" and p.get("collapsed")
+    }
+    assert "Per-Column Drift Detail" in collapsed
+    assert "Spot-Level Detail" in collapsed
+    assert len(collapsed["Per-Column Drift Detail"]["panels"]) == 2
+    assert len(collapsed["Spot-Level Detail"]["panels"]) == 7
+
+
+def test_rider_dashboard_covers_drift_and_prediction_metrics() -> None:
+    rider = _read_json("grafana_work/dashboards/foehncast-rider.json")
+    panels = {p["title"]: p for p in rider["panels"] if p["type"] != "row"}
+
+    # Drift status
+    assert (
+        panels["Feature Drift Score"]["targets"][0]["expr"]
+        == 'foehncast_drift_metric{dataset_name=~".+",metric_name="drift_score"}'
+    )
+    # Model confidence gauge
+    assert (
+        panels["Model Confidence"]["targets"][0]["expr"]
+        == '1 - clamp_max(max(foehncast_drift_metric{metric_name="drift_score",dataset_name=~".+"}), 1)'
+    )
+    # System pulse
+    assert (
+        panels["Prediction Freshness"]["targets"][0]["expr"]
+        == "time() - max(foehncast_prediction_log_latest_prediction_timestamp_seconds)"
+    )
+    # Spot validation panels (all 6 Swiss spots)
+    spot_ids = {
+        "silvaplana",
+        "urnersee",
+        "neuchatel",
+        "bodensee",
+        "walensee",
+        "thunersee",
+    }
+    spot_panels = [
+        p
+        for p in rider["panels"]
+        if p["type"] != "row"
+        and "spot_validation_passed" in p.get("targets", [{}])[0].get("expr", "")
+    ]
+    assert len(spot_panels) == 6
+    found_spots = set()
+    for p in spot_panels:
+        for sid in spot_ids:
+            if sid in p["targets"][0]["expr"]:
+                found_spots.add(sid)
+    assert found_spots == spot_ids
+
+
+def test_all_dashboards_have_unique_panel_ids_and_cross_links() -> None:
+    for filename, uid in [
+        ("foehncast-operations.json", "foehncast-operations"),
+        ("foehncast-rider.json", "foehncast-rider"),
+        ("foehncast-ml-diagnostics.json", "foehncast-ml-diagnostics"),
+    ]:
+        d = _read_json(f"grafana_work/dashboards/{filename}")
+        assert d["uid"] == uid
+
+        ids: set[int] = set()
+        for p in d["panels"]:
+            assert p["id"] not in ids, f"Duplicate id {p['id']} in {filename}"
+            ids.add(p["id"])
+            for inner in p.get("panels", []):
+                assert inner["id"] not in ids, (
+                    f"Duplicate id {inner['id']} in {filename}"
+                )
+                ids.add(inner["id"])
+
+        assert len(d.get("links", [])) == 3
 
 
 def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default() -> (
@@ -447,13 +451,14 @@ def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default(
     assert config.getboolean("metrics", "enabled")
     assert (
         config["dashboards"]["default_home_dashboard_path"]
-        == "/opt/grafana/dashboards/foehncast-overview.json"
+        == "/opt/grafana/dashboards/foehncast-operations.json"
     )
 
 
 def test_local_bootstrap_applies_local_only_grafana_access_overrides() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
 
+    assert "FOEHNCAST_GRAFANA_ALLOW_EMBEDDING" in bootstrap
     assert "FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM" in bootstrap
     assert "FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED" in bootstrap
     assert "FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE" in bootstrap
@@ -466,7 +471,7 @@ def test_local_bootstrap_verifies_grafana_provisioning() -> None:
     bootstrap = _read_text("scripts/bootstrap-local.sh")
 
     assert "verify_grafana_provisioning" in bootstrap
-    assert "/api/search?dashboardUIDs=foehncast-monitoring" in bootstrap
+    assert "/api/search?dashboardUIDs=foehncast-operations" in bootstrap
     assert "/api/v1/provisioning/alert-rules" in bootstrap
     assert "foehncast_predmon_schedule_fail" in bootstrap
     assert "foehncast_predmon_execution_fail" in bootstrap
