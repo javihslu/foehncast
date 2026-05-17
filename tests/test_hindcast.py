@@ -92,7 +92,11 @@ class TestRunHindcastValidation:
 
     def test_computes_metrics_with_matching_data(self) -> None:
         now = datetime.now(tz=UTC)
-        forecast_base = now - timedelta(hours=200)
+        # Truncate to the hour so prediction and observation timestamps align
+        # after the round("h") step in run_hindcast_validation.
+        forecast_base = (now - timedelta(hours=200)).replace(
+            minute=0, second=0, microsecond=0
+        )
 
         history = pd.DataFrame(
             {
@@ -111,7 +115,7 @@ class TestRunHindcastValidation:
 
         # Build a fake observed DataFrame matching what fetch_archive returns.
         observed_index = pd.DatetimeIndex(
-            [forecast_base.replace(minute=0, second=0, microsecond=0)],
+            [forecast_base],
             name="time",
         )
         observed_raw = pd.DataFrame(
