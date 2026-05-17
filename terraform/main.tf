@@ -1367,10 +1367,11 @@ resource "google_project_iam_member" "workflows_run_developer" {
 resource "google_workflows_workflow" "pipeline_cascade" {
   count = var.provision_cloud_workflows ? 1 : 0
 
-  name            = "foehncast-pipeline-cascade"
-  region          = var.region
-  description     = "FoehnCast FTI pipeline cascade: feature → training → inference"
-  service_account = google_service_account.workflows[0].id
+  name                = "foehncast-pipeline-cascade"
+  region              = var.region
+  description         = "FoehnCast FTI pipeline cascade: feature → training → inference"
+  service_account     = google_service_account.workflows[0].id
+  deletion_protection = false
 
   source_contents = <<-YAML
     main:
