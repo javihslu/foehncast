@@ -83,14 +83,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 12
+        dashboardUid: foehncast-operations
+        panelId: 34
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "12"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "34"
           summary: Recent prediction-monitoring background scheduling failures detected.
         labels:
           component: inference-monitoring
@@ -173,14 +173,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 13
+        dashboardUid: foehncast-operations
+        panelId: 35
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "13"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "35"
           summary: Recent prediction-monitoring background execution failures detected.
         labels:
           component: inference-monitoring
@@ -263,14 +263,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 14
+        dashboardUid: foehncast-operations
+        panelId: 36
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "14"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "36"
           summary: Prediction monitoring has been active without a successful background execution for more than 15 minutes.
         labels:
           component: inference-monitoring
@@ -353,14 +353,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 18
+        dashboardUid: foehncast-operations
+        panelId: 25
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "18"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "25"
           summary: The latest feature-pipeline summary reports a failing stage.
         labels:
           component: feature-pipeline
@@ -443,14 +443,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 27
+        dashboardUid: foehncast-operations
+        panelId: 26
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "27"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "26"
           summary: The latest training-pipeline summary reports a failing stage.
         labels:
           component: training-pipeline
@@ -533,14 +533,14 @@ groups:
               maxDataPoints: 43200
               refId: C
               type: threshold
-        dashboardUid: foehncast-monitoring
-        panelId: 19
+        dashboardUid: foehncast-operations
+        panelId: 15
         noDataState: OK
         execErrState: Error
         for: 0s
         annotations:
-          __dashboardUid__: foehncast-monitoring
-          __panelId__: "19"
+          __dashboardUid__: foehncast-operations
+          __panelId__: "15"
           summary: The hosted compose sync has not reported a successful refresh for more than 15 minutes.
         labels:
           component: hosted-operator
