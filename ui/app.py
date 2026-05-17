@@ -484,7 +484,7 @@ def _render_sidebar_ml_panels() -> None:
         refresh="30s",
     )
 
-    # --- Model Status (compact header) -----------------------------------
+    # --- Model Status (styled card with stats) -------------------------
     model_ver = _prom_query("foehncast_training_pipeline_registered_model_version")
     eval_ok = _prom_query("foehncast_training_pipeline_evaluation_report_exists")
     reg_ok = _prom_query("foehncast_training_pipeline_model_registered")
@@ -492,10 +492,82 @@ def _render_sidebar_ml_panels() -> None:
         reg_ok is not None and reg_ok >= 1
     )
     ver_label = f"v{int(model_ver)}" if model_ver is not None else "—"
-    st.metric("Model", f"{ver_label} · {'Verified ✓' if verified else 'Unverified ✗'}")
+
+    r2_val = _prom_query('foehncast_training_pipeline_run_metric{metric_name="r2"}')
+    rmse_val = _prom_query('foehncast_training_pipeline_run_metric{metric_name="rmse"}')
+    feat_count = _prom_query("foehncast_training_pipeline_feature_count")
+    train_rows = _prom_query("foehncast_training_pipeline_row_count")
+
+    if verified:
+        badge_color = "var(--accent)"
+        badge_bg = "var(--accent-soft)"
+        badge_text = "Verified ✓"
+    else:
+        badge_color = "#c0392b"
+        badge_bg = "rgba(192, 57, 43, 0.10)"
+        badge_text = "Unverified ✗"
+
+    def _stat(label: str, value: float | None, fmt: str = ".2f") -> str:
+        display = f"{value:{fmt}}" if value is not None else "—"
+        return (
+            f'<div style="flex:1;min-width:0">'
+            f'<span style="display:block;font-family:Manrope,sans-serif;'
+            f"font-size:0.62rem;font-weight:700;letter-spacing:0.04em;"
+            f'text-transform:uppercase;color:var(--muted)">{label}</span>'
+            f'<strong style="display:block;margin-top:2px;'
+            f"font-family:Newsreader,serif;font-size:1.05rem;"
+            f'color:var(--ink)">{display}</strong></div>'
+        )
+
+    stats_html = (
+        '<div style="display:flex;gap:8px;margin-top:12px;'
+        'padding-top:10px;border-top:1px solid rgba(23,50,77,0.08)">'
+        + _stat("R²", r2_val)
+        + _stat("RMSE", rmse_val)
+        + _stat("Feats", feat_count, ".0f")
+        + _stat("Rows", train_rows, ".0f")
+        + "</div>"
+    )
+
+    st.markdown(
+        f"""
+        <div style="
+          border: 1px solid var(--line);
+          border-radius: 20px;
+          background: var(--panel);
+          box-shadow: var(--shadow);
+          padding: 16px 18px;
+          margin-bottom: 0.6rem;
+        ">
+          <p class="eyebrow" style="margin:0 0 6px">Champion Model</p>
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <span style="
+              font-family:'Newsreader',serif;
+              font-size:1.8rem;
+              font-weight:700;
+              color:var(--ink);
+              line-height:1;
+            ">{ver_label}</span>
+            <span style="
+              font-family:'Manrope',sans-serif;
+              font-size:0.75rem;
+              font-weight:700;
+              color:{badge_color};
+              background:{badge_bg};
+              border-radius:12px;
+              padding:3px 10px;
+              letter-spacing:0.02em;
+            ">{badge_text}</span>
+          </div>
+          {stats_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # --- Model Confidence (Grafana gauge embed) ---------------------------
     if _grafana_embedding_enabled():
+        st.caption("Confidence (1 − drift score)")
         url = _grafana_solo_panel_url(
             "foehncast-rider",
             "foehncast-rider",
@@ -751,9 +823,9 @@ def main() -> None:
             )
         st.markdown('<div style="margin-top:1.2rem"></div>', unsafe_allow_html=True)
         _render_freshness_bar()
-        st.caption(f"Grafana base: {_grafana_base_url()}")
         st.divider()
         _render_sidebar_ml_panels()
+        st.caption(f"Grafana: {_grafana_base_url()}")
 
     _render_timeline_panels()
 
