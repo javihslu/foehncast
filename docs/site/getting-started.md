@@ -48,7 +48,7 @@ curl -fsS -X POST http://127.0.0.1:8000/rank \
 
 ## Maintainer Path
 
-Most contributors can stop at the local evaluator path. If you maintain the shared cloud environment, start with [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). The cloud path stays separate from the default contributor path and does not belong in the first-run setup.
+Most contributors can stop at the local evaluator path. If you maintain the shared cloud environment, start with [Delivery and Operator Workflow](system/delivery-and-operator-workflow.md). For the technical overlay mechanism that switches the local stack between MinIO and GCP backends, see [Compose Overlay Pattern](system/architecture.md#compose-overlay-pattern). The cloud path stays separate from the default contributor path and does not belong in the first-run setup.
 
 Hosted deployment keeps the runtime scope tight. Runtime services deploy to the cloud path. Local notebooks, docs tooling, and local emulators stay local or CI-only.
 

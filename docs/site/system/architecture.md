@@ -162,6 +162,28 @@ flowchart LR
 
 The hosted targets deploy runtime services only. Development assets, notebooks, docs tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. Cloud Composer owns hosted orchestration. Operator services stay private by default.
 
+### Compose Overlay Pattern
+
+The local stack uses a layered Compose architecture. A shared base defines pipeline services. Storage and identity overlays swap the backend without changing the application layer.
+
+| File | Role | Storage backend |
+|------|------|----------------|
+| `docker-compose.yml` | Base services: Airflow, MLflow, app, UI, monitoring | None — storage is injected by an overlay |
+| `docker-compose.objectstore.yml` | Local overlay: MinIO, Feast Datastore emulator, S3 credentials | `STORAGE_BACKEND=s3`, MinIO on port 9000 |
+| `docker-compose.gcp.yml` | Cloud overlay: ADC credential mounts, BigQuery/GCS wiring, Feast GCS registry | `STORAGE_BACKEND=bigquery`, `gs://` artifact paths |
+
+Usage:
+
+```bash
+# Local development (default)
+docker compose -f docker-compose.yml -f docker-compose.objectstore.yml up
+
+# Cloud-parity testing with GCP credentials
+GCP_PROJECT_ID=my-project docker compose -f docker-compose.yml -f docker-compose.gcp.yml up
+```
+
+The overlays are mutually exclusive. Each injects environment variables into all services through YAML anchors (`x-objectstore-runtime-env` / `x-gcp-runtime-env`). The Python config layer reads `STORAGE_BACKEND` to resolve storage paths at runtime. CI validates both overlay configurations on every pull request.
+
 See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the hosted topology and managed service boundaries.
 
 ## Shared Core Vs Runtime Differences
