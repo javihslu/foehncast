@@ -9,7 +9,13 @@ import pandas as pd
 
 from foehncast.monitoring.hindcast import (
     _eligible_predictions,
+    read_hindcast_result,
     run_hindcast_validation,
+)
+
+_NOOP_WRITE = patch(
+    "foehncast.monitoring.hindcast._write_hindcast_result",
+    lambda result, path=None: None,
 )
 
 
@@ -59,20 +65,27 @@ class TestEligiblePredictions:
 
 class TestRunHindcastValidation:
     def test_returns_empty_when_no_predictions(self) -> None:
-        with patch(
-            "foehncast.monitoring.hindcast.read_prediction_history",
-            return_value=pd.DataFrame(),
+        with (
+            patch(
+                "foehncast.monitoring.hindcast.read_prediction_history",
+                return_value=pd.DataFrame(),
+            ),
+            _NOOP_WRITE,
         ):
             result = run_hindcast_validation()
         assert result["validated_count"] == 0
         assert result["accuracy"] is None
         assert result["mae"] is None
+        assert result["validated_at"] is not None
 
     def test_returns_empty_when_no_eligible(self) -> None:
         history = _make_prediction_history(forecast_hours_ago=24)
-        with patch(
-            "foehncast.monitoring.hindcast.read_prediction_history",
-            return_value=history,
+        with (
+            patch(
+                "foehncast.monitoring.hindcast.read_prediction_history",
+                return_value=history,
+            ),
+            _NOOP_WRITE,
         ):
             result = run_hindcast_validation(buffer_hours=120)
         assert result["validated_count"] == 0
@@ -149,6 +162,7 @@ class TestRunHindcastValidation:
                     "quiver_m2": [9, 12],
                 },
             ),
+            _NOOP_WRITE,
         ):
             result = run_hindcast_validation(buffer_hours=120)
 
@@ -187,8 +201,31 @@ class TestRunHindcastValidation:
                 "foehncast.monitoring.hindcast.get_rider_config",
                 return_value={"weight_kg": 80},
             ),
+            _NOOP_WRITE,
         ):
             result = run_hindcast_validation(buffer_hours=120)
 
         assert result["validated_count"] == 0
         assert result["accuracy"] is None
+
+
+class TestReadHindcastResult:
+    def test_returns_empty_when_no_file(self, tmp_path: object) -> None:
+        from pathlib import Path
+
+        missing = Path(str(tmp_path)) / "missing.json"
+        result = read_hindcast_result(missing)
+        assert result["validated_count"] == 0
+        assert result["accuracy"] is None
+
+    def test_reads_persisted_result(self, tmp_path: object) -> None:
+        import json
+        from pathlib import Path
+
+        state = Path(str(tmp_path)) / "hindcast-validation.json"
+        state.write_text(
+            json.dumps({"validated_count": 42, "accuracy": 0.85, "mae": 0.3})
+        )
+        result = read_hindcast_result(state)
+        assert result["validated_count"] == 42
+        assert result["accuracy"] == 0.85

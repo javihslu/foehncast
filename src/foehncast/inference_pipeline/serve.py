@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 import logging
 from typing import Any
@@ -41,6 +44,7 @@ from foehncast.monitoring.prediction_monitoring_prometheus import (
 from foehncast.monitoring.prediction_prometheus import (
     render_prediction_log_prometheus_metrics,
 )
+from foehncast.monitoring.hindcast import run_hindcast_validation
 from foehncast.monitoring.hindcast_prometheus import (
     render_hindcast_prometheus_metrics,
 )
@@ -129,9 +133,38 @@ def _metrics_payload() -> bytes:
     )
 
 
+_HINDCAST_INTERVAL_SECONDS = 3600  # Run hindcast validation every hour.
+
+
+def _run_hindcast_sync() -> None:
+    """Run hindcast validation, logging any failures."""
+    try:
+        run_hindcast_validation()
+    except Exception:
+        logger.exception("Hindcast validation failed")
+
+
+async def _hindcast_background_loop() -> None:
+    """Periodically run hindcast validation in a thread to avoid blocking."""
+    while True:
+        await asyncio.to_thread(_run_hindcast_sync)
+        await asyncio.sleep(_HINDCAST_INTERVAL_SECONDS)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    task = asyncio.create_task(_hindcast_background_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
 def create_app() -> FastAPI:
     """Build the serving application for health and inference endpoints."""
-    app = FastAPI(title="FoehnCast API", version="0.1.0")
+    app = FastAPI(title="FoehnCast API", version="0.1.0", lifespan=_lifespan)
     app.add_middleware(InferenceMetricsMiddleware)
 
     @app.get("/health")

@@ -41,7 +41,11 @@ from foehncast.monitoring.prediction_prometheus import (
     build_prediction_log_prometheus_registry,
     render_prediction_log_prometheus_metrics,
 )
-from foehncast.monitoring.hindcast import run_hindcast_validation
+from foehncast.monitoring.hindcast import (
+    hindcast_state_path,
+    read_hindcast_result,
+    run_hindcast_validation,
+)
 from foehncast.monitoring.hindcast_prometheus import (
     build_hindcast_prometheus_registry,
     render_hindcast_prometheus_metrics,
@@ -77,6 +81,8 @@ __all__ = [
     "render_hosted_sync_prometheus_metrics",
     "render_prediction_log_prometheus_metrics",
     "run_hindcast_validation",
+    "hindcast_state_path",
+    "read_hindcast_result",
     "build_hindcast_prometheus_registry",
     "render_hindcast_prometheus_metrics",
     "training_pipeline_stage_overview",

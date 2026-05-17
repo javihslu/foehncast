@@ -3,12 +3,17 @@
 Reads the prediction event log, fetches observed weather for forecast times
 that are now in the past, applies the same labeling function to get
 ground-truth quality, and computes accuracy metrics.
+
+Results are persisted to a state file so that Prometheus scrapes can read
+cached results without hitting external APIs on every request.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -18,12 +23,48 @@ from foehncast.config import get_rider_config, get_spots
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_archive
 from foehncast.monitoring.prediction_log import read_prediction_history
+from foehncast.paths import project_root
 from foehncast.training_pipeline.label import compute_quality_index
 
 logger = logging.getLogger(__name__)
 
 # Open-Meteo archive has ~5-day latency for observed data.
 _ARCHIVE_BUFFER_HOURS = 120
+
+_EMPTY_RESULT: dict[str, Any] = {
+    "validated_count": 0,
+    "accuracy": None,
+    "mae": None,
+    "class_counts": {},
+    "validated_at": None,
+}
+
+
+def hindcast_state_path() -> Path:
+    """Path to the persisted hindcast validation result."""
+    return project_root() / ".state" / "monitoring" / "hindcast-validation.json"
+
+
+def read_hindcast_result(path: Path | None = None) -> dict[str, Any]:
+    """Read the cached hindcast result from the state file."""
+    resolved = hindcast_state_path() if path is None else path
+    if not resolved.exists():
+        return dict(_EMPTY_RESULT)
+    try:
+        return json.loads(resolved.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Corrupt hindcast state file at %s", resolved)
+        return dict(_EMPTY_RESULT)
+
+
+def _write_hindcast_result(result: dict[str, Any], path: Path | None = None) -> Path:
+    """Persist hindcast validation result to the state file."""
+    resolved = hindcast_state_path() if path is None else path
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return resolved
 
 
 def _spot_lookup() -> dict[str, dict[str, Any]]:
@@ -74,12 +115,9 @@ def run_hindcast_validation(
 
     if eligible.empty:
         logger.info("No eligible predictions for hindcast validation")
-        return {
-            "validated_count": 0,
-            "accuracy": None,
-            "mae": None,
-            "class_counts": {},
-        }
+        result = dict(_EMPTY_RESULT, validated_at=datetime.now(tz=UTC).isoformat())
+        _write_hindcast_result(result)
+        return result
 
     spots = _spot_lookup()
     rider_config = get_rider_config()
@@ -117,12 +155,9 @@ def run_hindcast_validation(
 
     if not observed_frames:
         logger.info("No observed data retrieved for hindcast validation")
-        return {
-            "validated_count": 0,
-            "accuracy": None,
-            "mae": None,
-            "class_counts": {},
-        }
+        result = dict(_EMPTY_RESULT, validated_at=datetime.now(tz=UTC).isoformat())
+        _write_hindcast_result(result)
+        return result
 
     observed = pd.concat(observed_frames)
 
@@ -148,12 +183,9 @@ def run_hindcast_validation(
 
     if merged.empty:
         logger.info("No prediction/observation pairs matched after join")
-        return {
-            "validated_count": 0,
-            "accuracy": None,
-            "mae": None,
-            "class_counts": {},
-        }
+        result = dict(_EMPTY_RESULT, validated_at=datetime.now(tz=UTC).isoformat())
+        _write_hindcast_result(result)
+        return result
 
     # Compute metrics.
     predicted = merged["quality_index"].astype(float)
@@ -173,7 +205,9 @@ def run_hindcast_validation(
         "accuracy": accuracy,
         "mae": mae,
         "class_counts": {str(k): int(v) for k, v in class_counts.items()},
+        "validated_at": datetime.now(tz=UTC).isoformat(),
     }
+    _write_hindcast_result(result)
     logger.info(
         "Hindcast validation: %d pairs, accuracy=%.3f, MAE=%.3f",
         validated_count,

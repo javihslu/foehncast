@@ -1,15 +1,23 @@
-"""Prometheus export helpers for hindcast validation metrics."""
+"""Prometheus export helpers for hindcast validation metrics.
+
+Reads cached results from the hindcast state file. The actual validation
+runs as a periodic background task and writes to that file.
+"""
 
 from __future__ import annotations
 
+from typing import Any
+
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
-from foehncast.monitoring.hindcast import run_hindcast_validation
+from foehncast.monitoring.hindcast import read_hindcast_result
 
 
-def build_hindcast_prometheus_registry() -> CollectorRegistry:
-    """Run hindcast validation and expose results as Prometheus gauges."""
-    result = run_hindcast_validation()
+def build_hindcast_prometheus_registry(
+    result: dict[str, Any] | None = None,
+) -> CollectorRegistry:
+    """Render cached hindcast results as Prometheus gauges."""
+    resolved = read_hindcast_result() if result is None else result
     registry = CollectorRegistry()
 
     accuracy = Gauge(
@@ -28,18 +36,20 @@ def build_hindcast_prometheus_registry() -> CollectorRegistry:
         registry=registry,
     )
 
-    validated_count.set(float(result["validated_count"]))
-    if result["accuracy"] is not None:
-        accuracy.set(result["accuracy"])
-    if result["mae"] is not None:
-        mae.set(result["mae"])
+    validated_count.set(float(resolved.get("validated_count", 0)))
+    if resolved.get("accuracy") is not None:
+        accuracy.set(resolved["accuracy"])
+    if resolved.get("mae") is not None:
+        mae.set(resolved["mae"])
 
     return registry
 
 
-def render_hindcast_prometheus_metrics() -> bytes:
+def render_hindcast_prometheus_metrics(
+    result: dict[str, Any] | None = None,
+) -> bytes:
     """Return Prometheus exposition text for hindcast validation."""
-    registry = build_hindcast_prometheus_registry()
+    registry = build_hindcast_prometheus_registry(result=result)
     return generate_latest(registry)
 
 
