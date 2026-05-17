@@ -77,6 +77,21 @@ outputs:
   cloud_composer_airflow_uri:
     description: Cloud Composer Airflow URI repository variable
     value: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
+  provision_cloud_run_mlflow:
+    description: Cloud Run MLflow provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_mlflow }}
+  provision_cloud_run_grafana:
+    description: Cloud Run Grafana provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_grafana }}
+  cloud_run_grafana_prometheus_url:
+    description: Grafana Prometheus datasource URL repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_grafana_prometheus_url }}
+  provision_cloud_run_ui:
+    description: Cloud Run UI provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
+  provision_cloud_workflows:
+    description: Cloud Workflows provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
   provision_online_compose_host:
     description: Online compose host provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_online_compose_host }}
@@ -147,6 +162,11 @@ runs:
           echo "cloud_composer_airflow_access_ready=$(read_repo_var GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY)"
           echo "cloud_composer_dag_gcs_prefix=$(read_repo_var GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX)"
           echo "cloud_composer_airflow_uri=$(read_repo_var GCP_CLOUD_COMPOSER_AIRFLOW_URI)"
+          echo "provision_cloud_run_mlflow=$(read_repo_var GCP_PROVISION_CLOUD_RUN_MLFLOW)"
+          echo "provision_cloud_run_grafana=$(read_repo_var GCP_PROVISION_CLOUD_RUN_GRAFANA)"
+          echo "cloud_run_grafana_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL)"
+          echo "provision_cloud_run_ui=$(read_repo_var GCP_PROVISION_CLOUD_RUN_UI)"
+          echo "provision_cloud_workflows=$(read_repo_var GCP_PROVISION_CLOUD_WORKFLOWS)"
           echo "provision_online_compose_host=$(read_repo_var GCP_PROVISION_ONLINE_COMPOSE_HOST)"
           echo "online_compose_host_name=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_NAME)"
           echo "online_compose_host_zone=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_ZONE)"
