@@ -40,6 +40,7 @@ markdown_extensions:
       emoji_index:
         !!python/name:material.extensions.emoji.twemoji # yaml-language-server-disable Unresolved tag
 
+
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.details
   - pymdownx.highlight:
@@ -75,3 +76,5 @@ nav:
   - Operations:
       - Monitoring: system/monitoring.md
       - Composer DAG Validation: system/composer-dag-validation.md
+  - Evidence:
+      - Grading Checklist: system/grading-checklist.md
