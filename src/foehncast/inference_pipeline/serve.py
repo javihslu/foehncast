@@ -41,6 +41,9 @@ from foehncast.monitoring.prediction_monitoring_prometheus import (
 from foehncast.monitoring.prediction_prometheus import (
     render_prediction_log_prometheus_metrics,
 )
+from foehncast.monitoring.hindcast_prometheus import (
+    render_hindcast_prometheus_metrics,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -119,6 +122,7 @@ def _metrics_payload() -> bytes:
         + render_training_pipeline_prometheus_metrics()
         + render_prediction_log_prometheus_metrics()
         + render_hosted_sync_prometheus_metrics()
+        + render_hindcast_prometheus_metrics()
         # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_monitoring_prometheus_metrics()
         + render_inference_prometheus_metrics()

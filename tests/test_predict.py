@@ -556,6 +556,14 @@ def test_metrics_endpoint_returns_prometheus_payload(
         "render_hosted_sync_prometheus_metrics",
         lambda: hosted_sync_payload,
     )
+    hindcast_payload = (
+        b"# HELP foehncast_hindcast_accuracy example\nfoehncast_hindcast_accuracy 0.5\n"
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_hindcast_prometheus_metrics",
+        lambda: hindcast_payload,
+    )
     monkeypatch.setattr(
         serve,
         "render_inference_prometheus_metrics",
@@ -571,6 +579,7 @@ def test_metrics_endpoint_returns_prometheus_payload(
         + training_payload
         + prediction_payload
         + hosted_sync_payload
+        + hindcast_payload
         + monitoring_payload
     )
     assert response.headers["content-type"] == CONTENT_TYPE_LATEST
