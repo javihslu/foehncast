@@ -1,33 +1,71 @@
+x-gcp-runtime-env: &gcp-runtime-env
+  STORAGE_BACKEND: bigquery
+  STORAGE_BIGQUERY_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID required}
+  STORAGE_BIGQUERY_DATASET: ${STORAGE_BIGQUERY_DATASET:-foehncast}
+  STORAGE_BIGQUERY_TABLE: ${STORAGE_BIGQUERY_TABLE:-forecast_features}
+  GCP_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID required}
+  GCP_LOCATION: ${GCP_LOCATION:-europe-west6}
+  GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:?GCP_PROJECT_ID required}
+
+x-feast-gcp-env: &feast-gcp-env
+  FOEHNCAST_FEAST_SOURCE: bigquery
+  FOEHNCAST_FEAST_PROJECT: foehncast
+  FOEHNCAST_FEAST_PROJECT_ID: ${GCP_PROJECT_ID:?GCP_PROJECT_ID required}
+  FOEHNCAST_FEAST_REGISTRY: gs://${GCP_ARTIFACT_BUCKET_NAME:-foehncast-data}/feast/registry.db
+  FOEHNCAST_FEAST_GCS_BUCKET: ${GCP_ARTIFACT_BUCKET_NAME:-foehncast-data}
+  FOEHNCAST_FEAST_GCS_STAGING_LOCATION: gs://${GCP_ARTIFACT_BUCKET_NAME:-foehncast-data}/feast/staging
+  FOEHNCAST_FEAST_BIGQUERY_DATASET: ${STORAGE_BIGQUERY_DATASET:-foehncast}
+  FOEHNCAST_FEAST_BIGQUERY_LOCATION: ${STORAGE_BIGQUERY_LOCATION:-EU}
+  FOEHNCAST_FEAST_BIGQUERY_TABLE: ${GCP_PROJECT_ID:?GCP_PROJECT_ID required}.${STORAGE_BIGQUERY_DATASET:-foehncast}.${STORAGE_BIGQUERY_TABLE:-forecast_features}
+  FOEHNCAST_FEAST_DATASTORE_DATABASE: ${FOEHNCAST_FEAST_DATASTORE_DATABASE:-feast-online}
+
 services:
   app:
     platform: linux/amd64
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
+      FOEHNCAST_PIPELINE_REPORT_DIR: gs://${GCP_ARTIFACT_BUCKET_NAME:-foehncast-data}/airflow/reports
     volumes:
       - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro
 
   model-registry:
+    environment:
+      MLFLOW_ARTIFACT_DESTINATION: gs://${GCP_ARTIFACT_BUCKET_NAME:-foehncast-data}/mlflow/artifacts
     volumes:
       - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
 
   development_env:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/appuser/.config/gcloud:ro
 
   airflow-init:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
 
   airflow-webserver:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
 
   airflow-dag-processor:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
 
   airflow-scheduler:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
 
   airflow-triggerer:
+    environment:
+      <<: [*gcp-runtime-env, *feast-gcp-env]
     volumes:
       - ${HOME}/.config/gcloud:/home/airflow/.config/gcloud:ro
