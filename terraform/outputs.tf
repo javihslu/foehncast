@@ -183,6 +183,11 @@ output "primary_hosted_api_url" {
   value       = try(google_cloud_run_v2_service.app[0].uri, null)
 }
 
+output "cloud_run_grafana_service_url" {
+  description = "Cloud Run Grafana dashboard URL, if provisioned."
+  value       = try(google_cloud_run_v2_service.grafana[0].uri, null)
+}
+
 output "online_compose_host_ip" {
   description = "Public IP address of the online Docker host, if provisioned."
   value       = try(google_compute_address.online_compose[0].address, null)

@@ -3,6 +3,7 @@ locals {
   artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
   cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  cloud_run_grafana_image           = var.cloud_run_grafana_image != "" ? var.cloud_run_grafana_image : "${local.artifact_registry_repository_path}/foehncast-grafana:latest"
   online_compose_app_image          = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
   online_compose_airflow_image      = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
   online_compose_mlflow_image       = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
@@ -837,6 +838,91 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   project  = var.project_id
   location = google_cloud_run_v2_service.app[0].location
   name     = google_cloud_run_v2_service.app[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — Grafana (read-only monitoring dashboard)
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_v2_service" "grafana" {
+  count               = var.provision_cloud_run_grafana ? 1 : 0
+  name                = var.cloud_run_grafana_service_name
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    timeout = "30s"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = local.cloud_run_grafana_image
+
+      ports {
+        container_port = 3000
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+
+      env {
+        name  = "GRAFANA_PROMETHEUS_URL"
+        value = var.cloud_run_grafana_prometheus_url
+      }
+
+      # Read-only public viewer surface — anonymous access, embedding enabled.
+      env {
+        name  = "GF_AUTH_ANONYMOUS_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "GF_AUTH_ANONYMOUS_ORG_ROLE"
+        value = "Viewer"
+      }
+      env {
+        name  = "GF_AUTH_DISABLE_LOGIN_FORM"
+        value = "true"
+      }
+      env {
+        name  = "GF_SECURITY_ALLOW_EMBEDDING"
+        value = "true"
+      }
+      env {
+        name  = "GF_SECURITY_ADMIN_PASSWORD"
+        value = random_password.grafana_admin[0].result
+      }
+    }
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "random_password" "grafana_admin" {
+  count   = var.provision_cloud_run_grafana ? 1 : 0
+  length  = 24
+  special = false
+}
+
+resource "google_cloud_run_v2_service_iam_member" "grafana_public_invoker" {
+  count    = var.provision_cloud_run_grafana ? 1 : 0
+  project  = var.project_id
+  location = google_cloud_run_v2_service.grafana[0].location
+  name     = google_cloud_run_v2_service.grafana[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

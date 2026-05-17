@@ -123,6 +123,41 @@ variable "cloud_run_env_vars" {
   default     = {}
 }
 
+# ---------------------------------------------------------------------------
+# Cloud Run — Grafana
+# ---------------------------------------------------------------------------
+
+variable "provision_cloud_run_grafana" {
+  description = "Whether Terraform should create a Cloud Run Grafana dashboard service."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_run_grafana_service_name" {
+  description = "Cloud Run service name for the Grafana dashboard."
+  type        = string
+  default     = "foehncast-grafana"
+}
+
+variable "cloud_run_grafana_image" {
+  description = "Container image URI for the Cloud Run Grafana service. Leave empty to use the default Artifact Registry path."
+  type        = string
+  default     = ""
+}
+
+variable "cloud_run_grafana_prometheus_url" {
+  description = "Prometheus-compatible query URL that Cloud Run Grafana should use as its datasource."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      !var.provision_cloud_run_grafana || trimspace(var.cloud_run_grafana_prometheus_url) != ""
+    )
+    error_message = "Set cloud_run_grafana_prometheus_url when provision_cloud_run_grafana is true."
+  }
+}
+
 variable "provision_cloud_composer_environment" {
   description = "Whether Terraform should create a Cloud Composer environment for hosted orchestration readiness work."
   type        = bool
