@@ -188,6 +188,26 @@ output "cloud_run_grafana_service_url" {
   value       = try(google_cloud_run_v2_service.grafana[0].uri, null)
 }
 
+output "cloud_run_mlflow_service_url" {
+  description = "Cloud Run MLflow tracking server URL, if provisioned. Not public — requires authenticated access."
+  value       = try(google_cloud_run_v2_service.mlflow[0].uri, null)
+}
+
+output "cloud_sql_mlflow_connection_name" {
+  description = "Cloud SQL connection name for the MLflow instance, if provisioned."
+  value       = try(google_sql_database_instance.mlflow[0].connection_name, null)
+}
+
+output "cloud_run_ui_service_url" {
+  description = "Cloud Run UI (Streamlit) URL, if provisioned."
+  value       = try(google_cloud_run_v2_service.ui[0].uri, null)
+}
+
+output "cloud_workflows_pipeline_cascade_id" {
+  description = "Cloud Workflows pipeline cascade ID, if provisioned."
+  value       = try(google_workflows_workflow.pipeline_cascade[0].id, null)
+}
+
 output "online_compose_host_ip" {
   description = "Public IP address of the online Docker host, if provisioned."
   value       = try(google_compute_address.online_compose[0].address, null)

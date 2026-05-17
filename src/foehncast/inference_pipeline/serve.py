@@ -24,6 +24,9 @@ from foehncast.inference_pipeline.predict import (
 )
 from foehncast.inference_pipeline.rank import rank_spots
 from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
+from foehncast.monitoring.drift_prometheus import (
+    render_drift_prometheus_metrics,
+)
 from foehncast.monitoring.pipeline_prometheus import (
     CONTENT_TYPE_LATEST,
     render_feature_pipeline_prometheus_metrics,
@@ -127,6 +130,7 @@ def _metrics_payload() -> bytes:
         + render_prediction_log_prometheus_metrics()
         + render_hosted_sync_prometheus_metrics()
         + render_hindcast_prometheus_metrics()
+        + render_drift_prometheus_metrics()
         # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_monitoring_prometheus_metrics()
         + render_inference_prometheus_metrics()

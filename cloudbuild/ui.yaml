@@ -1,0 +1,46 @@
+# Cloud Build config for the FoehnCast UI (Streamlit) image.
+#
+# Trigger contract: GitHub Actions submits this build after merge to main.
+# The workflow authenticates via OIDC, resolves the image repository from
+# Terraform-managed GitHub repository variables, and passes substitutions
+# for the commit SHA and floating tag.
+#
+# Manual submission (for testing):
+#   gcloud builds submit . \
+#     --config=cloudbuild/ui.yaml \
+#     --substitutions=_IMAGE_REPOSITORY=REGION-docker.pkg.dev/PROJECT/REPO/foehncast-ui,_COMMIT_SHA=$(git rev-parse HEAD)
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        tags=(-t "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}")
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          tags+=(-t "${_FLOATING_TAG}")
+        fi
+
+        docker build \
+          --platform linux/amd64 \
+          -f containers/ui/Dockerfile \
+          "${tags[@]}" \
+          .
+
+        docker push "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          docker push "${_FLOATING_TAG}"
+        fi
+
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+substitutions:
+  _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/example-project/foehncast-docker/foehncast-ui
+  _COMMIT_SHA: dev
+  _FLOATING_TAG: ""

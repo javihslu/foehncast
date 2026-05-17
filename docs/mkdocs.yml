@@ -64,6 +64,7 @@ nav:
       - Interfaces and Surfaces: system/interfaces-and-surfaces.md
   - Runtime and Deployment:
       - Architecture: system/architecture.md
+      - Cloud Architecture: system/cloud-architecture.md
       - Local Evaluator: system/local-evaluator.md
       - Hosted Full-Stack: system/hosted-full-stack.md
       - Cloud Mapping: system/cloud-mapping.md

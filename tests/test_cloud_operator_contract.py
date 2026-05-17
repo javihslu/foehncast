@@ -1265,7 +1265,9 @@ def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     assert "cloudbuild/**" in push_paths
     assert {target["image_name"] for target in image_targets} == {
         "foehncast-airflow",
+        "foehncast-grafana",
         "foehncast-mlflow",
+        "foehncast-ui",
     }
 
 

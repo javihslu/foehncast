@@ -10,9 +10,11 @@ on:
       - containers/airflow/**
       - containers/grafana/**
       - containers/mlflow/**
+      - containers/ui/**
       - grafana_work/**
       - prometheus_config/**
       - src/**
+      - ui/**
       - pyproject.toml
       - uv.lock
       - config.yaml
@@ -94,6 +96,8 @@ jobs:
             cloudbuild_config: cloudbuild/grafana.yaml
           - image_name: foehncast-mlflow
             cloudbuild_config: cloudbuild/mlflow.yaml
+          - image_name: foehncast-ui
+            cloudbuild_config: cloudbuild/ui.yaml
     steps:
       - uses: actions/checkout@v6.0.2
 

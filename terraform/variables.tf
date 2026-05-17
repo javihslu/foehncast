@@ -124,6 +124,34 @@ variable "cloud_run_env_vars" {
 }
 
 # ---------------------------------------------------------------------------
+# Cloud SQL + Cloud Run — MLflow
+# ---------------------------------------------------------------------------
+
+variable "provision_cloud_run_mlflow" {
+  description = "Whether Terraform should create a Cloud SQL instance and Cloud Run MLflow tracking server."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_run_mlflow_service_name" {
+  description = "Cloud Run service name for the MLflow tracking server."
+  type        = string
+  default     = "foehncast-mlflow"
+}
+
+variable "cloud_run_mlflow_image" {
+  description = "Container image URI for the Cloud Run MLflow service. Leave empty to use the default Artifact Registry path."
+  type        = string
+  default     = ""
+}
+
+variable "cloud_sql_mlflow_instance_name" {
+  description = "Cloud SQL instance name for the MLflow PostgreSQL backend."
+  type        = string
+  default     = "foehncast-mlflow"
+}
+
+# ---------------------------------------------------------------------------
 # Cloud Run — Grafana
 # ---------------------------------------------------------------------------
 
@@ -157,6 +185,56 @@ variable "cloud_run_grafana_prometheus_url" {
     error_message = "Set cloud_run_grafana_prometheus_url when provision_cloud_run_grafana is true."
   }
 }
+
+variable "provision_cloud_run_ui" {
+  description = "Whether Terraform should create a Cloud Run UI (Streamlit) service."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_run_ui_service_name" {
+  description = "Cloud Run service name for the Streamlit UI."
+  type        = string
+  default     = "foehncast-ui"
+}
+
+variable "cloud_run_ui_image" {
+  description = "Container image URI for the Cloud Run UI service. Leave empty to use the default Artifact Registry path."
+  type        = string
+  default     = ""
+}
+
+variable "cloud_run_ui_grafana_url" {
+  description = "Public Grafana URL that the UI embeds in iframes. Usually the Cloud Run Grafana service URL."
+  type        = string
+  default     = ""
+}
+
+variable "cloud_run_ui_prometheus_url" {
+  description = "Prometheus-compatible query URL for server-side metric lookups from the Streamlit UI."
+  type        = string
+  default     = ""
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Workflows — Serverless pipeline orchestration
+# ---------------------------------------------------------------------------
+
+variable "provision_cloud_workflows" {
+  description = "Whether Terraform should create Cloud Run Jobs, a Cloud Workflow, and a Cloud Scheduler trigger for serverless pipeline orchestration."
+  type        = bool
+  default     = false
+}
+
+variable "cloud_workflows_schedule" {
+  description = "Cron schedule for the pipeline cascade (Cloud Scheduler). Set to empty string to disable scheduling."
+  type        = string
+  default     = "0 */6 * * *"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Composer (managed Airflow — optional, higher cost)
+# ---------------------------------------------------------------------------
 
 variable "provision_cloud_composer_environment" {
   description = "Whether Terraform should create a Cloud Composer environment for hosted orchestration readiness work."
@@ -214,7 +292,7 @@ variable "cloud_composer_pypi_packages" {
 }
 
 variable "provision_online_compose_host" {
-  description = "Whether Terraform should create a single online Docker host for the full Airflow, MLflow, and app stack."
+  description = "DEPRECATED — prefer Cloud Run services. Whether Terraform should create a single online Docker host for the full Airflow, MLflow, and app stack."
   type        = bool
   default     = false
 }

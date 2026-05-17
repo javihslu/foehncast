@@ -6,6 +6,12 @@ from foehncast.monitoring.drift import (
     detect_data_drift,
     detect_prediction_drift,
     push_drift_metrics,
+    read_all_drift_reports,
+    read_drift_report,
+)
+from foehncast.monitoring.drift_prometheus import (
+    build_drift_prometheus_registry,
+    render_drift_prometheus_metrics,
 )
 from foehncast.monitoring.hosted_sync_prometheus import (
     build_hosted_sync_prometheus_registry,
@@ -70,6 +76,10 @@ __all__ = [
     "feature_pipeline_summary_path",
     "prediction_event_log_path",
     "push_drift_metrics",
+    "read_all_drift_reports",
+    "read_drift_report",
+    "build_drift_prometheus_registry",
+    "render_drift_prometheus_metrics",
     "read_hosted_sync_status",
     "read_prediction_event_log",
     "read_prediction_history",
