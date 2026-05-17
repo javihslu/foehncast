@@ -971,8 +971,8 @@ resource "google_sql_database_instance" "mlflow" {
     edition           = "ENTERPRISE"
     availability_type = "ZONAL"
 
-    disk_size    = 10
-    disk_type    = "PD_HDD"
+    disk_size       = 10
+    disk_type       = "PD_HDD"
     disk_autoresize = false
 
     ip_configuration {
