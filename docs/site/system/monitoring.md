@@ -19,6 +19,7 @@ flowchart LR
         AIR["Airflow pipeline summaries"]
         PRED["Prediction requests"]
         SYNC["Hosted sync status"]
+        HIND["Hindcast validation"]
     end
 
     subgraph Processing ["Metric composition"]
@@ -39,6 +40,7 @@ flowchart LR
     AIR --> APP
     PRED --> LOG
     SYNC --> APP
+    HIND --> APP
     LOG --> APP
     LOG --> DRIFT
     DRIFT --> STATSD
@@ -68,6 +70,7 @@ The public-versus-private surface rule is documented in [Interfaces and Surfaces
 | `.state/monitoring/prediction-events.jsonl` | durable | prediction-event history by model version (local S3-backed runtimes) |
 | `foehncast_monitoring.prediction_events` BigQuery table | durable | prediction-event history (Cloud Run and cloud-native readers) |
 | `.state/monitoring/prediction-log.jsonl` | bounded working set | recent prediction rows for local drift evaluation; not a history source |
+| `.state/monitoring/hindcast-validation.json` | durable | latest hindcast accuracy, MAE, and validated-pair counts |
 | `.state/hosted-sync/last-success.json` | durable | latest hosted sync success marker |
 | app `/metrics` | composed scrape | app-owned monitoring state and summary-derived metrics |
 | StatsD exporter `:9102` | scrape | Evidently-backed drift metrics |
@@ -168,13 +171,34 @@ All rules, the contact point, and the alert routing policy are checked into the 
 
 ## Dashboards
 
-Grafana is provisioned from the repository-owned dashboard at `grafana_work/dashboards/foehncast-overview.json`. The dashboard covers:
+Grafana is provisioned from three repository-owned dashboards under `grafana_work/dashboards/`:
 
-- feature pipeline summary count and latest run success by dataset and backend
-- failed spot counts
-- monitoring target health
+| Dashboard | File | Main audience | Key rows |
+|------|------|---------------|----------|
+| FoehnCast Rider | `foehncast-rider.json` | rider, reviewer | Spot Map, Model Confidence, Drift Status, System Pulse |
+| FoehnCast Operations | `foehncast-operations.json` | operator | System Health, Pipeline Status, Data Freshness, Spot Throughput, Pipeline Timing, Error Budget, Inference SLIs, Prediction Monitoring |
+| FoehnCast ML Diagnostics | `foehncast-ml-diagnostics.json` | operator, ML engineer | Drift Overview, Per-Column Drift Detail, Training Metrics, Training Data Shape, Model Registry, Feature Pipeline Detail, Spot-Level Detail, Prediction Log, Prediction Monitoring, Hindcast Validation |
+
+The rider dashboard keeps the evaluation-safe view narrow: spot geography, model confidence derived from drift scores, and system pulse. The operations dashboard focuses on service health and pipeline reliability. The ML diagnostics dashboard carries the deep inspection panels for drift, training, model registry, and hindcast accuracy.
 
 Dashboard JSON and provisioning config are version-controlled so the operator view is reproducible from a fresh `docker compose up`.
+
+## Hindcast Validation
+
+Hindcast validation compares past predictions against observed weather data to measure real-world forecast accuracy.
+
+The validation path is:
+
+- the app runs a background hindcast task hourly via `asyncio.to_thread` inside the FastAPI lifespan
+- eligible predictions are those older than a 120-hour buffer (accounting for Open-Meteo archive API latency of roughly five days)
+- for each eligible prediction, the archive API provides observed weather at the same spot and timestamp
+- ground-truth quality labels are recomputed from observed values using the same `compute_quality_index` function used in training
+- accuracy, MAE, and per-class counts are calculated and persisted to `.state/monitoring/hindcast-validation.json`
+- Prometheus scrapes the cached result; the app never calls the archive API on scrape
+
+The ML Diagnostics dashboard shows hindcast accuracy in a dedicated row with gauge, MAE stat, and validated-pairs count panels. The Streamlit sidebar model card also embeds the hindcast accuracy gauge.
+
+This closes the prediction-to-observation feedback loop without relying on manual evaluation notebooks.
 
 ## Recovery Evidence
 

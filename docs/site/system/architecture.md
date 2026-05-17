@@ -76,10 +76,10 @@ Grafana stays on the operator side. The rider-facing experience comes from the a
 |------|----------------|-------------------------|
 | Feature pipeline | Collect data, engineer curated rows, validate them, and store the result | local Airflow DAG plus the configured storage backend |
 | Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
-| Inference pipeline | Serve health, predict, rank, and spot-list responses | FastAPI app container |
+| Inference pipeline | Serve health, predict, rank, and spot-list responses; run batch predictions after model registration | FastAPI app container plus the asset-triggered `inference_pipeline` DAG |
 | Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow in the local evaluator; Cloud Composer in the hosted environment |
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
-| Monitoring | Scrape runtime metrics, collect pushed gauges, and visualize starter alerts | Prometheus, StatsD exporter, and Grafana operator stack |
+| Monitoring | Scrape runtime metrics, collect pushed gauges, run hindcast validation, and visualize through three operator dashboards | Prometheus, StatsD exporter, and Grafana operator stack |
 
 ## DVC And Airflow
 
@@ -87,7 +87,7 @@ The same feature and training boundaries are driven by two different control pat
 
 - DVC is the reproducible path for local reruns and CI. It tracks file dependencies and outputs in `dvc.yaml`.
 - Airflow is the runtime control plane. It schedules DAG runs, handles retries, and shows asset hand-offs.
-- Inference is neither a DVC stage nor an Airflow DAG. The FastAPI app serves live requests from the registered model and online feature surfaces.
+- The `inference_pipeline` DAG bridges inference into the Airflow world: it is asset-triggered by model registration and runs batch predictions across all configured spots, feeding the prediction-event history that hindcast validation and drift detection consume.
 
 <div class="mermaid">
 flowchart LR
@@ -103,6 +103,7 @@ flowchart LR
     subgraph AirflowPath ["Airflow runtime path"]
         FDAG["feature_dag"]:::ctl --> FEAT["Feature pipeline"]:::pipe
         TDAG["training_dag"]:::ctl --> TRAIN["Training pipeline"]:::pipe
+        IDAG["inference_dag"]:::ctl --> INF["Inference pipeline"]:::pipe
     end
 
     DVCCLI --> FEAT
@@ -111,6 +112,8 @@ flowchart LR
     CUR --> TRAIN
     CUR --> FEAST["Feast serving prep"]:::store
     TRAIN --> REG["MLflow model + reports"]:::store
+    REG --> INF
+    INF --> PLOG["Prediction event log"]:::store
     FEAST --> API["FastAPI inference"]:::serve
     REG --> API
 </div>
@@ -118,10 +121,10 @@ flowchart LR
 | Path | Main job | Main outputs |
 |------|----------|--------------|
 | DVC | repeatable offline reruns in local or CI contexts | `data/${dataset}`, `reports/train_metrics.json`, `reports/feature_importance.png` |
-| Airflow | scheduled or asset-triggered runtime execution | curated-feature, Feast-sync, training-request, MLflow, evaluation, and registry assets |
+| Airflow | scheduled or asset-triggered runtime execution | curated-feature, Feast-sync, training-request, MLflow, evaluation, registry, and prediction-log assets |
 | FastAPI | live serving | `/predict`, `/rank`, `/spots`, `/features/online`, `/metrics` |
 
-The runtime orchestration layer models main data products as Airflow assets. The feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. DVC mirrors the offline feature and training boundaries for reproducible reruns but does not replace the Airflow asset graph.
+The runtime orchestration layer models main data products as Airflow assets. The feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. The inference DAG consumes the registry asset and produces prediction-log events for monitoring. DVC mirrors the offline feature and training boundaries for reproducible reruns but does not replace the Airflow asset graph.
 
 ## Deployment Targets
 
