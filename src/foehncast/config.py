@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -197,6 +199,32 @@ def get_mlflow_config() -> dict[str, Any]:
 def get_mlflow_tracking_uri() -> str:
     """Return the resolved MLflow tracking URI."""
     return env_value("MLFLOW_TRACKING_URI") or _DEFAULT_MLFLOW_TRACKING_URI
+
+
+_log = logging.getLogger(__name__)
+
+
+def configure_mlflow_auth() -> None:
+    """Set ``MLFLOW_TRACKING_TOKEN`` when the tracking URI is a Cloud Run service.
+
+    On GCP (Cloud Run / GCE), the metadata server provides an ID token for the
+    target audience.  Locally or when the URI is plain HTTP the call is a no-op.
+    """
+    tracking_uri = get_mlflow_tracking_uri()
+    if not tracking_uri.startswith("https://"):
+        return
+
+    try:
+        import google.auth.transport.requests  # noqa: I001
+        import google.oauth2.id_token
+
+        request = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(request, tracking_uri)
+        os.environ["MLFLOW_TRACKING_TOKEN"] = token
+    except Exception:  # noqa: BLE001
+        _log.warning(
+            "Could not obtain ID token for MLflow — auth skipped", exc_info=True
+        )
 
 
 def get_inference_config() -> dict[str, Any]:

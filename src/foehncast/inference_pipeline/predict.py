@@ -8,6 +8,7 @@ import mlflow
 import pandas as pd
 
 from foehncast.config import (
+    configure_mlflow_auth,
     get_inference_config,
     get_mlflow_config,
     get_mlflow_tracking_uri,
@@ -65,6 +66,7 @@ def get_serving_model_version(
     resolved_alias = alias or get_serving_model_alias()
 
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+    configure_mlflow_auth()
     client = mlflow.MlflowClient()
     model_version = client.get_model_version_by_alias(
         resolved_model_name, resolved_alias
