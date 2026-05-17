@@ -497,6 +497,7 @@ def _render_sidebar_ml_panels() -> None:
     rmse_val = _prom_query('foehncast_training_pipeline_run_metric{metric_name="rmse"}')
     feat_count = _prom_query("foehncast_training_pipeline_feature_count")
     train_rows = _prom_query("foehncast_training_pipeline_row_count")
+    hindcast_acc = _prom_query("foehncast_hindcast_accuracy")
 
     if verified:
         badge_color = "var(--accent)"
@@ -524,6 +525,7 @@ def _render_sidebar_ml_panels() -> None:
         'padding-top:10px;border-top:1px solid rgba(23,50,77,0.08)">'
         + _stat("R²", r2_val)
         + _stat("RMSE", rmse_val)
+        + _stat("Hind.", hindcast_acc, ".0%")
         + _stat("Feats", feat_count, ".0f")
         + _stat("Rows", train_rows, ".0f")
         + "</div>"
@@ -573,6 +575,17 @@ def _render_sidebar_ml_panels() -> None:
             "foehncast-rider",
             panel_id=304,
             from_range="now-1h",
+        )
+        st.iframe(url, height=120)
+
+    # --- Hindcast Accuracy (Grafana gauge embed) --------------------------
+    if _grafana_embedding_enabled():
+        st.caption("Hindcast Accuracy")
+        url = _grafana_solo_panel_url(
+            _ML_DASHBOARD_UID,
+            _ML_DASHBOARD_SLUG,
+            panel_id=551,
+            from_range="now-24h",
         )
         st.iframe(url, height=120)
 
