@@ -39,3 +39,7 @@ def mlflow_registry_asset_uri(model_name: str = "foehncast") -> str:
 
 def inference_prediction_log_asset_uri(dataset: str = "default") -> str:
     return f"x-foehncast://inference/prediction-log/{_asset_segment(dataset)}"
+
+
+def drift_report_asset_uri(dataset: str = "default") -> str:
+    return f"x-foehncast://monitoring/drift-report/{_asset_segment(dataset)}"

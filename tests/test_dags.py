@@ -11,6 +11,7 @@ import pytest
 
 from foehncast.airflow_assets import (
     curated_feature_store_asset_uri,
+    drift_report_asset_uri,
     feast_feature_store_asset_uri,
     mlflow_evaluation_asset_uri,
     mlflow_registry_asset_uri,
@@ -93,6 +94,8 @@ def _load_dag_module(
         "AIRFLOW_FEATURE_SCHEDULE",
         "AIRFLOW_AUTO_RETRAIN_MODE",
         "AIRFLOW_TRAINING_DATASET",
+        "AIRFLOW_DRIFT_DATASET",
+        "AIRFLOW_DRIFT_SCHEDULE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -291,3 +294,58 @@ def test_runtime_release_dag_accepts_manual_handoff_requests(
         "dag_run_id": "{{ run_id }}",
         "dag_id": "runtime_release",
     }
+
+
+def test_drift_dag_defaults_to_twelve_hour_schedule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AIRFLOW_DRIFT_DATASET", raising=False)
+    monkeypatch.delenv("AIRFLOW_DRIFT_SCHEDULE", raising=False)
+    module, operators = _load_dag_module(monkeypatch, "dags/drift_dag.py")
+
+    assert module.dag.kwargs["schedule"] == "0 */12 * * *"
+    assert module.dag.kwargs["catchup"] is False
+    assert module.dag.kwargs["is_paused_upon_creation"] is False
+    assert module.dag.kwargs["tags"] == ["foehncast", "monitoring"]
+    assert [operator.kwargs["task_id"] for operator in operators] == [
+        "detect_feature_drift",
+        "detect_prediction_drift",
+    ]
+    assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
+    assert [asset.uri for asset in operators[0].kwargs["outlets"]] == [
+        drift_report_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[1].kwargs["outlets"]] == [
+        drift_report_asset_uri("train"),
+    ]
+
+
+def test_drift_dag_supports_custom_schedule_and_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, operators = _load_dag_module(
+        monkeypatch,
+        "dags/drift_dag.py",
+        env={
+            "AIRFLOW_DRIFT_DATASET": "validation",
+            "AIRFLOW_DRIFT_SCHEDULE": "0 0 * * *",
+        },
+    )
+
+    assert module.dag.kwargs["schedule"] == "0 0 * * *"
+    assert operators[0].kwargs["op_kwargs"] == {"dataset": "validation"}
+    assert [asset.uri for asset in operators[0].kwargs["outlets"]] == [
+        drift_report_asset_uri("validation"),
+    ]
+
+
+def test_drift_dag_can_be_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module, _operators = _load_dag_module(
+        monkeypatch,
+        "dags/drift_dag.py",
+        env={"AIRFLOW_DRIFT_SCHEDULE": "manual"},
+    )
+
+    assert module.dag.kwargs["schedule"] is None
