@@ -11,3 +11,7 @@
 !ui/**
 !containers/
 !containers/**
+!grafana_work/etc/
+!grafana_work/etc/**
+!grafana_work/dashboards/
+!grafana_work/dashboards/**

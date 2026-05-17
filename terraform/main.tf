@@ -3,6 +3,9 @@ locals {
   artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
   cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  cloud_run_grafana_image           = var.cloud_run_grafana_image != "" ? var.cloud_run_grafana_image : "${local.artifact_registry_repository_path}/foehncast-grafana:latest"
+  cloud_run_ui_image                = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
+  cloud_run_mlflow_image            = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
   online_compose_app_image          = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
   online_compose_airflow_image      = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
   online_compose_mlflow_image       = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
@@ -11,12 +14,20 @@ locals {
   feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
   prediction_event_dataset_id       = "foehncast_monitoring"
   prediction_event_table_id         = "prediction_events"
+  # When MLflow is deployed on Cloud Run, use its URL; otherwise fall back to
+  # the explicit variable (e.g. an external MLflow server).
+  mlflow_tracking_uri = (
+    var.provision_cloud_run_mlflow
+    ? google_cloud_run_v2_service.mlflow[0].uri
+    : var.mlflow_tracking_uri
+  )
+
   cloud_run_env_vars = merge(
     {
       GCP_PROJECT_ID                       = var.project_id
       GCP_LOCATION                         = var.region
       GOOGLE_CLOUD_PROJECT                 = var.project_id
-      MLFLOW_TRACKING_URI                  = var.mlflow_tracking_uri
+      MLFLOW_TRACKING_URI                  = local.mlflow_tracking_uri
       STORAGE_BACKEND                      = "bigquery"
       STORAGE_BIGQUERY_PROJECT_ID          = var.project_id
       STORAGE_BIGQUERY_DATASET             = var.bigquery_dataset_id
@@ -91,7 +102,7 @@ locals {
       GCP_LOCATION                          = var.region
       GOOGLE_CLOUD_PROJECT                  = var.project_id
       MLFLOW_ARTIFACT_DESTINATION           = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      MLFLOW_TRACKING_URI                   = var.mlflow_tracking_uri
+      MLFLOW_TRACKING_URI                   = local.mlflow_tracking_uri
       STORAGE_BACKEND                       = "bigquery"
       STORAGE_BIGQUERY_PROJECT_ID           = var.project_id
       STORAGE_BIGQUERY_DATASET              = var.bigquery_dataset_id
@@ -350,16 +361,19 @@ locals {
     "artifactregistry.googleapis.com",
     "bigquery.googleapis.com",
     "cloudbuild.googleapis.com",
+    "cloudscheduler.googleapis.com",
     "composer.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+    "monitoring.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "sqladmin.googleapis.com",
     "sts.googleapis.com",
+    "workflows.googleapis.com",
   ])
 }
 
@@ -613,6 +627,18 @@ resource "google_project_iam_member" "cloud_run_datastore_user" {
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_project_iam_member" "cloud_run_monitoring_viewer" {
+  project = var.project_id
+  role    = "roles/monitoring.viewer"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
+resource "google_project_iam_member" "cloud_run_monitoring_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
   dataset_id = google_bigquery_dataset.feature_store.dataset_id
   role       = "roles/bigquery.dataViewer"
@@ -839,6 +865,606 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   name     = google_cloud_run_v2_service.app[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — Grafana (read-only monitoring dashboard)
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_v2_service" "grafana" {
+  count               = var.provision_cloud_run_grafana ? 1 : 0
+  name                = var.cloud_run_grafana_service_name
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    timeout = "30s"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = local.cloud_run_grafana_image
+
+      ports {
+        container_port = 3000
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "512Mi"
+        }
+      }
+
+      env {
+        name  = "GRAFANA_PROMETHEUS_URL"
+        value = var.cloud_run_grafana_prometheus_url
+      }
+
+      # Read-only public viewer surface — anonymous access, embedding enabled.
+      env {
+        name  = "GF_AUTH_ANONYMOUS_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "GF_AUTH_ANONYMOUS_ORG_ROLE"
+        value = "Viewer"
+      }
+      env {
+        name  = "GF_AUTH_DISABLE_LOGIN_FORM"
+        value = "true"
+      }
+      env {
+        name  = "GF_SECURITY_ALLOW_EMBEDDING"
+        value = "true"
+      }
+      env {
+        name  = "GF_SECURITY_ADMIN_PASSWORD"
+        value = random_password.grafana_admin[0].result
+      }
+    }
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "random_password" "grafana_admin" {
+  count   = var.provision_cloud_run_grafana ? 1 : 0
+  length  = 24
+  special = false
+}
+
+resource "google_cloud_run_v2_service_iam_member" "grafana_public_invoker" {
+  count    = var.provision_cloud_run_grafana ? 1 : 0
+  project  = var.project_id
+  location = google_cloud_run_v2_service.grafana[0].location
+  name     = google_cloud_run_v2_service.grafana[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud SQL — MLflow metadata backend (PostgreSQL micro)
+# ---------------------------------------------------------------------------
+
+resource "google_sql_database_instance" "mlflow" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  name             = var.cloud_sql_mlflow_instance_name
+  database_version = "POSTGRES_15"
+  region           = var.region
+  project          = var.project_id
+
+  deletion_protection = false
+
+  settings {
+    tier              = "db-f1-micro"
+    edition           = "ENTERPRISE"
+    availability_type = "ZONAL"
+
+    disk_size       = 10
+    disk_type       = "PD_HDD"
+    disk_autoresize = false
+
+    ip_configuration {
+      ipv4_enabled = true
+      # Public IP is enabled but NO authorized_networks are defined,
+      # so direct TCP connections are blocked.  Cloud Run connects
+      # via Auth Proxy sidecar (unix socket through the Cloud SQL
+      # Admin API).  Operators use `gcloud sql connect`.
+    }
+
+    backup_configuration {
+      enabled = false
+    }
+
+    database_flags {
+      name  = "max_connections"
+      value = "50"
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_sql_database" "mlflow" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  name     = "mlflow"
+  instance = google_sql_database_instance.mlflow[0].name
+}
+
+resource "random_password" "mlflow_db" {
+  count   = var.provision_cloud_run_mlflow ? 1 : 0
+  length  = 24
+  special = false
+}
+
+resource "google_sql_user" "mlflow" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  instance = google_sql_database_instance.mlflow[0].name
+  name     = "mlflow"
+  password = random_password.mlflow_db[0].result
+}
+
+# Grant the Cloud Run SA permission to connect via Cloud SQL Auth Proxy.
+resource "google_project_iam_member" "cloud_run_cloudsql_client" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — MLflow (tracking server, protected)
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_v2_service" "mlflow" {
+  count               = var.provision_cloud_run_mlflow ? 1 : 0
+  name                = var.cloud_run_mlflow_service_name
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    service_account = google_service_account.cloud_run_runtime.email
+    timeout         = "300s"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    volumes {
+      name = "cloudsql"
+      cloud_sql_instance {
+        instances = [google_sql_database_instance.mlflow[0].connection_name]
+      }
+    }
+
+    containers {
+      image = local.cloud_run_mlflow_image
+
+      ports {
+        container_port = 5001
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "1Gi"
+        }
+      }
+
+      volume_mounts {
+        name       = "cloudsql"
+        mount_path = "/cloudsql"
+      }
+
+      env {
+        name  = "MLFLOW_BACKEND_STORE_URI"
+        value = "postgresql+psycopg2://mlflow:${random_password.mlflow_db[0].result}@/${google_sql_database.mlflow[0].name}?host=/cloudsql/${google_sql_database_instance.mlflow[0].connection_name}"
+      }
+
+      env {
+        name  = "MLFLOW_ARTIFACT_DESTINATION"
+        value = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
+      }
+
+      env {
+        name  = "MLFLOW_PORT"
+        value = "5001"
+      }
+    }
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [
+    google_project_service.required,
+    google_sql_database.mlflow,
+    google_sql_user.mlflow,
+    google_project_iam_member.cloud_run_cloudsql_client,
+    google_artifact_registry_repository_iam_member.cloud_run_reader,
+    google_storage_bucket_iam_member.cloud_run_bucket_reader,
+    google_storage_bucket_iam_member.cloud_run_bucket_metadata_reader,
+  ]
+}
+
+# MLflow is NOT public — only authenticated service accounts can invoke it.
+# Operators access via `gcloud run services proxy` or IAP (if configured).
+# The shared Cloud Run service account can invoke MLflow for tracking calls.
+resource "google_cloud_run_v2_service_iam_member" "mlflow_internal_invoker" {
+  count    = var.provision_cloud_run_mlflow ? 1 : 0
+  project  = var.project_id
+  location = google_cloud_run_v2_service.mlflow[0].location
+  name     = google_cloud_run_v2_service.mlflow[0].name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run — UI (Streamlit rider console)
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_v2_service" "ui" {
+  count               = var.provision_cloud_run_ui ? 1 : 0
+  name                = var.cloud_run_ui_service_name
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
+
+  template {
+    service_account = google_service_account.cloud_run_runtime.email
+    timeout         = "300s"
+
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+
+    containers {
+      image = local.cloud_run_ui_image
+
+      ports {
+        container_port = 8501
+      }
+
+      resources {
+        limits = {
+          cpu    = "1"
+          memory = "1Gi"
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.cloud_run_env_vars
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      env {
+        name = "FOEHNCAST_GRAFANA_BASE_URL"
+        value = (
+          var.provision_cloud_run_grafana
+          ? google_cloud_run_v2_service.grafana[0].uri
+          : var.cloud_run_ui_grafana_url
+        )
+      }
+
+      env {
+        name  = "FOEHNCAST_GRAFANA_ALLOW_EMBEDDING"
+        value = "true"
+      }
+
+      env {
+        name  = "FOEHNCAST_PROMETHEUS_URL"
+        value = var.cloud_run_ui_prometheus_url
+      }
+
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+
+      env {
+        name  = "GCP_LOCATION"
+        value = var.region
+      }
+    }
+  }
+
+  traffic {
+    percent = 100
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  depends_on = [
+    google_project_service.required,
+    google_firestore_database.feast_online_store,
+    google_artifact_registry_repository_iam_member.cloud_run_reader,
+    google_storage_bucket_iam_member.cloud_run_bucket_reader,
+    google_storage_bucket_iam_member.cloud_run_bucket_metadata_reader,
+    google_project_iam_member.cloud_run_bigquery_job_user,
+    google_project_iam_member.cloud_run_bigquery_read_session_user,
+    google_project_iam_member.cloud_run_datastore_user,
+    google_bigquery_dataset_iam_member.cloud_run_bigquery_reader,
+    google_bigquery_dataset_iam_member.cloud_run_monitoring_bigquery_editor,
+  ]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "ui_public_invoker" {
+  count    = var.provision_cloud_run_ui ? 1 : 0
+  project  = var.project_id
+  location = google_cloud_run_v2_service.ui[0].location
+  name     = google_cloud_run_v2_service.ui[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Run Jobs — Pipeline stages (reuse the app image)
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_run_v2_job" "feature_pipeline" {
+  count    = var.provision_cloud_workflows ? 1 : 0
+  name     = "foehncast-feature-pipeline"
+  location = var.region
+
+  template {
+    template {
+      service_account = google_service_account.cloud_run_runtime.email
+      timeout         = "600s"
+      max_retries     = 1
+
+      containers {
+        image = local.cloud_run_image
+
+        command = ["python", "-c"]
+        args    = ["from foehncast.orchestration import run_feature_pipeline_job; run_feature_pipeline_job(dataset='train')"]
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.cloud_run_env_vars
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_v2_job" "training_pipeline" {
+  count    = var.provision_cloud_workflows ? 1 : 0
+  name     = "foehncast-training-pipeline"
+  location = var.region
+
+  template {
+    template {
+      service_account = google_service_account.cloud_run_runtime.email
+      timeout         = "900s"
+      max_retries     = 0
+
+      containers {
+        image = local.cloud_run_image
+
+        command = ["python", "-c"]
+        args    = ["from foehncast.orchestration import run_training_pipeline_step; run_training_pipeline_step(dataset='train')"]
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "4Gi"
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.cloud_run_env_vars
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_v2_job" "inference_pipeline" {
+  count    = var.provision_cloud_workflows ? 1 : 0
+  name     = "foehncast-inference-pipeline"
+  location = var.region
+
+  template {
+    template {
+      service_account = google_service_account.cloud_run_runtime.email
+      timeout         = "300s"
+      max_retries     = 1
+
+      containers {
+        image = local.cloud_run_image
+
+        command = ["python", "-c"]
+        args    = ["from foehncast.orchestration import run_inference_pipeline_step; run_inference_pipeline_step()"]
+
+        resources {
+          limits = {
+            cpu    = "1"
+            memory = "1Gi"
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.cloud_run_env_vars
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Workflows — Pipeline orchestration (feature → train → infer)
+# ---------------------------------------------------------------------------
+
+resource "google_service_account" "workflows" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  account_id   = "foehncast-workflows"
+  display_name = "FoehnCast Cloud Workflows orchestrator"
+}
+
+# The workflow SA needs to run Cloud Run Jobs.
+resource "google_project_iam_member" "workflows_run_invoker" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/run.invoker"
+  member  = "serviceAccount:${google_service_account.workflows[0].email}"
+}
+
+resource "google_project_iam_member" "workflows_run_developer" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/run.developer"
+  member  = "serviceAccount:${google_service_account.workflows[0].email}"
+}
+
+resource "google_workflows_workflow" "pipeline_cascade" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  name            = "foehncast-pipeline-cascade"
+  region          = var.region
+  description     = "FoehnCast FTI pipeline cascade: feature → training → inference"
+  service_account = google_service_account.workflows[0].id
+
+  source_contents = <<-YAML
+    main:
+      steps:
+        - log_start:
+            call: sys.log
+            args:
+              text: "FoehnCast pipeline cascade started"
+              severity: INFO
+
+        - run_feature_pipeline:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: projects/${var.project_id}/locations/${var.region}/jobs/foehncast-feature-pipeline
+            result: feature_result
+
+        - log_feature_done:
+            call: sys.log
+            args:
+              text: "Feature pipeline completed"
+              severity: INFO
+
+        - run_training_pipeline:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: projects/${var.project_id}/locations/${var.region}/jobs/foehncast-training-pipeline
+            result: training_result
+
+        - log_training_done:
+            call: sys.log
+            args:
+              text: "Training pipeline completed"
+              severity: INFO
+
+        - run_inference_pipeline:
+            call: googleapis.run.v2.projects.locations.jobs.run
+            args:
+              name: projects/${var.project_id}/locations/${var.region}/jobs/foehncast-inference-pipeline
+            result: inference_result
+
+        - log_complete:
+            call: sys.log
+            args:
+              text: "FoehnCast pipeline cascade completed successfully"
+              severity: INFO
+
+        - return_result:
+            return:
+              feature: $${feature_result}
+              training: $${training_result}
+              inference: $${inference_result}
+  YAML
+
+  depends_on = [
+    google_project_service.required,
+    google_cloud_run_v2_job.feature_pipeline,
+    google_cloud_run_v2_job.training_pipeline,
+    google_cloud_run_v2_job.inference_pipeline,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Cloud Scheduler — Cron trigger for the pipeline cascade
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "pipeline_cascade" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  name             = "foehncast-pipeline-cascade"
+  description      = "Run the FoehnCast FTI pipeline cascade every 6 hours"
+  schedule         = var.cloud_workflows_schedule
+  time_zone        = "Europe/Zurich"
+  attempt_deadline = "30s"
+  region           = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://workflowexecutions.googleapis.com/v1/${google_workflows_workflow.pipeline_cascade[0].id}/executions"
+
+    oauth_token {
+      service_account_email = google_service_account.workflows[0].email
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+# Grant the UI service account permission to trigger workflows (on-demand button).
+resource "google_project_iam_member" "ui_workflows_invoker" {
+  count = var.provision_cloud_workflows && var.provision_cloud_run_ui ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/workflows.invoker"
+  member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
 resource "google_compute_network" "online_compose" {

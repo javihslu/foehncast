@@ -4,7 +4,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: ${GRAFANA_PROMETHEUS_URL}
     isDefault: true
     uid: prometheus
     editable: false

@@ -131,6 +131,43 @@ The shared hosted environment is separate from normal contributor setup. Contrib
 
 Hosted deployment keeps a narrow scope: the cloud targets deploy runtime services only, while `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only. Start with [docs/site/system/delivery-and-operator-workflow.md](docs/site/system/delivery-and-operator-workflow.md) for the maintainer workflow split and use `terraform/README.md` for operator detail.
 
+### Cloud Services
+
+All compute runs on serverless Cloud Run (scale-to-zero). The only fixed-cost resource is a Cloud SQL micro instance for MLflow metadata (~$8/mo idle).
+
+```mermaid
+flowchart LR
+    classDef public fill:#c8e6c9,stroke:#2e7d32
+    classDef protected fill:#fff3e0,stroke:#e65100
+    classDef managed fill:#e3f2fd,stroke:#1565c0
+
+    UI[Streamlit UI]:::public
+    APP[FastAPI App]:::public
+    GF[Grafana]:::public
+    MLF[MLflow]:::protected
+    WF[Cloud Workflows]:::protected
+
+    BQ[(BigQuery)]:::managed
+    GCS[(Cloud Storage)]:::managed
+    SQL[(Cloud SQL)]:::managed
+    GMP[Managed Prometheus]:::managed
+
+    UI & APP & GF -->|metrics| GMP
+    APP --> BQ & GCS
+    MLF --> SQL & GCS
+    WF -->|orchestrate| APP
+```
+
+| Service | Access | Purpose |
+|---------|--------|---------|
+| Streamlit UI | Public | Rider dashboard, forecasts, Grafana embeds |
+| FastAPI App | Public | Inference API |
+| Grafana | Public | Read-only monitoring dashboards |
+| MLflow | Protected | Model registry and experiment tracking |
+| Cloud Workflows | Protected | Pipeline orchestration (scheduled + on-demand) |
+
+See the [Cloud Architecture](https://javihslu.github.io/foehncast/system/cloud-architecture/) docs page for the full interactive diagram, access model, and cost forecast.
+
 ## Repository Map
 
 - `src/foehncast/`: application code for configuration, feature engineering, training, inference, monitoring, and spot metadata
@@ -148,6 +185,7 @@ Hosted deployment keeps a narrow scope: the cloud targets deploy runtime service
 - Docs home: <https://javihslu.github.io/foehncast/>
 - Getting started: <https://javihslu.github.io/foehncast/getting-started/>
 - Architecture: <https://javihslu.github.io/foehncast/system/architecture/>
+- Cloud architecture and costs: <https://javihslu.github.io/foehncast/system/cloud-architecture/>
 - Delivery and operator workflow: <https://javihslu.github.io/foehncast/system/delivery-and-operator-workflow/>
 - Cloud mapping: <https://javihslu.github.io/foehncast/system/cloud-mapping/>
 - Feature pipeline: <https://javihslu.github.io/foehncast/system/feature-pipeline/>

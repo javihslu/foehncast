@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+import logging
 import re
 import socket
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -13,6 +16,7 @@ import pandas as pd
 from foehncast.config import get_monitoring_config
 from foehncast.env import env_value
 from foehncast.monitoring._common import safe_float
+from foehncast.paths import project_root
 
 _DEFAULT_DRIFT_THRESHOLD = 0.15
 _DEFAULT_EVALUATION_WINDOW_DAYS = 30
@@ -125,14 +129,66 @@ def detect_prediction_drift(predictions_log: pd.DataFrame) -> DriftReport:
 
 
 def push_drift_metrics(report: DriftReport) -> None:
-    """Push drift metrics to StatsD for Prometheus scraping."""
+    """Push drift metrics to StatsD and persist for Prometheus scraping."""
+    _persist_drift_report(report)
+
     host = env_value("FOEHNCAST_STATSD_HOST") or _DEFAULT_STATSD_HOST
     port = int(env_value("FOEHNCAST_STATSD_PORT") or str(_DEFAULT_STATSD_PORT))
     prefix = env_value("FOEHNCAST_STATSD_PREFIX") or _DEFAULT_STATSD_PREFIX
 
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
-        for line in _statsd_lines(report, prefix or _DEFAULT_STATSD_PREFIX):
-            client.sendto(line.encode("utf-8"), (host or _DEFAULT_STATSD_HOST, port))
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            for line in _statsd_lines(report, prefix or _DEFAULT_STATSD_PREFIX):
+                client.sendto(
+                    line.encode("utf-8"), (host or _DEFAULT_STATSD_HOST, port)
+                )
+    except OSError:
+        logging.getLogger(__name__).debug("StatsD push failed (expected in cloud)")
+
+
+def _drift_report_dir() -> Path:
+    """Return the directory for persisted drift reports."""
+    configured = env_value("FOEHNCAST_PIPELINE_REPORT_DIR")
+    if configured and configured.strip():
+        return Path(configured.strip())
+    return project_root() / "airflow" / "reports"
+
+
+def _drift_report_path(report_kind: str, dataset_name: str) -> Path:
+    return _drift_report_dir() / f"drift-{report_kind}-{dataset_name}-latest.json"
+
+
+def _persist_drift_report(report: DriftReport) -> None:
+    """Write drift report to a JSON file for Prometheus export."""
+    path = _drift_report_path(report.report_kind, report.dataset_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = asdict(report)
+    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+
+def read_drift_report(report_kind: str, dataset_name: str) -> dict[str, Any] | None:
+    """Read a persisted drift report, or None if not available."""
+    path = _drift_report_path(report_kind, dataset_name)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def read_all_drift_reports() -> list[dict[str, Any]]:
+    """Read all persisted drift reports from the report directory."""
+    report_dir = _drift_report_dir()
+    if not report_dir.exists():
+        return []
+    reports = []
+    for path in sorted(report_dir.glob("drift-*-latest.json")):
+        try:
+            reports.append(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
+    return reports
 
 
 def _build_drift_report(
@@ -473,4 +529,6 @@ __all__ = [
     "detect_data_drift",
     "detect_prediction_drift",
     "push_drift_metrics",
+    "read_all_drift_reports",
+    "read_drift_report",
 ]

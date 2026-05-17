@@ -71,3 +71,4 @@ airflow/standalone_admin_password.txt
 htmlcov/
 .pytest_cache/
 /site/
+terraform/tfplan

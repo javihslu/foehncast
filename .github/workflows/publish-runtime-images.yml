@@ -8,8 +8,13 @@ on:
       - .github/actions/load-gcp-repo-config/action.yml
       - cloudbuild/**
       - containers/airflow/**
+      - containers/grafana/**
       - containers/mlflow/**
+      - containers/ui/**
+      - grafana_work/**
+      - prometheus_config/**
       - src/**
+      - ui/**
       - pyproject.toml
       - uv.lock
       - config.yaml
@@ -87,8 +92,12 @@ jobs:
         include:
           - image_name: foehncast-airflow
             cloudbuild_config: cloudbuild/airflow.yaml
+          - image_name: foehncast-grafana
+            cloudbuild_config: cloudbuild/grafana.yaml
           - image_name: foehncast-mlflow
             cloudbuild_config: cloudbuild/mlflow.yaml
+          - image_name: foehncast-ui
+            cloudbuild_config: cloudbuild/ui.yaml
     steps:
       - uses: actions/checkout@v6.0.2
 

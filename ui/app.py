@@ -59,6 +59,49 @@ _PROMETHEUS_BASE_URL = os.getenv(
     "FOEHNCAST_PROMETHEUS_URL", "http://127.0.0.1:9090"
 ).rstrip("/")
 
+_WORKFLOWS_PROJECT = os.getenv("GCP_PROJECT_ID", "")
+_WORKFLOWS_REGION = os.getenv("GCP_LOCATION", "")
+_WORKFLOWS_NAME = os.getenv("FOEHNCAST_WORKFLOW_NAME", "foehncast-pipeline-cascade")
+
+
+def _trigger_pipeline() -> str | None:
+    """Trigger the Cloud Workflows pipeline cascade and return the execution name.
+
+    Returns ``None`` when the required env vars are not set (local dev) or
+    when the request fails.
+    """
+    if not _WORKFLOWS_PROJECT or not _WORKFLOWS_REGION:
+        return None
+    try:
+        # On Cloud Run the default SA metadata token works for authenticated calls.
+        token_url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+        token_req = urllib.request.Request(
+            token_url, headers={"Metadata-Flavor": "Google"}
+        )
+        with urllib.request.urlopen(token_req, timeout=5) as resp:
+            token = json.loads(resp.read())["access_token"]
+
+        api_url = (
+            f"https://workflowexecutions.googleapis.com/v1/"
+            f"projects/{_WORKFLOWS_PROJECT}/locations/{_WORKFLOWS_REGION}/"
+            f"workflows/{_WORKFLOWS_NAME}/executions"
+        )
+        body = json.dumps({"argument": "{}"}).encode()
+        req = urllib.request.Request(
+            api_url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+            return result.get("name")
+    except Exception:
+        return None
+
 
 @st.cache_data(show_spinner=False)
 def _available_spots() -> list[dict[str, Any]]:
@@ -326,11 +369,33 @@ def _grafana_dashboard_url(
     return f"{_grafana_base_url()}/d/{uid}/{slug}?{query}&kiosk"
 
 
-def _prom_query(expr: str) -> float | None:
-    """Run an instant PromQL query and return the scalar value, or *None*."""
-    url = f"{_PROMETHEUS_BASE_URL}/api/v1/query?query={urlquote(expr)}"
+def _gcp_access_token() -> str | None:
+    """Fetch a GCP access token from the metadata server (Cloud Run only)."""
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
+        token_url = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+        req = urllib.request.Request(token_url, headers={"Metadata-Flavor": "Google"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return json.loads(resp.read()).get("access_token")
+    except Exception:
+        return None
+
+
+def _prom_query(expr: str) -> float | None:
+    """Run an instant PromQL query and return the scalar value, or *None*.
+
+    When the Prometheus URL points to a GMP endpoint (contains
+    ``monitoring.googleapis.com``), an OAuth2 bearer token is attached
+    automatically using the Cloud Run metadata server.
+    """
+    url = f"{_PROMETHEUS_BASE_URL}/api/v1/query?query={urlquote(expr)}"
+    headers: dict[str, str] = {}
+    if "monitoring.googleapis.com" in _PROMETHEUS_BASE_URL:
+        token = _gcp_access_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
             data = json.load(resp)
         results = data.get("data", {}).get("result", [])
         if results:
@@ -842,6 +907,17 @@ def main() -> None:
         _render_freshness_bar()
         st.divider()
         _render_sidebar_ml_panels()
+        if _WORKFLOWS_PROJECT and _WORKFLOWS_REGION:
+            st.divider()
+            if st.button(
+                "Run Pipeline",
+                help="Trigger the feature → training → inference cascade in the cloud",
+            ):
+                execution_name = _trigger_pipeline()
+                if execution_name:
+                    st.success("Pipeline triggered")
+                else:
+                    st.error("Failed to trigger pipeline")
         st.caption(f"Grafana: {_grafana_base_url()}")
 
     _render_timeline_panels()

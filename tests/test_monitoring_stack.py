@@ -36,6 +36,7 @@ def test_monitoring_compose_defines_expected_services() -> None:
         "../../grafana_work/dashboards:/opt/grafana/dashboards:ro"
         in services["grafana"]["volumes"]
     )
+    assert grafana_environment["GRAFANA_PROMETHEUS_URL"] == ("http://prometheus:9090")
     assert grafana_environment["FOEHNCAST_GRAFANA_ALERT_EMAIL"] == (
         "${FOEHNCAST_GRAFANA_ALERT_EMAIL:-alerts@example.invalid}"
     )
@@ -109,7 +110,7 @@ def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
     rider = _read_json("grafana_work/dashboards/foehncast-rider.json")
     ml = _read_json("grafana_work/dashboards/foehncast-ml-diagnostics.json")
 
-    assert datasource["url"] == "http://prometheus:9090"
+    assert datasource["url"] == "${GRAFANA_PROMETHEUS_URL}"
     assert datasource["uid"] == "prometheus"
     assert dashboard_provider["options"]["path"] == "/opt/grafana/dashboards"
 

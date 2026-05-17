@@ -6,7 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 import mlflow
 
-from foehncast.config import get_mlflow_config, get_mlflow_tracking_uri
+from foehncast.config import (
+    configure_mlflow_auth,
+    get_mlflow_config,
+    get_mlflow_tracking_uri,
+)
 
 if TYPE_CHECKING:
     from mlflow.entities.model_registry import ModelVersion
@@ -32,6 +36,7 @@ def _normalized_version(version: str | int) -> str:
 
 def _configured_mlflow_client(mlflow_module: Any, tracking_uri: str) -> Any:
     mlflow_module.set_tracking_uri(tracking_uri)
+    configure_mlflow_auth()
     return mlflow_module.MlflowClient()
 
 
@@ -122,4 +127,5 @@ def get_model_by_alias(alias: str, model_name: str | None = None) -> Any:
     mlflow_config = get_mlflow_config()
     resolved_model_name = _resolved_model_name(model_name, mlflow_config)
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+    configure_mlflow_auth()
     return mlflow.pyfunc.load_model(f"models:/{resolved_model_name}@{normalized_alias}")
