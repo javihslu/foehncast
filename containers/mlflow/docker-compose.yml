@@ -12,9 +12,6 @@ services:
       - MLFLOW_PORT=5001
       - MLFLOW_ARTIFACT_DESTINATION=${MLFLOW_ARTIFACT_DESTINATION:-file:///mlartifacts}
       - MLFLOW_BACKEND_STORE_URI=sqlite:///metadata/metadata.sqlite
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - MLFLOW_S3_ENDPOINT_URL=http://objectstore:9000
       - GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
       - GOOGLE_CLOUD_PROJECT=${GCP_PROJECT_ID:-}
     volumes:
