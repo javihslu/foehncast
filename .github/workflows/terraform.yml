@@ -470,8 +470,8 @@ jobs:
             cloud_run_memory='512Mi'
           fi
 
-          if [[ "$provision_cloud_run_service" == 'true' && -z "$mlflow_tracking_uri" ]]; then
-            echo "Resolve mlflow_tracking_uri from the workflow input or repository variable GCP_MLFLOW_TRACKING_URI when provision_cloud_run_service is true." >&2
+          if [[ "$provision_cloud_run_service" == 'true' && "$provision_cloud_run_mlflow" != 'true' && -z "$mlflow_tracking_uri" ]]; then
+            echo "Resolve mlflow_tracking_uri from the workflow input or repository variable GCP_MLFLOW_TRACKING_URI when provision_cloud_run_service is true and provision_cloud_run_mlflow is false." >&2
             exit 1
           fi
           provision_cloud_run_mlflow="$REPO_GCP_PROVISION_CLOUD_RUN_MLFLOW"
