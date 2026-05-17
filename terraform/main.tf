@@ -1227,6 +1227,8 @@ resource "google_cloud_run_v2_job" "feature_pipeline" {
   name     = "foehncast-feature-pipeline"
   location = var.region
 
+  deletion_protection = false
+
   template {
     template {
       service_account = google_service_account.cloud_run_runtime.email
@@ -1265,6 +1267,8 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
   name     = "foehncast-training-pipeline"
   location = var.region
 
+  deletion_protection = false
+
   template {
     template {
       service_account = google_service_account.cloud_run_runtime.email
@@ -1302,6 +1306,8 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
   count    = var.provision_cloud_workflows ? 1 : 0
   name     = "foehncast-inference-pipeline"
   location = var.region
+
+  deletion_protection = false
 
   template {
     template {
