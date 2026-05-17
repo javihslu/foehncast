@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
       - run: docker compose -f docker-compose.yml config
+      - run: GCP_PROJECT_ID=ci-validate docker compose -f docker-compose.yml -f
+          docker-compose.gcp.yml config
       - run: docker compose -f docker-compose.yml build model-registry app
           airflow-webserver
       - run: make smoke-local-evaluator
