@@ -9,9 +9,6 @@ FROM grafana/grafana
 
 # Defaults that alerting provisioning needs at startup.
 ENV FOEHNCAST_GRAFANA_ALERT_EMAIL=alerts@example.invalid
-# Install the Google Cloud Monitoring plugin for GMP datasource in cloud mode.
-ENV GF_INSTALL_PLUGINS=grafana-googlecloud-datasource
-
 COPY --chown=grafana:root grafana_work/etc/grafana.ini /etc/grafana/grafana.ini
 COPY --chown=grafana:root grafana_work/etc/provisioning /etc/grafana/provisioning
 COPY --chown=grafana:root grafana_work/dashboards /opt/grafana/dashboards

@@ -976,11 +976,11 @@ resource "google_sql_database_instance" "mlflow" {
     disk_autoresize = false
 
     ip_configuration {
-      ipv4_enabled = false
-      # Cloud Run connects via Cloud SQL Auth Proxy sidecar (unix
-      # socket, no public IP needed).  Operators use
-      # `gcloud sql connect` which tunnels through the Cloud SQL
-      # Admin API — no authorized_networks entry required.
+      ipv4_enabled = true
+      # Public IP is enabled but NO authorized_networks are defined,
+      # so direct TCP connections are blocked.  Cloud Run connects
+      # via Auth Proxy sidecar (unix socket through the Cloud SQL
+      # Admin API).  Operators use `gcloud sql connect`.
     }
 
     backup_configuration {

@@ -102,7 +102,7 @@ flowchart TB
 | **BigQuery** | BigQuery | — | IAM | Feature storage, monitoring events |
 | **Cloud Storage** | GCS | — | IAM | MLflow artifacts, Feast registry, pipeline reports |
 | **Firestore** | Firestore | — | IAM | Feast online store (Datastore mode) |
-| **Cloud SQL** | Cloud SQL | 5432 | Private | MLflow metadata (PostgreSQL micro, no public IP) |
+| **Cloud SQL** | Cloud SQL | 5432 | Private | MLflow metadata (PostgreSQL micro, no authorized networks) |
 | **GMP** | Managed Prometheus | — | IAM | Metric ingestion and query (PromQL-compatible) |
 | **Cloud Build** | Cloud Build | — | IAM | Container image builds from reviewed source |
 | **Artifact Registry** | Artifact Registry | — | IAM | Docker image repository |
