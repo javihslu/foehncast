@@ -913,3 +913,196 @@ def test_run_training_pipeline_step_emits_training_summary(
     assert emitted["summary"]["requested_stage"] == "Production"
     assert emitted["summary"]["training_run_id"] == "run-123"
     assert emitted["summary"]["training_row_count"] == 240
+
+
+# ---------------------------------------------------------------------------
+# Drift detection pipeline steps
+# ---------------------------------------------------------------------------
+
+
+def test_run_feature_drift_detection_step_checks_all_spots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "bodensee"}, {"id": "silvaplana"}],
+    )
+
+    bodensee_df = pd.DataFrame(
+        {"wind_speed_10m": [1.0, 2.0, 8.0, 9.0], "temperature_2m": [5, 6, 7, 8]}
+    )
+    silvaplana_df = pd.DataFrame(
+        {"wind_speed_10m": [3.0, 4.0, 10.0, 11.0], "temperature_2m": [9, 10, 11, 12]}
+    )
+
+    def fake_read_optional(spot_id: str, dataset: str) -> pd.DataFrame:
+        return {"bodensee": bodensee_df, "silvaplana": silvaplana_df}.get(
+            spot_id, pd.DataFrame()
+        )
+
+    monkeypatch.setattr(
+        orchestration, "_read_optional_feature_slice", fake_read_optional
+    )
+
+    emit_calls: list[dict[str, object]] = []
+
+    def fake_emit(*, spot_id: str, dataset: str, reference_df, current_df) -> bool:
+        emit_calls.append(
+            {
+                "spot_id": spot_id,
+                "dataset": dataset,
+                "ref_rows": len(reference_df),
+                "cur_rows": len(current_df),
+            }
+        )
+        return spot_id == "bodensee"
+
+    monkeypatch.setattr(orchestration, "_emit_feature_drift_metrics", fake_emit)
+
+    result = orchestration.run_feature_drift_detection_step(dataset="train")
+
+    assert result["dataset"] == "train"
+    assert result["checked_spots"] == ["bodensee", "silvaplana"]
+    assert result["drifted_spots"] == ["bodensee"]
+    assert result["errors"] == {}
+    assert len(emit_calls) == 2
+    assert emit_calls[0]["spot_id"] == "bodensee"
+    assert emit_calls[0]["ref_rows"] == 2
+    assert emit_calls[0]["cur_rows"] == 2
+
+
+def test_run_feature_drift_detection_step_skips_spots_with_insufficient_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "empty_spot"}, {"id": "one_row"}],
+    )
+
+    def fake_read_optional(spot_id: str, dataset: str) -> pd.DataFrame:
+        if spot_id == "one_row":
+            return pd.DataFrame({"wind_speed_10m": [1.0]})
+        return pd.DataFrame()
+
+    monkeypatch.setattr(
+        orchestration, "_read_optional_feature_slice", fake_read_optional
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "_emit_feature_drift_metrics",
+        lambda **kw: False,
+    )
+
+    result = orchestration.run_feature_drift_detection_step()
+
+    assert result["checked_spots"] == []
+    assert result["drifted_spots"] == []
+    assert result["errors"] == {}
+
+
+def test_run_feature_drift_detection_step_captures_per_spot_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        orchestration,
+        "get_spots",
+        lambda: [{"id": "broken"}, {"id": "ok"}],
+    )
+
+    def fake_read_optional(spot_id: str, dataset: str) -> pd.DataFrame:
+        if spot_id == "broken":
+            raise RuntimeError("storage unavailable")
+        return pd.DataFrame({"wind_speed_10m": [1.0, 2.0, 3.0, 4.0]})
+
+    monkeypatch.setattr(
+        orchestration, "_read_optional_feature_slice", fake_read_optional
+    )
+    monkeypatch.setattr(
+        orchestration,
+        "_emit_feature_drift_metrics",
+        lambda **kw: False,
+    )
+
+    result = orchestration.run_feature_drift_detection_step()
+
+    assert result["checked_spots"] == ["ok"]
+    assert "broken" in result["errors"]
+    assert "storage unavailable" in result["errors"]["broken"]
+
+
+def test_run_prediction_drift_detection_step_returns_drift_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from foehncast.monitoring.drift import DriftReport
+
+    fake_report = DriftReport(
+        report_kind="prediction",
+        dataset_name="inference_predictions",
+        dataset_version="v1",
+        threshold=0.15,
+        reference_row_count=50,
+        current_row_count=50,
+        column_count=3,
+        drifted_column_count=1,
+        share_of_drifted_columns=0.33,
+        dataset_drift=True,
+        generated_at="2026-05-17T00:00:00+00:00",
+        metrics=(),
+    )
+
+    predictions_df = pd.DataFrame(
+        {"prediction": [0.1, 0.2, 0.9, 0.95], "score": [1, 2, 3, 4]}
+    )
+
+    monkeypatch.setattr(
+        "foehncast.orchestration.push_drift_metrics",
+        lambda report: None,
+    )
+    monkeypatch.setattr(
+        "foehncast.monitoring.prediction_log.read_prediction_history",
+        lambda path, **kw: predictions_df,
+    )
+    monkeypatch.setattr(
+        "foehncast.monitoring.drift.detect_prediction_drift",
+        lambda log: fake_report,
+    )
+
+    result = orchestration.run_prediction_drift_detection_step()
+
+    assert result["prediction_drift"] is True
+    assert result["drifted_column_count"] == 1
+    assert result["column_count"] == 3
+    assert result["share_of_drifted_columns"] == 0.33
+
+
+def test_run_prediction_drift_detection_step_returns_insufficient_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "foehncast.monitoring.prediction_log.read_prediction_history",
+        lambda path, **kw: pd.DataFrame(),
+    )
+
+    result = orchestration.run_prediction_drift_detection_step()
+
+    assert result["prediction_drift"] is None
+    assert result["reason"] == "insufficient_data"
+
+
+def test_run_prediction_drift_detection_step_handles_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def exploding_read(path, **kw):
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(
+        "foehncast.monitoring.prediction_log.read_prediction_history",
+        exploding_read,
+    )
+
+    result = orchestration.run_prediction_drift_detection_step()
+
+    assert result["prediction_drift"] is None
+    assert "connection refused" in result["error"]
