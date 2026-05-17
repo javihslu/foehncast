@@ -498,6 +498,10 @@ def _render_sidebar_ml_panels() -> None:
     feat_count = _prom_query("foehncast_training_pipeline_feature_count")
     train_rows = _prom_query("foehncast_training_pipeline_row_count")
     hindcast_acc = _prom_query("foehncast_hindcast_accuracy")
+    hindcast_n = _prom_query("foehncast_hindcast_validated_count")
+    # Show "—" when no validated pairs exist (avoids misleading "0%")
+    if hindcast_n is not None and hindcast_n < 1:
+        hindcast_acc = None
 
     if verified:
         badge_color = "var(--accent)"
@@ -579,7 +583,7 @@ def _render_sidebar_ml_panels() -> None:
         st.iframe(url, height=120)
 
     # --- Hindcast Accuracy (Grafana gauge embed) --------------------------
-    if _grafana_embedding_enabled():
+    if _grafana_embedding_enabled() and hindcast_acc is not None:
         st.caption("Hindcast Accuracy")
         url = _grafana_solo_panel_url(
             _ML_DASHBOARD_UID,
