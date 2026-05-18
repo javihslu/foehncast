@@ -415,13 +415,16 @@ def _grafana_solo_panel_url(
     panel_id: int,
     *,
     from_range: str = "now-24h",
-    refresh: str = "30s",
+    refresh: str | None = "30s",
     variables: dict[str, str] | None = None,
 ) -> str:
     """Build a Grafana solo-panel embed URL (no chrome, no branding).
 
     *variables* passes Grafana template variables, e.g.
     ``{"var-spot": "silvaplana", "var-dataset": "data"}``.
+
+    Pass ``refresh=None`` (or empty string) to skip auto-refresh entirely;
+    this avoids constant PromQL re-queries on static stat panels.
     """
     params: dict[str, str | int] = {
         "orgId": 1,
@@ -429,9 +432,10 @@ def _grafana_solo_panel_url(
         "panelId": panel_id,
         "from": from_range,
         "to": "now",
-        "refresh": refresh,
         "hideLogo": "true",
     }
+    if refresh:
+        params["refresh"] = refresh
     if variables:
         params.update(variables)
     return f"{_grafana_base_url()}/d-solo/{uid}/{slug}?{urlencode(params)}"
@@ -648,6 +652,7 @@ def _render_sidebar_ml_panels() -> None:
             "foehncast-rider",
             panel_id=304,
             from_range="now-1h",
+            refresh=None,
         )
         st.iframe(url, height=120)
 
@@ -662,6 +667,7 @@ def _render_sidebar_ml_panels() -> None:
                 "foehncast-operations",
                 panel_id=7,
                 from_range="now-1h",
+                refresh=None,
             )
             st.iframe(url, height=90)
         with col_b:
@@ -670,6 +676,7 @@ def _render_sidebar_ml_panels() -> None:
                 "foehncast-operations",
                 panel_id=8,
                 from_range="now-1h",
+                refresh=None,
             )
             st.iframe(url, height=90)
 
@@ -680,6 +687,7 @@ def _render_sidebar_ml_panels() -> None:
             "foehncast-operations",
             panel_id=22,
             from_range="now-1h",
+            refresh=None,
         )
         st.iframe(url, height=140)
 
@@ -699,6 +707,7 @@ def _render_timeline_panels() -> None:
             _ML_DASHBOARD_SLUG,
             panel_id=505,
             from_range="now-24h",
+            refresh="1m",
             variables={"var-dataset": "train"},
         )
         st.iframe(url, height=200)
@@ -709,6 +718,7 @@ def _render_timeline_panels() -> None:
             _ML_DASHBOARD_SLUG,
             panel_id=513,
             from_range="now-24h",
+            refresh="1m",
             variables={"var-dataset": "train"},
         )
         st.iframe(url, height=200)
