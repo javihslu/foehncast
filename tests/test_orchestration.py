@@ -10,6 +10,9 @@ import pandas as pd
 import pytest
 
 from foehncast import orchestration
+from foehncast.orchestration import drift as _orch_drift
+from foehncast.orchestration import feature as _orch_feature
+from foehncast.orchestration import training as _orch_training
 from tests.mlflow_fixtures import clear_tracking_uri_env
 
 
@@ -19,7 +22,7 @@ def _feature_pipeline_state_root(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "_feature_pipeline_state_root",
         lambda: tmp_path / "feature-pipeline-state",
     )
@@ -100,9 +103,12 @@ def _capture_emitted_summary(
     monkeypatch: pytest.MonkeyPatch,
     attribute_name: str,
     emitted: dict[str, object],
+    *,
+    target=None,
 ) -> None:
+    module = target if target is not None else orchestration
     monkeypatch.setattr(
-        orchestration,
+        module,
         attribute_name,
         lambda summary: emitted.update({"summary": summary}),
     )
@@ -122,7 +128,7 @@ def test_run_feature_pipeline_fetches_validated_features(
     emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_spots",
         lambda: [
             {
@@ -132,17 +138,17 @@ def test_run_feature_pipeline_fetches_validated_features(
         ],
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "fetch_all_spots",
         lambda: {"silvaplana": feature_df},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "engineer_features",
         lambda df, shore_orientation_deg: df.assign(gust_factor=1.2),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_validation",
         lambda df, spot_id: SimpleNamespace(
             is_valid=True,
@@ -152,7 +158,7 @@ def test_run_feature_pipeline_fetches_validated_features(
         ),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "write_features",
         lambda df, spot_id, dataset: stored.append((spot_id, dataset)),
     )
@@ -167,18 +173,19 @@ def test_run_feature_pipeline_fetches_validated_features(
         return feature_df.assign(gust_factor=1.2)
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "read_features",
         fake_read_features,
     )
     monkeypatch.setattr(
-        orchestration, "detect_data_drift", lambda *args, **kwargs: None
+        _orch_feature, "detect_data_drift", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(orchestration, "push_drift_metrics", lambda report: None)
+    monkeypatch.setattr(_orch_feature, "push_drift_metrics", lambda report: None)
     _capture_emitted_summary(
         monkeypatch,
         "emit_feature_pipeline_run_summary",
         emitted,
+        target=_orch_feature,
     )
 
     stored_spots = orchestration.run_feature_pipeline()
@@ -220,22 +227,22 @@ def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_spots",
         lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "fetch_all_spots",
         lambda: {"silvaplana": forecast_df},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "engineer_features",
         lambda df, shore_orientation_deg: df.assign(gust_factor=[1.2, 1.25]),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_validation",
         lambda df, spot_id: SimpleNamespace(
             is_valid=True,
@@ -245,7 +252,7 @@ def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
         ),
     )
     monkeypatch.setattr(
-        orchestration, "write_features", lambda df, spot_id, dataset: None
+        _orch_feature, "write_features", lambda df, spot_id, dataset: None
     )
 
     read_calls = 0
@@ -257,9 +264,9 @@ def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
             return previous_stored_df
         return current_stored_df
 
-    monkeypatch.setattr(orchestration, "read_features", fake_read_features)
+    monkeypatch.setattr(_orch_feature, "read_features", fake_read_features)
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "detect_data_drift",
         lambda reference_df, current_df, threshold=None: (
             captured.update(
@@ -278,12 +285,12 @@ def test_run_feature_pipeline_emits_drift_metrics_when_previous_slice_exists(
         ),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "push_drift_metrics",
         lambda report: captured.update({"pushed_report": report}),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "emit_feature_pipeline_run_summary",
         lambda summary: None,
     )
@@ -310,22 +317,22 @@ def test_run_feature_pipeline_raises_on_validation_failure(
     emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_spots",
         lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "fetch_all_spots",
         lambda: {"silvaplana": pd.DataFrame({"wind_speed_10m": [14.0]})},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "engineer_features",
         lambda df, shore_orientation_deg: df,
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_validation",
         lambda df, spot_id: SimpleNamespace(
             is_valid=False,
@@ -338,6 +345,7 @@ def test_run_feature_pipeline_raises_on_validation_failure(
         monkeypatch,
         "emit_feature_pipeline_run_summary",
         emitted,
+        target=_orch_feature,
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
@@ -363,7 +371,7 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
     )
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_spots",
         lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
     )
@@ -377,7 +385,7 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
     )
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_validation",
         lambda df, spot_id: SimpleNamespace(
             is_valid=False,
@@ -400,6 +408,7 @@ def test_validate_feature_pipeline_context_serializes_timestamp_range_violations
         monkeypatch,
         "emit_feature_pipeline_run_summary",
         emitted,
+        target=_orch_feature,
     )
 
     with pytest.raises(ValueError, match="Feature validation failed"):
@@ -421,12 +430,12 @@ def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(
     emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_spots",
         lambda: [{"id": "silvaplana", "shore_orientation_deg": 225}],
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "fetch_all_spots",
         lambda: (_ for _ in ()).throw(
             ValueError("Unexpected unit for wind_speed_10m: expected km/h, got 'kn'")
@@ -436,6 +445,7 @@ def test_run_feature_pipeline_emits_failed_summary_on_ingest_contract_error(
         monkeypatch,
         "emit_feature_pipeline_run_summary",
         emitted,
+        target=_orch_feature,
     )
 
     with pytest.raises(ValueError, match="Unexpected unit for wind_speed_10m"):
@@ -462,7 +472,7 @@ def test_run_feature_pipeline_job_without_mlflow_env_delegates(
         return ["silvaplana"]
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_feature_pipeline",
         fake_run_feature_pipeline,
     )
@@ -479,19 +489,19 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
     logged: dict[str, object] = {}
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
-    monkeypatch.setattr(orchestration, "mlflow", _FeatureJobMlflow(logged))
+    monkeypatch.setattr(_orch_feature, "mlflow", _FeatureJobMlflow(logged))
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_mlflow_config",
         lambda: {"experiment_name": "foehncast"},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_storage_config",
         lambda: {"backend": "bigquery"},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "run_feature_pipeline",
         lambda dataset="train": ["silvaplana", "urnersee"],
     )
@@ -516,14 +526,14 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
     logged: dict[str, object] = {}
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
-    monkeypatch.setattr(orchestration, "mlflow", _FeatureJobMlflow(logged))
+    monkeypatch.setattr(_orch_feature, "mlflow", _FeatureJobMlflow(logged))
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "get_mlflow_config",
         lambda: {"experiment_name": "foehncast"},
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_feature,
         "_run_feature_pipeline_result",
         lambda dataset="train", auto_retraining_mode=None, training_request_stage="Production": {
             "dataset": dataset,
@@ -663,14 +673,14 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
 
     run = SimpleNamespace(data=SimpleNamespace(metrics={"mae": 0.5}))
 
-    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+    monkeypatch.setattr(_orch_training, "mlflow", _QueriedRunMlflow(run, logged))
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "get_mlflow_tracking_uri",
         lambda: "http://localhost:5001",
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "generate_evaluation_report",
         lambda metrics, output_path: str(tmp_path / "evaluation.md"),
     )
@@ -678,6 +688,7 @@ def test_evaluate_training_run_logs_to_existing_mlflow_run(
         monkeypatch,
         "emit_training_pipeline_run_summary",
         emitted,
+        target=_orch_training,
     )
 
     report_path = orchestration.evaluate_training_run("run-123")
@@ -714,19 +725,19 @@ def test_evaluate_training_run_uses_matching_history_when_latest_summary_is_othe
         )
     )
 
-    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+    monkeypatch.setattr(_orch_training, "mlflow", _QueriedRunMlflow(run, logged))
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "get_mlflow_tracking_uri",
         lambda: "http://localhost:5001",
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "generate_evaluation_report",
         lambda metrics, output_path: str(tmp_path / "evaluation.md"),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "read_training_pipeline_run_summary",
         lambda dataset="train": {
             "dataset": dataset,
@@ -746,7 +757,7 @@ def test_evaluate_training_run_uses_matching_history_when_latest_summary_is_othe
         },
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "read_training_pipeline_run_summary_history",
         lambda dataset=None: [
             {
@@ -776,6 +787,7 @@ def test_evaluate_training_run_uses_matching_history_when_latest_summary_is_othe
         monkeypatch,
         "emit_training_pipeline_run_summary",
         emitted,
+        target=_orch_training,
     )
 
     report_path = orchestration.evaluate_training_run(
@@ -804,7 +816,7 @@ def test_training_run_metrics_and_params_normalize_mlflow_run_data(
         )
     )
 
-    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+    monkeypatch.setattr(_orch_training, "mlflow", _QueriedRunMlflow(run, logged))
 
     metrics, params = orchestration._training_run_metrics_and_params("run-123")
 
@@ -823,12 +835,12 @@ def test_register_training_run_registers_and_promotes(
     emitted: dict[str, object] = {}
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "register_model",
         lambda run_id: SimpleNamespace(version="7"),
     )
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "promote_model",
         lambda model_name, version, stage="Candidate": logged.update(
             {"promotion": (model_name, version, stage)}
@@ -838,6 +850,7 @@ def test_register_training_run_registers_and_promotes(
         monkeypatch,
         "emit_training_pipeline_run_summary",
         emitted,
+        target=_orch_training,
     )
 
     version = orchestration.register_training_run("run-456")
@@ -856,11 +869,12 @@ def test_register_training_run_emits_failed_summary_on_registration_error(
     def _raise_registration_error(run_id: str) -> SimpleNamespace:
         raise ValueError("registration failed")
 
-    monkeypatch.setattr(orchestration, "register_model", _raise_registration_error)
+    monkeypatch.setattr(_orch_training, "register_model", _raise_registration_error)
     _capture_emitted_summary(
         monkeypatch,
         "emit_training_pipeline_run_summary",
         emitted,
+        target=_orch_training,
     )
 
     with pytest.raises(ValueError, match="registration failed"):
@@ -892,15 +906,16 @@ def test_run_training_pipeline_step_emits_training_summary(
     )
 
     monkeypatch.setattr(
-        orchestration,
+        _orch_training,
         "run_training_pipeline",
         lambda dataset="train": "run-123",
     )
-    monkeypatch.setattr(orchestration, "mlflow", _QueriedRunMlflow(run, logged))
+    monkeypatch.setattr(_orch_training, "mlflow", _QueriedRunMlflow(run, logged))
     _capture_emitted_summary(
         monkeypatch,
         "emit_training_pipeline_run_summary",
         emitted,
+        target=_orch_training,
     )
 
     run_id = orchestration.run_training_pipeline_step(
@@ -924,7 +939,7 @@ def test_run_feature_drift_detection_step_checks_all_spots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        orchestration,
+        _orch_drift,
         "get_spots",
         lambda: [{"id": "bodensee"}, {"id": "silvaplana"}],
     )
@@ -941,9 +956,7 @@ def test_run_feature_drift_detection_step_checks_all_spots(
             spot_id, pd.DataFrame()
         )
 
-    monkeypatch.setattr(
-        orchestration, "_read_optional_feature_slice", fake_read_optional
-    )
+    monkeypatch.setattr(_orch_drift, "_read_optional_feature_slice", fake_read_optional)
 
     emit_calls: list[dict[str, object]] = []
 
@@ -958,7 +971,7 @@ def test_run_feature_drift_detection_step_checks_all_spots(
         )
         return spot_id == "bodensee"
 
-    monkeypatch.setattr(orchestration, "_emit_feature_drift_metrics", fake_emit)
+    monkeypatch.setattr(_orch_drift, "_emit_feature_drift_metrics", fake_emit)
 
     result = orchestration.run_feature_drift_detection_step(dataset="train")
 
@@ -976,7 +989,7 @@ def test_run_feature_drift_detection_step_skips_spots_with_insufficient_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        orchestration,
+        _orch_drift,
         "get_spots",
         lambda: [{"id": "empty_spot"}, {"id": "one_row"}],
     )
@@ -986,11 +999,9 @@ def test_run_feature_drift_detection_step_skips_spots_with_insufficient_data(
             return pd.DataFrame({"wind_speed_10m": [1.0]})
         return pd.DataFrame()
 
+    monkeypatch.setattr(_orch_drift, "_read_optional_feature_slice", fake_read_optional)
     monkeypatch.setattr(
-        orchestration, "_read_optional_feature_slice", fake_read_optional
-    )
-    monkeypatch.setattr(
-        orchestration,
+        _orch_drift,
         "_emit_feature_drift_metrics",
         lambda **kw: False,
     )
@@ -1006,7 +1017,7 @@ def test_run_feature_drift_detection_step_captures_per_spot_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        orchestration,
+        _orch_drift,
         "get_spots",
         lambda: [{"id": "broken"}, {"id": "ok"}],
     )
@@ -1016,11 +1027,9 @@ def test_run_feature_drift_detection_step_captures_per_spot_errors(
             raise RuntimeError("storage unavailable")
         return pd.DataFrame({"wind_speed_10m": [1.0, 2.0, 3.0, 4.0]})
 
+    monkeypatch.setattr(_orch_drift, "_read_optional_feature_slice", fake_read_optional)
     monkeypatch.setattr(
-        orchestration, "_read_optional_feature_slice", fake_read_optional
-    )
-    monkeypatch.setattr(
-        orchestration,
+        _orch_drift,
         "_emit_feature_drift_metrics",
         lambda **kw: False,
     )
@@ -1057,7 +1066,7 @@ def test_run_prediction_drift_detection_step_returns_drift_report(
     )
 
     monkeypatch.setattr(
-        "foehncast.orchestration.push_drift_metrics",
+        "foehncast.orchestration.drift.push_drift_metrics",
         lambda report: None,
     )
     monkeypatch.setattr(
