@@ -1031,9 +1031,15 @@ def run_training_pipeline_step(
     requested_stage: str = "Candidate",
 ) -> str:
     """Train the model and persist the latest step-level training summary."""
-    training_state = _training_summary_state(
+    # Start a fresh training summary: the "train" stage is the first step of a
+    # new training run, so any persisted stage_failure_counts /
+    # stage_durations_seconds from prior runs must not bleed into the new
+    # run's stage_states (otherwise a one-off historical failure would keep
+    # the rail's train pill stuck at "failed" forever).
+    training_state = TrainingPipelineState.from_summary(
         dataset=dataset,
         requested_stage=requested_stage,
+        summary={},
     )
 
     def _run() -> str:
