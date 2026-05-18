@@ -15,17 +15,12 @@ import streamlit as st
 import altair as alt
 import pandas as pd
 
-from foehncast.config import get_model_config, get_rider_config, get_spots
-from foehncast.feature_pipeline.engineer import engineer_features
-from foehncast.feature_pipeline.ingest import fetch_forecast
+from foehncast.config import get_rider_config, get_spots
 from foehncast.inference_pipeline.dashboard import (
     list_dashboard_spots,
     load_dashboard_data,
 )
-from foehncast.inference_pipeline.predict import (
-    get_serving_model_alias,
-)
-from foehncast.training_pipeline.register import get_model_by_alias
+from foehncast.feature_pipeline.ingest import fetch_forecast
 
 st.set_page_config(
     page_title="FoehnCast Rider Console",
@@ -175,12 +170,6 @@ def _available_spots() -> list[dict[str, Any]]:
     return list_dashboard_spots()
 
 
-@st.cache_resource(show_spinner=False)
-def _champion_model(alias: str) -> Any:
-    """Load the champion model once per process; switch only on alias change."""
-    return get_model_by_alias(alias)
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def _live_dashboard_data(selected_spot_ids: tuple[str, ...]) -> dict[str, Any]:
     return load_dashboard_data(list(selected_spot_ids) if selected_spot_ids else None)
@@ -188,33 +177,36 @@ def _live_dashboard_data(selected_spot_ids: tuple[str, ...]) -> dict[str, Any]:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def _focus_spot_timeline(spot_id: str, *, past_days: int = 1) -> pd.DataFrame:
-    """Past+future predicted quality_index for a single spot.
+    """Return wind speed at three elevations for a single spot.
 
-    Open-Meteo's forecast endpoint, called with ``past_days``, returns
-    observed/analysed hours before now and the standard forecast horizon
-    afterwards. We run the served champion model across that combined
-    window so the rider sees how predicted conditions line up against
-    what the weather has actually done in the last hours.
+    The Open-Meteo forecast endpoint, called with ``past_days``, returns
+    analysed/observed hours before now and the standard forecast horizon
+    after. We surface the raw ``wind_speed_{10,80,120}m`` series so the
+    rider can compare observed and predicted wind directly. The 12 kn
+    rideability threshold (~22.2 km/h) is drawn on top by the chart.
     """
     spot = next((s for s in get_spots() if s["id"] == spot_id), None)
     if spot is None:
-        return pd.DataFrame(columns=["time", "quality_index"])
+        return pd.DataFrame(columns=["time", "elevation", "wind_speed"])
 
     forecast_df = fetch_forecast(spot["lat"], spot["lon"], past_days=past_days)
     if forecast_df.empty:
-        return pd.DataFrame(columns=["time", "quality_index"])
+        return pd.DataFrame(columns=["time", "elevation", "wind_speed"])
 
-    feature_columns = get_model_config()["features"]
-    engineered_df = engineer_features(forecast_df, spot["shore_orientation_deg"])
-    feature_frame = engineered_df[feature_columns].copy().ffill().bfill().fillna(0.0)
-    model = _champion_model(get_serving_model_alias())
-    predictions = model.predict(feature_frame)
-    return pd.DataFrame(
-        {
-            "time": pd.to_datetime(engineered_df.index),
-            "quality_index": [float(value) for value in predictions],
-        }
+    wide = forecast_df.reset_index().rename(columns={"index": "time"})
+    keep = [
+        c
+        for c in ("wind_speed_10m", "wind_speed_80m", "wind_speed_120m")
+        if c in wide.columns
+    ]
+    if not keep:
+        return pd.DataFrame(columns=["time", "elevation", "wind_speed"])
+    long = wide[["time", *keep]].melt(
+        id_vars="time", var_name="elevation", value_name="wind_speed"
     )
+    long["elevation"] = long["elevation"].str.replace("wind_speed_", "")
+    long["time"] = pd.to_datetime(long["time"])
+    return long
 
 
 def _inject_styles() -> None:
@@ -691,6 +683,100 @@ def _prom_query(expr: str) -> float | None:
     return None
 
 
+@st.cache_data(ttl=15, show_spinner=False)
+def _prom_query_vector(expr: str) -> list[dict[str, Any]]:
+    """Run an instant PromQL query and return the full vector result.
+
+    Each entry is ``{"labels": {...}, "value": float}``. Returns an empty
+    list on any error or empty result. Cached briefly so the System tab
+    fanning out across many stages does not hammer the serve container.
+    """
+    url = f"{_PROMETHEUS_BASE_URL}/api/v1/query?query={urlquote(expr)}"
+    headers: dict[str, str] = {}
+    if "monitoring.googleapis.com" in _PROMETHEUS_BASE_URL:
+        token = _gcp_access_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    out: list[dict[str, Any]] = []
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+            data = json.load(resp)
+        for entry in data.get("data", {}).get("result", []):
+            labels = {
+                k: v for k, v in entry.get("metric", {}).items() if k != "__name__"
+            }
+            try:
+                value = float(entry["value"][1])
+            except (KeyError, ValueError, TypeError):
+                continue
+            out.append({"labels": labels, "value": value})
+    except Exception:
+        pass
+    return out
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def _list_job_logs(job_name: str, limit: int = 8) -> list[dict[str, str]]:
+    """Return the latest Cloud Logging entries for a Cloud Run Job.
+
+    Best effort: requires ``roles/logging.viewer`` on the UI service
+    account. Returns an empty list when the request fails or the env is
+    not configured.
+    """
+    if not _WORKFLOWS_PROJECT or not job_name:
+        return []
+    token = _gcp_access_token()
+    if not token:
+        return []
+    log_filter = (
+        f'resource.type="cloud_run_job" '
+        f'AND resource.labels.job_name="{job_name}" '
+        f"AND severity>=DEFAULT"
+    )
+    body = json.dumps(
+        {
+            "resourceNames": [f"projects/{_WORKFLOWS_PROJECT}"],
+            "filter": log_filter,
+            "orderBy": "timestamp desc",
+            "pageSize": limit,
+        }
+    ).encode()
+    try:
+        req = urllib.request.Request(
+            "https://logging.googleapis.com/v2/entries:list",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.load(resp)
+    except Exception:
+        return []
+    rows: list[dict[str, str]] = []
+    for entry in data.get("entries", []):
+        ts = entry.get("timestamp", "")
+        severity = entry.get("severity", "INFO")
+        message = (
+            entry.get("textPayload")
+            or entry.get("jsonPayload", {}).get("message")
+            or ""
+        )
+        if not message:
+            continue
+        rows.append(
+            {
+                "timestamp": ts,
+                "severity": severity,
+                "message": str(message).strip(),
+            }
+        )
+    return rows
+
+
 def _grafana_solo_panel_url(
     uid: str,
     slug: str,
@@ -1109,39 +1195,73 @@ def _render_rider_console(
 
     if focus_spot_id is not None:
         timeline_frame = _focus_spot_timeline(focus_spot_id)
-        st.subheader(f"Focus timeline — {_spot_label(spot_lookup, focus_spot_id)}")
+        st.subheader(f"Wind speed — {_spot_label(spot_lookup, focus_spot_id)}")
         if timeline_frame.empty:
             st.info("No timeline data available for this spot right now.")
         else:
-            now_ts = pd.Timestamp.now(tz=timeline_frame["time"].dt.tz)
-            chart_frame = timeline_frame.copy()
-            chart_frame["phase"] = chart_frame["time"].apply(
-                lambda ts: "Observed" if ts <= now_ts else "Forecast"
+            tz = timeline_frame["time"].dt.tz
+            now_ts = pd.Timestamp.now(tz=tz) if tz is not None else pd.Timestamp.now()
+            kn_to_kmh = 1.852
+            threshold_kmh = 12.0 * kn_to_kmh  # ~22.2 km/h
+            elevation_order = ["10m", "80m", "120m"]
+            elevations_present = [
+                e for e in elevation_order if e in timeline_frame["elevation"].unique()
+            ]
+
+            # Dim past region: a faint rectangle from the earliest sample to now.
+            past_min = timeline_frame["time"].min()
+            past_band = pd.DataFrame({"x": [past_min], "x2": [now_ts]})
+            past_rect = (
+                alt.Chart(past_band)
+                .mark_rect(color="#07252a", opacity=0.07)
+                .encode(x="x:T", x2="x2:T")
             )
-            line = (
-                alt.Chart(chart_frame)
-                .mark_line(interpolate="monotone", strokeWidth=2.5)
+
+            lines = (
+                alt.Chart(timeline_frame)
+                .mark_line(interpolate="monotone", strokeWidth=2.2)
                 .encode(
                     x=alt.X("time:T", title="Time"),
                     y=alt.Y(
-                        "quality_index:Q",
-                        title="Quality index",
-                        scale=alt.Scale(domain=[0, 5]),
+                        "wind_speed:Q",
+                        title="Wind speed (km/h)",
                     ),
                     color=alt.Color(
-                        "phase:N",
+                        "elevation:N",
                         scale=alt.Scale(
-                            domain=["Observed", "Forecast"],
-                            range=["#3b5a5a", "#0e8a86"],
+                            domain=elevations_present,
+                            range=["#3b5a5a", "#0e8a86", "#ff7a26"][
+                                : len(elevations_present)
+                            ],
                         ),
-                        legend=alt.Legend(title=None, orient="top"),
+                        legend=alt.Legend(title="Elevation", orient="top"),
                     ),
                 )
             )
             threshold = (
-                alt.Chart(pd.DataFrame({"y": [2.0]}))
-                .mark_rule(strokeDash=[4, 4], color="#1f5e44")
+                alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
+                .mark_rule(color="#c0392b", strokeDash=[4, 4], strokeWidth=1.5)
                 .encode(y="y:Q")
+            )
+            threshold_label = (
+                alt.Chart(
+                    pd.DataFrame(
+                        {
+                            "y": [threshold_kmh],
+                            "label": ["12 kn rideable"],
+                        }
+                    )
+                )
+                .mark_text(
+                    align="left",
+                    baseline="bottom",
+                    dx=6,
+                    dy=-3,
+                    color="#c0392b",
+                    fontSize=10,
+                )
+                .encode(y="y:Q", text="label:N")
+                .transform_calculate(x="datum.x")
             )
             now_rule = (
                 alt.Chart(pd.DataFrame({"x": [now_ts]}))
@@ -1149,7 +1269,7 @@ def _render_rider_console(
                 .encode(x="x:T")
             )
             st.altair_chart(
-                (line + threshold + now_rule)
+                (past_rect + lines + threshold + threshold_label + now_rule)
                 .properties(height=300, background="transparent")
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
@@ -1236,240 +1356,386 @@ def _render_rider_console(
     _render_spot_map(ranked_spots)
 
 
-_PIPELINES_MERMAID = """
-flowchart LR
-  classDef src fill:#f9efe3,stroke:#1f5e44,color:#07252a,font-weight:600;
-  classDef pipe fill:#0e8a86,stroke:#07252a,color:#ffffff,font-weight:600;
-  classDef store fill:#ffffff,stroke:#0e8a86,color:#07252a;
-  classDef serve fill:#ff7a26,stroke:#07252a,color:#ffffff,font-weight:600;
-  classDef mon fill:#1f5e44,stroke:#07252a,color:#ffffff;
-
-  OM(["Open-Meteo<br/>Forecast API"]):::src
-
-  subgraph FP[Feature Pipeline]
-    F1[Ingest] --> F2[Engineer] --> F3[Validate] --> F4[Store]
-  end
-  class F1,F2,F3,F4 pipe
-
-  BQ[("BigQuery<br/>curated features")]:::store
-  FEAST[("Feast<br/>online store")]:::store
-
-  OM --> F1
-  F4 --> BQ
-  F4 --> FEAST
-
-  subgraph TP[Training Pipeline]
-    T1[Load] --> T2[Train] --> T3[Evaluate] --> T4[Register]
-  end
-  class T1,T2,T3,T4 pipe
-
-  MLF[("MLflow<br/>tracking + registry")]:::store
-
-  BQ --> T1
-  T4 --> MLF
-
-  subgraph IP[Inference Pipeline]
-    I1[Online features] --> I2[Predict] --> I3[Rank]
-  end
-  class I1,I2,I3 pipe
-
-  FEAST --> I1
-  MLF --> I2
-
-  API[/"FastAPI /predict /rank"/]:::serve
-  UIAPP[/"Streamlit Rider Console"/]:::serve
-  I3 --> API --> UIAPP
-
-  PROM[(Prometheus<br/>scraped via serve)]:::mon
-  GRAF[(Grafana)]:::mon
-  FP -.metrics.-> PROM
-  TP -.metrics.-> PROM
-  IP -.metrics.-> PROM
-  API -.metrics.-> PROM
-  PROM --> GRAF
-"""
+# ---------------------------------------------------------------------------
+# System tab — pipelines panel (PromQL-driven, no Grafana iframes).
+#
+# Layout, per pipeline (feature / training / inference), in a single column:
+#   [ Header strip ] pipeline name · status pill · summary age
+#   [ Body row     ] left=step pills with state+duration · right=live log view
+#   [ Footer row   ] compact metric chips
+# A small top toolbar above the rails owns the cascade and per-job triggers.
+# ---------------------------------------------------------------------------
 
 
-def _render_pipelines_topology() -> None:
-    """Render the pipelines topology as a Mermaid SVG via an HTML component."""
-    html = """
-<div style="background:#faf6ee;border-radius:14px;padding:18px 20px;">
-  <div class="mermaid" style="font-family:Manrope,sans-serif">__MERMAID__</div>
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'base',
-      securityLevel: 'loose',
-      themeVariables: {
-        primaryColor: '#0e8a86',
-        primaryTextColor: '#ffffff',
-        primaryBorderColor: '#07252a',
-        lineColor: '#1f5e44',
-        clusterBkg: '#eef3ee',
-        clusterBorder: '#1f5e44',
-        fontFamily: 'Manrope, sans-serif'
-      }
-    });
-  </script>
-</div>
-""".replace("__MERMAID__", _PIPELINES_MERMAID)
-    st.components.v1.html(html, height=440, scrolling=False)
+_PIPELINE_RAILS: list[dict[str, Any]] = [
+    {
+        "key": "feature",
+        "title": "Feature pipeline",
+        "job_name_key": "feature",
+        "success_metric": "foehncast_feature_pipeline_run_success",
+        "summary_ts_metric": "foehncast_feature_pipeline_summary_generated_timestamp_seconds",
+        "stages_query": ('foehncast_feature_pipeline_stage_state{dataset="forecast"}'),
+        "stage_duration_query": (
+            'foehncast_feature_pipeline_stage_duration_seconds{dataset="forecast"}'
+        ),
+        "stage_order": ["fetch", "engineer", "validate", "store"],
+        "metric_chips": [
+            ("stored spots", "foehncast_feature_pipeline_stored_spot_count", "int"),
+            ("drifted", "foehncast_feature_pipeline_drifted_spot_count", "int"),
+            ("failed", "foehncast_feature_pipeline_failed_spot_count", "int"),
+            (
+                "dataset drift",
+                "foehncast_feature_pipeline_dataset_drift_detected",
+                "bool",
+            ),
+            ("ingest rows", "foehncast_feature_pipeline_spot_ingest_rows", "int"),
+        ],
+    },
+    {
+        "key": "training",
+        "title": "Training pipeline",
+        "job_name_key": "training",
+        "success_metric": "foehncast_training_pipeline_run_success",
+        "summary_ts_metric": "foehncast_training_pipeline_summary_generated_timestamp_seconds",
+        "stages_query": (
+            'foehncast_training_pipeline_stage_state{requested_stage="Production"}'
+        ),
+        "stage_duration_query": (
+            'foehncast_training_pipeline_stage_duration_seconds{requested_stage="Production"}'
+        ),
+        "stage_order": ["train", "evaluate", "register"],
+        "metric_chips": [
+            ("rows", "foehncast_training_pipeline_row_count", "int"),
+            ("features", "foehncast_training_pipeline_feature_count", "int"),
+            ("R²", 'foehncast_training_pipeline_run_metric{metric_name="r2"}', "f2"),
+            (
+                "RMSE",
+                'foehncast_training_pipeline_run_metric{metric_name="rmse"}',
+                "f3",
+            ),
+            (
+                "model",
+                "foehncast_training_pipeline_registered_model_version",
+                "version",
+            ),
+        ],
+    },
+    {
+        "key": "inference",
+        "title": "Inference pipeline",
+        "job_name_key": "inference",
+        "success_metric": None,
+        "summary_ts_metric": "foehncast_prediction_log_latest_prediction_timestamp_seconds",
+        "stages_query": None,
+        "stage_duration_query": None,
+        "stage_order": [],
+        "metric_chips": [
+            ("predictions", "foehncast_prediction_log_total_row_count", "int"),
+            ("models", "foehncast_prediction_log_model_count", "int"),
+            (
+                "hindcast",
+                "foehncast_hindcast_accuracy",
+                "pct",
+            ),
+            (
+                "confidence",
+                'clamp_max(1 - max(foehncast_drift_metric{metric_name="share_of_drifted_columns"}), 1)',
+                "pct",
+            ),
+        ],
+    },
+]
 
 
-def _bool_badge(value: float | None) -> str:
-    """Render a green/red badge for a 0/1 gauge value, or '—' when missing."""
+def _stage_index(rail: dict[str, Any]) -> dict[str, dict[str, float]]:
+    """Return ``{stage_name: {state, duration}}`` for a rail in one fan-out."""
+    out: dict[str, dict[str, float]] = {
+        stage: {"state": float("nan"), "duration": float("nan")}
+        for stage in rail["stage_order"]
+    }
+    if rail.get("stages_query"):
+        for entry in _prom_query_vector(rail["stages_query"]):
+            stage = entry["labels"].get("stage")
+            if stage in out:
+                out[stage]["state"] = entry["value"]
+    if rail.get("stage_duration_query"):
+        for entry in _prom_query_vector(rail["stage_duration_query"]):
+            stage = entry["labels"].get("stage")
+            if stage in out:
+                out[stage]["duration"] = entry["value"]
+    return out
+
+
+def _stage_pill_html(name: str, state: float, duration: float) -> str:
+    """Render a single nested step pill (name + state dot + duration)."""
+    if state != state:  # NaN
+        bg, fg, dot, label = "#eef3ee", "#3b5a5a", "#9aa5a5", "—"
+    elif state >= 0.999:
+        bg, fg, dot, label = "rgba(14, 138, 134, 0.14)", "#07252a", "#0e8a86", "ok"
+    elif state <= -0.5:
+        bg, fg, dot, label = "rgba(192, 57, 43, 0.10)", "#c0392b", "#c0392b", "fail"
+    else:
+        bg, fg, dot, label = "rgba(255, 122, 38, 0.14)", "#7a3f10", "#ff7a26", "running"
+    dur_text = (
+        f"{duration:.2f}s"
+        if (duration == duration and duration < 60)
+        else (f"{duration / 60:.1f}m" if duration == duration else "—")
+    )
+    return (
+        f'<div style="display:flex;align-items:center;gap:8px;'
+        f"padding:6px 12px;border-radius:999px;background:{bg};color:{fg};"
+        f'font-family:Manrope,sans-serif;font-size:0.78rem;font-weight:600">'
+        f'<span style="width:8px;height:8px;border-radius:50%;background:{dot}"></span>'
+        f"<span>{name}</span>"
+        f'<span style="color:#5f6f7f;font-weight:500;font-size:0.72rem">{label} · {dur_text}</span>'
+        "</div>"
+    )
+
+
+def _chip_value(expr: str, kind: str) -> str:
+    """Format a chip's value from an instant PromQL gauge."""
+    value = _prom_query(expr)
     if value is None:
         return "—"
-    return "✓ pass" if value >= 0.5 else "✗ fail"
+    if kind == "int":
+        return f"{int(value)}"
+    if kind == "f2":
+        return f"{value:.2f}"
+    if kind == "f3":
+        return f"{value:.3f}"
+    if kind == "pct":
+        return f"{value * 100:.0f} %"
+    if kind == "version":
+        return f"v{int(value)}"
+    if kind == "bool":
+        return "drift" if value >= 0.5 else "clean"
+    return f"{value:g}"
 
 
-def _age_label(ts: float | None) -> str:
-    """Format an epoch-seconds timestamp gauge as a relative age, or '—'."""
-    if ts is None or ts <= 0:
-        return "—"
-    return f"{_fmt_delta(_time.time() - ts)} ago"
+def _status_pill_html(success: float | None, summary_ts: float | None) -> str:
+    if success is None and summary_ts is None:
+        bg, fg, text = "#eef3ee", "#3b5a5a", "no data"
+    elif success is None:
+        bg, fg, text = "rgba(14, 138, 134, 0.14)", "#07252a", "live"
+    elif success >= 0.5:
+        bg, fg, text = "rgba(14, 138, 134, 0.16)", "#0e8a86", "last run ok"
+    else:
+        bg, fg, text = "rgba(192, 57, 43, 0.12)", "#c0392b", "last run failed"
+    age = (
+        f"{_fmt_delta(_time.time() - summary_ts)} ago"
+        if (summary_ts is not None and summary_ts > 0)
+        else "no summary yet"
+    )
+    return (
+        f'<div style="display:flex;align-items:center;gap:10px;'
+        'font-family:Manrope,sans-serif;font-size:0.78rem">'
+        f'<span style="padding:3px 10px;border-radius:999px;background:{bg};'
+        f'color:{fg};font-weight:700">{text}</span>'
+        f'<span style="color:#5f6f7f">{age}</span>'
+        "</div>"
+    )
+
+
+def _render_log_panel(job_name: str) -> None:
+    """Render the latest 6 Cloud Logging entries for a job."""
+    logs = _list_job_logs(job_name, limit=6)
+    if not logs:
+        st.markdown(
+            '<div style="font-family:Manrope,sans-serif;font-size:0.72rem;'
+            "color:#5f6f7f;padding:8px 12px;background:rgba(7,37,42,0.04);"
+            'border-radius:8px">no recent log entries</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    sev_color = {
+        "DEFAULT": "#5f6f7f",
+        "DEBUG": "#5f6f7f",
+        "INFO": "#0e8a86",
+        "NOTICE": "#0e8a86",
+        "WARNING": "#ff7a26",
+        "ERROR": "#c0392b",
+        "CRITICAL": "#c0392b",
+        "ALERT": "#c0392b",
+        "EMERGENCY": "#c0392b",
+    }
+    lines_html: list[str] = []
+    for entry in logs:
+        ts = (
+            entry["timestamp"][11:19]
+            if len(entry["timestamp"]) >= 19
+            else entry["timestamp"]
+        )
+        color = sev_color.get(entry["severity"], "#5f6f7f")
+        msg = entry["message"]
+        if len(msg) > 160:
+            msg = msg[:157] + "…"
+        # Escape angle brackets to keep HTML safe.
+        msg_safe = msg.replace("<", "&lt;").replace(">", "&gt;")
+        lines_html.append(
+            f'<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">'
+            f'<span style="color:#5f6f7f;font-size:0.66rem;min-width:54px">{ts}</span>'
+            f'<span style="color:{color};font-size:0.62rem;font-weight:700;min-width:54px">{entry["severity"]}</span>'
+            f'<span style="color:#07252a;font-size:0.72rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{msg_safe}</span>'
+            "</div>"
+        )
+    st.markdown(
+        '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
+        "background:rgba(7,37,42,0.03);border-radius:8px;"
+        'border:1px solid rgba(7,37,42,0.08)">' + "".join(lines_html) + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_pipeline_rail(rail: dict[str, Any]) -> None:
+    """Render one pipeline as a horizontal rail: header / body / metrics."""
+    success = (
+        _prom_query(rail["success_metric"]) if rail.get("success_metric") else None
+    )
+    summary_ts = (
+        _prom_query(rail["summary_ts_metric"])
+        if rail.get("summary_ts_metric")
+        else None
+    )
+
+    # Header strip
+    header_cols = st.columns([0.55, 0.45])
+    with header_cols[0]:
+        st.markdown(
+            f'<div style="font-family:Manrope,sans-serif;font-weight:800;'
+            f'font-size:0.95rem;color:#07252a;letter-spacing:0.01em">{rail["title"]}</div>',
+            unsafe_allow_html=True,
+        )
+    with header_cols[1]:
+        st.markdown(_status_pill_html(success, summary_ts), unsafe_allow_html=True)
+
+    # Body: left = step pills, right = log preview
+    body_cols = st.columns([0.55, 0.45], gap="medium")
+    with body_cols[0]:
+        if rail["stage_order"]:
+            stages = _stage_index(rail)
+            pills_html = "".join(
+                _stage_pill_html(name, stages[name]["state"], stages[name]["duration"])
+                for name in rail["stage_order"]
+            )
+            st.markdown(
+                '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 0">'
+                + pills_html
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div style="font-family:Manrope,sans-serif;font-size:0.78rem;'
+                'color:#5f6f7f;padding:6px 0">no stage metrics — see logs →</div>',
+                unsafe_allow_html=True,
+            )
+    with body_cols[1]:
+        _render_log_panel(_PIPELINE_JOB_NAMES[rail["job_name_key"]])
+
+    # Footer: metric chips
+    chip_parts: list[str] = []
+    for label, expr, kind in rail["metric_chips"]:
+        value = _chip_value(expr, kind)
+        chip_parts.append(
+            f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
+            "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
+            'min-width:90px">'
+            f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
+            "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
+            f'color:#5f6f7f">{label}</span>'
+            f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{value}</strong>'
+            "</div>"
+        )
+    st.markdown(
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;padding-top:6px;padding-bottom:6px">'
+        + "".join(chip_parts)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_pipelines_panel() -> None:
-    """Pipelines sub-section: topology, status tiles, triggers, recent runs.
+    """System tab body: triggers, three pipeline rails, recent executions.
 
-    Kept above the lazy-loaded Grafana iframes so the demo trigger path
-    stays snappy: only a handful of instant PromQL queries and one
-    Workflows ``ListExecutions`` call (cached 15 s).
+    No Grafana iframes; every visible value is fed by an instant PromQL
+    query against the serve container's mini engine, plus a Cloud
+    Logging tail per pipeline.
     """
-    st.subheader("Pipelines")
-    st.caption(
-        "Feature → training → inference cascade backed by Cloud Run Jobs and "
-        "Cloud Workflows. Status tiles are instant PromQL gauges from the "
-        "serve container; trigger buttons call the Workflows or Cloud Run "
-        "Jobs Execute API directly."
-    )
-
-    _render_pipelines_topology()
-
-    # Trigger row -----------------------------------------------------
     triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
-    cols = st.columns(4)
-    cascade_clicked = cols[0].button(
+
+    # Top toolbar -----------------------------------------------------
+    toolbar = st.columns([1.2, 1, 1, 1, 0.7])
+    cascade_clicked = toolbar[0].button(
         "DO NOT CLICK",
         type="primary",
         disabled=not triggers_available,
         help="Cloud Workflows: feature → training → inference",
         key="pipe_trigger_cascade",
     )
-    feature_clicked = cols[1].button(
-        "Run feature pipeline",
-        disabled=not triggers_available,
-        key="pipe_trigger_feature",
+    feature_clicked = toolbar[1].button(
+        "Feature", disabled=not triggers_available, key="pipe_trigger_feature"
     )
-    training_clicked = cols[2].button(
-        "Run training pipeline",
-        disabled=not triggers_available,
-        key="pipe_trigger_training",
+    training_clicked = toolbar[2].button(
+        "Training", disabled=not triggers_available, key="pipe_trigger_training"
     )
-    inference_clicked = cols[3].button(
-        "Run inference pipeline",
-        disabled=not triggers_available,
-        key="pipe_trigger_inference",
+    inference_clicked = toolbar[3].button(
+        "Inference", disabled=not triggers_available, key="pipe_trigger_inference"
     )
-
-    if not triggers_available:
-        st.caption(
-            "Triggers require GCP_PROJECT_ID and GCP_LOCATION; available "
-            "on the Cloud Run UI service."
-        )
+    refresh_clicked = toolbar[4].button(
+        "Refresh", key="pipe_refresh", help="Clear cached PromQL and log queries"
+    )
+    if refresh_clicked:
+        _prom_query.clear()
+        _prom_query_vector.clear()
+        _list_job_logs.clear()
+        _list_workflow_executions.clear()
+        st.rerun(scope="fragment")
 
     if cascade_clicked:
         name = _trigger_pipeline()
-        if name:
-            st.success(f"Cascade started: {name.rsplit('/', 1)[-1]}")
-            _list_workflow_executions.clear()
-        else:
-            st.error("Failed to start cascade")
+        st.success(f"Cascade started: {name.rsplit('/', 1)[-1]}") if name else st.error(
+            "Failed to start cascade"
+        )
+        _list_workflow_executions.clear()
     if feature_clicked:
         name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["feature"])
-        if name:
-            st.success(f"Feature job started: {name.rsplit('/', 1)[-1]}")
-        else:
-            st.error("Failed to start feature job")
+        st.success(
+            f"Feature job started: {name.rsplit('/', 1)[-1]}"
+        ) if name else st.error("Failed to start feature job")
     if training_clicked:
         name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["training"])
-        if name:
-            st.success(f"Training job started: {name.rsplit('/', 1)[-1]}")
-        else:
-            st.error("Failed to start training job")
+        st.success(
+            f"Training job started: {name.rsplit('/', 1)[-1]}"
+        ) if name else st.error("Failed to start training job")
     if inference_clicked:
         name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["inference"])
-        if name:
-            st.success(f"Inference job started: {name.rsplit('/', 1)[-1]}")
-        else:
-            st.error("Failed to start inference job")
+        st.success(
+            f"Inference job started: {name.rsplit('/', 1)[-1]}"
+        ) if name else st.error("Failed to start inference job")
 
-    # Per-pipeline status tiles --------------------------------------
-    st.markdown("##### Last run health")
-    feat_success = _prom_query("foehncast_feature_pipeline_run_success")
-    feat_ts = _prom_query(
-        "foehncast_feature_pipeline_summary_generated_timestamp_seconds"
+    if not triggers_available:
+        st.caption(
+            "Triggers and logs require GCP_PROJECT_ID / GCP_LOCATION — available "
+            "on the Cloud Run UI service."
+        )
+
+    # Pipeline rails -------------------------------------------------
+    for index, rail in enumerate(_PIPELINE_RAILS):
+        if index > 0:
+            st.markdown(
+                '<hr style="border:none;border-top:1px solid rgba(7,37,42,0.10);'
+                'margin:14px 0">',
+                unsafe_allow_html=True,
+            )
+        _render_pipeline_rail(rail)
+
+    # Recent cascade executions -------------------------------------
+    st.markdown(
+        '<div style="font-family:Manrope,sans-serif;font-weight:700;'
+        "font-size:0.78rem;letter-spacing:0.04em;text-transform:uppercase;"
+        'color:#5f6f7f;padding:18px 0 6px 0">Recent cascade executions</div>',
+        unsafe_allow_html=True,
     )
-    feat_stored = _prom_query("foehncast_feature_pipeline_stored_spot_count")
-    feat_drift = _prom_query("foehncast_feature_pipeline_dataset_drift_detected")
-
-    train_success = _prom_query("foehncast_training_pipeline_run_success")
-    train_ts = _prom_query(
-        "foehncast_training_pipeline_summary_generated_timestamp_seconds"
-    )
-    train_rows = _prom_query("foehncast_training_pipeline_row_count")
-    train_version = _prom_query("foehncast_training_pipeline_registered_model_version")
-
-    pred_ts = _prom_query(
-        "foehncast_prediction_log_latest_prediction_timestamp_seconds"
-    )
-    pred_rows = _prom_query("foehncast_prediction_log_total_row_count")
-    hindcast_acc = _prom_query("foehncast_hindcast_accuracy")
-
-    feat_col, train_col, inf_col = st.columns(3)
-    with feat_col:
-        st.markdown("**Feature pipeline**")
-        st.metric("Run status", _bool_badge(feat_success))
-        st.metric("Summary age", _age_label(feat_ts))
-        st.metric(
-            "Stored spots",
-            "—" if feat_stored is None else f"{int(feat_stored)}",
-        )
-        st.metric(
-            "Dataset drift",
-            "—" if feat_drift is None else _bool_badge(1 - feat_drift),
-            help="Inverted: green when no drift detected",
-        )
-    with train_col:
-        st.markdown("**Training pipeline**")
-        st.metric("Run status", _bool_badge(train_success))
-        st.metric("Summary age", _age_label(train_ts))
-        st.metric(
-            "Training rows",
-            "—" if train_rows is None else f"{int(train_rows)}",
-        )
-        st.metric(
-            "Registered model v",
-            "—" if train_version is None else f"v{int(train_version)}",
-        )
-    with inf_col:
-        st.markdown("**Inference pipeline**")
-        st.metric("Latest prediction", _age_label(pred_ts))
-        st.metric(
-            "Logged predictions",
-            "—" if pred_rows is None else f"{int(pred_rows)}",
-        )
-        st.metric(
-            "Hindcast accuracy",
-            "—" if hindcast_acc is None else f"{hindcast_acc * 100:.0f} %",
-            help="% of validated forecasts whose predicted quality bucket "
-            "matched the labeled hindcast bucket",
-        )
-
-    # Recent executions ----------------------------------------------
-    st.markdown("##### Recent cascade executions")
     executions = _list_workflow_executions(limit=5) if triggers_available else []
     if executions:
         rows = []
@@ -1484,16 +1750,9 @@ def _render_pipelines_panel() -> None:
             except Exception:
                 age = "—"
             rows.append({"Execution": name, "State": state, "Started": age})
-        st.dataframe(
-            pd.DataFrame(rows),
-            hide_index=True,
-            use_container_width=True,
-        )
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     else:
-        st.caption(
-            "No cascade executions visible yet. Trigger one with the button "
-            "above, or check the Cloud Workflows console."
-        )
+        st.caption("No cascade executions visible yet.")
 
 
 @st.fragment
