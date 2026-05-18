@@ -187,18 +187,6 @@ def test_hosted_dag_bundle_contains_feature_and_training_dags() -> None:
     )
 
 
-def test_composer_bundle_includes_pipeline_source_package() -> None:
-    """The Composer DAG bundle must include the foehncast source package."""
-    from foehncast.composer_bundle import composer_bundle_mappings
-
-    mappings = composer_bundle_mappings()
-    sources = [m["source"] for m in mappings]
-    assert "src/foehncast" in sources, (
-        "Composer bundle must include src/foehncast so pipeline_stage_tracking "
-        "and monitoring contracts are available to Cloud Composer DAGs"
-    )
-
-
 def test_hosted_operator_terraform_exposes_cloud_run_contract() -> None:
     """Terraform must declare Cloud Run resources for the hosted lane."""
     terraform_main = read_repo_text("terraform/main.tf")
