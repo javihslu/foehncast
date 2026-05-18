@@ -38,9 +38,6 @@ keys/
 *.key
 *.json
 !config.json
-!grafana_work/dashboards/foehncast-operations.json
-!grafana_work/dashboards/foehncast-rider.json
-!grafana_work/dashboards/foehncast-ml-diagnostics.json
 
 # Terraform
 terraform/.terraform/
@@ -50,9 +47,6 @@ terraform/terraform.tfvars
 # MLflow
 mlruns/
 mlartifacts/
-
-# Grafana runtime state
-grafana_work/data/
 
 # Airflow
 airflow/logs/

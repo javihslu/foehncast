@@ -12,8 +12,6 @@ AIRFLOW_HEALTH_URL="${AIRFLOW_HEALTH_URL:-http://127.0.0.1:8080/api/v2/monitor/h
 APP_HEALTH_URL="${APP_HEALTH_URL:-http://127.0.0.1:8000/health}"
 APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"
 ONLINE_FEATURES_URL="${ONLINE_FEATURES_URL:-http://127.0.0.1:8000/features/online}"
-GRAFANA_BASE_URL="${GRAFANA_BASE_URL:-http://127.0.0.1:3000}"
-GRAFANA_HEALTH_URL="${GRAFANA_HEALTH_URL:-${GRAFANA_BASE_URL}/api/health}"
 CI_SMOKE_INGEST_FIXTURE_DIR="${CI_SMOKE_INGEST_FIXTURE_DIR:-/workspace/data/unit_contract_eval}"
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/scripts/cli-common.sh"
@@ -160,7 +158,6 @@ BOOTSTRAP_SERVICES=(
   app
   statsd
   prometheus
-  grafana
 )
 
 compose() {
@@ -209,7 +206,6 @@ cleanup_local_runtime_state() {
   rm -rf "$ROOT_DIR/.state/online-compose-sync"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
-  rm -rf "$ROOT_DIR/grafana_work/data"
 }
 
 prepare_bind_mounted_runtime_paths() {
@@ -226,7 +222,6 @@ prepare_bind_mounted_runtime_paths() {
     "$ROOT_DIR/.state/online-compose-sync"
     "$ROOT_DIR/data/$dataset"
     "$ROOT_DIR/data/feast"
-    "$ROOT_DIR/grafana_work/data"
     "$ROOT_DIR/.state/feast"
   )
 
@@ -321,51 +316,6 @@ wait_for_airflow_dag_run_state() {
     "${helper_args[@]}"
 }
 
-grafana_api_get() {
-  local path="$1"
-
-  local auth_args=()
-  if [[ -n "${GRAFANA_API_USER:-}" && -n "${GRAFANA_API_PASSWORD:-}" ]]; then
-    auth_args=(--user "${GRAFANA_API_USER}:${GRAFANA_API_PASSWORD}")
-  fi
-
-  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS \
-    "${auth_args[@]}" \
-    "${GRAFANA_BASE_URL}${path}"
-}
-
-require_payload_pattern() {
-  payload_check_require_pattern "Grafana provisioning check failed" "$@"
-}
-
-require_payload_patterns() {
-  payload_check_require_patterns "Grafana provisioning check failed" "$@"
-}
-
-verify_grafana_provisioning() {
-  local dashboard_payload alert_rules_payload contact_points_payload policies_payload
-  local health_auth_args=()
-
-  if [[ -n "${GRAFANA_API_USER:-}" && -n "${GRAFANA_API_PASSWORD:-}" ]]; then
-    health_auth_args=(--user "${GRAFANA_API_USER}:${GRAFANA_API_PASSWORD}")
-  fi
-
-  echo "Waiting for Grafana health..."
-  curl --retry 60 --retry-all-errors --retry-delay 2 -fsS \
-    "${health_auth_args[@]}" \
-    "$GRAFANA_HEALTH_URL" >/dev/null
-
-  echo "Checking Grafana dashboard provisioning..."
-  dashboard_payload="$(grafana_api_get "/api/search?dashboardUIDs=foehncast-operations")"
-  require_payload_patterns \
-    "$dashboard_payload" \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast-operations"' \
-    '"title"[[:space:]]*:[[:space:]]*"FoehnCast Operations"' \
-    'dashboard title FoehnCast Operations'
-}
-
-
-
 RUN_MODE_LABEL="local MinIO-backed objectstore baseline"
 
 export STORAGE_BACKEND="s3"
@@ -415,24 +365,6 @@ FEAST_DATASTORE_EMULATOR_RESET_URL="http://${DATASTORE_EMULATOR_HOST}/reset"
 FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"
 FEAST_DATASET="${FEAST_DATASET:-train}"
 
-export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_USER "$ENV_FILE"
-export_resolved_env_value FOEHNCAST_GRAFANA_ADMIN_PASSWORD "$ENV_FILE"
-export_resolved_env_value FOEHNCAST_GRAFANA_ALLOW_EMBEDDING "$ENV_FILE"
-export_resolved_env_value FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM "$ENV_FILE"
-export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED "$ENV_FILE"
-export_resolved_env_value FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE "$ENV_FILE"
-export_resolved_env_value GRAFANA_API_USER "$ENV_FILE"
-export_resolved_env_value GRAFANA_API_PASSWORD "$ENV_FILE"
-
-ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin
-ensure_env_default FOEHNCAST_GRAFANA_ADMIN_PASSWORD foehncast-local
-ensure_env_default FOEHNCAST_GRAFANA_ALLOW_EMBEDDING true
-ensure_env_default FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM true
-ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED true
-ensure_env_default FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE Admin
-export GRAFANA_API_USER="${GRAFANA_API_USER:-${FOEHNCAST_GRAFANA_ADMIN_USER}}"
-export GRAFANA_API_PASSWORD="${GRAFANA_API_PASSWORD:-${FOEHNCAST_GRAFANA_ADMIN_PASSWORD}}"
-
 echo "Resetting local stack state for a clean run..."
 compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
@@ -458,8 +390,6 @@ wait_for_service_health airflow-triggerer 90 2
 
 echo "Waiting for Airflow API server health..."
 verify_airflow_api_health 60 2
-
-verify_grafana_provisioning
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
 if [[ "$CI_SMOKE" == "true" ]]; then
@@ -490,7 +420,7 @@ curl --retry 30 --retry-all-errors --retry-delay 2 -fsS \
 
 if [[ "$CI_SMOKE" == "true" ]]; then
   echo "Local evaluator smoke passed."
-  echo "Verified Airflow health, Grafana provisioning, feature pipeline execution, Feast serving state, app health, hosted sync metrics, and /features/online."
+  echo "Verified Airflow health, feature pipeline execution, Feast serving state, app health, hosted sync metrics, and /features/online."
   echo "The stack will be torn down automatically."
   exit 0
 fi
@@ -501,7 +431,6 @@ echo "Profile:  ${RUN_MODE_LABEL}"
 echo "App:      http://127.0.0.1:8000"
 echo "Airflow:  http://127.0.0.1:8080"
 echo "MLflow:   http://127.0.0.1:5001"
-echo "Grafana:  ${GRAFANA_BASE_URL}"
 echo "Feast:    /features/online verified"
 echo "Airflow UI/API and MLflow open directly in local mode."
 echo "This bootstrap path resets local Docker volumes, Airflow metadata, and disposable runtime artifacts so each run starts clean."
@@ -510,8 +439,7 @@ echo "This keeps the local object-access layer aligned with the hosted GCS-facin
 echo "Objectstore API: ${STORAGE_S3_ENDPOINT}"
 echo "Objectstore UI:  http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_CONSOLE_PORT}"
 echo "Feast online store: http://${DATASTORE_EMULATOR_HOST}"
-echo "The local bootstrap also prepares Feast state, verifies the online-feature route, and confirms Grafana loaded the checked-in dashboard and alerting resources."
-echo "Grafana uses deployable-safe defaults in the checked-in config; this bootstrap applies local-only access overrides unless you provide stricter local settings in $ENV_FILE."
+echo "The local bootstrap also prepares Feast state and verifies the online-feature route."
 echo
 echo "Sample check:"
 echo "curl -fsS -X POST http://127.0.0.1:8000/rank -H 'content-type: application/json' -d '{\"spot_ids\":[\"silvaplana\",\"urnersee\"]}'"

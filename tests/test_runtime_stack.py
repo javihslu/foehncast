@@ -111,7 +111,6 @@ def test_local_bootstrap_uses_shared_env_file_helpers() -> None:
     assert "export_local_feast_datastore_env()" in helper
     assert "env_file_value()" not in bootstrap
     assert 'export_local_feast_datastore_env "$ENV_FILE"' in bootstrap
-    assert "ensure_env_default FOEHNCAST_GRAFANA_ADMIN_USER admin" in bootstrap
     assert (
         'FEAST_DATASET="${FEAST_DATASET:-$(resolved_env_value AIRFLOW_FEATURE_DATASET "$ENV_FILE")}"'
         in bootstrap
@@ -145,8 +144,6 @@ def test_local_bootstrap_uses_shared_payload_check_helpers() -> None:
     assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in bootstrap
     assert "payload_check_require_pattern()" in helper
     assert "payload_check_require_patterns()" in helper
-    assert "require_payload_patterns()" in bootstrap
-    assert "require_payload_patterns \\" in bootstrap
 
 
 def test_local_bootstrap_handles_missing_docker_desktop_helper() -> None:
@@ -216,7 +213,6 @@ def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_write
     assert "prepare_bind_mounted_runtime_paths" in bootstrap
     assert 'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"' in bootstrap
     assert 'chmod 0777 "$path"' in bootstrap
-    assert 'rm -rf "$ROOT_DIR/grafana_work/data"' in bootstrap
     assert '"$ROOT_DIR/airflow"' in bootstrap
     assert '"$ROOT_DIR/.state/airflow"' in bootstrap
     assert '"$ROOT_DIR/.state/monitoring"' in bootstrap
@@ -224,7 +220,6 @@ def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_write
     assert '"$ROOT_DIR/data/$dataset"' in bootstrap
     assert '"$ROOT_DIR/.state/feast"' in bootstrap
     assert '"$ROOT_DIR/data/feast"' in bootstrap
-    assert '"$ROOT_DIR/grafana_work/data"' in bootstrap
     assert bootstrap.index(
         'prepare_bind_mounted_runtime_paths "$FEAST_DATASET"'
     ) < bootstrap.index(

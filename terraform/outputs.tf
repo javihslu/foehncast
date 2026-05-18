@@ -128,16 +128,6 @@ output "provision_cloud_run_mlflow" {
   value       = var.provision_cloud_run_mlflow
 }
 
-output "provision_cloud_run_grafana" {
-  description = "Whether Terraform is configured to provision the Cloud Run Grafana service."
-  value       = var.provision_cloud_run_grafana
-}
-
-output "cloud_run_grafana_prometheus_url" {
-  description = "Configured Prometheus datasource URL for the Cloud Run Grafana service."
-  value       = var.cloud_run_grafana_prometheus_url
-}
-
 output "provision_cloud_run_ui" {
   description = "Whether Terraform is configured to provision the Cloud Run UI service."
   value       = var.provision_cloud_run_ui
@@ -206,11 +196,6 @@ output "primary_hosted_api_target" {
 output "primary_hosted_api_url" {
   description = "Primary hosted API URL. The promoted hosted contract requires this to resolve to Cloud Run."
   value       = try(google_cloud_run_v2_service.app[0].uri, null)
-}
-
-output "cloud_run_grafana_service_url" {
-  description = "Cloud Run Grafana dashboard URL, if provisioned."
-  value       = try(google_cloud_run_v2_service.grafana[0].uri, null)
 }
 
 output "cloud_run_mlflow_service_url" {

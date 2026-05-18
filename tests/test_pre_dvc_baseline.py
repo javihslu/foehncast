@@ -131,10 +131,9 @@ def test_bootstrap_local_runs_feature_then_waits_for_training() -> None:
 
 
 def test_bootstrap_local_verifies_monitoring_surfaces() -> None:
-    """The smoke must verify Grafana provisioning and app metrics."""
+    """The smoke must verify app metrics."""
     script = read_repo_text("scripts/bootstrap-local.sh")
 
-    assert "verify_grafana_provisioning" in script
     assert "APP_METRICS_URL" in script
 
 

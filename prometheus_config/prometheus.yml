@@ -22,10 +22,3 @@ scrape_configs:
       - targets: ["statsd:9102"]
         labels:
           service: statsd
-
-  - job_name: grafana
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["grafana:3000"]
-        labels:
-          service: grafana

@@ -153,41 +153,6 @@ variable "cloud_sql_mlflow_instance_name" {
   default     = "foehncast-mlflow"
 }
 
-# ---------------------------------------------------------------------------
-# Cloud Run — Grafana
-# ---------------------------------------------------------------------------
-
-variable "provision_cloud_run_grafana" {
-  description = "Whether Terraform should create a Cloud Run Grafana dashboard service."
-  type        = bool
-  default     = false
-}
-
-variable "cloud_run_grafana_service_name" {
-  description = "Cloud Run service name for the Grafana dashboard."
-  type        = string
-  default     = "foehncast-grafana"
-}
-
-variable "cloud_run_grafana_image" {
-  description = "Container image URI for the Cloud Run Grafana service. Leave empty to use the default Artifact Registry path."
-  type        = string
-  default     = ""
-}
-
-variable "cloud_run_grafana_prometheus_url" {
-  description = "Prometheus-compatible query URL that Cloud Run Grafana should use as its datasource."
-  type        = string
-  default     = ""
-
-  validation {
-    condition = (
-      !var.provision_cloud_run_grafana || trimspace(var.cloud_run_grafana_prometheus_url) != ""
-    )
-    error_message = "Set cloud_run_grafana_prometheus_url when provision_cloud_run_grafana is true."
-  }
-}
-
 variable "provision_cloud_run_ui" {
   description = "Whether Terraform should create a Cloud Run UI (Streamlit) service."
   type        = bool
@@ -202,12 +167,6 @@ variable "cloud_run_ui_service_name" {
 
 variable "cloud_run_ui_image" {
   description = "Container image URI for the Cloud Run UI service. Leave empty to use the default Artifact Registry path."
-  type        = string
-  default     = ""
-}
-
-variable "cloud_run_ui_grafana_url" {
-  description = "Public Grafana URL that the UI embeds in iframes. Usually the Cloud Run Grafana service URL."
   type        = string
   default     = ""
 }

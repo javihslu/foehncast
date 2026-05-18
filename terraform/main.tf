@@ -3,7 +3,6 @@ locals {
   artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
   cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  cloud_run_grafana_image           = var.cloud_run_grafana_image != "" ? var.cloud_run_grafana_image : "${local.artifact_registry_repository_path}/foehncast-grafana:latest"
   cloud_run_ui_image                = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
   cloud_run_mlflow_image            = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
   online_compose_app_image          = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
@@ -867,140 +866,6 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   member   = "allUsers"
 }
 
-resource "google_cloud_run_v2_service" "grafana" {
-  count               = var.provision_cloud_run_grafana ? 1 : 0
-  name                = var.cloud_run_grafana_service_name
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
-  deletion_protection = false
-
-  template {
-    timeout = "30s"
-
-    scaling {
-      min_instance_count = 1
-      max_instance_count = 3
-    }
-
-    containers {
-      image = local.cloud_run_grafana_image
-
-      ports {
-        container_port = 3000
-      }
-
-      resources {
-        limits = {
-          cpu = "2"
-          # 512Mi caused continuous OOMs on Cloud Run (logs show
-          # "Memory limit of 512 MiB exceeded with 515 MiB used"), which
-          # in turn triggered grafana-apiserver Handler timeouts and
-          # SQLite lock contention. 1Gi is the documented minimum for
-          # Grafana with embedded SQLite + provisioning. Bumped to 2Gi
-          # alongside cpu=2 and min_instances=1 to keep the embedded
-          # dashboards warm for the public UI.
-          memory = "2Gi"
-        }
-      }
-
-      env {
-        name  = "GRAFANA_PROMETHEUS_URL"
-        value = var.cloud_run_grafana_prometheus_url
-      }
-
-      # Read-only public viewer surface — anonymous access, embedding enabled.
-      env {
-        name  = "GF_AUTH_ANONYMOUS_ENABLED"
-        value = "true"
-      }
-      env {
-        name  = "GF_AUTH_ANONYMOUS_ORG_ROLE"
-        value = "Viewer"
-      }
-      env {
-        name  = "GF_AUTH_DISABLE_LOGIN_FORM"
-        value = "true"
-      }
-      env {
-        name  = "GF_SECURITY_ALLOW_EMBEDDING"
-        value = "true"
-      }
-      env {
-        name  = "GF_SECURITY_ADMIN_PASSWORD"
-        value = random_password.grafana_admin[0].result
-      }
-      env {
-        name  = "GF_GOOGLE_SDK_AUTO_DETECT_CREDENTIALS"
-        value = "true"
-      }
-
-      # Disable Grafana Live (WebSocket push) on Cloud Run. The platform
-      # terminates idle WebSocket connections at ~30s, which produces a
-      # steady stream of 504s on /api/live/ws. Live updates are unused by
-      # the public dashboards (they refresh on a fixed interval instead).
-      env {
-        name  = "GF_LIVE_MAX_CONNECTIONS"
-        value = "0"
-      }
-
-      # Performance: enable SQLite WAL so concurrent iframe dashboard reads
-      # (the Streamlit sidebar embeds 7+ solo panels) stop serializing
-      # behind a single writer lock. Documented Grafana recommendation
-      # for embedded SQLite under any non-trivial read concurrency.
-      env {
-        name  = "GF_DATABASE_WAL"
-        value = "true"
-      }
-
-      # Performance: silence outbound analytics/update probes that block
-      # the request pipeline on startup. Cloud Run cold starts then warm
-      # the dashboards faster.
-      env {
-        name  = "GF_ANALYTICS_REPORTING_ENABLED"
-        value = "false"
-      }
-      env {
-        name  = "GF_ANALYTICS_CHECK_FOR_UPDATES"
-        value = "false"
-      }
-      env {
-        name  = "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES"
-        value = "false"
-      }
-
-      # Performance: cap minimum auto-refresh on dashboards so a stray
-      # `refresh=5s` URL param cannot stampede Prometheus from multiple
-      # browser iframes at once.
-      env {
-        name  = "GF_DASHBOARDS_MIN_REFRESH_INTERVAL"
-        value = "30s"
-      }
-    }
-  }
-
-  traffic {
-    percent = 100
-    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
-  }
-
-  depends_on = [google_project_service.required]
-}
-
-resource "random_password" "grafana_admin" {
-  count   = var.provision_cloud_run_grafana ? 1 : 0
-  length  = 24
-  special = false
-}
-
-resource "google_cloud_run_v2_service_iam_member" "grafana_public_invoker" {
-  count    = var.provision_cloud_run_grafana ? 1 : 0
-  project  = var.project_id
-  location = google_cloud_run_v2_service.grafana[0].location
-  name     = google_cloud_run_v2_service.grafana[0].name
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
-
 resource "google_sql_database_instance" "mlflow" {
   count = var.provision_cloud_run_mlflow ? 1 : 0
 
@@ -1194,20 +1059,6 @@ resource "google_cloud_run_v2_service" "ui" {
           name  = env.key
           value = env.value
         }
-      }
-
-      env {
-        name = "FOEHNCAST_GRAFANA_BASE_URL"
-        value = (
-          var.provision_cloud_run_grafana
-          ? google_cloud_run_v2_service.grafana[0].uri
-          : var.cloud_run_ui_grafana_url
-        )
-      }
-
-      env {
-        name  = "FOEHNCAST_GRAFANA_ALLOW_EMBEDDING"
-        value = "true"
       }
 
       env {
