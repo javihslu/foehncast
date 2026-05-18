@@ -1245,7 +1245,7 @@ resource "google_cloud_run_v2_job" "feature_pipeline" {
         image = local.cloud_run_image
 
         command = ["python", "-c"]
-        args    = ["from foehncast.orchestration import run_feature_pipeline_job; run_feature_pipeline_job(dataset='train')"]
+        args    = ["from foehncast.orchestration import run_feature_pipeline_job; run_feature_pipeline_job(dataset='forecast')"]
 
         resources {
           limits = {
