@@ -603,6 +603,12 @@ resource "google_storage_bucket_iam_member" "cloud_run_bucket_reader" {
   member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
+resource "google_storage_bucket_iam_member" "cloud_run_bucket_writer" {
+  bucket = google_storage_bucket.artifacts.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
+}
+
 resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader" {
   bucket = google_storage_bucket.artifacts.name
   role   = "roles/storage.legacyBucketReader"
