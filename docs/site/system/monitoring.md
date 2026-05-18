@@ -145,11 +145,7 @@ Scrape interval is 15 seconds. Alert rules are evaluated at the same interval.
 
 ## Alert Rules
 
-Alerting uses two evaluation tiers so domain alerts fire even if Grafana is unavailable.
-
-### Prometheus-native rules
-
-The checked-in rules at `prometheus_config/alerting_rules.yml` cover service health and domain health:
+The checked-in Prometheus rules at `prometheus_config/alerting_rules.yml` cover service health and domain health:
 
 | Alert | Group | Severity | Trigger | What it guards |
 |------|-------|----------|---------|----------------|
@@ -163,11 +159,7 @@ The checked-in rules at `prometheus_config/alerting_rules.yml` cover service hea
 | `TrainingPipelineStageFailure` | domain-health | warning | any training stage failure count > 0 | training pipeline reliability |
 | `HostedSyncStale` | domain-health | warning | no sync success for 15 min | hosted environment freshness |
 
-### Grafana-provisioned rules
-
-The Grafana alerting provisioning at `grafana_work/etc/provisioning/alerting/foehncast-alert-rules.yml` evaluates the same domain signals with dashboard-linked context. These rules are tied to specific Grafana panels and provide richer annotation when the operator is working inside the dashboard.
-
-All rules, the contact point, and the alert routing policy are checked into the repository so the alerting contract is reviewable without a live Grafana instance.
+The alert rules are version-controlled so the alerting contract is reviewable without a live Prometheus instance.
 
 ## Dashboards
 

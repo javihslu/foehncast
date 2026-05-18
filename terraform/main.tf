@@ -942,22 +942,6 @@ resource "google_cloud_run_v2_service" "grafana" {
         value = "true"
       }
 
-      # Disable the unified alerting scheduler on Cloud Run. The provisioned
-      # rule set uses PromQL increase() / rate() over a time window, but the
-      # in-process /api/v1/query engine exposed by serve.py only returns the
-      # current point value of each metric. Every rule evaluation therefore
-      # times out and contributed to Grafana memory pressure and SQLite lock
-      # contention. Local Compose retains a real Prometheus scrape and keeps
-      # alerting enabled.
-      env {
-        name  = "GF_UNIFIED_ALERTING_ENABLED"
-        value = "false"
-      }
-      env {
-        name  = "GF_ALERTING_ENABLED"
-        value = "false"
-      }
-
       # Disable Grafana Live (WebSocket push) on Cloud Run. The platform
       # terminates idle WebSocket connections at ~30s, which produces a
       # steady stream of 504s on /api/live/ws. Live updates are unused by

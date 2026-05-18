@@ -92,8 +92,6 @@ When `provision_online_compose_host = true`, provide:
 - optional image overrides if you do not want the default Artifact Registry `:latest` tags
 - any extra stack environment in `online_compose_env_vars`
 
-If the hosted Grafana tenant should deliver the provisioned monitoring alerts by email, set `FOEHNCAST_GRAFANA_ALERT_EMAIL` in `online_compose_env_vars`. The local Docker path intentionally leaves that override out of `.env.example` and relies on the placeholder route instead.
-
 Terraform creates a network, a static public IP, and a Compute Engine VM. The VM clones the repo, writes a runtime `.env` file with the GCP and BigQuery settings, configures Artifact Registry auth with its runtime identity, and pulls the reviewed runtime images from Artifact Registry. If the images are not available, the sync fails fast instead of building on the VM.
 That `.env` file uses the same Feast runtime settings as the Cloud Run path, so both hosted targets use the same Feast config.
 It also points MLflow artifacts to `gs://<artifact-bucket>/mlflow/artifacts`, so artifacts go to the shared bucket instead of a VM-local volume.
