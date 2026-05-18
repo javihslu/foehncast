@@ -11,13 +11,41 @@ permissions:
   contents: read
 
 jobs:
-  compose:
+  changes:
     if: ${{ github.actor == github.repository_owner && (github.event_name ==
       'pull_request' || github.triggering_actor == github.repository_owner) }}
+    runs-on: ubuntu-latest
+    outputs:
+      compose: ${{ steps.filter.outputs.compose }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: dorny/paths-filter@v3.0.2
+        id: filter
+        with:
+          filters: |
+            compose:
+              - 'src/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'docker-compose*.yml'
+              - 'docker_includes/**'
+              - 'containers/**'
+              - 'Dockerfile*'
+              - 'Makefile'
+              - 'scripts/bootstrap-local.sh'
+              - 'scripts/smoke-local-evaluator.sh'
+              - 'config.yaml'
+              - '.github/workflows/ci.yml'
+
+  compose:
+    needs: changes
+    if: ${{ needs.changes.outputs.compose == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - run: docker compose -f docker-compose.yml config
       - run: GCP_PROJECT_ID=ci-validate docker compose -f docker-compose.yml -f
           docker-compose.gcp.yml config
@@ -55,6 +83,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -66,6 +96,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - run: uv sync --frozen
       - run: uv run pytest tests/ -v
 
@@ -76,6 +108,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - run: uv sync --frozen
       - name: Validate pipeline DAG
         run: uv run dvc dag
@@ -122,5 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
       - run: uv sync --frozen --only-group docs --no-default-groups
       - run: uv run mkdocs build -f docs/mkdocs.yml --strict
