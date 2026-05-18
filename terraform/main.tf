@@ -1285,7 +1285,7 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
         image = local.cloud_run_image
 
         command = ["python", "-c"]
-        args    = ["from foehncast.orchestration import run_training_pipeline_step; run_training_pipeline_step(dataset='train')"]
+        args    = ["from foehncast.orchestration import run_training_pipeline_step, register_training_run; run_id = run_training_pipeline_step(dataset='train'); register_training_run(run_id, stage='Production', dataset='train')"]
 
         resources {
           limits = {
