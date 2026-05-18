@@ -119,6 +119,9 @@ outputs:
   state_prefix:
     description: Terraform state prefix repository variable
     value: ${{ steps.repo_config.outputs.state_prefix }}
+  cloud_run_image:
+    description: Cloud Run container image URI repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_image }}
   cloud_run_service:
     description: Cloud Run service repository variable
     value: ${{ steps.repo_config.outputs.cloud_run_service }}
@@ -176,5 +179,6 @@ runs:
           echo "service_account_email=$(read_repo_var GCP_SERVICE_ACCOUNT_EMAIL)"
           echo "state_bucket=$(read_repo_var GCP_TERRAFORM_STATE_BUCKET)"
           echo "state_prefix=$(read_repo_var GCP_TERRAFORM_STATE_PREFIX)"
+          echo "cloud_run_image=$(read_repo_var GCP_CLOUD_RUN_IMAGE)"
           echo "cloud_run_service=$(read_repo_var GCP_CLOUD_RUN_SERVICE)"
         } >> "$GITHUB_OUTPUT"

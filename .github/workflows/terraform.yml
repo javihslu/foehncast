@@ -258,6 +258,7 @@ jobs:
           REPO_GCP_ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
           REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE: ${{ steps.repo_config.outputs.online_compose_machine_type }}
           REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB: ${{ steps.repo_config.outputs.online_compose_disk_size_gb }}
+          REPO_GCP_CLOUD_RUN_IMAGE: ${{ steps.repo_config.outputs.cloud_run_image }}
           REPO_GCP_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
         run: |
           set -euo pipefail
@@ -537,6 +538,8 @@ jobs:
           if [[ -z "$online_compose_disk_size_gb" ]]; then
             online_compose_disk_size_gb='40'
           fi
+          cloud_run_image="$REPO_GCP_CLOUD_RUN_IMAGE"
+
           github_owner="${{ github.repository_owner }}"
           github_repository="${{ github.event.repository.name }}"
 
@@ -546,6 +549,7 @@ jobs:
             echo "TF_CLEANUP_CONFIRMATION=${cleanup_confirmation}"
             echo "TF_CLEANUP_CLEAR_GITHUB_ACTIONS=${cleanup_clear_github_actions}"
             echo "TF_CLEANUP_DELETE_STATE_BUCKET=${cleanup_delete_state_bucket}"
+            echo "TF_VAR_cloud_run_image=${cloud_run_image}"
             echo "TF_VAR_project_id=${project_id}"
             echo "TF_VAR_region=${region}"
             echo "TF_VAR_artifact_bucket_name=${artifact_bucket_name}"
