@@ -194,63 +194,8 @@ variable "cloud_workflows_schedule" {
 }
 
 # ---------------------------------------------------------------------------
-# Cloud Composer (managed Airflow — optional, higher cost)
+# GitHub OIDC and Delivery
 # ---------------------------------------------------------------------------
-
-variable "provision_cloud_composer_environment" {
-  description = "Whether Terraform should create a Cloud Composer environment for hosted orchestration readiness work."
-  type        = bool
-  default     = false
-}
-
-variable "cloud_composer_environment_name" {
-  description = "Cloud Composer environment name for the managed orchestration target."
-  type        = string
-  default     = "foehncast-composer"
-}
-
-variable "cloud_composer_airflow_access_ready" {
-  description = "Whether the reviewed GitHub runtime-release identity is already mapped to a usable Airflow user or role for the Cloud Composer environment."
-  type        = bool
-  default     = false
-}
-
-variable "cloud_composer_image_version" {
-  description = "Managed Airflow image version for the Cloud Composer environment."
-  type        = string
-  default     = "composer-2-airflow-2"
-}
-
-variable "cloud_composer_subnet_cidr" {
-  description = "CIDR range for the dedicated Cloud Composer subnet."
-  type        = string
-  default     = "10.43.0.0/24"
-}
-
-variable "cloud_composer_env_vars" {
-  description = "Additional environment variables for the Cloud Composer environment."
-  type        = map(string)
-  default     = {}
-}
-
-variable "cloud_composer_secret_env_vars" {
-  description = "Secret Manager secret names or resource paths rendered as sm:// environment bindings for the Cloud Composer environment."
-  type        = map(string)
-  default     = {}
-
-  validation {
-    condition = alltrue([
-      for _, secret in var.cloud_composer_secret_env_vars : trimspace(secret) != ""
-    ])
-    error_message = "cloud_composer_secret_env_vars values must not be empty."
-  }
-}
-
-variable "cloud_composer_pypi_packages" {
-  description = "Additional or overriding PyPI packages merged on top of the repo-reviewed Cloud Composer baseline."
-  type        = map(string)
-  default     = {}
-}
 
 variable "github_owner" {
   description = "GitHub organization or user that owns the repository."

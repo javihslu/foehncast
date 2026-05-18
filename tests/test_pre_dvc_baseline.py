@@ -199,17 +199,13 @@ def test_composer_bundle_includes_pipeline_source_package() -> None:
     )
 
 
-def test_hosted_operator_terraform_exposes_cloud_run_and_composer_contract() -> None:
-    """Terraform must declare Cloud Run and Composer resources for the hosted lane."""
+def test_hosted_operator_terraform_exposes_cloud_run_contract() -> None:
+    """Terraform must declare Cloud Run resources for the hosted lane."""
     terraform_main = read_repo_text("terraform/main.tf")
 
     assert (
         "google_cloud_run_v2_service" in terraform_main
         or "cloud_run" in terraform_main.lower()
-    )
-    assert (
-        "google_cloud_composer" in terraform_main
-        or "composer" in terraform_main.lower()
     )
 
 

@@ -156,10 +156,6 @@ foehncast_default_cloud_run_service_name() {
   printf 'foehncast-serve\n'
 }
 
-foehncast_default_cloud_composer_environment_name() {
-  printf 'foehncast-composer\n'
-}
-
 foehncast_cloud_env_pairs() {
   local project_id="$1"
   local location="$2"
@@ -217,8 +213,6 @@ apply_foehncast_cloud_tfvars_values() {
   local provision_cloud_run_service="${10}"
   local cloud_run_service_name="${11}"
   local mlflow_tracking_uri="${12}"
-  local provision_cloud_composer_environment="${13}"
-  local cloud_composer_environment_name="${14:-$(foehncast_default_cloud_composer_environment_name)}"
 
   set_tfvars_string project_id "$project_id"
   set_tfvars_string region "$location"
@@ -233,8 +227,6 @@ apply_foehncast_cloud_tfvars_values() {
   set_tfvars_string cloud_run_service_name "$cloud_run_service_name"
   set_tfvars_string cloud_run_image "$(foehncast_default_cloud_run_image "$location" "$project_id" "$artifact_repository")"
   set_tfvars_string mlflow_tracking_uri "$mlflow_tracking_uri"
-  set_tfvars_bool provision_cloud_composer_environment "$provision_cloud_composer_environment"
-  set_tfvars_string cloud_composer_environment_name "$cloud_composer_environment_name"
 }
 
 load_terraform_platform_state() {
@@ -254,8 +246,6 @@ load_terraform_platform_state() {
   # shellcheck disable=SC2034
   FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_run_runtime_service_account)"
   # shellcheck disable=SC2034
-  # shellcheck disable=SC2034
-  FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_composer_runtime_service_account)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_service provision_cloud_run_service)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_service_name cloud_run_service_name)"
   FOEHNCAST_TF_CLOUD_RUN_CONTAINER_PORT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_container_port cloud_run_container_port)"
@@ -265,11 +255,6 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_CLOUD_RUN_CPU="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_cpu cloud_run_cpu)"
   FOEHNCAST_TF_CLOUD_RUN_MEMORY="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_memory cloud_run_memory)"
   FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
-  FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_composer_environment provision_cloud_composer_environment)"
-  FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_composer_environment_name cloud_composer_environment_name)"
-    FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_composer_airflow_access_ready cloud_composer_airflow_access_ready)"
-  FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX="$(trimmed_terraform_output_value "$terraform_dir" cloud_composer_dag_gcs_prefix)"
-  FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI="$(optional_terraform_output_value "$terraform_dir" cloud_composer_airflow_uri)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_mlflow provision_cloud_run_mlflow)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_ui provision_cloud_run_ui)"
   FOEHNCAST_TF_CLOUD_RUN_UI_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_ui_prometheus_url cloud_run_ui_prometheus_url)"
@@ -277,9 +262,6 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_STATE_BUCKET="${FOEHNCAST_TF_PROJECT_ID}-foehncast-tfstate"
   FOEHNCAST_TF_STATE_PREFIX="terraform/state"
-  if ! terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY"; then
-    FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=false
-  fi
 }
 
 terraform_repo_variable_names() {
@@ -306,11 +288,6 @@ terraform_repo_variable_names() {
     GCP_CLOUD_RUN_CPU \
     GCP_CLOUD_RUN_MEMORY \
     GCP_MLFLOW_TRACKING_URI \
-    GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT \
-    GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME \
-    GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY \
-    GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX \
-    GCP_CLOUD_COMPOSER_AIRFLOW_URI \
     GCP_PROVISION_CLOUD_RUN_MLFLOW \
     GCP_PROVISION_CLOUD_RUN_UI \
     GCP_CLOUD_RUN_UI_PROMETHEUS_URL \
@@ -345,20 +322,9 @@ terraform_repo_variable_pairs() {
   printf 'GCP_CLOUD_RUN_MAX_INSTANCE_COUNT\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MAX_INSTANCE_COUNT"
   printf 'GCP_CLOUD_RUN_CPU\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_CPU"
   printf 'GCP_CLOUD_RUN_MEMORY\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_MEMORY"
-  printf 'GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"
-  printf 'GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_ENVIRONMENT_NAME"
-    printf 'GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY"
 
   if [[ -n "$FOEHNCAST_TF_MLFLOW_TRACKING_URI" ]]; then
     printf 'GCP_MLFLOW_TRACKING_URI\t%s\n' "$FOEHNCAST_TF_MLFLOW_TRACKING_URI"
-  fi
-
-  if terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX"; then
-    printf 'GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX"
-  fi
-
-  if terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"; then
-    printf 'GCP_CLOUD_COMPOSER_AIRFLOW_URI\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"
   fi
 
   printf 'GCP_PROVISION_CLOUD_RUN_MLFLOW\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW"

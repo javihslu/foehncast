@@ -42,66 +42,6 @@ locals {
     },
     var.cloud_run_env_vars,
   )
-  cloud_composer_secret_resource_paths = {
-    for env_name, secret_id in var.cloud_composer_secret_env_vars :
-    env_name => (
-      can(regex("^projects/[^/]+/secrets/[^/]+(?:/versions/[^/]+)?$", trimspace(secret_id)))
-      ? trimspace(secret_id)
-      : "projects/${var.project_id}/secrets/${trimspace(secret_id)}"
-    )
-  }
-  cloud_composer_secret_iam_ids = {
-    for env_name, secret_id in local.cloud_composer_secret_resource_paths :
-    env_name => regexreplace(secret_id, "/versions/[^/]+$", "")
-  }
-  cloud_composer_secret_env_var_refs = {
-    for env_name, secret_id in local.cloud_composer_secret_resource_paths :
-    env_name => "sm://${secret_id}"
-  }
-  cloud_composer_env_vars = merge(
-    {
-      GCP_PROJECT_ID                        = var.project_id
-      GCP_LOCATION                          = var.region
-      GOOGLE_CLOUD_PROJECT                  = var.project_id
-      MLFLOW_ARTIFACT_DESTINATION           = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      MLFLOW_TRACKING_URI                   = local.mlflow_tracking_uri
-      STORAGE_BACKEND                       = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID           = var.project_id
-      STORAGE_BIGQUERY_DATASET              = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE                = var.bigquery_feature_table_id
-      FOEHNCAST_FEAST_SOURCE                = "bigquery"
-      FOEHNCAST_FEAST_PROJECT               = "foehncast"
-      FOEHNCAST_FEAST_PROJECT_ID            = var.project_id
-      FOEHNCAST_FEAST_REGISTRY              = local.feast_registry_uri
-      FOEHNCAST_FEAST_GCS_BUCKET            = var.artifact_bucket_name
-      FOEHNCAST_FEAST_GCS_STAGING_LOCATION  = local.feast_staging_uri
-      FOEHNCAST_FEAST_BIGQUERY_DATASET      = var.bigquery_dataset_id
-      FOEHNCAST_FEAST_BIGQUERY_LOCATION     = var.bigquery_location
-      FOEHNCAST_FEAST_BIGQUERY_TABLE        = local.feast_bigquery_table
-      FOEHNCAST_FEAST_DATASTORE_DATABASE    = var.feast_online_store_database_name
-      FOEHNCAST_PIPELINE_REPORT_DIR         = "gs://${var.artifact_bucket_name}/airflow/reports"
-      FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH = "gs://${var.artifact_bucket_name}/airflow/reports/runtime-release-latest.json"
-    },
-    var.cloud_composer_env_vars,
-    local.cloud_composer_secret_env_var_refs,
-  )
-  cloud_composer_pypi_packages = merge(
-    {
-      evidently                   = ">=0.7.21"
-      feast                       = "[gcp]>=0.63.0"
-      google-cloud-bigquery       = ">=3.30.0"
-      google-cloud-secret-manager = ">=2.23.0"
-      google-cloud-storage        = ">=2.19.0"
-      matplotlib                  = ">=3.8"
-      mlflow                      = ">=3.0"
-      pandas                      = ">=2.0"
-      pyarrow                     = ">=14.0"
-      pyyaml                      = ">=6.0"
-      requests                    = ">=2.31"
-      scikit-learn                = ">=1.5"
-    },
-    var.cloud_composer_pypi_packages,
-  )
 
   forecast_feature_schema = [
     {
@@ -324,7 +264,6 @@ locals {
     "bigquery.googleapis.com",
     "cloudbuild.googleapis.com",
     "cloudscheduler.googleapis.com",
-    "composer.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
     "firestore.googleapis.com",
@@ -456,7 +395,6 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/artifactregistry.admin",
     "roles/bigquery.admin",
     "roles/cloudbuild.builds.editor",
-    "roles/composer.admin",
     "roles/compute.admin",
     "roles/datastore.owner",
     "roles/iam.serviceAccountAdmin",
@@ -474,13 +412,6 @@ resource "google_project_iam_member" "github_project_admin" {
 resource "google_service_account" "cloud_run_runtime" {
   account_id   = "foehncast-cloud-run"
   display_name = "FoehnCast Cloud Run runtime"
-}
-
-resource "google_service_account" "cloud_composer_runtime" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  account_id   = "foehncast-composer"
-  display_name = "FoehnCast Cloud Composer runtime"
 }
 
 resource "google_project_iam_member" "github_artifact_registry_writer" {
@@ -604,89 +535,6 @@ resource "google_bigquery_dataset_iam_member" "cloud_run_monitoring_bigquery_edi
   dataset_id = google_bigquery_dataset.monitoring_store.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
-}
-
-resource "google_project_iam_member" "cloud_composer_worker" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/composer.worker"
-  member  = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_service_account_iam_member" "cloud_composer_service_agent_extension" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  service_account_id = google_service_account.cloud_composer_runtime[0].name
-  role               = "roles/composer.ServiceAgentV2Ext"
-  member             = "serviceAccount:service-${data.google_project.current.number}@cloudcomposer-accounts.iam.gserviceaccount.com"
-
-  depends_on = [google_project_service.required]
-}
-
-resource "google_project_iam_member" "cloud_composer_bigquery_job_user" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/bigquery.jobUser"
-  member  = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_project_iam_member" "cloud_composer_bigquery_read_session_user" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/bigquery.readSessionUser"
-  member  = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_project_iam_member" "cloud_composer_datastore_user" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_artifact_registry_repository_iam_member" "cloud_composer_reader" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  location   = google_artifact_registry_repository.containers.location
-  repository = google_artifact_registry_repository.containers.name
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_storage_bucket_iam_member" "cloud_composer_bucket_admin" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  bucket = google_storage_bucket.artifacts.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_storage_bucket_iam_member" "cloud_composer_bucket_metadata_reader" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  bucket = google_storage_bucket.artifacts.name
-  role   = "roles/storage.legacyBucketReader"
-  member = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_bigquery_dataset_iam_member" "cloud_composer_bigquery_editor" {
-  count = var.provision_cloud_composer_environment ? 1 : 0
-
-  dataset_id = google_bigquery_dataset.feature_store.dataset_id
-  role       = "roles/bigquery.dataEditor"
-  member     = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
-}
-
-resource "google_secret_manager_secret_iam_member" "cloud_composer_secret_accessor" {
-  for_each = var.provision_cloud_composer_environment ? local.cloud_composer_secret_iam_ids : {}
-
-  secret_id = each.value
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.cloud_composer_runtime[0].email}"
 }
 
 resource "google_cloud_run_v2_service" "app" {
@@ -1247,67 +1095,6 @@ resource "google_project_iam_member" "ui_workflows_invoker" {
   project = var.project_id
   role    = "roles/workflows.invoker"
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
-}
-
-resource "google_compute_network" "cloud_composer" {
-  count                   = var.provision_cloud_composer_environment ? 1 : 0
-  name                    = "${var.cloud_composer_environment_name}-network"
-  auto_create_subnetworks = false
-
-  depends_on = [google_project_service.required]
-}
-
-resource "google_compute_subnetwork" "cloud_composer" {
-  count         = var.provision_cloud_composer_environment ? 1 : 0
-  name          = "${var.cloud_composer_environment_name}-subnet"
-  ip_cidr_range = var.cloud_composer_subnet_cidr
-  region        = var.region
-  network       = google_compute_network.cloud_composer[0].id
-}
-
-resource "google_composer_environment" "cloud_composer" {
-  count  = var.provision_cloud_composer_environment ? 1 : 0
-  name   = var.cloud_composer_environment_name
-  region = var.region
-
-  labels = {
-    stack   = "foehncast"
-    surface = "managed-orchestration"
-  }
-
-  config {
-    software_config {
-      image_version = var.cloud_composer_image_version
-
-      airflow_config_overrides = {
-        "core-dags_are_paused_at_creation" = "True"
-      }
-
-      env_variables = local.cloud_composer_env_vars
-      pypi_packages = local.cloud_composer_pypi_packages
-    }
-
-    node_config {
-      network         = google_compute_network.cloud_composer[0].id
-      subnetwork      = google_compute_subnetwork.cloud_composer[0].id
-      service_account = google_service_account.cloud_composer_runtime[0].name
-    }
-  }
-
-  depends_on = [
-    google_project_service.required,
-    google_firestore_database.feast_online_store,
-    google_project_iam_member.cloud_composer_worker,
-    google_service_account_iam_member.cloud_composer_service_agent_extension,
-    google_project_iam_member.cloud_composer_bigquery_job_user,
-    google_project_iam_member.cloud_composer_bigquery_read_session_user,
-    google_project_iam_member.cloud_composer_datastore_user,
-    google_artifact_registry_repository_iam_member.cloud_composer_reader,
-    google_storage_bucket_iam_member.cloud_composer_bucket_admin,
-    google_storage_bucket_iam_member.cloud_composer_bucket_metadata_reader,
-    google_bigquery_dataset_iam_member.cloud_composer_bigquery_editor,
-    google_secret_manager_secret_iam_member.cloud_composer_secret_accessor,
-  ]
 }
 
 resource "google_iam_workload_identity_pool" "github" {

@@ -92,14 +92,6 @@ on:
         description: Allow unauthenticated Cloud Run access (`true` or `false`; leave blank to use repo vars)
         required: false
         type: string
-      provision_cloud_composer_environment:
-        description: Provision the Cloud Composer environment (`true` or `false`; leave blank to use repo vars)
-        required: false
-        type: string
-      cloud_composer_environment_name:
-        description: Cloud Composer environment name (leave blank to use repo vars)
-        required: false
-        type: string
 permissions:
   contents: read
 
@@ -226,8 +218,6 @@ jobs:
           REPO_GCP_CLOUD_RUN_CPU: ${{ steps.repo_config.outputs.cloud_run_cpu }}
           REPO_GCP_CLOUD_RUN_MEMORY: ${{ steps.repo_config.outputs.cloud_run_memory }}
           REPO_GCP_MLFLOW_TRACKING_URI: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-          REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
-          REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME: ${{ steps.repo_config.outputs.cloud_composer_environment_name }}
           REPO_GCP_PROVISION_CLOUD_RUN_MLFLOW: ${{ steps.repo_config.outputs.provision_cloud_run_mlflow }}
           REPO_GCP_PROVISION_CLOUD_RUN_UI: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
           REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL: ${{ steps.repo_config.outputs.cloud_run_ui_prometheus_url }}
@@ -378,21 +368,6 @@ jobs:
           if [[ -z "$mlflow_tracking_uri" ]]; then
             mlflow_tracking_uri="$REPO_GCP_MLFLOW_TRACKING_URI"
           fi
-          provision_cloud_composer_environment="${{ inputs.provision_cloud_composer_environment }}"
-          if [[ -z "$provision_cloud_composer_environment" ]]; then
-            provision_cloud_composer_environment="$REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"
-          fi
-          if [[ -z "$provision_cloud_composer_environment" ]]; then
-            provision_cloud_composer_environment='false'
-          fi
-          provision_cloud_composer_environment="$(normalize_bool provision_cloud_composer_environment "$provision_cloud_composer_environment")"
-          cloud_composer_environment_name="${{ inputs.cloud_composer_environment_name }}"
-          if [[ -z "$cloud_composer_environment_name" ]]; then
-            cloud_composer_environment_name="$REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME"
-          fi
-          if [[ -z "$cloud_composer_environment_name" ]]; then
-            cloud_composer_environment_name='foehncast-composer'
-          fi
           cloud_run_service_name="${{ inputs.cloud_run_service_name }}"
           if [[ -z "$cloud_run_service_name" ]]; then
             cloud_run_service_name="$REPO_GCP_CLOUD_RUN_SERVICE_NAME"
@@ -509,8 +484,6 @@ jobs:
             echo "TF_VAR_cloud_run_max_instance_count=${cloud_run_max_instance_count}"
             echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"
             echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"
-            echo "TF_VAR_provision_cloud_composer_environment=${provision_cloud_composer_environment}"
-            echo "TF_VAR_cloud_composer_environment_name=${cloud_composer_environment_name}"
             echo "TF_VAR_provision_cloud_run_mlflow=${provision_cloud_run_mlflow}"
             echo "TF_VAR_cloud_run_ui_prometheus_url=${cloud_run_ui_prometheus_url}"
             echo "TF_VAR_provision_cloud_run_ui=${provision_cloud_run_ui}"

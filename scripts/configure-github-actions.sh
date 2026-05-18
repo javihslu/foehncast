@@ -95,8 +95,6 @@ fi
 
 cloud_run_synced=false
 mlflow_tracking_uri_synced=false
-cloud_composer_dag_gcs_prefix_synced=false
-cloud_composer_airflow_uri_synced=false
 while IFS=$'\t' read -r variable_name variable_value; do
   set_variable "$REPOSITORY_PATH" "$variable_name" "$variable_value"
 
@@ -106,14 +104,6 @@ while IFS=$'\t' read -r variable_name variable_value; do
 
   if [[ "$variable_name" == "GCP_MLFLOW_TRACKING_URI" ]]; then
     mlflow_tracking_uri_synced=true
-  fi
-
-  if [[ "$variable_name" == "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" ]]; then
-    cloud_composer_dag_gcs_prefix_synced=true
-  fi
-
-  if [[ "$variable_name" == "GCP_CLOUD_COMPOSER_AIRFLOW_URI" ]]; then
-    cloud_composer_airflow_uri_synced=true
   fi
 done < <(terraform_repo_variable_pairs "$TERRAFORM_DIR")
 
@@ -125,16 +115,6 @@ fi
 if [[ "$mlflow_tracking_uri_synced" != "true" ]]; then
   delete_variable "$REPOSITORY_PATH" GCP_MLFLOW_TRACKING_URI
   echo "Skipping GCP_MLFLOW_TRACKING_URI because Terraform does not currently define an MLflow tracking URI."
-fi
-
-if [[ "$cloud_composer_dag_gcs_prefix_synced" != "true" ]]; then
-  delete_variable "$REPOSITORY_PATH" GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX
-  echo "Skipping GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX because Terraform has not provisioned a Cloud Composer DAG bucket prefix yet."
-fi
-
-if [[ "$cloud_composer_airflow_uri_synced" != "true" ]]; then
-  delete_variable "$REPOSITORY_PATH" GCP_CLOUD_COMPOSER_AIRFLOW_URI
-  echo "Skipping GCP_CLOUD_COMPOSER_AIRFLOW_URI because Terraform has not provisioned a Cloud Composer Airflow URI yet."
 fi
 
 echo "GitHub Actions variables are configured for ${REPOSITORY_PATH}."
