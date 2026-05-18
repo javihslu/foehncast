@@ -1,11 +1,11 @@
 # Delivery and Operator Workflow
 
-FoehnCast keeps contributor onboarding and shared-cloud delivery separate. Contributors use `./scripts/bootstrap-local.sh` to run the validated local evaluator. Maintainers use `./scripts/bootstrap-gcp.sh`, GitHub Actions, and Terraform to bootstrap and advance the shared hosted environment. The hosted architecture is Cloud Build plus Cloud Composer. This page describes the workflow contract.
+FoehnCast keeps contributor onboarding and shared-cloud delivery separate. Contributors use `./scripts/bootstrap-local.sh` to run the validated local evaluator. Maintainers use `./scripts/bootstrap-gcp.sh`, GitHub Actions, and Terraform to bootstrap and advance the shared hosted environment. The hosted architecture is Cloud Build plus Cloud Run. This page describes the workflow contract.
 
 !!! note "Scope"
 
     This page describes the validated delivery and operator workflow.
-    It covers the Cloud Composer and Cloud Build hosted architecture.
+    It covers the Cloud Run and Cloud Build hosted architecture.
     It is not the local evaluator setup guide.
 
 ## Workflow In One View
@@ -27,18 +27,16 @@ flowchart TD
         HANDOFF["Remote TF + repo vars"]
         PUSH["Push or dispatch"]
         TFWF["fab:fa-github terraform.yml"]
-        CMP["Cloud Composer"]
         RUN["Cloud Run API"]
         SHELL --> BGCP --> HANDOFF --> TFWF
         PUSH --> TFWF
-        TFWF --> CMP
         TFWF --> RUN
     end
 </div>
 
 The local path is the supported onboarding path. The cloud path assumes GCP ownership, GitHub repository administration, and access to private operator surfaces.
 
-The remote workflow lands on two hosted runtime surfaces: Cloud Run for the public API lane and Cloud Composer for orchestration, scheduling, and recovery. Cloud Build publishes runtime images.
+The remote workflow lands on Cloud Run for the public API lane. Cloud Build publishes runtime images. Orchestration runs on local Airflow via Docker Compose.
 
 ## Supported Paths
 
@@ -47,7 +45,7 @@ The remote workflow lands on two hosted runtime surfaces: Cloud Run for the publ
 | Default contributor path | contributor or reviewer | local Docker plus `./scripts/bootstrap-local.sh` | validated one-machine evaluator stack |
 | One-time shared-cloud bootstrap | maintainer | Google Cloud Shell plus `./scripts/bootstrap-gcp.sh` | remote Terraform backend, repository-variable contract, and first hosted setup |
 | Reviewed day-2 delivery | maintainer | GitHub Actions plus Terraform plus OIDC | reviewed infrastructure and runtime updates |
-| Runtime recovery | maintainer | Cloud Composer Airflow plus the runtime trigger workflow | retries, backfills, and reviewed serving handoffs |
+| Runtime recovery | maintainer | local Airflow plus the runtime release script | retries, backfills, and reviewed serving handoffs |
 
 ## Default Contributor Path
 
@@ -87,20 +85,18 @@ After the one-time bootstrap establishes OIDC and the remote backend, GitHub Act
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted-target toggles. Cloud Run settings such as instance count, container port, CPU, and memory are also repo-variable-backed.
 
-GitHub publishes the repo-managed DAG and source bundle into the Composer DAG bucket. Composer gets a reviewed PyPI baseline for the checked-in DAG bundle and can consume `sm://...` Secret Manager env references through the shared runtime env helper.
-
 Repository variables stay structural delivery inputs only. Runtime passwords, API tokens, and other secrets belong in the runtime environment or a managed secret path. Both hosted lanes read the same Terraform-managed storage, Feast, and MLflow contract. See [Configuration and Contracts](configuration-and-contracts.md) for the full inventory.
 
-## Hosted Orchestration
+## Orchestration
 
-Cloud Composer owns hosted orchestration: DAG scheduling, retries, backfills, and runtime release handoff.
+Local Airflow (via Docker Compose) owns orchestration: DAG scheduling, retries, backfills, and runtime release handoff.
 
-| Concern | Hosted implementation |
+| Concern | Implementation |
 |------|------------------------|
-| Hosted Airflow surface | Cloud Composer |
-| Reviewed runtime release entry | GitHub OIDC plus access token to the Composer Airflow API |
-| Scheduling, retries, and backfills | Cloud Composer |
-| Operator services | MLflow, monitoring, and private app checks as managed services |
+| Airflow surface | local Docker Compose |
+| Runtime release entry | `scripts/trigger-runtime-release.sh` against local Airflow API |
+| Scheduling, retries, and backfills | local Airflow |
+| Operator services | MLflow, monitoring, and private app checks |
 
 ## GitHub Versus GCP Boundary
 
@@ -109,29 +105,25 @@ The reviewed delivery plane and the runtime execution plane have different respo
 | Plane | Active owner | What it owns | What it must not own |
 |------|---------------|--------------|----------------------|
 | Reviewed delivery | GitHub Actions plus Terraform | lint, test, build, image publish, Terraform plan/apply/destroy, and reviewed deploy workflows | runtime scheduling, retries, backfills, and long-lived operator state |
-| Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, Cloud Composer scheduling, retries, backfills, runtime environment injection, and operator telemetry | source control, CI review, and infrastructure policy review |
-| Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces; runtime release reaches the Composer Airflow API | ad hoc operator-only divergence from the declared contract |
+| Runtime execution | GCP-hosted runtime surfaces | Cloud Run serving, operator telemetry | source control, CI review, and infrastructure policy review |
+| Shared handoff | repository variables, published images, Terraform outputs, and runtime release requests | reviewed contract from GitHub into GCP runtime surfaces | ad hoc operator-only divergence from the declared contract |
 
-GitHub Actions may trigger reviewed delivery workflows, but runtime scheduling does not belong to GitHub. Runtime orchestration lives on Cloud Composer.
+GitHub Actions triggers reviewed delivery workflows, but runtime scheduling does not belong to GitHub. Runtime orchestration lives on local Airflow.
 
 ## Runtime Release Trigger Contract
 
-GitHub has exactly one reviewed handoff into runtime execution.
+The runtime release handoff uses a single script against the Airflow API.
 
 <div class="mermaid">
 flowchart TD
-    GHW["fab:fa-github Runtime release workflow"] --> TARGET["reviewed receiver selection"]
-    TARGET --> AUTH["OIDC + access token"]
-    AUTH --> API["Composer Airflow API"]
+    SCRIPT["scripts/trigger-runtime-release.sh"] --> API["Airflow API"]
     API --> DAG["runtime_release DAG"]
     DAG --> REPORT["runtime-release-latest.json"]
-    REPORT --> SUMMARY["GitHub workflow summary"]
 </div>
 
-- signal: `.github/workflows/trigger-runtime-release.yml` sends one JSON request with a single action and the associated release coordinates
-- receiver: the Composer Airflow API
-- auth path: GitHub OIDC plus a Google access token for the Composer Airflow API; the GitHub service account maps to an Airflow user or role
-- observable outcome: the workflow waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target with requested receiver metadata; the Composer path reads the durable `gs://...` report contract derived from the artifact bucket
+- signal: `scripts/trigger-runtime-release.sh` sends one JSON request with a single action and the associated release coordinates
+- receiver: the local Airflow API
+- observable outcome: the script waits for the `runtime_release` DAG to succeed and captures the configured runtime release summary target
 
 Supported actions:
 
@@ -141,8 +133,6 @@ Supported actions:
 
 This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary.
 
-## Composer Runtime Contract
-
 ## Retry And Backfill Runbooks
 
 Operators should retry work on the same plane that owns it instead of jumping between GitHub and runtime surfaces.
@@ -150,12 +140,12 @@ Operators should retry work on the same plane that owns it instead of jumping be
 | Situation | Where to act | Normal procedure | Minimum evidence |
 |------|---------------|------------------|------------------|
 | Terraform or image publication fails before any runtime request is sent | GitHub Actions | fix the reviewed delivery input, then rerun the failed GitHub workflow | GitHub workflow URL plus the updated workflow summary |
-| candidate deploy, promotion, or rollback handoff needs another attempt | GitHub Actions through the runtime trigger contract | rerun `.github/workflows/trigger-runtime-release.yml` with the same reviewed release coordinates so the Composer API handoff records a new acknowledgement | GitHub workflow URL plus the configured runtime release summary target |
-| a feature slice failed or needs replay for one logical date | Cloud Composer Airflow | trigger `feature_pipeline` with an explicit logical date through the Composer Airflow UI and wait for the DAG to succeed | logical date, feature DAG run id, and `airflow/reports/feature-pipeline-<dataset>-latest.json` |
-| a replayed feature slice should refresh training state too | Cloud Composer Airflow | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run instead of treating training as a separate first step | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
-| training must be rerun without replaying feature ingestion | Cloud Composer Airflow | use a manual `training_pipeline` run only when the curated feature slice already exists and the operator is intentionally choosing the requested stage in DAG config | training DAG run id, requested stage, model version, and training summary JSON |
+| candidate deploy, promotion, or rollback handoff needs another attempt | local Airflow | rerun `scripts/trigger-runtime-release.sh` with the same release coordinates | runtime release summary target |
+| a feature slice failed or needs replay for one logical date | local Airflow | trigger `feature_pipeline` with an explicit logical date and wait for the DAG to succeed | logical date, feature DAG run id, and `airflow/reports/feature-pipeline-<dataset>-latest.json` |
+| a replayed feature slice should refresh training state too | local Airflow | let the feature replay publish the training-request asset and wait for the asset-triggered `training_pipeline` run | training DAG run id plus `airflow/reports/training-pipeline-<dataset>-latest.json` |
+| training must be rerun without replaying feature ingestion | local Airflow | use a manual `training_pipeline` run only when the curated feature slice already exists | training DAG run id, requested stage, model version, and training summary JSON |
 
-The operator services stay private by default. Recovery uses the Composer Airflow UI or API.
+The operator services stay private by default. Recovery uses the local Airflow UI or API.
 
 After the trigger, keep the same wait contract:
 
@@ -170,15 +160,15 @@ Serving rollout problems should use the runtime trigger contract, not the backfi
 Rollback uses the runtime trigger contract instead of direct GitHub runtime mutation.
 
 - `.github/workflows/publish-app-image.yml` publishes the reviewed app image only
-- `.github/workflows/trigger-runtime-release.yml` is the single reviewed GitHub-to-runtime handoff for candidate deploy, promotion, and rollback requests
+- `scripts/trigger-runtime-release.sh` is the single reviewed handoff for candidate deploy, promotion, and rollback requests
 - `.github/workflows/promote-candidate.yml` and `.github/workflows/rollback-live-release.yml` stay as blocked redirect workflows so the old entry points do not continue mutating runtime state directly
-- the configured runtime release summary target records the acknowledged handoff on the runtime side, including requested receiver metadata
+- the configured runtime release summary target records the acknowledged handoff on the runtime side
 
 Practical recovery split:
 
 - use GitHub workflow reruns when reviewed delivery failed before runtime execution
-- use Cloud Composer retries and backfills when runtime data or orchestration work failed after delivery
-- use the runtime trigger contract when the serving release handoff itself must be retried
+- use local Airflow retries and backfills when runtime data or orchestration work failed after delivery
+- use the runtime trigger script when the serving release handoff itself must be retried
 
 ## Reviewable Boundaries
 
@@ -187,7 +177,7 @@ These boundaries stay explicit across the scripts, Terraform reference, and work
 - the local Docker evaluator remains the only default contributor path
 - the shared cloud environment stays operator-owned, even though the repository and images are public
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
-- runtime scheduling, retries, and backfills belong to Cloud Composer, not to GitHub Actions
+- runtime scheduling, retries, and backfills belong to local Airflow, not to GitHub Actions
 - runtime promotion, rollback, and live traffic control do not run inside GitHub workflows; GitHub only sends the reviewed runtime release request
 - Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
@@ -200,6 +190,6 @@ The same split keeps cloud retirement reviewable. Destroy and cleanup stay separ
 - the one-time cloud bootstrap is explicit and interactive, which is safer for project, billing, and hosted-target choices
 - day-2 infrastructure changes run through GitHub Actions so operators do not need local Terraform
 - Terraform outputs, repository variables, and workflow behavior are tied together by regression tests
-- managed orchestration through Cloud Composer replaces VM-owned scheduling
+- managed orchestration through local Airflow keeps scheduling local and reproducible
 
 See [Interfaces and Surfaces](interfaces-and-surfaces.md), [Hosted Full-Stack](hosted-full-stack.md), [Cloud Mapping](cloud-mapping.md), and [Monitoring](monitoring.md) for the surrounding runtime and exposure boundaries.

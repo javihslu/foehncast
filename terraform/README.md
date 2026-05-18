@@ -47,7 +47,7 @@ Terraform can provision:
 - an inference-only Cloud Run service
 
 The Cloud Run service remains inference-only.
-Terraform also seeds `FOEHNCAST_PIPELINE_REPORT_DIR` to the shared `gs://<artifact-bucket>/airflow/reports` prefix across hosted surfaces so feature and training summaries can be written once and then read consistently by retained-host Airflow and the Cloud Run `/metrics` surface.
+Terraform also seeds `FOEHNCAST_PIPELINE_REPORT_DIR` to the shared `gs://<artifact-bucket>/airflow/reports` prefix across hosted surfaces so feature and training summaries can be written once and then read consistently by local Airflow and the Cloud Run `/metrics` surface.
 
 ## Deployment Scope Rule
 
@@ -80,19 +80,10 @@ Terraform also injects the Feast runtime env contract for the hosted app path: t
 
 This Cloud Run runtime identity is intentionally narrower than the other hosted identities. It exists to serve the inference API, not to act as the general operator or deployment account.
 
-## Transitional VM-Specific Surface
-
-The retained host is still part of the shared environment, but several VM-specific surfaces are transitional rather than long-term design targets.
-
-| Surface | Why it still exists | Classification | Next migration issue |
-|--------|----------------------|----------------|----------------------|
-| public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface | keep for now | keep until the role changes |
-
 ## What The Hosted Paths Expose
 
 | Path | Public surface by default | Notes |
 |------|---------------------------|-------|
-| Hosted full-stack target | no public app surface by default | Airflow and MLflow stay private unless explicitly exposed |
 | Cloud Run | inference API URL | promoted primary hosted API surface |
 
 ## Teardown
@@ -118,7 +109,7 @@ Remote destroy intentionally stops at Terraform-managed resources tracked in the
 The repository uses two image-publication workflows that share one hosted build contract:
 
 - `.github/workflows/publish-app-image.yml` submits the app image build to Cloud Build and publishes the reviewed image to Artifact Registry for the Cloud Run path
-- `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry for the retained operator host
+- `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry
 
 Artifact Registry is the canonical hosted image registry in this contract.
 
