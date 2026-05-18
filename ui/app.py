@@ -1022,6 +1022,7 @@ def _render_spot_map(ranked_spots: list[dict[str, Any]]) -> None:
     st.pydeck_chart(deck, use_container_width=True)
 
 
+@st.fragment
 def _render_rider_console(
     dashboard_data: dict[str, Any],
     selected_spot_ids: list[str],
@@ -1111,7 +1112,9 @@ def _render_rider_console(
                     type="primary" if is_active else "secondary",
                 ):
                     st.session_state["rider_focus_spot"] = spot_id
-                    st.rerun()
+                    # Scope the rerun to this fragment so the System tab's
+                    # Grafana iframes stay mounted and don't reload.
+                    st.rerun(scope="fragment")
 
             # Transposed metrics grid: a CSS grid with the same column ratios
             # and gap as the button row above, so column centers line up.
@@ -1166,6 +1169,7 @@ def _render_rider_console(
     _render_spot_map(ranked_spots)
 
 
+@st.fragment
 def _render_system_tab() -> None:
     """System tab: rider live conditions + operations + ML diagnostics dashboards."""
     _render_monitoring_tab(_RIDER_GRAFANA)
