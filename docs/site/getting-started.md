@@ -11,10 +11,9 @@ The shared environment hosts the inference, UI, observability, and tracking surf
 | Streamlit UI | <https://foehncast-ui-290885878569.europe-west6.run.app/> | Rider console with ranked spot recommendations |
 | Inference API | <https://foehncast-serve-290885878569.europe-west6.run.app/> | FastAPI service for `/health`, `/rank`, `/predict`, `/spots` |
 | API metrics | <https://foehncast-serve-290885878569.europe-west6.run.app/metrics> | Prometheus exposition for monitoring |
-| Grafana | <https://foehncast-grafana-290885878569.europe-west6.run.app/> | Rider, Operations, and ML Diagnostics dashboards |
 | MLflow | <https://foehncast-mlflow-290885878569.europe-west6.run.app/> | Tracking server (IAM-gated, expect `403`) |
 
-The inference container ships a Prometheus-compatible `/api/v1/query` endpoint so Grafana can render metrics directly without a separate Prometheus deployment.
+The inference container ships a Prometheus-compatible `/api/v1/query` endpoint so the Streamlit UI can render native Altair charts from direct PromQL queries without a separate Prometheus deployment.
 
 ## Local Evaluator (Default Path)
 
@@ -32,7 +31,7 @@ flowchart TD
   BOOT --> APP["FastAPI app"]
   BOOT --> AIR["Airflow"]
   BOOT --> MLF["MLflow"]
-  BOOT --> MON["Prometheus + Grafana"]
+  BOOT --> MON["Prometheus + StatsD"]
   BOOT --> DATA["MinIO + Feast emulator"]
 </div>
 
@@ -47,7 +46,6 @@ The bootstrap starts the local evaluator stack, waits for the feature-to-trainin
 | Airflow | `http://127.0.0.1:8080` | operator surface for orchestration |
 | MLflow | `http://127.0.0.1:5001` | operator surface for runs and model versions |
 | Prometheus | `http://127.0.0.1:9090` | operator surface for scraped metrics |
-| Grafana | `http://127.0.0.1:3000` | operator surface for dashboards and alerts |
 | Streamlit | `http://127.0.0.1:8501` | rider console with live rankings and model card |
 
 The objectstore UI and the Feast emulator endpoint are printed by the bootstrap helper when the stack comes up. For the full surface boundary, use [Interfaces and Surfaces](system/interfaces-and-surfaces.md).

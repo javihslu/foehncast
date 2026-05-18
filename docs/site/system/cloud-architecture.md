@@ -22,7 +22,6 @@ flowchart TB
         direction TB
         UI["Streamlit UI\n:8501"]:::public
         APP["FastAPI App\n:8000"]:::public
-        GF["Grafana\n:3000"]:::public
     end
 
     subgraph OperatorLane ["Operator lane (protected)"]
@@ -62,7 +61,6 @@ flowchart TB
     APP --> GMP
 
     UI --> GMP
-    GF --> GMP
 
     MLF --> SQL
     MLF --> GCS
@@ -71,7 +69,6 @@ flowchart TB
     CB --> AR
     AR --> APP
     AR --> UI
-    AR --> GF
     AR --> MLF
 
     click UI "https://console.cloud.google.com/run?project=" "Open Cloud Run"
@@ -93,9 +90,8 @@ flowchart TB
 
 | Service | GCP Product | Container Port | Access | Purpose |
 |---------|-------------|---------------|--------|---------|
-| **Streamlit UI** | Cloud Run | 8501 | Public | Rider-facing dashboard with spot rankings, forecasts, and Grafana embeds |
+| **Streamlit UI** | Cloud Run | 8501 | Public | Rider-facing dashboard with spot rankings, forecasts, and native Altair metric charts |
 | **FastAPI App** | Cloud Run | 8000 | Public | Inference API — `/predict`, `/rank`, `/spots`, `/health`, `/metrics` |
-| **Grafana** | Cloud Run | 3000 | Public | Read-only dashboards (anonymous viewer, embedding enabled) |
 | **MLflow** | Cloud Run | 5001 | Protected | Tracking server and model registry — service-account-only invocation |
 | **Cloud Workflows** | Workflows | — | Protected | Pipeline orchestration: feature → training → inference cascade |
 | **Cloud Scheduler** | Scheduler | — | Protected | Cron trigger for scheduled pipeline runs |
@@ -113,7 +109,7 @@ flowchart TB
 <ul>
 <li>
 <p><strong>Public services</strong></p>
-<p>UI, App, and Grafana use <code>allUsers</code> Cloud Run IAM invoker. Anonymous access, no login required.</p>
+<p>UI and App use <code>allUsers</code> Cloud Run IAM invoker. Anonymous access, no login required.</p>
 </li>
 <li>
 <p><strong>Protected services</strong></p>

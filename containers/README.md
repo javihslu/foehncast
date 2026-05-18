@@ -50,7 +50,7 @@ flowchart TD
 |---------------|-----------------|--------------------------|-------------------------|
 | optional `development_env`, MinIO, Feast emulator | yes | no | no |
 | Airflow, MLflow, app | yes | yes | app only |
-| Prometheus, StatsD exporter, Grafana | yes | yes | no |
+| Prometheus, StatsD exporter | yes | yes | no |
 
 ## Main Components
 
@@ -80,7 +80,6 @@ flowchart TD
 
 - `prometheus`: scrapes the app `/metrics` route, the StatsD exporter, and stack monitoring surfaces.
 - `statsd`: exposes the UDP sink that FoehnCast monitoring helpers push to, then republishes them in Prometheus format.
-- `grafana`: provisions the Prometheus datasource and the FoehnCast dashboards from checked-in config.
 
 ### `feast_online_store/`
 
@@ -88,7 +87,7 @@ flowchart TD
 
 ## Default Local Path
 
-For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the app plus Grafana monitoring surfaces.
+For the shortest evaluator path, run `./scripts/bootstrap-local.sh` from the repo root. It builds the local stack, seeds the feature and training DAGs, and checks the app plus monitoring surfaces.
 
 This path is intentionally GCP-free. You do not need `gcloud`, Terraform, GitHub Actions variables, or Cloud Shell to run it. For end-to-end contributor setup and the resolved local endpoints, use [../docs/site/getting-started.md](../docs/site/getting-started.md) and [../docs/site/system/local-evaluator.md](../docs/site/system/local-evaluator.md). For maintainer-owned hosted delivery, start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/system/delivery-and-operator-workflow.md).
 

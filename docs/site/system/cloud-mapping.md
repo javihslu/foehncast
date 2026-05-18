@@ -99,10 +99,10 @@ These parts should stay the same in local and cloud.
 |------|-------------------|------------------|
 | FastAPI app routes | riders, service clients, smoke tests | exposed by the active hosted app target |
 | `/metrics` and scrape targets | Prometheus and operators | service-only |
-| Airflow, MLflow, Prometheus, and Grafana | operators | private by default |
+| Airflow, MLflow, and Prometheus | operators | private by default |
 | Public docs and review artifacts | reviewer, course audience, fork reader | public-safe when rendered from snapshots, markdown, or screenshots |
 
-This boundary matters because the hosted app is the product and service surface. Grafana remains an operator dashboard, and public docs should prefer rendered evidence over live embeds of private hosted tools.
+This boundary matters because the hosted app is the product and service surface. Monitoring visualization uses native Altair charts in the Streamlit UI, and public docs should prefer rendered evidence over live embeds of private hosted tools.
 
 ## Hosted Topology
 
@@ -180,7 +180,7 @@ flowchart TD
 | Local Docker image builds | same reviewed images | GitHub workflows + Cloud Build + Artifact Registry |
 | Local Airflow | same DAGs and runtime release contract | Local Airflow (no cloud equivalent) |
 | Local MLflow + MinIO artifacts | same run tracking and registry | managed MLflow + GCS artifacts |
-| Prometheus + StatsD + Grafana | same operator monitoring | private hosted operator monitoring |
+| Prometheus + StatsD | same operator monitoring | private hosted operator monitoring (Google Managed Prometheus) |
 | MinIO for raw files and artifact-style blobs | same object storage role | GCS |
 | MinIO curated feature objects | same curated feature contract | BigQuery |
 | Feast parquet export | same Feast offline source | BigQuery table or view |
@@ -280,7 +280,7 @@ The stable evidence surfaces are:
 - `airflow/reports/training-pipeline-<dataset>-latest.json` and its history copy for training follow-up
 - the configured runtime release summary target and its history copy for reviewed deploy, promote, or rollback handoffs
 - `.state/hosted-sync/last-success.json` for the hosted sync state
-- `/metrics` and the checked-in Grafana panels for post-recovery operator verification
+- `/metrics` and the checked-in alert rules for post-recovery operator verification
 
 On hosted surfaces, Terraform points `FOEHNCAST_PIPELINE_REPORT_DIR` at the durable `gs://<artifact-bucket>/airflow/reports` prefix so Cloud Run `/metrics` and operator tools can read the same feature and training summary evidence.
 

@@ -76,7 +76,7 @@ Static analysis, a large test suite, and consistent project structure enforce qu
 
 ## Monitoring (20%)
 
-Prometheus metrics, Grafana dashboards, drift detection, hindcast validation, and alerting rules form a complete observability stack.
+Prometheus metrics, native Altair charts, drift detection, hindcast validation, and alerting rules form a complete observability stack.
 
 | Claim | Evidence |
 |-------|----------|
@@ -84,10 +84,10 @@ Prometheus metrics, Grafana dashboards, drift detection, hindcast validation, an
 | Composed `/metrics` endpoint | Feature, training, prediction, sync, and hindcast metrics on one scrape target |
 | Drift detection (Evidently) | `src/foehncast/monitoring/drift.py` — column-level statistical tests, StatsD export |
 | Hindcast validation | `src/foehncast/monitoring/hindcast.py` — predictions vs. observed weather |
-| 3 Grafana dashboards | `grafana_work/dashboards/` — Rider, Operations, ML Diagnostics |
+| Native Altair charts in Streamlit UI | `ui/app.py` — direct PromQL queries for system health, pipeline status, drift, and hindcast panels |
 | 9 Prometheus alert rules | `prometheus_config/alerting_rules.yml` — AppDown, HighRequestLatency, FeaturePipelineStageFailure, etc. |
 | Prediction event history | `.state/monitoring/prediction-events.jsonl` (local), BigQuery `prediction_events` table (cloud) |
 | Pipeline summary evidence | `airflow/reports/feature-pipeline-*-latest.json`, `training-pipeline-*-latest.json` |
-| Scrape config version-controlled | `prometheus_config/prometheus.yml` — 4 scrape targets |
+| Scrape config version-controlled | `prometheus_config/prometheus.yml` — 3 scrape targets |
 
 **Docs**: [Monitoring](monitoring.md)

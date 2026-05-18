@@ -68,7 +68,7 @@ That makes the hosted full-stack target a managed operator surface, not a single
 | Cloud Composer | schedule DAGs, retries, backfills, and runtime release handoff | a contributor setup path or notebook host |
 | Cloud Run | serve the public FastAPI product and service routes | a hidden deployment control plane |
 | Cloud Build | publish reviewed runtime images to Artifact Registry | a substitute for GitHub-reviewed delivery |
-| MLflow, Prometheus, and Grafana | operator tracking, monitoring, and review | the rider-facing interface |
+| MLflow and Prometheus | operator tracking and monitoring | the rider-facing interface |
 | GitHub OIDC delivery | run remote Terraform and image-driven deploy updates | a substitute for the runtime orchestrator |
 
 ## Runtime Contract
@@ -104,7 +104,7 @@ The sync contract is:
 - Cloud Composer receives reviewed DAG bundles from the GitHub publish workflow
 - each successful sync writes `.state/hosted-sync/last-success.json`
 - the app republishes that status through `/metrics`
-- Grafana can show the last successful hosted refresh from the same sync state
+- the Streamlit UI can show the last successful hosted refresh from the same sync state
 
 This makes the hosted target observable through standard metrics and evidence files.
 
