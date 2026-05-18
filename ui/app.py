@@ -71,6 +71,15 @@ _WORKFLOWS_REGION = os.getenv("GCP_LOCATION", "")
 _WORKFLOWS_NAME = os.getenv("FOEHNCAST_WORKFLOW_NAME", "foehncast-pipeline-cascade")
 
 
+_PIPELINE_JOB_NAMES = {
+    "feature": os.getenv("FOEHNCAST_FEATURE_JOB_NAME", "foehncast-feature-pipeline"),
+    "training": os.getenv("FOEHNCAST_TRAINING_JOB_NAME", "foehncast-training-pipeline"),
+    "inference": os.getenv(
+        "FOEHNCAST_INFERENCE_JOB_NAME", "foehncast-inference-pipeline"
+    ),
+}
+
+
 def _trigger_pipeline() -> str | None:
     """Trigger the Cloud Workflows pipeline cascade and return the execution name.
 
@@ -108,6 +117,57 @@ def _trigger_pipeline() -> str | None:
             return result.get("name")
     except Exception:
         return None
+
+
+def _trigger_cloud_run_job(job_name: str) -> str | None:
+    """Execute a single Cloud Run Job and return the execution name on success."""
+    if not _WORKFLOWS_PROJECT or not _WORKFLOWS_REGION or not job_name:
+        return None
+    token = _gcp_access_token()
+    if not token:
+        return None
+    try:
+        api_url = (
+            f"https://run.googleapis.com/v2/projects/{_WORKFLOWS_PROJECT}/"
+            f"locations/{_WORKFLOWS_REGION}/jobs/{job_name}:run"
+        )
+        req = urllib.request.Request(
+            api_url,
+            data=b"{}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read()).get("name")
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _list_workflow_executions(limit: int = 5) -> list[dict[str, Any]]:
+    """Return the most recent Cloud Workflows executions (best effort)."""
+    if not _WORKFLOWS_PROJECT or not _WORKFLOWS_REGION:
+        return []
+    token = _gcp_access_token()
+    if not token:
+        return []
+    try:
+        api_url = (
+            f"https://workflowexecutions.googleapis.com/v1/"
+            f"projects/{_WORKFLOWS_PROJECT}/locations/{_WORKFLOWS_REGION}/"
+            f"workflows/{_WORKFLOWS_NAME}/executions"
+            f"?pageSize={limit}&orderBy=createTime%20desc"
+        )
+        req = urllib.request.Request(
+            api_url, headers={"Authorization": f"Bearer {token}"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read()).get("executions", [])
+    except Exception:
+        return []
 
 
 @st.cache_data(show_spinner=False)
@@ -1169,15 +1229,272 @@ def _render_rider_console(
     _render_spot_map(ranked_spots)
 
 
+_PIPELINES_MERMAID = """
+flowchart LR
+  classDef src fill:#f9efe3,stroke:#1f5e44,color:#07252a,font-weight:600;
+  classDef pipe fill:#0e8a86,stroke:#07252a,color:#ffffff,font-weight:600;
+  classDef store fill:#ffffff,stroke:#0e8a86,color:#07252a;
+  classDef serve fill:#ff7a26,stroke:#07252a,color:#ffffff,font-weight:600;
+  classDef mon fill:#1f5e44,stroke:#07252a,color:#ffffff;
+
+  OM(["Open-Meteo<br/>Forecast API"]):::src
+
+  subgraph FP[Feature Pipeline]
+    F1[Ingest] --> F2[Engineer] --> F3[Validate] --> F4[Store]
+  end
+  class F1,F2,F3,F4 pipe
+
+  BQ[("BigQuery<br/>curated features")]:::store
+  FEAST[("Feast<br/>online store")]:::store
+
+  OM --> F1
+  F4 --> BQ
+  F4 --> FEAST
+
+  subgraph TP[Training Pipeline]
+    T1[Load] --> T2[Train] --> T3[Evaluate] --> T4[Register]
+  end
+  class T1,T2,T3,T4 pipe
+
+  MLF[("MLflow<br/>tracking + registry")]:::store
+
+  BQ --> T1
+  T4 --> MLF
+
+  subgraph IP[Inference Pipeline]
+    I1[Online features] --> I2[Predict] --> I3[Rank]
+  end
+  class I1,I2,I3 pipe
+
+  FEAST --> I1
+  MLF --> I2
+
+  API[/"FastAPI /predict /rank"/]:::serve
+  UIAPP[/"Streamlit Rider Console"/]:::serve
+  I3 --> API --> UIAPP
+
+  PROM[(Prometheus<br/>scraped via serve)]:::mon
+  GRAF[(Grafana)]:::mon
+  FP -.metrics.-> PROM
+  TP -.metrics.-> PROM
+  IP -.metrics.-> PROM
+  API -.metrics.-> PROM
+  PROM --> GRAF
+"""
+
+
+def _render_pipelines_topology() -> None:
+    """Render the pipelines topology as a Mermaid SVG via an HTML component."""
+    html = """
+<div style="background:#faf6ee;border-radius:14px;padding:18px 20px;">
+  <div class="mermaid" style="font-family:Manrope,sans-serif">__MERMAID__</div>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      securityLevel: 'loose',
+      themeVariables: {
+        primaryColor: '#0e8a86',
+        primaryTextColor: '#ffffff',
+        primaryBorderColor: '#07252a',
+        lineColor: '#1f5e44',
+        clusterBkg: '#eef3ee',
+        clusterBorder: '#1f5e44',
+        fontFamily: 'Manrope, sans-serif'
+      }
+    });
+  </script>
+</div>
+""".replace("__MERMAID__", _PIPELINES_MERMAID)
+    st.components.v1.html(html, height=440, scrolling=False)
+
+
+def _bool_badge(value: float | None) -> str:
+    """Render a green/red badge for a 0/1 gauge value, or '—' when missing."""
+    if value is None:
+        return "—"
+    return "✓ pass" if value >= 0.5 else "✗ fail"
+
+
+def _age_label(ts: float | None) -> str:
+    """Format an epoch-seconds timestamp gauge as a relative age, or '—'."""
+    if ts is None or ts <= 0:
+        return "—"
+    return f"{_fmt_delta(_time.time() - ts)} ago"
+
+
+def _render_pipelines_panel() -> None:
+    """Pipelines sub-section: topology, status tiles, triggers, recent runs.
+
+    Kept above the lazy-loaded Grafana iframes so the demo trigger path
+    stays snappy: only a handful of instant PromQL queries and one
+    Workflows ``ListExecutions`` call (cached 15 s).
+    """
+    st.subheader("Pipelines")
+    st.caption(
+        "Feature → training → inference cascade backed by Cloud Run Jobs and "
+        "Cloud Workflows. Status tiles are instant PromQL gauges from the "
+        "serve container; trigger buttons call the Workflows or Cloud Run "
+        "Jobs Execute API directly."
+    )
+
+    _render_pipelines_topology()
+
+    # Trigger row -----------------------------------------------------
+    triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
+    cols = st.columns(4)
+    cascade_clicked = cols[0].button(
+        "Run full cascade",
+        type="primary",
+        disabled=not triggers_available,
+        help="Cloud Workflows: feature → training → inference",
+        key="pipe_trigger_cascade",
+    )
+    feature_clicked = cols[1].button(
+        "Run feature pipeline",
+        disabled=not triggers_available,
+        key="pipe_trigger_feature",
+    )
+    training_clicked = cols[2].button(
+        "Run training pipeline",
+        disabled=not triggers_available,
+        key="pipe_trigger_training",
+    )
+    inference_clicked = cols[3].button(
+        "Run inference pipeline",
+        disabled=not triggers_available,
+        key="pipe_trigger_inference",
+    )
+
+    if not triggers_available:
+        st.caption(
+            "Triggers require GCP_PROJECT_ID and GCP_LOCATION; available "
+            "on the Cloud Run UI service."
+        )
+
+    if cascade_clicked:
+        name = _trigger_pipeline()
+        if name:
+            st.success(f"Cascade started: {name.rsplit('/', 1)[-1]}")
+            _list_workflow_executions.clear()
+        else:
+            st.error("Failed to start cascade")
+    if feature_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["feature"])
+        if name:
+            st.success(f"Feature job started: {name.rsplit('/', 1)[-1]}")
+        else:
+            st.error("Failed to start feature job")
+    if training_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["training"])
+        if name:
+            st.success(f"Training job started: {name.rsplit('/', 1)[-1]}")
+        else:
+            st.error("Failed to start training job")
+    if inference_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["inference"])
+        if name:
+            st.success(f"Inference job started: {name.rsplit('/', 1)[-1]}")
+        else:
+            st.error("Failed to start inference job")
+
+    # Per-pipeline status tiles --------------------------------------
+    st.markdown("##### Last run health")
+    feat_success = _prom_query("foehncast_feature_pipeline_run_success")
+    feat_ts = _prom_query(
+        "foehncast_feature_pipeline_summary_generated_timestamp_seconds"
+    )
+    feat_stored = _prom_query("foehncast_feature_pipeline_stored_spot_count")
+    feat_drift = _prom_query("foehncast_feature_pipeline_dataset_drift_detected")
+
+    train_success = _prom_query("foehncast_training_pipeline_run_success")
+    train_ts = _prom_query(
+        "foehncast_training_pipeline_summary_generated_timestamp_seconds"
+    )
+    train_rows = _prom_query("foehncast_training_pipeline_row_count")
+    train_version = _prom_query("foehncast_training_pipeline_registered_model_version")
+
+    pred_ts = _prom_query(
+        "foehncast_prediction_log_latest_prediction_timestamp_seconds"
+    )
+    pred_rows = _prom_query("foehncast_prediction_log_total_row_count")
+    hindcast_acc = _prom_query("foehncast_hindcast_accuracy")
+
+    feat_col, train_col, inf_col = st.columns(3)
+    with feat_col:
+        st.markdown("**Feature pipeline**")
+        st.metric("Run status", _bool_badge(feat_success))
+        st.metric("Summary age", _age_label(feat_ts))
+        st.metric(
+            "Stored spots",
+            "—" if feat_stored is None else f"{int(feat_stored)}",
+        )
+        st.metric(
+            "Dataset drift",
+            "—" if feat_drift is None else _bool_badge(1 - feat_drift),
+            help="Inverted: green when no drift detected",
+        )
+    with train_col:
+        st.markdown("**Training pipeline**")
+        st.metric("Run status", _bool_badge(train_success))
+        st.metric("Summary age", _age_label(train_ts))
+        st.metric(
+            "Training rows",
+            "—" if train_rows is None else f"{int(train_rows)}",
+        )
+        st.metric(
+            "Registered model v",
+            "—" if train_version is None else f"v{int(train_version)}",
+        )
+    with inf_col:
+        st.markdown("**Inference pipeline**")
+        st.metric("Latest prediction", _age_label(pred_ts))
+        st.metric(
+            "Logged predictions",
+            "—" if pred_rows is None else f"{int(pred_rows)}",
+        )
+        st.metric(
+            "Hindcast accuracy",
+            "—" if hindcast_acc is None else f"{hindcast_acc * 100:.0f} %",
+            help="% of validated forecasts whose predicted quality bucket "
+            "matched the labeled hindcast bucket",
+        )
+
+    # Recent executions ----------------------------------------------
+    st.markdown("##### Recent cascade executions")
+    executions = _list_workflow_executions(limit=5) if triggers_available else []
+    if executions:
+        rows = []
+        now = _time.time()
+        for ex in executions:
+            name = ex.get("name", "").rsplit("/", 1)[-1]
+            state = ex.get("state", "—")
+            start_iso = ex.get("startTime", "")
+            try:
+                started = pd.to_datetime(start_iso, utc=True).timestamp()
+                age = _fmt_delta(now - started)
+            except Exception:
+                age = "—"
+            rows.append({"Execution": name, "State": state, "Started": age})
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.caption(
+            "No cascade executions visible yet. Trigger one with the button "
+            "above, or check the Cloud Workflows console."
+        )
+
+
 @st.fragment
 def _render_system_tab() -> None:
-    """System tab: rider live conditions + operations + ML diagnostics dashboards.
+    """System tab: pipelines panel + Grafana dashboards (lazy loaded)."""
+    _render_pipelines_panel()
+    st.divider()
 
-    The embedded Grafana dashboards are heavy; we gate them behind a one-time
-    toggle so the Rider Console stays snappy on Cloud Run. Streamlit renders
-    both tab bodies on every script run, so without this gate the iframes
-    would load even when the rider tab is active.
-    """
     if not st.session_state.get("system_tab_loaded"):
         st.info(
             "Monitoring dashboards load on demand to keep the rider tab fast. "
