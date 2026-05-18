@@ -13,7 +13,7 @@ This page describes what is measured, where the evidence comes from, and how ope
 ## Signal Path
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     subgraph Sources ["Evidence sources"]
         direction TB
         AIR["Airflow pipeline summaries"]
@@ -82,7 +82,7 @@ Durable files survive restarts and support audits. Runtime counters on `/metrics
 The serving application publishes one composed Prometheus payload on `/metrics`:
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     subgraph App ["/metrics payload"]
         direction TB
         FPS["Feature pipeline summary gauges"]

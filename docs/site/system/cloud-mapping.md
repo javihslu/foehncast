@@ -107,7 +107,7 @@ This boundary matters because the hosted app is the product and service surface.
 ## Hosted Topology
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     %% Styling
     classDef infra fill:#f5f5f5,stroke:#333
     classDef runner fill:#f4f1ea,stroke:#f05032
@@ -200,7 +200,7 @@ This is role matching, not a literal copy. Some local tools map to hosted servic
 ## Cloud Pipeline Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef source fill:#f5f5f5,stroke:#333
     classDef process fill:#e1f5fe,stroke:#01579b
     classDef data fill:#ececff,stroke:#9370db

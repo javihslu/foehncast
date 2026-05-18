@@ -13,7 +13,7 @@ This page describes what the running app owns and what stays optional or operato
 ## Inference Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     subgraph RequestPath ["Request path"]
         direction TB
         REQ["Requested spots"]

@@ -11,7 +11,7 @@ FoehnCast exposes five surface classes: rider, service, operator, delivery, and 
 ## Surface Map
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef public fill:#f5f5f5,stroke:#333
     classDef service fill:#e1f5fe,stroke:#01579b
     classDef operator fill:#fff8e1,stroke:#f57f17

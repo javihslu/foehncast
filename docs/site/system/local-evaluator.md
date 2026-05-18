@@ -13,7 +13,7 @@ This page describes the default contributor runtime contract. It documents the s
 ## Target Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef pipeline fill:#e1f5fe,stroke:#01579b
     classDef registry fill:#fff,stroke:#d32f2f
     classDef app fill:#222,stroke:#333,color:#fff

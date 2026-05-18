@@ -121,7 +121,7 @@ GitHub Actions may trigger reviewed delivery workflows, but runtime scheduling d
 GitHub has exactly one reviewed handoff into runtime execution.
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     GHW["fab:fa-github Runtime release workflow"] --> TARGET["reviewed receiver selection"]
     TARGET --> AUTH["OIDC + access token"]
     AUTH --> API["Composer Airflow API"]
