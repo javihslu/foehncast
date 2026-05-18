@@ -331,12 +331,15 @@ def _eval_instant_query(expr: str) -> list[dict]:
             s["value"] = [now, str(min(float(s["value"][1]), cap))]
         return inner
 
-    # ``max(<expr>)`` and ``min(<expr>)``: scalar reduction.
-    agg = _re.match(r"^(max|min)\((.+)\)$", expr)
+    # ``max(<expr>)``, ``min(<expr>)`` and ``avg(<expr>)``: scalar reduction.
+    agg = _re.match(r"^(max|min|avg)\((.+)\)$", expr)
     if agg:
         inner = _eval_instant_query(agg.group(2))
         if not inner:
             return []
+        if agg.group(1) == "avg":
+            total = sum(float(s["value"][1]) for s in inner)
+            return [{"metric": {}, "value": [now, str(total / len(inner))]}]
         chooser = max if agg.group(1) == "max" else min
         best = chooser(inner, key=lambda s: float(s["value"][1]))
         return [{"metric": {}, "value": [now, best["value"][1]]}]
