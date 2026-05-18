@@ -101,7 +101,7 @@ variable "cloud_run_cpu" {
 variable "cloud_run_memory" {
   description = "Memory limit for the Cloud Run container."
   type        = string
-  default     = "512Mi"
+  default     = "1Gi"
 }
 
 variable "mlflow_tracking_uri" {

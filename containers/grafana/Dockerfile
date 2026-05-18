@@ -1,4 +1,4 @@
-FROM grafana/grafana
+FROM grafana/grafana:11.3.0
 
 # Self-contained Grafana image with all dashboards, provisioning, and config
 # baked in. Cloud Run (and other volume-free runtimes) use this image directly.
@@ -6,6 +6,9 @@ FROM grafana/grafana
 #
 # Build context must be the repository root:
 #   docker build --platform linux/amd64 -f containers/grafana/Dockerfile .
+#
+# Pinned to 11.3.0 (LTS line) to avoid panel-plugin lookup failures observed
+# on the floating `latest` tag (e.g. 13.x renames + Scenes migration issues).
 
 # Defaults that alerting provisioning needs at startup.
 ENV FOEHNCAST_GRAFANA_ALERT_EMAIL=alerts@example.invalid

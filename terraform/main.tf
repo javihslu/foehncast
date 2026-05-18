@@ -901,8 +901,13 @@ resource "google_cloud_run_v2_service" "grafana" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "512Mi"
+          cpu = "1"
+          # 512Mi caused continuous OOMs on Cloud Run (logs show
+          # "Memory limit of 512 MiB exceeded with 515 MiB used"), which
+          # in turn triggered grafana-apiserver Handler timeouts and
+          # SQLite lock contention. 1Gi is the documented minimum for
+          # Grafana with embedded SQLite + provisioning.
+          memory = "1Gi"
         }
       }
 
@@ -935,6 +940,31 @@ resource "google_cloud_run_v2_service" "grafana" {
       env {
         name  = "GF_GOOGLE_SDK_AUTO_DETECT_CREDENTIALS"
         value = "true"
+      }
+
+      # Disable the unified alerting scheduler on Cloud Run. The provisioned
+      # rule set uses PromQL increase() / rate() over a time window, but the
+      # in-process /api/v1/query engine exposed by serve.py only returns the
+      # current point value of each metric. Every rule evaluation therefore
+      # times out and contributed to Grafana memory pressure and SQLite lock
+      # contention. Local Compose retains a real Prometheus scrape and keeps
+      # alerting enabled.
+      env {
+        name  = "GF_UNIFIED_ALERTING_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "GF_ALERTING_ENABLED"
+        value = "false"
+      }
+
+      # Disable Grafana Live (WebSocket push) on Cloud Run. The platform
+      # terminates idle WebSocket connections at ~30s, which produces a
+      # steady stream of 504s on /api/live/ws. Live updates are unused by
+      # the public dashboards (they refresh on a fixed interval instead).
+      env {
+        name  = "GF_LIVE_MAX_CONNECTIONS"
+        value = "0"
       }
     }
   }

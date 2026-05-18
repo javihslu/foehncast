@@ -5,7 +5,13 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Awaitable
 
-from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -27,6 +33,22 @@ request_total = Counter(
     ["method", "endpoint", "status"],
     registry=_registry,
 )
+
+model_confidence = Gauge(
+    "foehncast_inference_model_confidence",
+    "Latest model confidence per spot (mean forecast quality index in [0,1])",
+    ["spot_id"],
+    registry=_registry,
+)
+
+
+def observe_model_confidence(spot_id: str, value: float) -> None:
+    """Record latest model confidence for a spot.
+
+    Clamps the value to [0, 1] so the gauge is always a valid confidence score.
+    """
+    bounded = max(0.0, min(1.0, float(value)))
+    model_confidence.labels(spot_id).set(bounded)
 
 
 def _normalize_path(path: str) -> str:

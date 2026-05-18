@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 import logging
 import re
 import socket
-from pathlib import Path
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
 
+from foehncast._report_store import (
+    ReportLocation,
+    read_json_object,
+    report_json_paths,
+    report_object_path,
+    write_json_object,
+)
 from foehncast.config import get_monitoring_config
 from foehncast.env import env_value
 from foehncast.monitoring._common import safe_float
-from foehncast.paths import project_root
+from foehncast.monitoring.pipeline_metrics import configured_pipeline_report_dir
 
 _DEFAULT_DRIFT_THRESHOLD = 0.15
 _DEFAULT_EVALUATION_WINDOW_DAYS = 30
@@ -146,47 +152,53 @@ def push_drift_metrics(report: DriftReport) -> None:
         logging.getLogger(__name__).debug("StatsD push failed (expected in cloud)")
 
 
-def _drift_report_dir() -> Path:
-    """Return the directory for persisted drift reports."""
-    configured = env_value("FOEHNCAST_PIPELINE_REPORT_DIR")
-    if configured and configured.strip():
-        return Path(configured.strip())
-    return project_root() / "airflow" / "reports"
+def _drift_report_dir() -> ReportLocation:
+    """Return the directory for persisted drift reports (gs:// or local)."""
+    return configured_pipeline_report_dir()
 
 
-def _drift_report_path(report_kind: str, dataset_name: str) -> Path:
-    return _drift_report_dir() / f"drift-{report_kind}-{dataset_name}-latest.json"
+def _drift_report_path(report_kind: str, dataset_name: str) -> ReportLocation:
+    return report_object_path(
+        _drift_report_dir(),
+        f"drift-{report_kind}-{dataset_name}-latest.json",
+    )
 
 
 def _persist_drift_report(report: DriftReport) -> None:
     """Write drift report to a JSON file for Prometheus export."""
     path = _drift_report_path(report.report_kind, report.dataset_name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = asdict(report)
-    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    payload = json.loads(json.dumps(asdict(report), default=str))
+    write_json_object(path, payload)
 
 
 def read_drift_report(report_kind: str, dataset_name: str) -> dict[str, Any] | None:
     """Read a persisted drift report, or None if not available."""
     path = _drift_report_path(report_kind, dataset_name)
-    if not path.exists():
-        return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        return read_json_object(
+            path,
+            error_message="Drift report must decode to a JSON object.",
+        )
+    except (FileNotFoundError, ValueError, OSError):
         return None
 
 
 def read_all_drift_reports() -> list[dict[str, Any]]:
     """Read all persisted drift reports from the report directory."""
-    report_dir = _drift_report_dir()
-    if not report_dir.exists():
+    try:
+        paths = report_json_paths(_drift_report_dir(), "drift-*-latest.json")
+    except OSError:
         return []
-    reports = []
-    for path in sorted(report_dir.glob("drift-*-latest.json")):
+    reports: list[dict[str, Any]] = []
+    for path in paths:
         try:
-            reports.append(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, OSError):
+            reports.append(
+                read_json_object(
+                    path,
+                    error_message="Drift report must decode to a JSON object.",
+                )
+            )
+        except (FileNotFoundError, ValueError, OSError):
             continue
     return reports
 

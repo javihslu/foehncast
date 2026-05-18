@@ -18,6 +18,7 @@ from foehncast.config import (
 from foehncast.env import env_value
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_forecast
+from foehncast.monitoring.inference_prometheus import observe_model_confidence
 from foehncast.training_pipeline.register import get_model_by_alias
 
 
@@ -121,6 +122,12 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
                     "quality_index": float(quality_index),
                 }
             )
+
+        if forecast_rows:
+            mean_quality = sum(row["quality_index"] for row in forecast_rows) / len(
+                forecast_rows
+            )
+            observe_model_confidence(spot["id"], mean_quality)
 
         predictions.append(
             {
