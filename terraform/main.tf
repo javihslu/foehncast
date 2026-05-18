@@ -559,13 +559,7 @@ resource "google_artifact_registry_repository_iam_member" "cloud_build_writer" {
   member     = "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
 }
 
-# ---------------------------------------------------------------------------
-# Dedicated Cloud Build service account (least-privilege alternative to the
-# default Cloud Build SA).  Builds are submitted by GitHub Actions via the
-# github_deployer SA; the build itself runs as this SA when
-# --service-account is passed to `gcloud builds submit`.
-# ---------------------------------------------------------------------------
-
+# Dedicated Cloud Build SA — builds run as this SA via --service-account.
 resource "google_service_account" "cloud_build" {
   account_id   = "foehncast-cloud-build"
   display_name = "FoehnCast Cloud Build"
@@ -873,10 +867,6 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   member   = "allUsers"
 }
 
-# ---------------------------------------------------------------------------
-# Cloud Run — Grafana (read-only monitoring dashboard)
-# ---------------------------------------------------------------------------
-
 resource "google_cloud_run_v2_service" "grafana" {
   count               = var.provision_cloud_run_grafana ? 1 : 0
   name                = var.cloud_run_grafana_service_name
@@ -1011,10 +1001,6 @@ resource "google_cloud_run_v2_service_iam_member" "grafana_public_invoker" {
   member   = "allUsers"
 }
 
-# ---------------------------------------------------------------------------
-# Cloud SQL — MLflow metadata backend (PostgreSQL micro)
-# ---------------------------------------------------------------------------
-
 resource "google_sql_database_instance" "mlflow" {
   count = var.provision_cloud_run_mlflow ? 1 : 0
 
@@ -1084,10 +1070,6 @@ resource "google_project_iam_member" "cloud_run_cloudsql_client" {
   role    = "roles/cloudsql.client"
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
-
-# ---------------------------------------------------------------------------
-# Cloud Run — MLflow (tracking server, protected)
-# ---------------------------------------------------------------------------
 
 resource "google_cloud_run_v2_service" "mlflow" {
   count               = var.provision_cloud_run_mlflow ? 1 : 0
@@ -1175,10 +1157,6 @@ resource "google_cloud_run_v2_service_iam_member" "mlflow_internal_invoker" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
-
-# ---------------------------------------------------------------------------
-# Cloud Run — UI (Streamlit rider console)
-# ---------------------------------------------------------------------------
 
 resource "google_cloud_run_v2_service" "ui" {
   count               = var.provision_cloud_run_ui ? 1 : 0
@@ -1277,10 +1255,6 @@ resource "google_cloud_run_v2_service_iam_member" "ui_public_invoker" {
   member   = "allUsers"
 }
 
-# ---------------------------------------------------------------------------
-# Cloud Run Jobs — Pipeline stages (reuse the app image)
-# ---------------------------------------------------------------------------
-
 resource "google_cloud_run_v2_job" "feature_pipeline" {
   count    = var.provision_cloud_workflows ? 1 : 0
   name     = "foehncast-feature-pipeline"
@@ -1338,7 +1312,7 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
         image = local.cloud_run_image
 
         command = ["python", "-c"]
-        args    = ["from foehncast.orchestration import run_training_pipeline_step, register_training_run; run_id = run_training_pipeline_step(dataset='train'); register_training_run(run_id, stage='Production', dataset='train')"]
+        args    = ["from foehncast.orchestration import run_training_pipeline_step, evaluate_training_run, register_training_run; run_id = run_training_pipeline_step(dataset='train'); evaluate_training_run(run_id, dataset='train', requested_stage='Production'); register_training_run(run_id, stage='Production', dataset='train')"]
 
         resources {
           limits = {
@@ -1400,10 +1374,6 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
 
   depends_on = [google_project_service.required]
 }
-
-# ---------------------------------------------------------------------------
-# Cloud Workflows — Pipeline orchestration (feature → train → infer)
-# ---------------------------------------------------------------------------
 
 resource "google_service_account" "workflows" {
   count = var.provision_cloud_workflows ? 1 : 0
@@ -1505,10 +1475,6 @@ resource "google_workflows_workflow" "pipeline_cascade" {
     google_cloud_run_v2_job.inference_pipeline,
   ]
 }
-
-# ---------------------------------------------------------------------------
-# Cloud Scheduler — Cron trigger for the pipeline cascade
-# ---------------------------------------------------------------------------
 
 resource "google_cloud_scheduler_job" "pipeline_cascade" {
   count = var.provision_cloud_workflows ? 1 : 0
