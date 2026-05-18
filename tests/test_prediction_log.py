@@ -11,6 +11,8 @@ import pandas as pd
 import pytest
 
 from foehncast.monitoring import prediction_log
+from foehncast.monitoring import _prediction_log_bigquery as _bq_mod
+from foehncast.monitoring import _prediction_log_common as _common_mod
 from tests.bigquery_fakes import (
     FakeCompletedJob,
     FakeLoadJobConfig,
@@ -63,7 +65,7 @@ def _patch_prediction_event_bigquery_not_found(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        prediction_log,
+        _bq_mod,
         "_google_exceptions_module",
         lambda: types.SimpleNamespace(NotFound=KeyError),
     )
@@ -471,7 +473,7 @@ def test_read_prediction_log_uses_minimum_two_window_retention_from_config(
 ) -> None:
     log_path = tmp_path / "prediction-log.jsonl"
     monkeypatch.setattr(
-        prediction_log,
+        _common_mod,
         "get_monitoring_config",
         lambda: {
             "evaluation_window_days": 30,
@@ -774,7 +776,7 @@ def test_append_prediction_log_bigquery_uses_prediction_event_warehouse_contract
             return FakeCompletedJob(lambda: captured.update({"job_completed": True}))
 
     monkeypatch.setattr(
-        prediction_log,
+        _bq_mod,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
@@ -872,7 +874,7 @@ def test_read_prediction_history_bigquery_uses_warehouse_contract_by_default(
             return _PredictionFrameQueryJob(warehouse_frame)
 
     monkeypatch.setattr(
-        prediction_log,
+        _bq_mod,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
@@ -954,7 +956,7 @@ def test_emit_prediction_drift_metrics_uses_bigquery_history_when_backend_is_big
             return _PredictionFrameQueryJob(filtered)
 
     monkeypatch.setattr(
-        prediction_log,
+        _bq_mod,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
