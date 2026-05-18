@@ -179,7 +179,7 @@ These boundaries stay explicit across the scripts, Terraform reference, and work
 - `terraform/terraform.tfvars` belongs to bootstrap and local preview work, while day-2 remote runs read GitHub repository variables
 - runtime scheduling, retries, and backfills belong to local Airflow, not to GitHub Actions
 - runtime promotion, rollback, and live traffic control do not run inside GitHub workflows; GitHub only sends the reviewed runtime release request
-- Grafana, Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
+- Airflow, MLflow, and Prometheus remain operator surfaces rather than rider-facing product surfaces
 - public docs should explain those surfaces with rendered evidence and checked-in configuration, not live control-plane embeds
 
 The same split keeps cloud retirement reviewable. Destroy and cleanup stay separate workflow commands, and cleanup only runs the follow-up actions the operator selected.

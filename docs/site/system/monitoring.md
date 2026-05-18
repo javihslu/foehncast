@@ -33,8 +33,8 @@ flowchart TD
     subgraph Operator ["Operator tooling"]
         direction TB
         PROM["Prometheus"]
-        GRAFANA["Grafana dashboards"]
         ALERT["Alert rules"]
+        UI["Streamlit native charts"]
     end
 
     AIR --> APP
@@ -46,7 +46,7 @@ flowchart TD
     DRIFT --> STATSD
     APP --> PROM
     STATSD --> PROM
-    PROM --> GRAFANA
+    PROM --> UI
     PROM --> ALERT
 </div>
 
@@ -56,8 +56,8 @@ Monitoring consumes persisted or runtime state after the pipeline and serving pa
 
 | Runtime mode | Monitoring contract |
 |------|---------------------|
-| Local evaluator | app `/metrics`, StatsD drift export, persisted pipeline summaries, and local Grafana dashboards validate the full monitoring path on one machine |
-| Shared hosted environment | Cloud Run exposes `/metrics`; the operator lane keeps Prometheus, Grafana, and hosted sync evidence online |
+| Local evaluator | app `/metrics`, StatsD drift export, persisted pipeline summaries, and native Altair charts in the Streamlit UI validate the full monitoring path on one machine |
+| Shared hosted environment | Cloud Run exposes `/metrics`; the operator lane keeps Prometheus and hosted sync evidence online |
 | Public docs | rendered metrics snippets, checked-in configs, and summary artifacts explain the contract without live control planes |
 
 The public-versus-private surface rule is documented in [Interfaces and Surfaces](interfaces-and-surfaces.md).
@@ -138,7 +138,6 @@ Prometheus scrapes four targets, all checked in at `prometheus_config/prometheus
 |------|--------|------------------|
 | `foehncast_app` | `app:8000/metrics` | app-owned pipeline, prediction, and sync metrics |
 | `statsd_exporter` | `statsd:9102` | Evidently drift metrics |
-| `grafana` | `grafana:3000/metrics` | Grafana self-monitoring |
 | `prometheus` | `prometheus:9090` | Prometheus self-monitoring |
 
 Scrape interval is 15 seconds. Alert rules are evaluated at the same interval.
@@ -161,19 +160,18 @@ The checked-in Prometheus rules at `prometheus_config/alerting_rules.yml` cover 
 
 The alert rules are version-controlled so the alerting contract is reviewable without a live Prometheus instance.
 
-## Dashboards
+## Visualization
 
-Grafana is provisioned from three repository-owned dashboards under `grafana_work/dashboards/`:
+Monitoring visualization uses native Altair charts in the Streamlit UI with direct PromQL queries against the app's `/api/v1/query` endpoint.
 
-| Dashboard | File | Main audience | Key rows |
-|------|------|---------------|----------|
-| FoehnCast Rider | `foehncast-rider.json` | rider, reviewer | Spot Map, Model Confidence, Drift Status, System Pulse |
-| FoehnCast Operations | `foehncast-operations.json` | operator | System Health, Pipeline Status, Data Freshness, Spot Throughput, Pipeline Timing, Error Budget, Inference SLIs, Prediction Monitoring |
-| FoehnCast ML Diagnostics | `foehncast-ml-diagnostics.json` | operator, ML engineer | Drift Overview, Per-Column Drift Detail, Training Metrics, Training Data Shape, Model Registry, Feature Pipeline Detail, Spot-Level Detail, Prediction Log, Prediction Monitoring, Hindcast Validation |
+The Streamlit sidebar renders:
 
-The rider dashboard keeps the evaluation-safe view narrow: spot geography, model confidence derived from drift scores, and system pulse. The operations dashboard focuses on service health and pipeline reliability. The ML diagnostics dashboard carries the deep inspection panels for drift, training, model registry, and hindcast accuracy.
+- system health indicators from Prometheus counters
+- pipeline status and timing from persisted summary metrics
+- drift scores from StatsD-exported Evidently results
+- hindcast accuracy from the cached validation result
 
-Dashboard JSON and provisioning config are version-controlled so the operator view is reproducible from a fresh `docker compose up`.
+All chart data comes from the same Prometheus metrics that the alert rules consume, ensuring consistency between what operators see and what alerts fire on.
 
 ## Hindcast Validation
 
@@ -188,7 +186,7 @@ The validation path is:
 - accuracy, MAE, and per-class counts are calculated and persisted to `.state/monitoring/hindcast-validation.json`
 - Prometheus scrapes the cached result; the app never calls the archive API on scrape
 
-The ML Diagnostics dashboard shows hindcast accuracy in a dedicated row with gauge, MAE stat, and validated-pairs count panels. The Streamlit sidebar model card also embeds the hindcast accuracy gauge.
+The Streamlit sidebar model card also embeds the hindcast accuracy gauge.
 
 This closes the prediction-to-observation feedback loop without relying on manual evaluation notebooks.
 
@@ -211,11 +209,11 @@ Explain monitoring with rendered evidence, not live control-plane embeds:
 
 - rendered `/metrics` snippets or screenshots
 - checked-in Prometheus scrape and alert configs
-- checked-in Grafana dashboards
+- native Altair charts in the Streamlit UI
 - pipeline summary JSON artifacts under `airflow/reports/`
 - prediction-event file structure under `.state/monitoring/`
 
-This keeps public docs understandable in review while leaving live Grafana, Prometheus, and Airflow as operator tools.
+This keeps public docs understandable in review while leaving live Prometheus and Airflow as operator tools.
 
 ## Why This Structure Works
 

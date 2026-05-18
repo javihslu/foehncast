@@ -19,7 +19,7 @@ flowchart TD
 
     RIDER["Rider demos<br/>Streamlit and /features/online/demo"]:::public
     SERVICE["Service routes<br/>/health, /spots, /predict, /rank, /features/online"]:::service
-    OPERATOR["Private operator surfaces<br/>/metrics, Airflow, MLflow, Prometheus, Grafana"]:::operator
+    OPERATOR["Private operator surfaces<br/>/metrics, Airflow, MLflow, Prometheus"]:::operator
     DELIVERY["fab:fa-github Delivery<br/>GitHub Actions, Terraform, bootstrap"]:::public
     EVIDENCE["Public-safe evidence<br/>Docs, summaries, screenshots"]:::evidence
 
@@ -37,7 +37,7 @@ The important split is simple: not every HTTP route is rider-facing, and not eve
 |------|----------|---------------|------------------|
 | Rider-facing demo surfaces | Streamlit rider console and `/features/online/demo` | rider, reviewer, contributor | public-safe when shown as screenshots, rendered examples, or a deliberate local demo |
 | Service endpoints | `/health`, `/spots`, `/predict`, `/rank`, and `/features/online` | clients, smoke tests, and app-side integrations | service-only |
-| Operator surfaces | `/metrics`, Airflow, MLflow, Prometheus, and Grafana | maintainer or deployment operator | private by default |
+| Operator surfaces | `/metrics`, Airflow, MLflow, and Prometheus | maintainer or deployment operator | private by default |
 | Delivery surfaces | GitHub Actions, Terraform, and bootstrap helpers | maintainer | review-controlled and not runtime-facing |
 | Public-safe docs and evidence | docs pages, rendered summaries, and screenshots | reviewer, fork reader, course audience | public-safe |
 
@@ -46,15 +46,15 @@ The important split is simple: not every HTTP route is rider-facing, and not eve
 - `/metrics` is an operator surface even though it is an app route.
 - Streamlit and `/features/online/demo` are evaluation surfaces, not deployment control planes.
 - GitHub Actions and Terraform advance reviewed delivery, but they do not own runtime scheduling, retries, or backfills.
-- Public docs should use rendered evidence or screenshots instead of live Airflow, MLflow, Prometheus, or Grafana views.
+- Public docs should use rendered evidence or screenshots instead of live Airflow, MLflow, or Prometheus views.
 
 ## Exposure By Runtime Mode
 
 | Runtime mode | Product or service surface | Operator-only surface |
 |------|-----------------------------|-----------------------|
-| Local evaluator | local app routes, local Streamlit demo, and the optional online-features demo | local Airflow, MLflow, Prometheus, and Grafana |
+| Local evaluator | local app routes, local Streamlit demo, and the optional online-features demo | local Airflow, MLflow, and Prometheus |
 | Shared API lane | hosted inference API only | no hosted Airflow or MLflow container in that target |
-| Operator lane | no public app route by default | Airflow, MLflow, Prometheus, and Grafana stay private unless deliberately exposed |
+| Operator lane | no public app route by default | Airflow, MLflow, and Prometheus stay private unless deliberately exposed |
 | Public docs site | rendered docs and evidence only | no live control planes |
 
 The same split applies in local and cloud runtimes: app routes form the product and service surface, while operator tools stay private unless an operator intentionally publishes them.
@@ -63,7 +63,7 @@ The same split applies in local and cloud runtimes: app routes form the product 
 
 - it lets the rider-facing demo reuse the real serving path without turning the product into an admin console
 - it keeps service endpoints narrow enough for smoke tests and client integrations
-- it keeps orchestration, tracking, monitoring, and alerting on the operator side
+- it keeps orchestration, tracking, and monitoring on the operator side
 - it gives the public docs stable evidence sources that do not depend on exposing private hosted dashboards
 
 See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Inference Pipeline](inference-pipeline.md), [Monitoring](monitoring.md), [Local Evaluator](local-evaluator.md), and [Hosted Full-Stack](hosted-full-stack.md) for the surrounding runtime contracts.

@@ -87,7 +87,7 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 |------|------------------|
 | Curated storage binding | `STORAGE_BACKEND`, `STORAGE_S3_BUCKET`, `STORAGE_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` |
 | MLflow connection | `MLFLOW_TRACKING_URI`, `MLFLOW_ARTIFACT_DESTINATION` |
-| Local service exposure | `APP_BIND_HOST`, `AIRFLOW_BIND_HOST`, `PROMETHEUS_PORT`, `GRAFANA_PORT` |
+| Local service exposure | `APP_BIND_HOST`, `AIRFLOW_BIND_HOST`, `PROMETHEUS_PORT` |
 | Monitoring history path | `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` |
 | Feast runtime binding | `FOEHNCAST_FEAST_SOURCE`, `FOEHNCAST_FEAST_REPO_PATH`, `FOEHNCAST_FEAST_CONFIG_PATH`, `FOEHNCAST_FEAST_BIGQUERY_*`, `FOEHNCAST_FEAST_DATASTORE_*` |
 
@@ -143,7 +143,7 @@ Two generated state areas are part of the runtime contract even though they are 
 | `.state/feast/feature_store.runtime.yaml` | binds the running environment to the checked-in Feast repo without forcing operators to hand-edit a second runtime YAML |
 | `.state/monitoring/prediction-log.jsonl` | bounded local working set derived from prediction writes for request-side drift checks |
 | `.state/monitoring/prediction-events.jsonl` | retained local prediction-event history contract and the durable history source for local S3-backed runtimes |
-| `airflow/reports/feature-pipeline-*-latest.json` | persisted pipeline summary that the app republishes through `/metrics` for Prometheus and Grafana |
+| `airflow/reports/feature-pipeline-*-latest.json` | persisted pipeline summary that the app republishes through `/metrics` for Prometheus |
 
 These files are runtime artifacts. They are inspectable and useful, but they are not part of the checked-in workload contract and should not be promoted into `config.yaml`.
 

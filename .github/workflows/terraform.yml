@@ -431,15 +431,6 @@ jobs:
             exit 1
           fi
 
-          provision_cloud_run_grafana="$REPO_GCP_PROVISION_CLOUD_RUN_GRAFANA"
-          if [[ -z "$provision_cloud_run_grafana" ]]; then
-            provision_cloud_run_grafana='false'
-          fi
-          provision_cloud_run_grafana="$(normalize_bool provision_cloud_run_grafana "$provision_cloud_run_grafana")"
-
-          cloud_run_grafana_prometheus_url="$REPO_GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL"
-
-          cloud_run_ui_grafana_url="$REPO_GCP_CLOUD_RUN_UI_GRAFANA_URL"
           cloud_run_ui_prometheus_url="$REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL"
 
           provision_cloud_run_ui="$REPO_GCP_PROVISION_CLOUD_RUN_UI"

@@ -57,10 +57,10 @@ See [Interfaces and Surfaces](interfaces-and-surfaces.md) for the dedicated publ
 |------|------------------|----------|------------------|
 | Rider-facing demo surface | rider, reviewer, contributor | public-safe when shown as screenshots or rendered examples | Streamlit rider console and the online-features demo page |
 | Service endpoints | clients, smoke tests, support services | service-only | `/health`, `/spots`, `/predict`, `/rank`, `/features/online`, and `/metrics` |
-| Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, Prometheus, and Grafana |
+| Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, and Prometheus |
 | Public docs and rendered evidence | course reviewer, fork reader, maintainer | public-safe | docs pages, evaluation markdown, summary JSON-derived charts, and screenshots |
 
-Grafana stays on the operator side. The rider-facing experience comes from the app layer. Public docs show rendered evidence or screenshots, not live embeds of private dashboards.
+Monitoring visualization uses native Altair charts in the Streamlit UI. Public docs show rendered evidence or screenshots, not live embeds of private dashboards.
 
 ## Runtime Lanes
 
@@ -79,7 +79,7 @@ Grafana stays on the operator side. The rider-facing experience comes from the a
 | Inference pipeline | Serve health, predict, rank, and spot-list responses; run batch predictions after model registration | FastAPI app container plus the asset-triggered `inference_pipeline` DAG |
 | Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow in the local evaluator; Cloud Composer in the hosted environment |
 | Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
-| Monitoring | Scrape runtime metrics, collect pushed gauges, run hindcast validation, and visualize through three operator dashboards | Prometheus, StatsD exporter, and Grafana operator stack |
+| Monitoring | Scrape runtime metrics, collect pushed gauges, run hindcast validation, and visualize through native Altair charts in the Streamlit UI | Prometheus, StatsD exporter, and Streamlit metric panels |
 
 ## DVC And Airflow
 
@@ -155,7 +155,7 @@ flowchart TD
 
 | Target | What runs | Main use |
 |------|-----------|----------|
-| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, StatsD exporter, Grafana, MinIO, Feast emulator, and optional `development_env` | default development and evaluation |
+| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, StatsD exporter, MinIO, Feast emulator, and optional `development_env` | default development and evaluation |
 | Hosted inference target | FastAPI only, backed by shared GCP services | primary hosted API surface |
 | Hosted operator target | Cloud Build for runtime images, Cloud Composer for hosted Airflow workloads, and managed operator services for MLflow and monitoring | hosted build, orchestration, and operator surface |
 | GitHub automation | review, workflow dispatch, and Terraform workflows | shared cloud delivery control plane |

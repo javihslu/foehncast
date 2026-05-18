@@ -28,7 +28,7 @@ flowchart LR
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit demo |
 | Hosted runtime | Working | The shared environment uses Cloud Run as the only promoted public API path while keeping the hosted full-stack target online for operator tooling |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
-| Monitoring | Working | Docker Compose runs Prometheus, a StatsD exporter, and Grafana; the app exposes `/metrics`; feature panels are derived from persisted Airflow report summaries; and Grafana loads starter dashboards and alert rules from checked-in config |
+| Monitoring | Working | Docker Compose runs Prometheus and a StatsD exporter; the app exposes `/metrics`; the Streamlit UI renders native Altair charts from direct PromQL queries; and Prometheus loads alert rules from checked-in config |
 
 ## Setup Paths
 
@@ -61,11 +61,10 @@ The shared environment hosts the inference, UI, observability, and tracking surf
 | Streamlit UI | <https://foehncast-ui-290885878569.europe-west6.run.app/> |
 | Inference API | <https://foehncast-serve-290885878569.europe-west6.run.app/> |
 | API metrics + query | <https://foehncast-serve-290885878569.europe-west6.run.app/metrics> · <https://foehncast-serve-290885878569.europe-west6.run.app/api/v1/query?query=foehncast_feature_pipeline_run_success> |
-| Grafana dashboards | <https://foehncast-grafana-290885878569.europe-west6.run.app/> |
 | MLflow tracking (IAM-gated) | <https://foehncast-mlflow-290885878569.europe-west6.run.app/> |
 | Project documentation | <https://javihslu.github.io/foehncast/> |
 
-The Cloud Run inference container exposes a Prometheus-compatible `/api/v1/query` endpoint so Grafana can render metrics directly without a separate Prometheus deployment.
+The Cloud Run inference container exposes a Prometheus-compatible `/api/v1/query` endpoint so the Streamlit UI can render native Altair charts from direct PromQL queries without a separate Prometheus deployment.
 
 ### Local evaluator
 
@@ -85,7 +84,6 @@ After bootstrap completes, the main local endpoints are:
 - Airflow: `http://127.0.0.1:8080`
 - MLflow: `http://127.0.0.1:5001`
 - Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000`
 - StatsD UDP sink: `127.0.0.1:8125`
 - StatsD exporter: `http://127.0.0.1:9102/metrics`
 
@@ -158,7 +156,6 @@ flowchart LR
 
     UI[Streamlit UI]:::public
     APP[FastAPI App]:::public
-    GF[Grafana]:::public
     MLF[MLflow]:::protected
     WF[Cloud Workflows]:::protected
 
@@ -167,7 +164,7 @@ flowchart LR
     SQL[(Cloud SQL)]:::managed
     GMP[Managed Prometheus]:::managed
 
-    UI & APP & GF -->|metrics| GMP
+    UI & APP -->|metrics| GMP
     APP --> BQ & GCS
     MLF --> SQL & GCS
     WF -->|orchestrate| APP
@@ -175,9 +172,8 @@ flowchart LR
 
 | Service | Access | Purpose |
 |---------|--------|---------|
-| Streamlit UI | Public | Rider dashboard, forecasts, Grafana embeds |
+| Streamlit UI | Public | Rider dashboard, forecasts, native Altair metric charts |
 | FastAPI App | Public | Inference API |
-| Grafana | Public | Read-only monitoring dashboards |
 | MLflow | Protected | Model registry and experiment tracking |
 | Cloud Workflows | Protected | Pipeline orchestration (scheduled + on-demand) |
 
@@ -191,7 +187,7 @@ See the [Cloud Architecture](https://javihslu.github.io/foehncast/system/cloud-a
 - `scripts/`: local bootstrap plus maintainer utilities
 - `terraform/`: maintainer cloud infrastructure definition and reference
 - `feature_repo/`: Feast integration surface and config repo
-- `prometheus_config/` and `grafana_work/`: checked-in monitoring stack configuration for Prometheus and Grafana
+- `prometheus_config/`: checked-in Prometheus scrape and alerting configuration
 - `tests/`: regression coverage for pipeline logic and API behavior
 - `docs/`: GitHub Pages source for the public project documentation
 

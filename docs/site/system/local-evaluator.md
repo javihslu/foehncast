@@ -30,7 +30,7 @@ flowchart TD
         REG["MLflow registry"]:::registry
         FEAST["Feast emulator"]:::storage
         APP["FastAPI app"]:::app
-        MON["Prometheus + StatsD + Grafana"]:::monitor
+        MON["Prometheus + StatsD"]:::monitor
     end
 
     AIR --> FEAT
@@ -62,7 +62,7 @@ The default contributor entrypoint is still simple:
 
 You do not need local `gcloud`, Terraform, GitHub Actions variables, or a compiler toolchain for this path.
 
-The bootstrap path resets disposable state, starts the validated service subset without the optional `development_env` container, waits for Airflow and Grafana health, runs the feature-to-training hand-off, prepares Feast local serving state, and verifies the live app plus `/metrics` before it reports success. The detailed proof path is listed below under [Verification Contract](#verification-contract).
+The bootstrap path resets disposable state, starts the validated service subset without the optional `development_env` container, waits for Airflow health, runs the feature-to-training hand-off, prepares Feast local serving state, and verifies the live app plus `/metrics` before it reports success. The detailed proof path is listed below under [Verification Contract](#verification-contract).
 
 If the preferred local ports are already occupied, the bootstrap moves the bindings to the next free ports and prints the resolved endpoints.
 
@@ -87,7 +87,7 @@ DVC is optional in the local evaluator. It is useful when you want a clean, file
 | MLflow | track runs, registry versions, and local model loading | the rider-facing interface |
 | MinIO objectstore | local object-access baseline for curated features and MLflow artifacts | a replacement for the online feature layer |
 | Feast Datastore emulator | required local online-serving layer above the curated contract | the primary storage contract |
-| Prometheus, StatsD exporter, and Grafana | operator monitoring and provisioning validation | the product UI |
+| Prometheus and StatsD exporter | operator monitoring validation | the product UI |
 | `development_env` | optional notebook and dev-shell helper surface | part of the default contributor path |
 
 This keeps the local lane close to the hosted architecture. The object-access layer follows the same shape as the hosted artifact path, while Feast continues to provide the online-serving boundary instead of turning storage into a serving shortcut.
@@ -100,7 +100,6 @@ The verification path includes:
 
 - Airflow component health checks for the webserver, dag-processor, scheduler, triggerer, and metadata database
 - an Airflow API health payload check instead of treating `200 OK` alone as enough
-- Grafana API checks for the checked-in dashboard, alert rules, contact point, and policies
 - a real `feature_pipeline` DAG test run through Airflow
 - a real asset-triggered `training_pipeline` success wait
 - a live `/features/online` request against the running app
@@ -120,12 +119,6 @@ The state split is:
 - pipeline summaries are rendered under `airflow/reports/`, with history copies under `airflow/reports/history/`
 
 This boundary matters because reproducibility depends on resetting transient runtime state without pretending that monitoring history or rendered evidence are themselves product data.
-
-## Local-Only Overrides
-
-The checked-in Grafana configuration keeps deployable-safe defaults: anonymous access, public dashboard sharing, and embedding are disabled by default.
-
-The local evaluator applies local-only access overrides so a fresh Docker run can still verify Grafana provisioning without extra manual setup. Grafana remains an operator surface, rider-facing evaluation stays with the Streamlit demo and API outputs, and public docs should keep preferring rendered evidence over live embeds of private dashboards.
 
 ## Why This Target Works
 

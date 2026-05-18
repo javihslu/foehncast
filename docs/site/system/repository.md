@@ -21,7 +21,6 @@ scripts/
 terraform/
 feature_repo/
 prometheus_config/
-grafana_work/
 tests/
 docs/
 ```
@@ -54,7 +53,7 @@ flowchart TD
 | `dags/` | Airflow entry points for feature, training, and inference workflows |
 | `ui/` | Streamlit rider console application |
 | `containers/`, `scripts/`, and `terraform/` | runtime packaging, bootstrap helpers, and deployment tooling |
-| `feature_repo/`, `prometheus_config/`, and `grafana_work/` | Feast and operator-monitoring integration contracts |
+| `feature_repo/` and `prometheus_config/` | Feast and operator-monitoring integration contracts |
 | `tests/` and `docs/` | regression coverage and public explanation |
 
 ## DVC Vs Airflow
