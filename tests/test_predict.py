@@ -581,7 +581,8 @@ def test_metrics_endpoint_returns_prometheus_payload(
 
     assert response.status_code == 200
     assert response.content == (
-        feature_payload
+        serve._SYNTHETIC_UP_METRICS
+        + feature_payload
         + training_payload
         + prediction_payload
         + hosted_sync_payload
