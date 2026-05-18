@@ -122,10 +122,7 @@ prepare_local_inputs() {
     "$(foehncast_default_feast_online_store_database)" \
     false \
     "$cloud_run_service" \
-    "" \
-    false \
-    "$(foehncast_default_cloud_composer_environment_name)" \
-    false
+    ""
   set_tfvars_string github_owner "$repo_owner"
   set_tfvars_string github_repository "$repo_name"
 }

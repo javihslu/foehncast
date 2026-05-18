@@ -160,12 +160,6 @@ The shared environment keeps a stable split: Cloud Run carries the shared public
 
 See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
 
-## Hosted Orchestration
-
-Cloud Composer is the hosted orchestration surface. Terraform provisions the Cloud Composer environment.
-
-A reviewed DAG and source bundle syncs to the Composer DAG bucket. Terraform seeds the reviewed PyPI baseline required by the checked-in DAG bundle and merges extra `cloud_composer_pypi_packages` overrides on top. The repo exposes a reviewed runtime release entry that reaches the Composer Airflow API, plus a reviewed Secret Manager-backed env-ref path for Composer. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the delivery boundary and [Configuration and Contracts](configuration-and-contracts.md) for the reviewed value-surface inventory.
-
 ## Local To Cloud Mapping
 
 <div class="mermaid">

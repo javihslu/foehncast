@@ -33,17 +33,6 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_CLOUD_RUN_CPU", "cloud_run_cpu"),
     ("GCP_CLOUD_RUN_MEMORY", "cloud_run_memory"),
     ("GCP_MLFLOW_TRACKING_URI", "mlflow_tracking_uri"),
-    (
-        "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT",
-        "provision_cloud_composer_environment",
-    ),
-    ("GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME", "cloud_composer_environment_name"),
-    (
-        "GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY",
-        "cloud_composer_airflow_access_ready",
-    ),
-    ("GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX", "cloud_composer_dag_gcs_prefix"),
-    ("GCP_CLOUD_COMPOSER_AIRFLOW_URI", "cloud_composer_airflow_uri"),
     ("GCP_PROVISION_CLOUD_RUN_MLFLOW", "provision_cloud_run_mlflow"),
     ("GCP_PROVISION_CLOUD_RUN_UI", "provision_cloud_run_ui"),
     ("GCP_CLOUD_RUN_UI_PROMETHEUS_URL", "cloud_run_ui_prometheus_url"),
@@ -73,14 +62,6 @@ WORKFLOW_REPO_ENV_OUTPUTS: list[tuple[str, str]] = [
     ("REPO_GCP_CLOUD_RUN_CPU", "cloud_run_cpu"),
     ("REPO_GCP_CLOUD_RUN_MEMORY", "cloud_run_memory"),
     ("REPO_GCP_MLFLOW_TRACKING_URI", "mlflow_tracking_uri"),
-    (
-        "REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT",
-        "provision_cloud_composer_environment",
-    ),
-    (
-        "REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME",
-        "cloud_composer_environment_name",
-    ),
     ("REPO_GCP_CLOUD_RUN_SERVICE", "cloud_run_service"),
 ]
 
@@ -98,8 +79,6 @@ REPO_BACKED_WORKFLOW_INPUTS = {
     "mlflow_tracking_uri",
     "cloud_run_service_name",
     "cloud_run_allow_unauthenticated",
-    "provision_cloud_composer_environment",
-    "cloud_composer_environment_name",
 }
 
 FEAST_CLOUD_ENV_KEYS = {
@@ -113,21 +92,6 @@ FEAST_CLOUD_ENV_KEYS = {
     "FOEHNCAST_FEAST_BIGQUERY_LOCATION",
     "FOEHNCAST_FEAST_BIGQUERY_TABLE",
     "FOEHNCAST_FEAST_DATASTORE_DATABASE",
-}
-
-COMPOSER_BASELINE_PYPI_PACKAGES = {
-    "evidently": ">=0.7.21",
-    "feast": "[gcp]>=0.63.0",
-    "google-cloud-bigquery": ">=3.30.0",
-    "google-cloud-secret-manager": ">=2.23.0",
-    "google-cloud-storage": ">=2.19.0",
-    "matplotlib": ">=3.8",
-    "mlflow": ">=3.0",
-    "pandas": ">=2.0",
-    "pyarrow": ">=14.0",
-    "pyyaml": ">=6.0",
-    "requests": ">=2.31",
-    "scikit-learn": ">=1.5",
 }
 
 
@@ -206,7 +170,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert "cloud_run_max_instance_count" not in inputs
 
     assert inputs["provision_cloud_run_service"]["type"] == "string"
-    assert inputs["provision_cloud_composer_environment"]["type"] == "string"
 
     resolve_step = _workflow_step(workflow, "remote", "Resolve Terraform inputs")
     env = resolve_step["env"]
@@ -268,28 +231,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert 'cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"' in run_script
     assert "cloud_run_memory='512Mi'" in run_script
     assert (
-        'provision_cloud_composer_environment="${{ inputs.provision_cloud_composer_environment }}"'
-        in run_script
-    )
-    assert (
-        'provision_cloud_composer_environment="$REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT"'
-        in run_script
-    )
-    assert "provision_cloud_composer_environment='false'" in run_script
-    assert (
-        'provision_cloud_composer_environment="$(normalize_bool provision_cloud_composer_environment "$provision_cloud_composer_environment")"'
-        in run_script
-    )
-    assert (
-        'cloud_composer_environment_name="${{ inputs.cloud_composer_environment_name }}"'
-        in run_script
-    )
-    assert (
-        'cloud_composer_environment_name="$REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME"'
-        in run_script
-    )
-    assert "cloud_composer_environment_name='foehncast-composer'" in run_script
-    assert (
         'feast_online_store_location="${{ inputs.feast_online_store_location }}"'
         in run_script
     )
@@ -333,14 +274,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     )
     assert 'echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"' in run_script
     assert 'echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"' in run_script
-    assert (
-        'echo "TF_VAR_provision_cloud_composer_environment=${provision_cloud_composer_environment}"'
-        in run_script
-    )
-    assert (
-        'echo "TF_VAR_cloud_composer_environment_name=${cloud_composer_environment_name}"'
-        in run_script
-    )
 
 
 def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> None:
@@ -460,76 +393,10 @@ def test_terraform_outputs_expose_primary_hosted_api_contract() -> None:
     assert "google_cloud_run_v2_service.app[0].uri" in outputs
 
 
-def test_terraform_seeds_reviewed_composer_pypi_baseline() -> None:
-    terraform = _read_text("terraform/main.tf")
-
-    assert "cloud_composer_pypi_packages = merge(" in terraform
-    assert "pypi_packages = local.cloud_composer_pypi_packages" in terraform
-    assert "var.cloud_composer_pypi_packages" in terraform
-
-    for package_name, constraint in COMPOSER_BASELINE_PYPI_PACKAGES.items():
-        assert re.search(
-            rf'^\s+{re.escape(package_name)}\s+=\s+"{re.escape(constraint)}"$',
-            terraform,
-            flags=re.MULTILINE,
-        )
-
-
-def test_terraform_describes_composer_pypi_override_contract() -> None:
-    variables = _read_text("terraform/variables.tf")
-
-    assert 'variable "cloud_composer_pypi_packages"' in variables
-    assert (
-        "Additional or overriding PyPI packages merged on top of the repo-reviewed Cloud Composer baseline."
-        in variables
-    )
-
-
 def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
     tfvars = _read_text("terraform/terraform.tfvars.example")
 
     assert "provision_cloud_run_service    = true" in tfvars
-    assert re.search(
-        r"^provision_cloud_composer_environment\s+=\s+false$",
-        tfvars,
-        flags=re.MULTILINE,
-    )
-    assert re.search(
-        r'^cloud_composer_environment_name\s+=\s+"foehncast-composer"$',
-        tfvars,
-        flags=re.MULTILINE,
-    )
-    assert re.search(
-        r"^cloud_composer_airflow_access_ready\s+=\s+false$",
-        tfvars,
-        flags=re.MULTILINE,
-    )
-    assert re.search(
-        r"^cloud_composer_pypi_packages\s+=\s+\{\}$",
-        tfvars,
-        flags=re.MULTILINE,
-    )
-
-
-def test_composer_readiness_docs_describe_reviewed_pypi_baseline() -> None:
-    terraform_readme = _read_text("terraform/README.md")
-    workflow_doc = _read_text("docs/site/system/delivery-and-operator-workflow.md")
-    cloud_mapping_doc = _read_text("docs/site/system/cloud-mapping.md")
-
-    assert "reviewed Composer PyPI package baseline" in terraform_readme
-    assert "cloud_composer_pypi_packages" in terraform_readme
-    assert (
-        "Composer gets a reviewed PyPI baseline for the checked-in DAG bundle"
-        in workflow_doc
-    )
-    assert (
-        "Terraform seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle"
-        in workflow_doc
-    )
-    assert (
-        "Terraform seeds the reviewed PyPI baseline required by the checked-in DAG bundle"
-        in cloud_mapping_doc
-    )
 
 
 def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> None:
@@ -683,244 +550,6 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
     assert "docker/setup-buildx-action" not in workflow_text
     assert "docker/build-push-action" not in workflow_text
     assert "docker/metadata-action" not in workflow_text
-
-
-def test_trigger_runtime_release_workflow_supports_selected_airflow_handoff_contract() -> (
-    None
-):
-    workflow = _workflow_yaml(".github/workflows/trigger-runtime-release.yml")
-    config_job = workflow["jobs"]["config"]
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-
-    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
-    assert dispatch_inputs["action"]["default"] == "deploy_candidate"
-    assert dispatch_inputs["action"]["type"] == "choice"
-    assert dispatch_inputs["action"]["options"] == [
-        "deploy_candidate",
-        "promote_candidate",
-        "rollback_live",
-    ]
-    assert dispatch_inputs["airflow_target"]["default"] == "composer_airflow"
-    assert dispatch_inputs["airflow_target"]["type"] == "choice"
-    assert dispatch_inputs["airflow_target"]["options"] == [
-        "composer_airflow",
-    ]
-    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
-    assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
-    assert dispatch_inputs["target_alias"]["default"] == "champion"
-    assert dispatch_inputs["rollback_revision_tag"]["default"] == "rollback"
-
-    assert set(config_job["outputs"]) == {
-        "owner_allowed",
-        "project_id",
-        "artifact_bucket_name",
-        "workload_identity_provider",
-        "service_account_email",
-        "cloud_composer_airflow_uri",
-        "airflow_target",
-        "action",
-        "image_uri",
-        "candidate_revision_tag",
-        "candidate_alias",
-        "target_alias",
-        "rollback_revision",
-        "rollback_model_version",
-        "rollback_revision_tag",
-        "trigger_ready",
-    }
-
-    repo_config_step = _workflow_step(workflow, "config", "repo_config")
-    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
-
-    derived_step = _workflow_step(workflow, "config", "derived")
-    assert derived_step["env"]["ACTION_INPUT"] == "${{ github.event.inputs.action }}"
-    assert (
-        derived_step["env"]["ARTIFACT_BUCKET_NAME"]
-        == "${{ steps.repo_config.outputs.artifact_bucket_name }}"
-    )
-    assert (
-        derived_step["env"]["PROVISION_CLOUD_COMPOSER_ENVIRONMENT"]
-        == "${{ steps.repo_config.outputs.provision_cloud_composer_environment }}"
-    )
-    assert (
-        derived_step["env"]["CLOUD_COMPOSER_AIRFLOW_ACCESS_READY"]
-        == "${{ steps.repo_config.outputs.cloud_composer_airflow_access_ready }}"
-    )
-    assert (
-        derived_step["env"]["CLOUD_COMPOSER_AIRFLOW_URI"]
-        == "${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}"
-    )
-    assert "PROVISION_ONLINE_COMPOSE_HOST" not in derived_step.get("env", {})
-    assert "deploy_candidate|promote_candidate|rollback_live" in derived_step["run"]
-    assert (
-        "composer_access_ready=\"$(printf '%s' \"${CLOUD_COMPOSER_AIRFLOW_ACCESS_READY:-false}\" | tr '[:upper:]' '[:lower:]')\""
-        in derived_step["run"]
-    )
-    assert "trigger_ready=false" in derived_step["run"]
-    assert 'echo "airflow_target=$airflow_target"' in derived_step["run"]
-    assert 'echo "trigger_ready=$trigger_ready"' in derived_step["run"]
-
-    trigger_job = workflow["jobs"]["trigger"]
-    assert (
-        trigger_job["if"]
-        == "${{ needs.config.outputs.owner_allowed == 'true' && needs.config.outputs.trigger_ready == 'true' }}"
-    )
-    assert (
-        trigger_job["env"]["ARTIFACT_BUCKET_NAME"]
-        == "${{ needs.config.outputs.artifact_bucket_name }}"
-    )
-    assert "HOST_NAME" not in trigger_job["env"]
-    assert "HOST_ZONE" not in trigger_job["env"]
-    assert "REQUESTED_AIRFLOW_TARGET" not in trigger_job["env"]
-    assert (
-        trigger_job["env"]["AIRFLOW_TARGET"]
-        == "${{ needs.config.outputs.airflow_target }}"
-    )
-    assert (
-        trigger_job["env"]["CLOUD_COMPOSER_AIRFLOW_URI"]
-        == "${{ needs.config.outputs.cloud_composer_airflow_uri }}"
-    )
-
-    setup_uv_step = _workflow_step(workflow, "trigger", "Set up uv")
-    assert "if" not in setup_uv_step
-    assert setup_uv_step["uses"] == "astral-sh/setup-uv@v8.1.0"
-
-    composer_deps_step = _workflow_step(
-        workflow,
-        "trigger",
-        "Install Composer trigger dependencies",
-    )
-    assert "if" not in composer_deps_step
-    assert "uv sync --frozen" in composer_deps_step["run"]
-
-    payload_step = _workflow_step(workflow, "trigger", "Build runtime release request")
-    assert "runtime-release-request.json" in payload_step["run"]
-    assert (
-        "python3 -m foehncast.runtime_release write-request-from-env"
-        in payload_step["run"]
-    )
-    assert (
-        'PYTHONPATH="$GITHUB_WORKSPACE/src${PYTHONPATH:+:$PYTHONPATH}"'
-        in payload_step["run"]
-    )
-    assert "--output-file runtime-release-request.json" in payload_step["run"]
-
-    trigger_step_names = [s["name"] for s in trigger_job["steps"] if "name" in s]
-    assert "Refresh operator host checkout" not in trigger_step_names
-    assert "Copy runtime release request" not in trigger_step_names
-
-    handoff_step = _workflow_step(
-        workflow, "trigger", "Trigger runtime release handoff"
-    )
-    assert "uv run ./scripts/trigger-runtime-release.sh" in handoff_step["run"]
-    assert "gcloud auth print-access-token" in handoff_step["run"]
-    assert "--airflow-api-base-url" in handoff_step["run"]
-    assert "--airflow-api-health-endpoint /health" in handoff_step["run"]
-    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in handoff_step["run"]
-    assert "retained" not in handoff_step["run"].lower()
-    assert "ssh" not in handoff_step["run"].lower()
-    assert 'echo "- Receiver: Composer Airflow API"' in handoff_step["run"]
-    assert 'echo "- Airflow DAG: runtime_release"' in handoff_step["run"]
-    assert (
-        "GitHub OIDC plus Google access token to Composer Airflow"
-        in handoff_step["run"]
-    )
-    assert (
-        "Composer access assumption: the GitHub service account already maps to an Airflow user or role"
-        in handoff_step["run"]
-    )
-    assert 'echo "## Runtime release handoff"' in handoff_step["run"]
-
-    skipped_step = _workflow_step(
-        workflow, "skipped", "Explain skipped runtime release handoff"
-    )
-    assert (
-        "The Composer Airflow trigger contract needs all of these inputs before it can run:"
-        in skipped_step["run"]
-    )
-    assert "retained" not in skipped_step["run"].lower()
-    assert "GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY=true" in skipped_step["run"]
-    assert "GCP_CLOUD_COMPOSER_AIRFLOW_URI" in skipped_step["run"]
-    assert (
-        "the GitHub service account already maps to an Airflow user or role"
-        in skipped_step["run"]
-    )
-
-
-def test_orchestration_docs_describe_hosted_composer_architecture() -> None:
-    workflow_doc = _read_text("docs/site/system/delivery-and-operator-workflow.md")
-    cloud_mapping = _read_text("docs/site/system/cloud-mapping.md")
-    terraform_readme = _read_text("terraform/README.md")
-
-    assert "The hosted architecture is Cloud Build plus Cloud Composer." in workflow_doc
-    assert "| Hosted Airflow surface | Cloud Composer |" in workflow_doc
-    assert ".github/workflows/publish-composer-dags.yml" in workflow_doc
-    assert (
-        "GitHub publishes the repo-managed DAG and source bundle into the Composer DAG bucket."
-        in workflow_doc
-    )
-    assert "reviewed receiver selection" in workflow_doc
-    assert "configured runtime release summary target" in workflow_doc
-    assert "requested receiver metadata" in workflow_doc
-    assert "Cloud Composer is the hosted orchestration surface" in workflow_doc
-    assert "managed secret path" in workflow_doc
-
-    assert (
-        "Cloud Composer is the hosted orchestration surface. Terraform provisions the Cloud Composer environment."
-        in cloud_mapping
-    )
-    assert "Runtime release acknowledgements use durable GCS storage." in cloud_mapping
-    assert (
-        "A reviewed DAG and source bundle syncs to the Composer DAG bucket."
-        in cloud_mapping
-    )
-    assert (
-        "reviewed runtime release entry that reaches the Composer Airflow API"
-        in cloud_mapping
-    )
-    assert "Cloud Build is the hosted image build surface." in cloud_mapping
-    assert (
-        "reviewed GitHub workflows submit Cloud Build builds that publish hosted runtime images to Artifact Registry"
-        in cloud_mapping
-    )
-    assert (
-        "Hosted image delivery already uses Cloud Build plus Artifact Registry"
-        in cloud_mapping
-    )
-    assert "FOEHNCAST_PIPELINE_REPORT_DIR" in cloud_mapping
-    assert "Cloud Composer, Cloud Run" in cloud_mapping
-    assert "reviewed Secret Manager-backed env-ref path for Composer" in cloud_mapping
-    assert (
-        "Cloud Composer is provisioned as the hosted orchestration surface."
-        in cloud_mapping
-    )
-    assert (
-        "publish reviewed hosted runtime images to Artifact Registry" in cloud_mapping
-    )
-
-    assert (
-        "Terraform can provision an optional Cloud Composer environment today."
-        in terraform_readme
-    )
-    assert ".github/workflows/publish-composer-dags.yml" in terraform_readme
-    assert "FOEHNCAST_PIPELINE_REPORT_DIR" in terraform_readme
-    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in terraform_readme
-    assert "cloud_composer_airflow_access_ready" in terraform_readme
-    assert "cloud_composer_secret_env_vars" in terraform_readme
-    assert "roles/secretmanager.secretAccessor" in terraform_readme
-    assert "sm://..." in terraform_readme
-    assert "Cloud Run `/metrics` surface" in terraform_readme
-    assert (
-        "default runtime release cutover away from retained-host SSH"
-        in terraform_readme
-    )
-    assert (
-        "making the Composer API handoff the default runtime release path"
-        in terraform_readme
-    )
-    assert "GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" in terraform_readme
-    assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in terraform_readme
-    assert "GCP_CLOUD_COMPOSER_AIRFLOW_URI" in terraform_readme
 
 
 def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
@@ -1128,90 +757,6 @@ def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
     assert "--report-path" not in script
 
 
-def test_publish_composer_dags_script_builds_bundle_and_syncs_to_gcs_prefix() -> None:
-    script = _read_text("scripts/publish-composer-dags.sh")
-
-    assert (
-        "Usage: $0 --dag-gcs-prefix gs://bucket/path [--bundle-dir path] [--manifest-path path]"
-        in script
-    )
-    assert 'source "${ROOT_DIR}/scripts/cli-common.sh"' in script
-    assert "require_command gcloud" in script
-    assert "require_command python3" in script
-    assert 'mktemp -d "${TMPDIR:-/tmp}/foehncast-composer-dags.XXXXXX"' in script
-    assert 'PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in script
-    assert "python3 -m foehncast.composer_bundle build" in script
-    assert "gcloud storage rsync --recursive" in script
-    assert "Composer DAG bundle published to" in script
-
-
-def test_publish_composer_dags_workflow_uses_repo_backed_composer_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-composer-dags.yml")
-    workflow_text = _read_text(".github/workflows/publish-composer-dags.yml")
-    push_paths = workflow["on"]["push"]["paths"]
-    config_job = workflow["jobs"]["config"]
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-
-    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
-    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
-    assert "dags/**" in push_paths
-    assert "src/**" in push_paths
-    assert "feature_repo/**" in push_paths
-    assert "scripts/publish-composer-dags.sh" in push_paths
-    assert dispatch_inputs["cloud_composer_dag_gcs_prefix"]["type"] == "string"
-
-    assert (
-        config_job["outputs"]["cloud_composer_environment_name"]
-        == "${{ steps.repo_config.outputs.cloud_composer_environment_name }}"
-    )
-    assert (
-        config_job["outputs"]["dag_gcs_prefix"]
-        == "${{ steps.derived.outputs.dag_gcs_prefix }}"
-    )
-    assert (
-        config_job["outputs"]["publish_ready"]
-        == "${{ steps.derived.outputs.publish_ready }}"
-    )
-
-    repo_config_step = _workflow_step(workflow, "config", "repo_config")
-    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
-
-    derived_step = _workflow_step(workflow, "config", "derived")
-    assert (
-        derived_step["env"]["REPO_DAG_GCS_PREFIX"]
-        == "${{ steps.repo_config.outputs.cloud_composer_dag_gcs_prefix }}"
-    )
-    assert (
-        derived_step["env"]["PROVISION_CLOUD_COMPOSER_ENVIRONMENT"]
-        == "${{ steps.repo_config.outputs.provision_cloud_composer_environment }}"
-    )
-    assert "publish_ready=false" in derived_step["run"]
-    assert 'echo "publish_ready=$publish_ready"' in derived_step["run"]
-
-    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v3"
-
-    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
-    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
-
-    publish_step = _workflow_step(workflow, "publish", "Publish Composer DAG bundle")
-    assert "bash ./scripts/publish-composer-dags.sh" in publish_step["run"]
-    assert '--dag-gcs-prefix "$DAG_GCS_PREFIX"' in publish_step["run"]
-    assert "composer-dag-bundle-manifest.json" in publish_step["run"]
-
-    summary_step = _workflow_step(workflow, "publish", "Summarize bundle")
-    assert "## Published Composer DAG bundle" in summary_step["run"]
-    assert "composer-dag-bundle-manifest.json" in summary_step["run"]
-
-    skipped_step = _workflow_step(workflow, "skipped", "Explain skipped publish")
-    assert "GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX" in skipped_step["run"]
-    assert "Runtime release still uses the retained-host handoff" in skipped_step["run"]
-
-    assert "gcloud compute ssh" not in workflow_text
-    assert "trigger-runtime-release.sh" not in workflow_text
-
-
 def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
     push_paths = workflow["on"]["push"]["paths"]
@@ -1315,20 +860,6 @@ def test_terraform_injects_feast_runtime_contract_into_both_hosted_targets() -> 
     assert "FOEHNCAST_PIPELINE_REPORT_DIR" in cloud_run_block.group("body")
 
 
-def test_terraform_hosted_runtime_env_maps_avoid_gcp_bucket_name_alias() -> None:
-    terraform = _read_text("terraform/main.tf")
-    cloud_composer_block = re.search(
-        r"cloud_composer_env_vars = merge\(\n\s*\{\n(?P<body>.*?)\n\s*\},\n\s*var\.cloud_composer_env_vars",
-        terraform,
-        flags=re.DOTALL,
-    )
-
-    assert cloud_composer_block is not None
-    assert "GCP_BUCKET_NAME" not in cloud_composer_block.group("body")
-    assert "MLFLOW_ARTIFACT_DESTINATION" in cloud_composer_block.group("body")
-    assert "FOEHNCAST_FEAST_GCS_BUCKET" in cloud_composer_block.group("body")
-
-
 def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_access() -> (
     None
 ):
@@ -1392,58 +923,6 @@ def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contra
     assert "default GHCR image" not in variables
 
 
-def test_terraform_defines_cloud_composer_hosted_orchestration_contract() -> None:
-    terraform = _read_text("terraform/main.tf")
-    variables = _read_text("terraform/variables.tf")
-    outputs = _read_text("terraform/outputs.tf")
-
-    assert '"composer.googleapis.com",' in terraform
-    assert '"container.googleapis.com",' in terraform
-    assert '"secretmanager.googleapis.com",' in terraform
-    assert '"sqladmin.googleapis.com",' in terraform
-    assert '"roles/composer.admin",' in terraform
-    assert 'variable "provision_cloud_composer_environment"' in variables
-    assert 'variable "cloud_composer_environment_name"' in variables
-    assert 'variable "cloud_composer_airflow_access_ready"' in variables
-    assert 'variable "cloud_composer_secret_env_vars"' in variables
-    assert 'variable "cloud_composer_image_version"' in variables
-    assert 'resource "google_service_account" "cloud_composer_runtime"' in terraform
-    assert 'resource "google_project_iam_member" "cloud_composer_worker"' in terraform
-    assert 'role    = "roles/composer.worker"' in terraform
-    assert (
-        'resource "google_service_account_iam_member" "cloud_composer_service_agent_extension"'
-        in terraform
-    )
-    assert 'role               = "roles/composer.ServiceAgentV2Ext"' in terraform
-    assert 'resource "google_compute_network" "cloud_composer"' in terraform
-    assert 'resource "google_compute_subnetwork" "cloud_composer"' in terraform
-    assert 'resource "google_composer_environment" "cloud_composer"' in terraform
-    assert "env_variables = local.cloud_composer_env_vars" in terraform
-    assert "FOEHNCAST_PIPELINE_REPORT_DIR" in terraform
-    assert "local.cloud_composer_secret_env_var_refs" in terraform
-    assert "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH" in terraform
-    assert (
-        '"gs://${var.artifact_bucket_name}/airflow/reports/runtime-release-latest.json"'
-        in terraform
-    )
-    assert '"gs://${var.artifact_bucket_name}/airflow/reports"' in terraform
-    assert 'google-cloud-secret-manager = ">=2.23.0"' in terraform
-    assert (
-        'resource "google_secret_manager_secret_iam_member" "cloud_composer_secret_accessor"'
-        in terraform
-    )
-    assert 'role      = "roles/secretmanager.secretAccessor"' in terraform
-    assert (
-        "service_account = google_service_account.cloud_composer_runtime[0].name"
-        in terraform
-    )
-    assert 'output "provision_cloud_composer_environment"' in outputs
-    assert 'output "cloud_composer_environment_name"' in outputs
-    assert 'output "cloud_composer_airflow_access_ready"' in outputs
-    assert 'output "cloud_composer_airflow_uri"' in outputs
-    assert 'output "cloud_composer_dag_gcs_prefix"' in outputs
-
-
 def test_terraform_forecast_feature_schema_tracks_direction_encoding_columns() -> None:
     terraform = _read_text("terraform/main.tf")
 
@@ -1460,19 +939,11 @@ def test_terraform_outputs_split_runtime_identity_contract() -> None:
 
     assert 'output "github_deployer_service_account"' in outputs
     assert 'output "cloud_run_runtime_service_account"' in outputs
-    assert 'output "cloud_composer_runtime_service_account"' in outputs
-    assert (
-        'value       = var.provision_cloud_composer_environment ? try(google_service_account.cloud_composer_runtime[0].email, "foehncast-composer@${var.project_id}.iam.gserviceaccount.com") : null'
-        in outputs
-    )
 
 
 def test_platform_state_tracks_hosted_runtime_identities_without_repo_var_sync() -> (
     None
 ):
-    load_body = _function_body(
-        "scripts/terraform-platform-state.sh", "load_terraform_platform_state"
-    )
     names_body = _function_body(
         "scripts/terraform-platform-state.sh", "terraform_repo_variable_names"
     )
@@ -1480,12 +951,6 @@ def test_platform_state_tracks_hosted_runtime_identities_without_repo_var_sync()
         "scripts/terraform-platform-state.sh", "terraform_repo_variable_pairs"
     )
 
-    assert (
-        'FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_composer_runtime_service_account)"'
-        in load_body
-    )
-    assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in names_body
-    assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
     assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in names_body
     assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
 
@@ -2040,15 +1505,6 @@ def test_cloud_scripts_share_github_repo_helpers() -> None:
     assert "resolve_repo()" not in configure
     assert "gh auth status" not in configure
     assert "require_github_auth" in configure
-    assert "cloud_composer_dag_gcs_prefix_synced=false" in configure
-    assert (
-        'delete_variable "$REPOSITORY_PATH" GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX'
-        in configure
-    )
-    assert (
-        'echo "Skipping GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX because Terraform has not provisioned a Cloud Composer DAG bucket prefix yet."'
-        in configure
-    )
     assert (
         'TARGET_REPO="$(require_cli_option_value "--repo" "${1:-}" usage)"' in configure
     )

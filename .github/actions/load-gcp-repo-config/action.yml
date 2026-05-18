@@ -62,21 +62,6 @@ outputs:
   mlflow_tracking_uri:
     description: MLflow tracking URI repository variable
     value: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
-  provision_cloud_composer_environment:
-    description: Cloud Composer provisioning repository variable
-    value: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
-  cloud_composer_environment_name:
-    description: Configured Cloud Composer environment name repository variable
-    value: ${{ steps.repo_config.outputs.cloud_composer_environment_name }}
-  cloud_composer_airflow_access_ready:
-    description: Cloud Composer Airflow access readiness repository variable
-    value: ${{ steps.repo_config.outputs.cloud_composer_airflow_access_ready }}
-  cloud_composer_dag_gcs_prefix:
-    description: Cloud Composer DAG bucket prefix repository variable
-    value: ${{ steps.repo_config.outputs.cloud_composer_dag_gcs_prefix }}
-  cloud_composer_airflow_uri:
-    description: Cloud Composer Airflow URI repository variable
-    value: ${{ steps.repo_config.outputs.cloud_composer_airflow_uri }}
   provision_cloud_run_mlflow:
     description: Cloud Run MLflow provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_cloud_run_mlflow }}
@@ -142,11 +127,6 @@ runs:
           echo "cloud_run_cpu=$(read_repo_var GCP_CLOUD_RUN_CPU)"
           echo "cloud_run_memory=$(read_repo_var GCP_CLOUD_RUN_MEMORY)"
           echo "mlflow_tracking_uri=$(read_repo_var GCP_MLFLOW_TRACKING_URI)"
-          echo "provision_cloud_composer_environment=$(read_repo_var GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT)"
-          echo "cloud_composer_environment_name=$(read_repo_var GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME)"
-          echo "cloud_composer_airflow_access_ready=$(read_repo_var GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY)"
-          echo "cloud_composer_dag_gcs_prefix=$(read_repo_var GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX)"
-          echo "cloud_composer_airflow_uri=$(read_repo_var GCP_CLOUD_COMPOSER_AIRFLOW_URI)"
           echo "provision_cloud_run_mlflow=$(read_repo_var GCP_PROVISION_CLOUD_RUN_MLFLOW)"
           echo "provision_cloud_run_ui=$(read_repo_var GCP_PROVISION_CLOUD_RUN_UI)"
           echo "cloud_run_ui_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_UI_PROMETHEUS_URL)"

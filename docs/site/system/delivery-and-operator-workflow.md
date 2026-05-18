@@ -83,8 +83,6 @@ After the one-time bootstrap establishes OIDC and the remote backend, GitHub Act
 | `scripts/configure-github-actions.sh` | sync Terraform outputs into GitHub repository variables |
 | `terraform/terraform.tfvars` | interactive bootstrap input, not the day-2 source of truth |
 | runtime image workflows | submit reviewed hosted image builds to Cloud Build and publish images to Artifact Registry |
-| `.github/workflows/publish-composer-dags.yml` | publish the reviewed DAG and source bundle to the provisioned Composer DAG bucket |
-| `.github/workflows/trigger-runtime-release.yml` | send one explicit reviewed runtime release request to the Composer Airflow API |
 | `scripts/prepare-feast-cloud.sh` | hosted Feast follow-up after a remote apply and curated BigQuery rows exist |
 
 The remote workflow reads repository-backed values for project, state, storage, BigQuery, and hosted-target toggles. Cloud Run settings such as instance count, container port, CPU, and memory are also repo-variable-backed.
@@ -144,18 +142,6 @@ Supported actions:
 This keeps the handoff explicit while deeper runtime automation still lives behind the Airflow side of the boundary.
 
 ## Composer Runtime Contract
-
-Cloud Composer is the hosted orchestration surface. The contract covers:
-
-| Concern | Implementation |
-|------|----------------|
-| DAG packaging | GitHub publishes the reviewed DAG and source bundle to the Composer DAG bucket; the bundle includes DAG entrypoints, the `foehncast` Python package, `config.yaml`, `pyproject.toml`, and `feature_repo` |
-| Python dependencies | Terraform seeds a reviewed Composer PyPI baseline for the checked-in DAG bundle; extra `cloud_composer_pypi_packages` overrides are available for follow-up slices |
-| Secrets and runtime config | Composer consumes reviewed `sm://...` Secret Manager env references resolved by the shared runtime env helper |
-| Network and API reachability | the runtime trigger reaches the Composer Airflow API through GitHub OIDC plus a Google access token |
-| Operator access model | Composer provides the Airflow UI for scheduling, retries, backfills, and recovery |
-
-The runtime release acknowledgement path writes the reviewed summary to durable GCS storage derived from the artifact bucket.
 
 ## Retry And Backfill Runbooks
 

@@ -201,15 +201,7 @@ tfvars_value_or_default() {
     [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" == "true" ]]
   }
 
-  cloud_composer_is_enabled() {
-    [[ "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == "true" ]]
-  }
-
   print_bootstrap_identity_summary() {
-    if cloud_composer_is_enabled; then
-      print_terraform_summary_line_if_present "Cloud Composer runtime service account" "$FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT"
-    fi
-
     echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
   }
 
@@ -277,18 +269,6 @@ tfvars_value_or_default() {
     echo "Hosted Feast offline source table: ${feast_bigquery_table}"
     echo "Hosted Feast online store database: ${FOEHNCAST_TF_FEAST_ONLINE_STORE_DATABASE}"
     echo "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
-  }
-
-  print_cloud_composer_summary() {
-    load_bootstrap_platform_state
-
-    if ! cloud_composer_is_enabled; then
-      return
-    fi
-
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer environment" cloud_composer_environment_name
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer Airflow URL" cloud_composer_airflow_uri
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer DAG bucket prefix" cloud_composer_dag_gcs_prefix
   }
 
   require_curl_payload_patterns() {
@@ -566,8 +546,6 @@ tfvars_value_or_default() {
     local current_project current_region artifact_bucket artifact_repo dataset_id table_id bigquery_location
     local feast_online_store_location feast_online_store_database_name
     local provision_cloud_run cloud_run_default cloud_run_service mlflow_tracking_uri
-    local provision_cloud_composer_environment provision_cloud_composer_environment_default
-    local cloud_composer_environment_name
     local repo_default target_repo_owner target_repo_name
 
     prepare_file_from_template "${ROOT_DIR}/.env.example" "$ENV_FILE"
@@ -623,19 +601,6 @@ tfvars_value_or_default() {
       mlflow_tracking_uri=""
     fi
 
-    provision_cloud_composer_environment_default="$(tfvars_yes_no_default provision_cloud_composer_environment)"
-
-    if prompt_yes_no "Provision an optional Cloud Composer environment now? This prepares the managed orchestration surface, but the retained host remains the active recovery path." "$provision_cloud_composer_environment_default"; then
-      provision_cloud_composer_environment=true
-    else
-      provision_cloud_composer_environment=false
-    fi
-
-    cloud_composer_environment_name="$(tfvars_value_or_default cloud_composer_environment_name "$(foehncast_default_cloud_composer_environment_name)")"
-    if [[ "$provision_cloud_composer_environment" == "true" ]]; then
-      cloud_composer_environment_name="$(prompt_with_default "Cloud Composer environment name" "$cloud_composer_environment_name")"
-    fi
-
     if [[ "$CONFIGURE_GITHUB" != "true" && "$INTERACTIVE" == "true" ]]; then
       local github_default_answer="n"
 
@@ -685,9 +650,7 @@ tfvars_value_or_default() {
       "$feast_online_store_database_name" \
       "$provision_cloud_run" \
       "$cloud_run_service" \
-      "$mlflow_tracking_uri" \
-      "$provision_cloud_composer_environment" \
-      "$cloud_composer_environment_name"
+      "$mlflow_tracking_uri"
   }
 
 while [[ $# -gt 0 ]]; do
@@ -822,7 +785,6 @@ else
     print_auth_summary
     print_primary_hosted_api_summary
     print_cloud_run_summary
-    print_cloud_composer_summary
     print_feast_runtime_summary
     verify_cloud_run_runtime
   fi
