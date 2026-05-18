@@ -719,7 +719,9 @@ jobs:
           fi
 
           online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"
-          if [[ -n "$online_compose_app_url" ]]; then
+          # The setup-terraform wrapper emits ::error:: annotations to stdout on failure;
+          # treat non-URL output as empty (null output from terraform).
+          if [[ "$online_compose_app_url" == http* ]]; then
             echo "Hosted runtime verification failed: online compose app URL is public (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2
             online_compose_verification_status="failed"
             verify_failure=true
