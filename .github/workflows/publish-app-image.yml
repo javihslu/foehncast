@@ -152,7 +152,7 @@ jobs:
             echo "- Builder: Cloud Build"
             echo "- Build id: ${{ steps.submit.outputs.build_id }}"
             echo "- Runtime handoff: not executed from GitHub in this workflow"
-            echo "- Next step: run Trigger Runtime Release with action deploy_candidate and this immutable image URI"
+            echo "- Next step: use the reviewed runtime release handoff with action deploy_candidate and this immutable image URI"
           } >> "$GITHUB_STEP_SUMMARY"
 
   skipped:

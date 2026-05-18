@@ -26,7 +26,7 @@ flowchart LR
 | Feature pipeline | Working | Airflow ingests, engineers, validates, and stores curated weather features |
 | Training pipeline | Working | Airflow labels data, trains the model, evaluates it, and registers fresh versions in MLflow under the requested registry alias |
 | Inference pipeline | Working | FastAPI serves `/health`, `/spots`, `/predict`, `/rank`, and online-feature routes, and `ui/app.py` provides the Streamlit demo |
-| Hosted runtime | Working | The shared environment uses Cloud Run as the only promoted public API path while keeping the hosted full-stack target online for operator tooling |
+| Hosted runtime | Working | The shared environment uses Cloud Run for the public API and hosted cloud services, while local Airflow remains the reviewed orchestration path |
 | Automation | Working | GitHub Actions publishes images, validates infrastructure, and drives remote Terraform workflows |
 | Monitoring | Working | Docker Compose runs Prometheus and a StatsD exporter; the app exposes `/metrics`; the Streamlit UI renders native Altair charts from direct PromQL queries; and Prometheus loads alert rules from checked-in config |
 

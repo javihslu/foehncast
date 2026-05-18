@@ -73,7 +73,6 @@ flowchart TB
 
     click UI "https://console.cloud.google.com/run?project=" "Open Cloud Run"
     click APP "https://console.cloud.google.com/run?project=" "Open Cloud Run"
-    click GF "https://console.cloud.google.com/run?project=" "Open Cloud Run"
     click MLF "https://console.cloud.google.com/run?project=" "Open Cloud Run"
     click WF "https://console.cloud.google.com/workflows?project=" "Open Workflows"
     click SCHED "https://console.cloud.google.com/cloudscheduler?project=" "Open Scheduler"

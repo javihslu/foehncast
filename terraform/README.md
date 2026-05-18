@@ -1,6 +1,6 @@
 # Terraform Baseline
 
-This directory defines one shared GCP baseline, two hosted runtime targets, and one optional managed orchestration target.
+This directory defines one shared GCP baseline plus optional hosted Cloud Run and Cloud Workflows surfaces.
 
 This is maintainer/operator reference material. Default contributor setup stays local with Docker and does not require Terraform, `gcloud`, or `gh`.
 
@@ -11,28 +11,25 @@ Start with [../docs/site/system/delivery-and-operator-workflow.md](../docs/site/
 | Surface | Purpose | Deploys |
 |---------|---------|---------|
 | Shared GCP baseline | APIs, storage, identities, and registries | no app containers |
-| Hosted full-stack target | keep Airflow, MLflow, and the API online together | runtime services only |
-| Hosted inference target | publish the inference API as a smaller hosted surface | FastAPI only |
-| Managed orchestration target | provision Cloud Composer for hosted Airflow readiness work | managed Airflow environment only |
+| Hosted Cloud Run surfaces | publish the hosted API and optional supporting services | runtime services only |
+| Hosted automation target | provision Cloud Run Jobs, Cloud Workflows, and Cloud Scheduler for serverless pipeline orchestration | managed automation only |
 | GitHub OIDC delivery | remote Terraform and image-based deploys | no runtime services |
 
 ```mermaid
 flowchart TD
    TF[Terraform] --> BASE[Shared GCP baseline]
-   BASE --> HOST[Hosted full-stack target]
    BASE --> RUN[Hosted inference target]
-   BASE --> COMP[Managed orchestration target]
+   BASE --> WF[Hosted automation target]
    BASE --> GH[GitHub OIDC delivery]
 ```
 
 ## What This Directory Covers
 
-This directory covers four cloud surfaces:
+This directory covers three cloud surfaces:
 
 - a shared GCP baseline for datasets, registries, identities, and the hosted runtime targets
-- an inference-only Cloud Run target for the shared public API
-- a single online Docker host target that runs the full Airflow, MLflow, and API stack from the same repo
-- an optional Cloud Composer environment for managed-orchestration readiness work
+- hosted Cloud Run surfaces for the shared public API and optional supporting services
+- an optional Cloud Workflows plus Cloud Scheduler automation target for serverless orchestration
 
 ## Current Scope
 
@@ -51,10 +48,10 @@ Terraform also seeds `FOEHNCAST_PIPELINE_REPORT_DIR` to the shared `gs://<artifa
 
 ## Deployment Scope Rule
 
-Deploy only runtime surfaces in cloud environments.
+Deploy only runtime and automation surfaces in cloud environments.
 
-- The hosted full-stack target deploys Airflow, MLflow, and the API.
-- The hosted inference target deploys the FastAPI service only.
+- Hosted Cloud Run surfaces deploy runtime services only.
+- The hosted automation target deploys Cloud Run Jobs, Cloud Workflows, and Cloud Scheduler, not contributor tooling.
 - `development_env`, notebooks, docs build tooling, the local objectstore, and the local Datastore emulator stay local or CI-only.
 
 ## Which Path To Use
@@ -62,8 +59,8 @@ Deploy only runtime surfaces in cloud environments.
 | Target | Use it when | What deploys |
 |--------|-------------|--------------|
 | Shared GCP baseline | you need the cloud data and identity foundation | no containers |
-| Hosted full-stack target | you want Airflow, MLflow, and the API online together | runtime services only |
-| Hosted inference target | you only need the inference API | FastAPI only |
+| Hosted Cloud Run surfaces | you need the shared API and optional hosted service surfaces | runtime services only |
+| Hosted automation target | you need serverless pipeline automation in GCP | managed automation only |
 
 ## Hosted Inference Target Inputs
 

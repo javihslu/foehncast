@@ -149,7 +149,7 @@ That keeps the orchestration boundary visible:
 - the training DAG emits MLflow training-run, evaluation-report, and model-registry assets
 - dataset and stage can still be overridden through DAG config when needed
 
-This makes the Airflow Assets view reflect the real dependency graph between curated feature persistence, training, evaluation, and registration. In the shared hosted path, those Airflow-owned steps run on the retained operator lane until orchestration moves to Cloud Composer. That infrastructure change should preserve the same training-stage ownership and evidence boundaries.
+This makes the Airflow Assets view reflect the real dependency graph between curated feature persistence, training, evaluation, and registration. The local evaluator runs those steps directly in Airflow, while the hosted cloud path preserves the same training-stage ownership even when serving and scheduled automation move onto Cloud Run and Cloud Workflows.
 
 ## Alias Controls Outside The DAG
 

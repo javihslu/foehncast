@@ -268,10 +268,9 @@ def normalize_runtime_release_request(
         ).lower(),
     }
 
-    if (
-        not normalized_request["selected_airflow_target"]
-        and normalized_request["requested_airflow_target"] == "composer_airflow"
-    ):
+    if not normalized_request["selected_airflow_target"] and normalized_request[
+        "requested_airflow_target"
+    ] not in {"", "auto", "unspecified"}:
         normalized_request["selected_airflow_target"] = normalized_request[
             "requested_airflow_target"
         ]
@@ -361,7 +360,7 @@ def build_runtime_release_summary(
     return {
         "generated_at": normalized_request["requested_at"],
         "state": "accepted",
-        "runtime_receiver": "hosted_airflow",
+        "runtime_receiver": "airflow_api",
         "requested_airflow_target": normalized_request["requested_airflow_target"],
         "selected_airflow_target": normalized_request["selected_airflow_target"],
         "dag_id": dag_id,
