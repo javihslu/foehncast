@@ -8,6 +8,13 @@ import pandas as pd
 import pytest
 
 from foehncast.feature_pipeline import store
+from tests.bigquery_fakes import (
+    FakeCompletedJob,
+    FakeLoadJobConfig,
+    FakeQueryJobConfig,
+    FakeScalarQueryParameter,
+    FakeTimePartitioning,
+)
 
 
 @pytest.fixture()
@@ -33,45 +40,6 @@ def sample_features() -> pd.DataFrame:
             "wind_steadiness": [0.1, 0.2],
         }
     )
-
-
-class _FakeLoadJobConfig:
-    def __init__(self, write_disposition: str, **kwargs: object) -> None:
-        self.write_disposition = write_disposition
-        for name, value in kwargs.items():
-            setattr(self, name, value)
-
-
-class _FakeTimePartitioning:
-    def __init__(
-        self,
-        *,
-        type_: object,
-        field: str,
-        expiration_ms: int,
-        require_partition_filter: bool,
-    ) -> None:
-        self.type_ = type_
-        self.field = field
-        self.expiration_ms = expiration_ms
-        self.require_partition_filter = require_partition_filter
-
-
-class _FakeScalarQueryParameter:
-    def __init__(self, name: str, param_type: str, value: str) -> None:
-        self.name = name
-        self.param_type = param_type
-        self.value = value
-
-
-class _FakeQueryJobConfig:
-    def __init__(self, query_parameters: list[object]) -> None:
-        self.query_parameters = query_parameters
-
-
-class _CompletedJob:
-    def result(self) -> None:
-        return None
 
 
 class _FlaggingCompletedJob:
@@ -291,13 +259,13 @@ def test_write_features_bigquery_uses_load_job(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakeLoadJobConfig,
-            QueryJobConfig=_FakeQueryJobConfig,
-            ScalarQueryParameter=_FakeScalarQueryParameter,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=_FakeTimePartitioning,
+            TimePartitioning=FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
@@ -371,11 +339,11 @@ def test_write_features_bigquery_applies_contract_when_table_is_missing(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakeLoadJobConfig,
+            LoadJobConfig=FakeLoadJobConfig,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=_FakeTimePartitioning,
+            TimePartitioning=FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
@@ -441,8 +409,8 @@ def test_read_features_bigquery_restores_time_index(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            QueryJobConfig=_FakeQueryJobConfig,
-            ScalarQueryParameter=_FakeScalarQueryParameter,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
     )
     _patch_bigquery_not_found(monkeypatch)
@@ -481,16 +449,16 @@ def test_bigquery_round_trip_restores_original_feature_schema(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> _CompletedJob:
+        ) -> FakeCompletedJob:
             written["frame"] = frame.copy()
-            return _CompletedJob()
+            return FakeCompletedJob()
 
         def query(
             self, query: str, job_config: object | None = None
-        ) -> _CompletedJob | _FrameQueryJob:
+        ) -> FakeCompletedJob | _FrameQueryJob:
             if "DELETE FROM" in query:
                 written["frame"] = written["frame"].iloc[0:0].copy()
-                return _CompletedJob()
+                return FakeCompletedJob()
             return _FrameQueryJob(written["frame"])
 
     monkeypatch.setattr(
@@ -498,9 +466,9 @@ def test_bigquery_round_trip_restores_original_feature_schema(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakeLoadJobConfig,
-            QueryJobConfig=_FakeQueryJobConfig,
-            ScalarQueryParameter=_FakeScalarQueryParameter,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
     )
     _patch_bigquery_not_found(monkeypatch)
@@ -539,13 +507,13 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
 
         def load_table_from_dataframe(
             self, frame: pd.DataFrame, table_id: str, job_config: object
-        ) -> _CompletedJob:
+        ) -> FakeCompletedJob:
             existing = state["table"]
             if existing is None:
                 state["table"] = frame.copy()
             else:
                 state["table"] = pd.concat([existing, frame.copy()], ignore_index=True)
-            return _CompletedJob()
+            return FakeCompletedJob()
 
         def query(self, query: str, job_config: object | None = None) -> object:
             parameters = {
@@ -564,7 +532,7 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
                         )
                     ].reset_index(drop=True)
                     state["table"] = filtered
-                return _CompletedJob()
+                return FakeCompletedJob()
 
             if table is None:
                 return _FrameQueryJob()
@@ -584,9 +552,9 @@ def test_write_features_bigquery_replaces_existing_slice_on_repeated_writes(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakeLoadJobConfig,
-            QueryJobConfig=_FakeQueryJobConfig,
-            ScalarQueryParameter=_FakeScalarQueryParameter,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
     )
     _patch_bigquery_not_found(monkeypatch)
@@ -630,8 +598,8 @@ def test_read_features_bigquery_raises_file_not_found_for_empty_result(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            QueryJobConfig=_FakeQueryJobConfig,
-            ScalarQueryParameter=_FakeScalarQueryParameter,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
     )
     _patch_bigquery_not_found(monkeypatch)

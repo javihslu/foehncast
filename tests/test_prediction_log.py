@@ -11,50 +11,13 @@ import pandas as pd
 import pytest
 
 from foehncast.monitoring import prediction_log
-
-
-class _FakePredictionLoadJobConfig:
-    def __init__(self, write_disposition: str, **kwargs: object) -> None:
-        self.write_disposition = write_disposition
-        for name, value in kwargs.items():
-            setattr(self, name, value)
-
-
-class _FakePredictionTimePartitioning:
-    def __init__(
-        self,
-        *,
-        type_: object,
-        field: str,
-        expiration_ms: int,
-        require_partition_filter: bool,
-    ) -> None:
-        self.type_ = type_
-        self.field = field
-        self.expiration_ms = expiration_ms
-        self.require_partition_filter = require_partition_filter
-
-
-class _FakePredictionScalarQueryParameter:
-    def __init__(self, name: str, param_type: str, value: object) -> None:
-        self.name = name
-        self.param_type = param_type
-        self.value = value
-
-
-class _FakePredictionQueryJobConfig:
-    def __init__(self, query_parameters: list[object]) -> None:
-        self.query_parameters = query_parameters
-
-
-class _PredictionCompletedJob:
-    def __init__(self, callback=None) -> None:
-        self._callback = callback
-
-    def result(self):
-        if self._callback is not None:
-            self._callback()
-        return None
+from tests.bigquery_fakes import (
+    FakeCompletedJob,
+    FakeLoadJobConfig,
+    FakeQueryJobConfig,
+    FakeScalarQueryParameter,
+    FakeTimePartitioning,
+)
 
 
 class _PredictionFrameRowIterator:
@@ -801,29 +764,27 @@ def test_append_prediction_log_bigquery_uses_prediction_event_warehouse_contract
             frame: pd.DataFrame,
             table_id: str,
             job_config: object,
-        ) -> _PredictionCompletedJob:
+        ) -> FakeCompletedJob:
             captured["table_id"] = table_id
             captured["frame"] = frame.copy()
             captured["write_disposition"] = job_config.write_disposition
             captured["time_partitioning"] = job_config.time_partitioning
             captured["clustering_fields"] = job_config.clustering_fields
             captured["schema_update_options"] = job_config.schema_update_options
-            return _PredictionCompletedJob(
-                lambda: captured.update({"job_completed": True})
-            )
+            return FakeCompletedJob(lambda: captured.update({"job_completed": True}))
 
     monkeypatch.setattr(
         prediction_log,
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakePredictionLoadJobConfig,
-            QueryJobConfig=_FakePredictionQueryJobConfig,
-            ScalarQueryParameter=_FakePredictionScalarQueryParameter,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=_FakePredictionTimePartitioning,
+            TimePartitioning=FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
@@ -915,8 +876,8 @@ def test_read_prediction_history_bigquery_uses_warehouse_contract_by_default(
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            QueryJobConfig=_FakePredictionQueryJobConfig,
-            ScalarQueryParameter=_FakePredictionScalarQueryParameter,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
         ),
     )
     _patch_prediction_event_bigquery_not_found(monkeypatch)
@@ -960,7 +921,7 @@ def test_emit_prediction_drift_metrics_uses_bigquery_history_when_backend_is_big
             frame: pd.DataFrame,
             table_id: str,
             job_config: object,
-        ) -> _PredictionCompletedJob:
+        ) -> FakeCompletedJob:
             if state["table"] is None:
                 state["table"] = frame.copy()
             else:
@@ -968,7 +929,7 @@ def test_emit_prediction_drift_metrics_uses_bigquery_history_when_backend_is_big
                     [state["table"], frame.copy()],
                     ignore_index=True,
                 )
-            return _PredictionCompletedJob()
+            return FakeCompletedJob()
 
         def query(
             self, query: str, job_config: object | None = None
@@ -997,13 +958,13 @@ def test_emit_prediction_drift_metrics_uses_bigquery_history_when_backend_is_big
         "_bigquery_module",
         lambda: types.SimpleNamespace(
             Client=FakeClient,
-            LoadJobConfig=_FakePredictionLoadJobConfig,
-            QueryJobConfig=_FakePredictionQueryJobConfig,
-            ScalarQueryParameter=_FakePredictionScalarQueryParameter,
+            LoadJobConfig=FakeLoadJobConfig,
+            QueryJobConfig=FakeQueryJobConfig,
+            ScalarQueryParameter=FakeScalarQueryParameter,
             SchemaUpdateOption=types.SimpleNamespace(
                 ALLOW_FIELD_ADDITION="ALLOW_FIELD_ADDITION"
             ),
-            TimePartitioning=_FakePredictionTimePartitioning,
+            TimePartitioning=FakeTimePartitioning,
             TimePartitioningType=types.SimpleNamespace(DAY="DAY"),
         ),
     )
