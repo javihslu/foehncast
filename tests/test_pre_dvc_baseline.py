@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from foehncast.airflow_assets import (
     curated_feature_store_asset_uri,
     training_request_asset_uri,
@@ -30,14 +32,19 @@ from tests.repo_helpers import read_repo_text
 # ---------------------------------------------------------------------------
 
 
-def test_feature_pipeline_stages_are_ordered_and_complete() -> None:
+@pytest.mark.parametrize(
+    ("stages", "expected"),
+    [
+        (FEATURE_PIPELINE_STAGES, ("fetch", "engineer", "validate", "store")),
+        (TRAINING_PIPELINE_STAGES, ("train", "evaluate", "register")),
+    ],
+    ids=["feature", "training"],
+)
+def test_pipeline_stages_are_ordered_and_complete(
+    stages: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
     """DVC stages will mirror these; any change breaks the DVC pipeline."""
-    assert FEATURE_PIPELINE_STAGES == ("fetch", "engineer", "validate", "store")
-
-
-def test_training_pipeline_stages_are_ordered_and_complete() -> None:
-    """DVC stages will mirror these; any change breaks the DVC pipeline."""
-    assert TRAINING_PIPELINE_STAGES == ("train", "evaluate", "register")
+    assert stages == expected
 
 
 # ---------------------------------------------------------------------------
@@ -45,47 +52,49 @@ def test_training_pipeline_stages_are_ordered_and_complete() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_feature_monitoring_contract_covers_all_stages() -> None:
-    """Each feature-pipeline stage must have a monitoring contract section."""
-    stage_to_contract_key = {
-        "fetch": "ingest",
-        "engineer": "engineering",
-        "validate": "validation",
-        "store": "storage",
-    }
-    for stage in FEATURE_PIPELINE_STAGES:
-        contract_key = stage_to_contract_key.get(stage, stage)
-        assert contract_key in FEATURE_PIPELINE_METRIC_CONTRACT, (
-            f"Feature stage '{stage}' has no monitoring contract section "
+@pytest.mark.parametrize(
+    ("stages", "contract", "stage_map"),
+    [
+        (
+            FEATURE_PIPELINE_STAGES,
+            FEATURE_PIPELINE_METRIC_CONTRACT,
+            {
+                "fetch": "ingest",
+                "engineer": "engineering",
+                "validate": "validation",
+                "store": "storage",
+            },
+        ),
+        (
+            TRAINING_PIPELINE_STAGES,
+            TRAINING_PIPELINE_METRIC_CONTRACT,
+            {"train": "train", "evaluate": "evaluation", "register": "registration"},
+        ),
+    ],
+    ids=["feature", "training"],
+)
+def test_monitoring_contract_covers_all_stages(
+    stages: tuple[str, ...], contract: dict, stage_map: dict[str, str]
+) -> None:
+    """Each pipeline stage must have a monitoring contract section."""
+    for stage in stages:
+        contract_key = stage_map.get(stage, stage)
+        assert contract_key in contract, (
+            f"Stage '{stage}' has no monitoring contract section "
             f"(expected key '{contract_key}')"
         )
 
 
-def test_training_monitoring_contract_covers_all_stages() -> None:
-    """Each training-pipeline stage must have a monitoring contract section."""
-    stage_to_contract_key = {
-        "train": "train",
-        "evaluate": "evaluation",
-        "register": "registration",
-    }
-    for stage in TRAINING_PIPELINE_STAGES:
-        contract_key = stage_to_contract_key.get(stage, stage)
-        assert contract_key in TRAINING_PIPELINE_METRIC_CONTRACT, (
-            f"Training stage '{stage}' has no monitoring contract section "
-            f"(expected key '{contract_key}')"
-        )
-
-
-def test_feature_monitoring_run_contract_tracks_stage_durations_and_failures() -> None:
+@pytest.mark.parametrize(
+    "contract",
+    [FEATURE_PIPELINE_METRIC_CONTRACT, TRAINING_PIPELINE_METRIC_CONTRACT],
+    ids=["feature", "training"],
+)
+def test_monitoring_run_contract_tracks_stage_durations_and_failures(
+    contract: dict,
+) -> None:
     """Run-level summary must include stage tracking for duration and failure counts."""
-    run_fields = FEATURE_PIPELINE_METRIC_CONTRACT["run"]
-    assert "stage_durations_seconds" in run_fields
-    assert "stage_failure_counts" in run_fields
-
-
-def test_training_monitoring_run_contract_tracks_stage_durations_and_failures() -> None:
-    """Run-level summary must include stage tracking for duration and failure counts."""
-    run_fields = TRAINING_PIPELINE_METRIC_CONTRACT["run"]
+    run_fields = contract["run"]
     assert "stage_durations_seconds" in run_fields
     assert "stage_failure_counts" in run_fields
 
@@ -214,34 +223,37 @@ def test_dvc_pipeline_definition_exists() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_feature_dag_has_tasks_covering_all_stages() -> None:
-    """Each feature-pipeline stage must have a corresponding Airflow task."""
-    dag_source = read_repo_text("dags/feature_dag.py")
+@pytest.mark.parametrize(
+    ("dag_file", "task_map"),
+    [
+        (
+            "dags/feature_dag.py",
+            {
+                "fetch": "fetch_feature_inputs",
+                "engineer": "engineer_feature_set",
+                "validate": "validate_feature_set",
+                "store": "store_feature_set",
+            },
+        ),
+        (
+            "dags/training_dag.py",
+            {
+                "train": "train_model",
+                "evaluate": "evaluate_model",
+                "register": "register_model",
+            },
+        ),
+    ],
+    ids=["feature", "training"],
+)
+def test_dag_has_tasks_covering_all_stages(
+    dag_file: str, task_map: dict[str, str]
+) -> None:
+    """Each pipeline stage must have a corresponding Airflow task."""
+    dag_source = read_repo_text(dag_file)
 
-    expected_task_fragments = {
-        "fetch": "fetch_feature_inputs",
-        "engineer": "engineer_feature_set",
-        "validate": "validate_feature_set",
-        "store": "store_feature_set",
-    }
-    for stage, task_fragment in expected_task_fragments.items():
+    for stage, task_fragment in task_map.items():
         assert task_fragment in dag_source, (
-            f"Feature DAG is missing a task for stage '{stage}' "
-            f"(expected '{task_fragment}' in feature_dag.py)"
-        )
-
-
-def test_training_dag_has_tasks_covering_all_stages() -> None:
-    """Each training-pipeline stage must have a corresponding Airflow task."""
-    dag_source = read_repo_text("dags/training_dag.py")
-
-    expected_task_fragments = {
-        "train": "train_model",
-        "evaluate": "evaluate_model",
-        "register": "register_model",
-    }
-    for stage, task_fragment in expected_task_fragments.items():
-        assert task_fragment in dag_source, (
-            f"Training DAG is missing a task for stage '{stage}' "
-            f"(expected '{task_fragment}' in training_dag.py)"
+            f"DAG is missing a task for stage '{stage}' "
+            f"(expected '{task_fragment}' in {dag_file})"
         )
