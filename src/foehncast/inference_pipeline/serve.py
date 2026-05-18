@@ -137,6 +137,112 @@ def _metrics_payload() -> bytes:
     )
 
 
+def _parse_metrics_text(text: str) -> list[dict]:
+    """Parse Prometheus exposition text into a list of metric samples."""
+    import re
+
+    results: list[dict] = []
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{[^}]*\})?\s+(.+?)(\s+\d+)?$", line)
+        if not m:
+            continue
+        name = m.group(1)
+        labels_str = m.group(2) or ""
+        value = m.group(3)
+        labels: dict[str, str] = {"__name__": name}
+        if labels_str:
+            for lm in re.finditer(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"', labels_str):
+                labels[lm.group(1)] = lm.group(2)
+        results.append({"metric": labels, "value": [0, value]})
+    return results
+
+
+def _match_metric(metric: dict, matchers: list[tuple[str, str, str]]) -> bool:
+    """Check whether a metric sample matches all label matchers."""
+    import re as _re
+
+    for label, op, val in matchers:
+        actual = metric["metric"].get(label, "")
+        if op == "=" and actual != val:
+            return False
+        if op == "!=" and actual == val:
+            return False
+        if op == "=~" and not _re.fullmatch(val, actual):
+            return False
+        if op == "!~" and _re.fullmatch(val, actual):
+            return False
+    return True
+
+
+def _eval_instant_query(expr: str) -> list[dict]:
+    """Evaluate a simple PromQL instant query against the metrics payload.
+
+    Supports: ``metric_name``, ``metric_name{label="value",...}``, and the
+    wrapping functions ``max()``, ``clamp_max()``, ``1 - expr`` used by the
+    FoehnCast dashboards.  This is *not* a full PromQL engine — just enough
+    to serve the dozen queries our Grafana panels and UI issue.
+    """
+    import re as _re
+    import time
+
+    now = time.time()
+    text = _metrics_payload().decode("utf-8", errors="replace")
+    all_samples = _parse_metrics_text(text)
+
+    expr = expr.strip()
+
+    # Handle ``1 - <expr>`` wrapper
+    prefix_sub = _re.match(r"^(\d+(?:\.\d+)?)\s*-\s*(.+)$", expr)
+    if prefix_sub:
+        minuend = float(prefix_sub.group(1))
+        inner = _eval_instant_query(prefix_sub.group(2))
+        for s in inner:
+            s["value"] = [now, str(minuend - float(s["value"][1]))]
+        return inner
+
+    # Handle ``clamp_max(<expr>, <max>)``
+    clamp = _re.match(r"^clamp_max\((.+),\s*(\d+(?:\.\d+)?)\)$", expr)
+    if clamp:
+        inner = _eval_instant_query(clamp.group(1))
+        cap = float(clamp.group(2))
+        for s in inner:
+            s["value"] = [now, str(min(float(s["value"][1]), cap))]
+        return inner
+
+    # Handle ``max(<expr>)``
+    agg_max = _re.match(r"^max\((.+)\)$", expr)
+    if agg_max:
+        inner = _eval_instant_query(agg_max.group(1))
+        if not inner:
+            return []
+        best = max(inner, key=lambda s: float(s["value"][1]))
+        return [{"metric": {}, "value": [now, best["value"][1]]}]
+
+    # Base case: metric_name or metric_name{...}
+    m = _re.match(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(\{.*\})?$", expr)
+    if not m:
+        return []
+
+    name = m.group(1)
+    label_sel = m.group(2) or ""
+
+    matchers: list[tuple[str, str, str]] = [("__name__", "=", name)]
+    if label_sel:
+        for lm in _re.finditer(
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*(=~|!~|!=|=)\s*"([^"]*)"', label_sel
+        ):
+            matchers.append((lm.group(1), lm.group(2), lm.group(3)))
+
+    results = [
+        {"metric": s["metric"], "value": [now, s["value"][1]]}
+        for s in all_samples
+        if _match_metric(s, matchers)
+    ]
+    return results
+
+
 _HINDCAST_INTERVAL_SECONDS = 3600  # Run hindcast validation every hour.
 
 
@@ -241,6 +347,70 @@ def create_app() -> FastAPI:
             content=_metrics_payload(),
             headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
+
+    # ------------------------------------------------------------------
+    # Minimal Prometheus-compatible query API
+    # ------------------------------------------------------------------
+    # Allows Grafana and the UI to query this service directly using the
+    # standard ``/api/v1/query`` endpoint without needing a separate
+    # Prometheus server or GMP scraping infrastructure.
+    # ------------------------------------------------------------------
+
+    @app.get("/api/v1/query")
+    @app.post("/api/v1/query")
+    def prom_query(query: str = "") -> dict:
+        return {
+            "status": "success",
+            "data": {
+                "resultType": "vector",
+                "result": _eval_instant_query(query),
+            },
+        }
+
+    @app.get("/api/v1/query_range")
+    @app.post("/api/v1/query_range")
+    def prom_query_range(
+        query: str = "", start: str = "", end: str = "", step: str = ""
+    ) -> dict:
+        # Return the current instant values at each requested timestamp.
+        # This is sufficient for Grafana panels that display recent data.
+        results = _eval_instant_query(query)
+        matrix = []
+        for sample in results:
+            matrix.append(
+                {
+                    "metric": sample["metric"],
+                    "values": [sample["value"]],
+                }
+            )
+        return {
+            "status": "success",
+            "data": {
+                "resultType": "matrix",
+                "result": matrix,
+            },
+        }
+
+    @app.get("/api/v1/labels")
+    @app.post("/api/v1/labels")
+    def prom_labels() -> dict:
+        text = _metrics_payload().decode("utf-8", errors="replace")
+        samples = _parse_metrics_text(text)
+        labels: set[str] = set()
+        for s in samples:
+            labels.update(s["metric"].keys())
+        return {"status": "success", "data": sorted(labels)}
+
+    @app.get("/api/v1/label/{label_name}/values")
+    def prom_label_values(label_name: str) -> dict:
+        text = _metrics_payload().decode("utf-8", errors="replace")
+        samples = _parse_metrics_text(text)
+        values: set[str] = set()
+        for s in samples:
+            v = s["metric"].get(label_name, "")
+            if v:
+                values.add(v)
+        return {"status": "success", "data": sorted(values)}
 
     return app
 

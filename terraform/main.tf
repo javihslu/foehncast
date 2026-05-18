@@ -932,6 +932,10 @@ resource "google_cloud_run_v2_service" "grafana" {
         name  = "GF_SECURITY_ADMIN_PASSWORD"
         value = random_password.grafana_admin[0].result
       }
+      env {
+        name  = "GF_GOOGLE_SDK_AUTO_DETECT_CREDENTIALS"
+        value = "true"
+      }
     }
   }
 

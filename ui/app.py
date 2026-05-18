@@ -380,8 +380,12 @@ def _gcp_access_token() -> str | None:
         return None
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def _prom_query(expr: str) -> float | None:
     """Run an instant PromQL query and return the scalar value, or *None*.
+
+    Results are cached for 30 s to avoid redundant HTTP round-trips on
+    every Streamlit widget interaction.
 
     When the Prometheus URL points to a GMP endpoint (contains
     ``monitoring.googleapis.com``), an OAuth2 bearer token is attached
@@ -644,17 +648,6 @@ def _render_sidebar_ml_panels() -> None:
             "foehncast-rider",
             panel_id=304,
             from_range="now-1h",
-        )
-        st.iframe(url, height=120)
-
-    # --- Hindcast Accuracy (Grafana gauge embed) --------------------------
-    if _grafana_embedding_enabled() and hindcast_acc is not None:
-        st.caption("Hindcast Accuracy")
-        url = _grafana_solo_panel_url(
-            _ML_DASHBOARD_UID,
-            _ML_DASHBOARD_SLUG,
-            panel_id=551,
-            from_range="now-24h",
         )
         st.iframe(url, height=120)
 

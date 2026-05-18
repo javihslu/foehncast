@@ -8,3 +8,5 @@ datasources:
     isDefault: true
     uid: prometheus
     editable: false
+    jsonData:
+      httpMethod: GET

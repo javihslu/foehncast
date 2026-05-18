@@ -13,4 +13,8 @@ COPY --chown=grafana:root grafana_work/etc/grafana.ini /etc/grafana/grafana.ini
 COPY --chown=grafana:root grafana_work/etc/provisioning /etc/grafana/provisioning
 COPY --chown=grafana:root grafana_work/dashboards /opt/grafana/dashboards
 
+# Entrypoint that injects a GCP metadata token for GMP auth on Cloud Run.
+COPY --chown=grafana:root containers/grafana/entrypoint.sh /entrypoint.sh
+
 EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]
