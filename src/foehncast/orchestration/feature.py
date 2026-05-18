@@ -1,8 +1,7 @@
-"""High-level orchestration helpers for Airflow-managed ML jobs."""
+"""Feature pipeline orchestration: fetch, engineer, validate, store."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime
 import logging
 from pathlib import Path
@@ -19,11 +18,9 @@ from foehncast._json import read_json_file_if_exists, write_pretty_json
 from foehncast.config import (
     configure_mlflow_auth,
     get_mlflow_config,
-    get_mlflow_tracking_uri,
     get_spots,
     get_storage_config,
 )
-from foehncast.env import env_value
 from foehncast.feature_pipeline.engineer import engineer_features
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import read_features, write_features
@@ -33,25 +30,26 @@ from foehncast.monitoring.pipeline_metrics import (
     build_feature_pipeline_handoff_summary,
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
-    build_training_pipeline_run_summary,
     emit_feature_pipeline_run_summary,
-    emit_training_pipeline_run_summary,
-    read_training_pipeline_run_summary,
-    read_training_pipeline_run_summary_history,
 )
-from foehncast.pipeline_state import FeaturePipelineState, TrainingPipelineState
+from foehncast.orchestration._helpers import (
+    resolve_auto_retraining_mode,
+    scheduled_mlflow_tracking_uri,
+)
+from foehncast.paths import project_root
 from foehncast.pipeline_stage_tracking import (
     FEATURE_PIPELINE_STAGES,
-    TRAINING_PIPELINE_STAGES,
     increment_stage_failure,
     record_stage_duration,
 )
-from foehncast.paths import project_root
-from foehncast.training_pipeline.evaluate import generate_evaluation_report
-from foehncast.training_pipeline.register import promote_model, register_model
-from foehncast.training_pipeline.train import run_training_pipeline
+from foehncast.pipeline_state import FeaturePipelineState
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# State paths
+# ---------------------------------------------------------------------------
 
 
 def _feature_pipeline_state_root() -> Path:
@@ -78,6 +76,11 @@ def _feature_pipeline_stage_path(run_dir: Path, stage: str, spot_id: str) -> Pat
 
 def _feature_pipeline_validation_path(run_dir: Path, spot_id: str) -> Path:
     return run_dir / "validation" / f"{spot_id}.json"
+
+
+# ---------------------------------------------------------------------------
+# Frame I/O helpers
+# ---------------------------------------------------------------------------
 
 
 def _write_feature_pipeline_frame(destination: Path, frame: pd.DataFrame) -> None:
@@ -155,6 +158,11 @@ def _read_feature_pipeline_validation(source: Path) -> SimpleNamespace | None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Context helpers
+# ---------------------------------------------------------------------------
+
+
 def _copy_feature_pipeline_context(
     feature_context: FeaturePipelineState,
 ) -> FeaturePipelineState:
@@ -196,6 +204,11 @@ def _feature_pipeline_metric_count(
     if items_key in feature_result:
         return int(len(feature_result.get(items_key, [])))
     return None
+
+
+# ---------------------------------------------------------------------------
+# Result and summary
+# ---------------------------------------------------------------------------
 
 
 def _feature_pipeline_result(
@@ -334,6 +347,64 @@ def _emit_feature_pipeline_summary(
         training_request_stage=training_request_stage,
     )
     emit_feature_pipeline_run_summary(summary)
+
+
+# ---------------------------------------------------------------------------
+# Drift helpers (used within the feature store step)
+# ---------------------------------------------------------------------------
+
+
+def _feature_drift_frame(
+    frame: pd.DataFrame,
+    *,
+    spot_id: str,
+    dataset: str,
+) -> pd.DataFrame:
+    tagged = frame.copy()
+    tagged.attrs = {
+        **getattr(tagged, "attrs", {}),
+        "dataset_name": spot_id,
+        "dataset_version": dataset,
+    }
+    return tagged
+
+
+def _emit_feature_drift_metrics(
+    *,
+    spot_id: str,
+    dataset: str,
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+) -> bool:
+    if reference_df.empty or current_df.empty:
+        return False
+
+    try:
+        report = detect_data_drift(
+            _feature_drift_frame(reference_df, spot_id=spot_id, dataset=dataset),
+            _feature_drift_frame(current_df, spot_id=spot_id, dataset=dataset),
+        )
+        push_drift_metrics(report)
+        return report.dataset_drift
+    except Exception:
+        logger.exception(
+            "Failed to emit feature drift metrics for spot '%s' in dataset '%s'",
+            spot_id,
+            dataset,
+        )
+        return False
+
+
+def _read_optional_feature_slice(spot_id: str, dataset: str) -> pd.DataFrame:
+    try:
+        return read_features(spot_id=spot_id, dataset=dataset)
+    except Exception:
+        return pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline stages (Airflow task callables)
+# ---------------------------------------------------------------------------
 
 
 def _fetch_feature_pipeline_context_state(
@@ -652,7 +723,7 @@ def store_feature_pipeline_context(
 
 
 def _log_feature_pipeline_job_context(feature_result: dict[str, object]) -> None:
-    tracking_uri = _scheduled_mlflow_tracking_uri()
+    tracking_uri = scheduled_mlflow_tracking_uri()
     if tracking_uri is None:
         return
 
@@ -730,118 +801,9 @@ def store_feature_pipeline_job_context(
     return result
 
 
-def _read_optional_feature_slice(spot_id: str, dataset: str) -> pd.DataFrame:
-    try:
-        return read_features(spot_id=spot_id, dataset=dataset)
-    except FileNotFoundError:
-        return pd.DataFrame()
-    except Exception:
-        logger.exception(
-            "Failed to load prior stored features for drift monitoring on spot '%s'",
-            spot_id,
-        )
-        return pd.DataFrame()
-
-
-def _feature_drift_frame(
-    frame: pd.DataFrame,
-    *,
-    spot_id: str,
-    dataset: str,
-) -> pd.DataFrame:
-    tagged = frame.copy()
-    tagged.attrs = {
-        **getattr(tagged, "attrs", {}),
-        "dataset_name": spot_id,
-        "dataset_version": dataset,
-    }
-    return tagged
-
-
-def _emit_feature_drift_metrics(
-    *,
-    spot_id: str,
-    dataset: str,
-    reference_df: pd.DataFrame,
-    current_df: pd.DataFrame,
-) -> bool:
-    if reference_df.empty or current_df.empty:
-        return False
-
-    try:
-        report = detect_data_drift(
-            _feature_drift_frame(reference_df, spot_id=spot_id, dataset=dataset),
-            _feature_drift_frame(current_df, spot_id=spot_id, dataset=dataset),
-        )
-        push_drift_metrics(report)
-        return report.dataset_drift
-    except Exception:
-        logger.exception(
-            "Failed to emit feature drift metrics for spot '%s' in dataset '%s'",
-            spot_id,
-            dataset,
-        )
-        return False
-
-
-def resolve_airflow_schedule(
-    schedule: str | None, *, default: str | None = None
-) -> str | None:
-    """Normalize an Airflow schedule string, allowing explicit opt-out values."""
-    candidate = default if schedule is None else schedule
-    if candidate is None:
-        return None
-
-    normalized = candidate.strip()
-    if not normalized:
-        return None
-
-    if normalized.lower() in {"none", "off", "false", "manual"}:
-        return None
-
-    return normalized
-
-
-def resolve_auto_retraining_mode(
-    mode: str | None, *, default: str | None = "always"
-) -> str | None:
-    """Normalize Airflow auto-retraining mode values."""
-    candidate = default if mode is None else mode
-    if candidate is None:
-        return None
-
-    normalized = candidate.strip().lower()
-    if not normalized or normalized in {"none", "off", "false", "manual"}:
-        return None
-
-    if normalized in {"always", "new-data", "new_data", "on-success", "on_success"}:
-        return "always"
-
-    if normalized in {"drift", "drift-only", "drift_only"}:
-        return "drift"
-
-    raise ValueError(
-        "Unsupported auto retraining mode. Use 'always', 'drift', or 'off'."
-    )
-
-
-def should_auto_retrain(
-    feature_result: dict[str, object], mode: str | None = "always"
-) -> bool:
-    """Return whether the Airflow feature refresh should continue into retraining."""
-    resolved_mode = resolve_auto_retraining_mode(mode, default="always")
-    if resolved_mode is None:
-        return False
-
-    stored_spots = [
-        str(spot_id).strip()
-        for spot_id in feature_result.get("stored_spots", [])
-        if str(spot_id).strip()
-    ]
-    if resolved_mode == "always":
-        return bool(stored_spots)
-
-    return bool(feature_result.get("dataset_drift_detected", False))
+# ---------------------------------------------------------------------------
+# Convenience runners (all-in-one)
+# ---------------------------------------------------------------------------
 
 
 def _run_feature_pipeline_result(
@@ -869,14 +831,9 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
     return list(_run_feature_pipeline_result(dataset=dataset)["stored_spots"])
 
 
-def _scheduled_mlflow_tracking_uri() -> str | None:
-    tracking_uri = env_value("MLFLOW_TRACKING_URI")
-    return tracking_uri or None
-
-
 def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
     """Run the feature pipeline and optionally log a refresh run to MLflow."""
-    tracking_uri = _scheduled_mlflow_tracking_uri()
+    tracking_uri = scheduled_mlflow_tracking_uri()
     if tracking_uri is None:
         return run_feature_pipeline(dataset=dataset)
 
@@ -911,352 +868,3 @@ def run_feature_pipeline_job_context(
     )
     _log_feature_pipeline_job_context(result)
     return result
-
-
-def _training_summary_state(
-    *,
-    dataset: str,
-    requested_stage: str,
-    training_run_id: str | None = None,
-) -> TrainingPipelineState:
-    summary: dict[str, Any] = {}
-
-    try:
-        latest_summary = read_training_pipeline_run_summary(dataset)
-    except FileNotFoundError:
-        latest_summary = {}
-
-    if not training_run_id or latest_summary.get("training_run_id") in {
-        None,
-        training_run_id,
-    }:
-        summary = latest_summary
-    else:
-        try:
-            summary_history = read_training_pipeline_run_summary_history(dataset)
-        except FileNotFoundError:
-            summary_history = []
-
-        for candidate in reversed(summary_history):
-            if candidate.get("training_run_id") == training_run_id:
-                summary = candidate
-                break
-
-    return TrainingPipelineState.from_summary(
-        dataset=dataset,
-        requested_stage=requested_stage,
-        summary=summary,
-        training_run_id=training_run_id,
-    )
-
-
-def _emit_training_summary(
-    training_state: TrainingPipelineState,
-    *,
-    run_status: str,
-    error: str | None = None,
-) -> None:
-    summary = build_training_pipeline_run_summary(
-        **training_state.to_summary_payload(),
-        run_status=run_status,
-        error=error,
-    )
-    emit_training_pipeline_run_summary(summary)
-
-
-def _run_training_stage(
-    training_state: TrainingPipelineState,
-    *,
-    stage: str,
-    success_status: str,
-    action: Callable[[], Any],
-) -> Any:
-    started_at = perf_counter()
-
-    try:
-        result = action()
-    except Exception as exc:
-        increment_stage_failure(
-            training_state,
-            stage=stage,
-            stage_names=TRAINING_PIPELINE_STAGES,
-        )
-        record_stage_duration(
-            training_state,
-            stage=stage,
-            started_at=started_at,
-        )
-        _emit_training_summary(training_state, run_status="failed", error=str(exc))
-        raise
-
-    record_stage_duration(
-        training_state,
-        stage=stage,
-        started_at=started_at,
-    )
-    _emit_training_summary(training_state, run_status=success_status)
-    return result
-
-
-def _training_run_metrics_and_params(
-    training_run_id: str,
-) -> tuple[dict[str, float], dict[str, str]]:
-    run = mlflow.MlflowClient().get_run(training_run_id)
-    raw_metrics = dict(getattr(run.data, "metrics", {}))
-    raw_params = dict(getattr(run.data, "params", {}))
-    metrics = {str(name): float(value) for name, value in raw_metrics.items()}
-    params = {str(name): str(value) for name, value in raw_params.items()}
-    return metrics, params
-
-
-def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
-    metrics, params = _training_run_metrics_and_params(training_run_id)
-
-    def _metric_count(name: str) -> int | None:
-        value = metrics.get(name)
-        return None if value is None else int(value)
-
-    return {
-        "run_metrics": metrics,
-        "training_row_count": _metric_count("training_input_row_count"),
-        "training_feature_count": _metric_count("training_feature_count"),
-        "train_row_count": _metric_count("training_train_row_count"),
-        "test_row_count": _metric_count("training_test_row_count"),
-        "registered_model_name": params.get("model_name"),
-    }
-
-
-def run_training_pipeline_step(
-    dataset: str = "train",
-    requested_stage: str = "Candidate",
-) -> str:
-    """Train the model and persist the latest step-level training summary."""
-    # Start a fresh training summary: the "train" stage is the first step of a
-    # new training run, so any persisted stage_failure_counts /
-    # stage_durations_seconds from prior runs must not bleed into the new
-    # run's stage_states (otherwise a one-off historical failure would keep
-    # the rail's train pill stuck at "failed" forever).
-    training_state = TrainingPipelineState.from_summary(
-        dataset=dataset,
-        requested_stage=requested_stage,
-        summary={},
-    )
-
-    def _run() -> str:
-        training_run_id = run_training_pipeline(dataset=dataset)
-        training_state.merge_run_snapshot(_training_run_snapshot(training_run_id))
-        training_state.training_run_id = training_run_id
-        return training_run_id
-
-    return _run_training_stage(
-        training_state,
-        stage="train",
-        success_status="running",
-        action=_run,
-    )
-
-
-def evaluate_training_run(
-    training_run_id: str,
-    dataset: str = "train",
-    requested_stage: str = "Candidate",
-) -> str:
-    """Resume a training run, log evaluation metrics, and return the report path."""
-    training_state = _training_summary_state(
-        dataset=dataset,
-        requested_stage=requested_stage,
-        training_run_id=training_run_id,
-    )
-
-    def _run() -> str:
-        mlflow.set_tracking_uri(get_mlflow_tracking_uri())
-        configure_mlflow_auth()
-        metrics, _ = _training_run_metrics_and_params(training_run_id)
-        if not metrics:
-            raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")
-
-        report_dir = project_root() / "airflow" / "reports"
-        report_path = report_dir / f"evaluation-{training_run_id}.md"
-
-        with mlflow.start_run(run_id=training_run_id):
-            resolved_report_path = generate_evaluation_report(metrics, str(report_path))
-
-        training_state.training_run_id = training_run_id
-        training_state.run_metrics = metrics
-        training_state.evaluation_report_path = resolved_report_path
-        training_state.evaluation_report_exists = Path(resolved_report_path).exists()
-        return resolved_report_path
-
-    return _run_training_stage(
-        training_state,
-        stage="evaluate",
-        success_status="running",
-        action=_run,
-    )
-
-
-def register_training_run(
-    training_run_id: str,
-    stage: str = "Candidate",
-    dataset: str = "train",
-) -> str:
-    """Register a training run's model and assign the requested registry alias."""
-    training_state = _training_summary_state(
-        dataset=dataset,
-        requested_stage=stage,
-        training_run_id=training_run_id,
-    )
-
-    def _run() -> str:
-        model_version = register_model(training_run_id)
-        promote_model(None, model_version.version, stage=stage)
-        training_state.training_run_id = training_run_id
-        training_state.registered_model_name = get_mlflow_config()["model_name"]
-        training_state.registered_model_version = str(model_version.version)
-        return str(model_version.version)
-
-    return _run_training_stage(
-        training_state,
-        stage="register",
-        success_status="succeeded",
-        action=_run,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Inference pipeline
-# ---------------------------------------------------------------------------
-
-
-def run_inference_pipeline_step() -> dict[str, Any]:
-    """Run inference for all configured spots and write the prediction log.
-
-    Designed as an Airflow-callable: loads the champion model, calls
-    ``predict_spots()`` for every configured spot, appends the prediction
-    log, and emits drift metrics.  Returns the prediction payload dict.
-    """
-    from foehncast.inference_pipeline.predict import predict_spots
-    from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
-
-    log = logging.getLogger(__name__)
-    log.info("Scheduled inference: running predictions for all spots")
-    prediction_payload = predict_spots(spot_ids=None)
-
-    n_spots = len(prediction_payload.get("predictions", []))
-    model_version = prediction_payload.get("model_version", "unknown")
-    log.info(
-        "Scheduled inference: %d spots predicted with model v%s",
-        n_spots,
-        model_version,
-    )
-
-    emit_prediction_drift_metrics(
-        prediction_payload,
-        endpoint="scheduled",
-    )
-    log.info("Scheduled inference: prediction log and drift metrics updated")
-    return prediction_payload
-
-
-# ---------------------------------------------------------------------------
-# Drift detection pipeline
-# ---------------------------------------------------------------------------
-
-
-def run_feature_drift_detection_step(
-    dataset: str = "train",
-) -> dict[str, Any]:
-    """Detect data drift across all configured spots.
-
-    Loads the curated feature store for each spot, splits into reference
-    and current windows, runs ``detect_data_drift()``, and pushes StatsD
-    metrics.  Returns a summary dict suitable for Airflow XCom.
-    """
-    log = logging.getLogger(__name__)
-    spots = get_spots()
-    spot_ids = [spot["id"] for spot in spots]
-    drifted_spots: list[str] = []
-    checked_spots: list[str] = []
-    errors: dict[str, str] = {}
-
-    for spot_id in spot_ids:
-        try:
-            features_df = _read_optional_feature_slice(spot_id, dataset)
-            if features_df.empty or len(features_df) < 2:
-                log.info("Drift check: skipping spot '%s' — insufficient data", spot_id)
-                continue
-
-            midpoint = len(features_df) // 2
-            reference_df = features_df.iloc[:midpoint].copy()
-            current_df = features_df.iloc[midpoint:].copy()
-
-            if _emit_feature_drift_metrics(
-                spot_id=spot_id,
-                dataset=dataset,
-                reference_df=reference_df,
-                current_df=current_df,
-            ):
-                drifted_spots.append(spot_id)
-
-            checked_spots.append(spot_id)
-        except Exception as exc:
-            log.exception(
-                "Drift check: failed for spot '%s' in dataset '%s'",
-                spot_id,
-                dataset,
-            )
-            errors[spot_id] = str(exc)
-
-    log.info(
-        "Feature drift check: %d/%d spots checked, %d drifted",
-        len(checked_spots),
-        len(spot_ids),
-        len(drifted_spots),
-    )
-    return {
-        "dataset": dataset,
-        "checked_spots": checked_spots,
-        "drifted_spots": drifted_spots,
-        "errors": errors,
-    }
-
-
-def run_prediction_drift_detection_step() -> dict[str, Any]:
-    """Detect prediction drift from the logged prediction history.
-
-    Loads the prediction event log, runs ``detect_prediction_drift()``,
-    and pushes StatsD metrics.  Returns a summary dict.
-    """
-    from foehncast.monitoring.prediction_log import (
-        read_prediction_history,
-    )
-
-    log = logging.getLogger(__name__)
-    try:
-        predictions_log = read_prediction_history(None)
-        if predictions_log.empty or len(predictions_log) < 2:
-            log.info("Prediction drift check: insufficient prediction history")
-            return {"prediction_drift": None, "reason": "insufficient_data"}
-
-        predictions_log.attrs.update(
-            {"dataset_name": "inference_predictions", "dataset_version": "v1"}
-        )
-        from foehncast.monitoring.drift import detect_prediction_drift
-
-        report = detect_prediction_drift(predictions_log)
-        push_drift_metrics(report)
-        log.info(
-            "Prediction drift check: drift=%s, drifted_columns=%d/%d",
-            report.dataset_drift,
-            report.drifted_column_count,
-            report.column_count,
-        )
-        return {
-            "prediction_drift": report.dataset_drift,
-            "drifted_column_count": report.drifted_column_count,
-            "column_count": report.column_count,
-            "share_of_drifted_columns": report.share_of_drifted_columns,
-        }
-    except Exception as exc:
-        log.exception("Prediction drift check failed")
-        return {"prediction_drift": None, "error": str(exc)}
