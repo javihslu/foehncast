@@ -490,6 +490,7 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
     monkeypatch.setattr(_orch_feature, "mlflow", _FeatureJobMlflow(logged))
+    monkeypatch.setattr(_orch_feature, "configure_mlflow_auth", lambda: None)
     monkeypatch.setattr(
         _orch_feature,
         "get_mlflow_config",
@@ -527,6 +528,7 @@ def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
 
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://mlflow.example.com")
     monkeypatch.setattr(_orch_feature, "mlflow", _FeatureJobMlflow(logged))
+    monkeypatch.setattr(_orch_feature, "configure_mlflow_auth", lambda: None)
     monkeypatch.setattr(
         _orch_feature,
         "get_mlflow_config",
