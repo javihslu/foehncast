@@ -84,10 +84,13 @@ def _hourly_to_dataframe(
     return df
 
 
-def fetch_forecast(lat: float, lon: float) -> pd.DataFrame:
+def fetch_forecast(lat: float, lon: float, *, past_days: int = 0) -> pd.DataFrame:
     """Fetch forecast data for a location.
 
     Returns hourly weather data for the configured forecast horizon.
+    When ``past_days`` is positive, Open-Meteo also returns the most recent
+    observed/analysed hours, so callers can render past + future on a
+    single timeline.
     """
     cfg = get_api_config()["open_meteo"]
     params = {
@@ -98,6 +101,8 @@ def fetch_forecast(lat: float, lon: float) -> pd.DataFrame:
         "timezone": cfg["timezone"],
         "wind_speed_unit": cfg.get("wind_speed_unit", "kmh"),
     }
+    if past_days > 0:
+        params["past_days"] = past_days
     data = _get(cfg["forecast_url"], params)
     return _hourly_to_dataframe(data, timezone=cfg["timezone"])
 
