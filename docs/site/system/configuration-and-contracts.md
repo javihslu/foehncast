@@ -91,9 +91,9 @@ The checked-in `.env.example` shows the kind of values that belong in runtime wi
 | Monitoring history path | `FOEHNCAST_PREDICTION_EVENT_LOG_PATH` |
 | Feast runtime binding | `FOEHNCAST_FEAST_SOURCE`, `FOEHNCAST_FEAST_REPO_PATH`, `FOEHNCAST_FEAST_CONFIG_PATH`, `FOEHNCAST_FEAST_BIGQUERY_*`, `FOEHNCAST_FEAST_DATASTORE_*` |
 
-These values describe one concrete runtime instance. They should stay overridable because the local evaluator, hosted full-stack target, and hosted inference target do not all bind to the same services.
+These values describe one concrete runtime instance. They should stay overridable because the local evaluator, shared API lane, and hosted operator surfaces do not all bind to the same services.
 
-In the shared hosted path, the full-stack target represents the active operator lane. That lane is a retained operator surface, so the runtime wiring should stay explicit instead of being treated as a permanent deployment shape.
+In the shared hosted path, the operator surfaces stay intentionally smaller than the local evaluator. Their runtime wiring should stay explicit instead of being treated as a permanent deployment shape.
 
 ## Cloud Runtime Inventory
 

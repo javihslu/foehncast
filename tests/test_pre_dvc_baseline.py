@@ -173,7 +173,7 @@ def test_ci_compose_job_runs_smoke_after_build() -> None:
 
 
 def test_hosted_dag_bundle_contains_feature_and_training_dags() -> None:
-    """Cloud Composer receives the same DAG files that the local evaluator uses."""
+    """The hosted docs still point at the same DAG sources as the local evaluator."""
     feature_dag = Path("dags/feature_dag.py")
     training_dag = Path("dags/training_dag.py")
 

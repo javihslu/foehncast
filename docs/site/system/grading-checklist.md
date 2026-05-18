@@ -15,7 +15,7 @@ FoehnCast follows a Feature-Training-Inference (FTI) split with clear module bou
 | Containerized services | 8 container definitions in `containers/` (Airflow, MLflow, app, UI, monitoring, development) |
 | Modular Compose with includes | `docker-compose.yml` includes from `docker_includes/` and `containers/` |
 | Local and cloud runtime lanes | `scripts/bootstrap-local.sh` (local), `scripts/bootstrap-gcp.sh` + Terraform (cloud) |
-| Cloud Run serving + Cloud Composer orchestration | `terraform/main.tf`, `.github/workflows/publish-app-image.yml` |
+| Cloud Run serving + hosted cloud automation | `terraform/main.tf`, `.github/workflows/publish-app-image.yml` |
 | Storage abstraction (S3/BigQuery) | `src/foehncast/feature_pipeline/store.py` with backend selection |
 
 **Docs**: [Architecture](architecture.md), [Cloud Mapping](cloud-mapping.md)
@@ -28,8 +28,8 @@ CI/CD, infrastructure-as-code, and pipeline scheduling run without manual steps 
 |-------|----------|
 | CI pipeline (7 jobs) | `.github/workflows/ci.yml` — shell, lint, terraform, dvc, compose, test, docs |
 | Automated image publishing | `.github/workflows/publish-app-image.yml`, `publish-runtime-images.yml` |
-| DAG bundle publishing to Composer | `.github/workflows/publish-composer-dags.yml` |
-| Runtime release trigger | `.github/workflows/trigger-runtime-release.yml` |
+| Hosted automation provisioning | `terraform/main.tf`, `.github/workflows/terraform.yml` |
+| Runtime release handoff | `scripts/trigger-runtime-release.sh`, `dags/runtime_release_dag.py`, `.github/workflows/promote-candidate.yml`, `.github/workflows/rollback-live-release.yml` |
 | Infrastructure-as-code (Terraform) | `terraform/main.tf`, `terraform/providers.tf`, `terraform/outputs.tf`, `terraform/versions.tf` |
 | Cloud Build configs | 4 configs in `cloudbuild/` |
 | Bootstrap scripts | `scripts/bootstrap-local.sh`, `scripts/bootstrap-gcp.sh` (19 scripts total) |
@@ -37,7 +37,7 @@ CI/CD, infrastructure-as-code, and pipeline scheduling run without manual steps 
 | Asset-triggered inference | Training DAG registers model → Inference DAG auto-runs |
 | Pre-commit hooks | `.pre-commit-config.yaml` — 8 hooks including ruff lint and format |
 
-**Docs**: [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Composer DAG Validation](composer-dag-validation.md)
+**Docs**: [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Cloud Architecture](cloud-architecture.md)
 
 ## Reproducibility (20%)
 

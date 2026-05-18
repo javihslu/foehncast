@@ -508,7 +508,7 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
         in summary_step["run"]
     )
     assert (
-        'echo "- Next step: run Trigger Runtime Release with action deploy_candidate and this immutable image URI"'
+        'echo "- Next step: use the reviewed runtime release handoff with action deploy_candidate and this immutable image URI"'
         in summary_step["run"]
     )
 
@@ -620,7 +620,7 @@ def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> N
         in blocked_step["run"]
     )
     assert (
-        "Use Trigger Runtime Release with action promote_candidate"
+        "Use the reviewed runtime release handoff with action promote_candidate"
         in blocked_step["run"]
     )
 
@@ -703,7 +703,8 @@ def test_rollback_live_release_workflow_redirects_to_runtime_trigger_contract() 
         in blocked_step["run"]
     )
     assert (
-        "Use Trigger Runtime Release with action rollback_live" in blocked_step["run"]
+        "Use the reviewed runtime release handoff with action rollback_live"
+        in blocked_step["run"]
     )
 
 

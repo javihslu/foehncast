@@ -112,7 +112,7 @@ jobs:
             echo "- Target alias: $TARGET_ALIAS"
             echo
             echo "GitHub Actions no longer restores live runtime state directly."
-            echo "Use Trigger Runtime Release with action rollback_live so GitHub sends one reviewed request into hosted Airflow."
+            echo "Use the reviewed runtime release handoff with action rollback_live so the request goes through the configured Airflow API path."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'Live rollback is no longer executed directly from GitHub Actions. Use Trigger Runtime Release with action rollback_live instead.' >&2
+          echo 'Live rollback is no longer executed directly from GitHub Actions. Use the reviewed runtime release handoff with action rollback_live instead.' >&2
           exit 1

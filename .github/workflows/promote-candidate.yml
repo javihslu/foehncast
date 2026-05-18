@@ -97,7 +97,7 @@ jobs:
             echo "- Target alias: $TARGET_ALIAS"
             echo
             echo "GitHub Actions no longer promotes live runtime state directly."
-            echo "Use Trigger Runtime Release with action promote_candidate so GitHub sends one reviewed request into hosted Airflow."
+            echo "Use the reviewed runtime release handoff with action promote_candidate so the request goes through the configured Airflow API path."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo 'Candidate promotion is no longer executed directly from GitHub Actions. Use Trigger Runtime Release with action promote_candidate instead.' >&2
+          echo 'Candidate promotion is no longer executed directly from GitHub Actions. Use the reviewed runtime release handoff with action promote_candidate instead.' >&2
           exit 1

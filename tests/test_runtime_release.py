@@ -108,12 +108,12 @@ def test_normalize_runtime_release_request_tracks_airflow_targets() -> None:
         {
             "action": "promote_candidate",
             "requested_airflow_target": "AUTO",
-            "selected_airflow_target": "COMPOSER_AIRFLOW",
+            "selected_airflow_target": "LOCAL_AIRFLOW",
         }
     )
 
     assert request["requested_airflow_target"] == "auto"
-    assert request["selected_airflow_target"] == "composer_airflow"
+    assert request["selected_airflow_target"] == "local_airflow"
 
 
 def test_runtime_release_request_from_env_builds_normalized_payload() -> None:
@@ -126,7 +126,7 @@ def test_runtime_release_request_from_env_builds_normalized_payload() -> None:
             "GITHUB_RUN_ID": "42",
             "GITHUB_SHA": "abc123",
             "REQUESTED_AIRFLOW_TARGET": "AUTO",
-            "AIRFLOW_TARGET": "COMPOSER_AIRFLOW",
+            "AIRFLOW_TARGET": "LOCAL_AIRFLOW",
             "CANDIDATE_ALIAS": "Candidate",
         },
         requested_at="2026-05-16T12:00:00+00:00",
@@ -139,7 +139,7 @@ def test_runtime_release_request_from_env_builds_normalized_payload() -> None:
         == "https://github.com/javihslu/foehncast/actions/runs/42"
     )
     assert request["requested_airflow_target"] == "auto"
-    assert request["selected_airflow_target"] == "composer_airflow"
+    assert request["selected_airflow_target"] == "local_airflow"
     assert request["candidate_alias"] == "candidate"
 
 
@@ -155,7 +155,7 @@ def test_write_runtime_release_request_file_persists_normalized_payload(
             "GITHUB_WORKFLOW": "Trigger Runtime Release",
             "GITHUB_RUN_ID": "99",
             "GITHUB_SHA": "def456",
-            "REQUESTED_AIRFLOW_TARGET": "composer_airflow",
+            "REQUESTED_AIRFLOW_TARGET": "local_airflow",
             "IMAGE_URI": "europe-west6-docker.pkg.dev/demo/foehncast/foehncast-app:sha-123",
         },
         requested_at="2026-05-16T12:05:00+00:00",
@@ -164,8 +164,8 @@ def test_write_runtime_release_request_file_persists_normalized_payload(
     request = json.loads(request_path.read_text(encoding="utf-8"))
     assert request["action"] == "deploy_candidate"
     assert request["requested_at"] == "2026-05-16T12:05:00+00:00"
-    assert request["requested_airflow_target"] == "composer_airflow"
-    assert request["selected_airflow_target"] == "composer_airflow"
+    assert request["requested_airflow_target"] == "local_airflow"
+    assert request["selected_airflow_target"] == "local_airflow"
     assert request["image_uri"]
 
 
@@ -207,7 +207,7 @@ def test_main_normalize_request_prints_normalized_payload(
             {
                 "action": "PROMOTE_CANDIDATE",
                 "requested_airflow_target": "AUTO",
-                "selected_airflow_target": "Composer_Airflow",
+                "selected_airflow_target": "Local_Airflow",
                 "candidate_alias": "Candidate",
                 "target_alias": "Champion",
                 "github_repository": "javihslu/foehncast",
@@ -229,7 +229,7 @@ def test_main_normalize_request_prints_normalized_payload(
     payload = json.loads(capsys.readouterr().out)
     assert payload["action"] == "promote_candidate"
     assert payload["requested_airflow_target"] == "auto"
-    assert payload["selected_airflow_target"] == "composer_airflow"
+    assert payload["selected_airflow_target"] == "local_airflow"
     assert payload["candidate_alias"] == "candidate"
     assert payload["target_alias"] == "champion"
 
@@ -369,7 +369,7 @@ def test_build_runtime_release_summary_normalizes_deploy_candidate_request() -> 
         {
             "action": "DEPLOY_CANDIDATE",
             "requested_airflow_target": "auto",
-            "selected_airflow_target": "composer_airflow",
+            "selected_airflow_target": "local_airflow",
             "image_uri": "europe-west6-docker.pkg.dev/demo/foehncast/foehncast-app:sha-123",
             "candidate_revision_tag": "Candidate",
             "candidate_alias": "Candidate",
@@ -390,9 +390,9 @@ def test_build_runtime_release_summary_normalizes_deploy_candidate_request() -> 
     assert summary["target_alias"] == "champion"
     assert summary["dag_id"] == "runtime_release"
     assert summary["dag_run_id"] == "runtime_release__2026-05-14T10-00-00Z"
-    assert summary["runtime_receiver"] == "hosted_airflow"
+    assert summary["runtime_receiver"] == "airflow_api"
     assert summary["requested_airflow_target"] == "auto"
-    assert summary["selected_airflow_target"] == "composer_airflow"
+    assert summary["selected_airflow_target"] == "local_airflow"
 
 
 def test_build_runtime_release_summary_requires_rollback_coordinates() -> None:
@@ -412,9 +412,9 @@ def test_write_runtime_release_summary_persists_latest_and_history(
     summary = {
         "generated_at": "2026-05-14T11:00:00+00:00",
         "state": "accepted",
-        "runtime_receiver": "hosted_airflow",
+        "runtime_receiver": "airflow_api",
         "requested_airflow_target": "auto",
-        "selected_airflow_target": "composer_airflow",
+        "selected_airflow_target": "local_airflow",
         "dag_id": "runtime_release",
         "dag_run_id": "runtime_release__2026-05-14T11-00-00Z",
         "action": "promote_candidate",
@@ -441,7 +441,7 @@ def test_write_runtime_release_summary_persists_latest_and_history(
     assert (
         _read_json(latest_path)["dag_run_id"] == "runtime_release__2026-05-14T11-00-00Z"
     )
-    assert _read_json(latest_path)["selected_airflow_target"] == "composer_airflow"
+    assert _read_json(latest_path)["selected_airflow_target"] == "local_airflow"
     history_paths = runtime_release.runtime_release_summary_history_paths()
     assert len(history_paths) == 1
     assert history_paths[0].name == "runtime-release-20260514T110000000000Z.json"
@@ -479,9 +479,9 @@ def test_write_runtime_release_summary_supports_gcs_location(
     summary = {
         "generated_at": "2026-05-14T11:00:00+00:00",
         "state": "accepted",
-        "runtime_receiver": "hosted_airflow",
+        "runtime_receiver": "airflow_api",
         "requested_airflow_target": "auto",
-        "selected_airflow_target": "composer_airflow",
+        "selected_airflow_target": "local_airflow",
         "dag_id": "runtime_release",
         "dag_run_id": "runtime_release__2026-05-14T11-00-00Z",
         "action": "promote_candidate",

@@ -1,6 +1,6 @@
 # Inference Pipeline
 
-FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs locally, on Cloud Run, and on the private operator lane. Cloud Run is the shared public API. The operator-lane app stays private for internal checks.
+FoehnCast keeps inference inside the application layer. The same FastAPI serving contract runs locally and on Cloud Run. Internal checks and hosted automation reuse that contract without creating a separate rider-facing surface.
 
 This page describes what the running app owns and what stays optional or operator-controlled.
 
@@ -172,8 +172,8 @@ This keeps the prediction-event history populated even when no rider requests ar
 |------|---------------------|
 | Local evaluator | FastAPI app serves predictions from locally-registered MLflow model; the `inference_pipeline` DAG runs batch predictions after model registration |
 | Cloud Run | shared public API with the same serving contract |
-| Cloud Composer | scheduled inference DAG runs batch predictions after model registration |
-| Private operator host | internal checks next to other hosted operator services |
+| Cloud Workflows + Scheduler | hosted automation can coordinate scheduled refreshes without changing the FastAPI serving contract |
+| Hosted operator surfaces | private checks and tracking stay separate from the rider-facing API |
 
 See [Architecture](architecture.md) for the lane summary and [Hosted Full-Stack](hosted-full-stack.md) for the hosted exposure and transition rules.
 
