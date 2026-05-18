@@ -42,7 +42,7 @@ _RIDER_GRAFANA = {
     "uid": "foehncast-rider",
     "slug": "foehncast-rider",
     "from": "now-12h",
-    "refresh": "30s",
+    "refresh": "2m",
     "height": 1560,
 }
 _PIPELINE_GRAFANA = {
@@ -55,7 +55,7 @@ _PIPELINE_GRAFANA = {
     "uid": "foehncast-operations",
     "slug": "foehncast-operations",
     "from": "now-24h",
-    "refresh": "30s",
+    "refresh": "2m",
     "height": 1840,
 }
 _ML_DASHBOARD_UID = "foehncast-ml-diagnostics"
@@ -1171,7 +1171,24 @@ def _render_rider_console(
 
 @st.fragment
 def _render_system_tab() -> None:
-    """System tab: rider live conditions + operations + ML diagnostics dashboards."""
+    """System tab: rider live conditions + operations + ML diagnostics dashboards.
+
+    The embedded Grafana dashboards are heavy; we gate them behind a one-time
+    toggle so the Rider Console stays snappy on Cloud Run. Streamlit renders
+    both tab bodies on every script run, so without this gate the iframes
+    would load even when the rider tab is active.
+    """
+    if not st.session_state.get("system_tab_loaded"):
+        st.info(
+            "Monitoring dashboards load on demand to keep the rider tab fast. "
+            "Click below to load them — they will stay loaded for the rest of "
+            "this session."
+        )
+        if st.button("Load monitoring dashboards", type="primary"):
+            st.session_state["system_tab_loaded"] = True
+            st.rerun(scope="fragment")
+        return
+
     _render_monitoring_tab(_RIDER_GRAFANA)
     st.divider()
     _render_monitoring_tab(_PIPELINE_GRAFANA)
@@ -1187,7 +1204,7 @@ def _render_system_tab() -> None:
         "uid": _ML_DASHBOARD_UID,
         "slug": _ML_DASHBOARD_SLUG,
         "from": "now-24h",
-        "refresh": "30s",
+        "refresh": "5m",
         "height": 2200,
     }
     _render_monitoring_tab(ml_config)
