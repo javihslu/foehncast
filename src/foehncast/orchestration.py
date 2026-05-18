@@ -17,6 +17,7 @@ import pandas as pd
 
 from foehncast._json import read_json_file_if_exists, write_pretty_json
 from foehncast.config import (
+    configure_mlflow_auth,
     get_mlflow_config,
     get_mlflow_tracking_uri,
     get_spots,
@@ -656,6 +657,7 @@ def _log_feature_pipeline_job_context(feature_result: dict[str, object]) -> None
         return
 
     mlflow.set_tracking_uri(tracking_uri)
+    configure_mlflow_auth()
     mlflow.set_experiment(get_mlflow_config()["experiment_name"])
 
     metrics: dict[str, float] = {}
@@ -879,6 +881,7 @@ def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
         return run_feature_pipeline(dataset=dataset)
 
     mlflow.set_tracking_uri(tracking_uri)
+    configure_mlflow_auth()
     mlflow.set_experiment(get_mlflow_config()["experiment_name"])
 
     with mlflow.start_run(run_name=f"feature-{dataset}-refresh"):
@@ -1061,6 +1064,7 @@ def evaluate_training_run(
 
     def _run() -> str:
         mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+        configure_mlflow_auth()
         metrics, _ = _training_run_metrics_and_params(training_run_id)
         if not metrics:
             raise ValueError(f"No evaluation metrics found for run '{training_run_id}'")

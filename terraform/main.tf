@@ -1376,6 +1376,14 @@ resource "google_project_iam_member" "workflows_run_developer" {
   member  = "serviceAccount:${google_service_account.workflows[0].email}"
 }
 
+resource "google_project_iam_member" "workflows_log_writer" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.workflows[0].email}"
+}
+
 resource "google_workflows_workflow" "pipeline_cascade" {
   count = var.provision_cloud_workflows ? 1 : 0
 
