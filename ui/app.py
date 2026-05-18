@@ -12,13 +12,20 @@ from urllib.parse import urlencode
 
 import streamlit as st
 
+import altair as alt
+import pandas as pd
+
+from foehncast.config import get_model_config, get_rider_config, get_spots
+from foehncast.feature_pipeline.engineer import engineer_features
+from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.inference_pipeline.dashboard import (
-    build_forecast_frame,
-    build_ranking_frame,
-    horizon_caption,
     list_dashboard_spots,
     load_dashboard_data,
 )
+from foehncast.inference_pipeline.predict import (
+    get_serving_model_alias,
+)
+from foehncast.training_pipeline.register import get_model_by_alias
 
 st.set_page_config(
     page_title="FoehnCast Rider Console",
@@ -35,7 +42,7 @@ _RIDER_GRAFANA = {
     "uid": "foehncast-rider",
     "slug": "foehncast-rider",
     "from": "now-12h",
-    "refresh": "30s",
+    "refresh": "2m",
     "height": 1560,
 }
 _PIPELINE_GRAFANA = {
@@ -48,7 +55,7 @@ _PIPELINE_GRAFANA = {
     "uid": "foehncast-operations",
     "slug": "foehncast-operations",
     "from": "now-24h",
-    "refresh": "30s",
+    "refresh": "2m",
     "height": 1840,
 }
 _ML_DASHBOARD_UID = "foehncast-ml-diagnostics"
@@ -108,9 +115,46 @@ def _available_spots() -> list[dict[str, Any]]:
     return list_dashboard_spots()
 
 
+@st.cache_resource(show_spinner=False)
+def _champion_model(alias: str) -> Any:
+    """Load the champion model once per process; switch only on alias change."""
+    return get_model_by_alias(alias)
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def _live_dashboard_data(selected_spot_ids: tuple[str, ...]) -> dict[str, Any]:
     return load_dashboard_data(list(selected_spot_ids) if selected_spot_ids else None)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _focus_spot_timeline(spot_id: str, *, past_days: int = 1) -> pd.DataFrame:
+    """Past+future predicted quality_index for a single spot.
+
+    Open-Meteo's forecast endpoint, called with ``past_days``, returns
+    observed/analysed hours before now and the standard forecast horizon
+    afterwards. We run the served champion model across that combined
+    window so the rider sees how predicted conditions line up against
+    what the weather has actually done in the last hours.
+    """
+    spot = next((s for s in get_spots() if s["id"] == spot_id), None)
+    if spot is None:
+        return pd.DataFrame(columns=["time", "quality_index"])
+
+    forecast_df = fetch_forecast(spot["lat"], spot["lon"], past_days=past_days)
+    if forecast_df.empty:
+        return pd.DataFrame(columns=["time", "quality_index"])
+
+    feature_columns = get_model_config()["features"]
+    engineered_df = engineer_features(forecast_df, spot["shore_orientation_deg"])
+    feature_frame = engineered_df[feature_columns].copy().ffill().bfill().fillna(0.0)
+    model = _champion_model(get_serving_model_alias())
+    predictions = model.predict(feature_frame)
+    return pd.DataFrame(
+        {
+            "time": pd.to_datetime(engineered_df.index),
+            "quality_index": [float(value) for value in predictions],
+        }
+    )
 
 
 def _inject_styles() -> None:
@@ -120,35 +164,87 @@ def _inject_styles() -> None:
           @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,700&display=swap');
 
           :root {
-            --bg: #f3eee2;
-            --panel: rgba(255, 251, 244, 0.94);
-            --panel-strong: rgba(255, 248, 237, 0.98);
-            --ink: #17324d;
-            --muted: #5f6f7f;
-            --accent: #0e6d6e;
-            --accent-soft: rgba(14, 109, 110, 0.12);
-            --warm: #d1833d;
-            --line: rgba(23, 50, 77, 0.12);
-            --shadow: 0 20px 60px rgba(23, 50, 77, 0.08);
+            --bg: #c4d9d2;
+            --panel: rgba(255, 255, 255, 0.82);
+            --panel-strong: rgba(255, 255, 255, 0.94);
+            --ink: #07252a;
+            --muted: #3b5a5a;
+            --accent: #0e8a86;
+            --accent-soft: rgba(14, 138, 134, 0.16);
+            --pine: #1f5e44;
+            --pine-soft: rgba(31, 94, 68, 0.16);
+            --warm: #ff7a26;
+            --warm-soft: rgba(255, 122, 38, 0.20);
+            --line: rgba(7, 37, 42, 0.18);
+            --shadow: 0 20px 60px rgba(7, 37, 42, 0.14);
           }
 
           .stApp {
             background:
-              radial-gradient(circle at top left, rgba(14, 109, 110, 0.15), transparent 30%),
-              radial-gradient(circle at top right, rgba(209, 131, 61, 0.18), transparent 28%),
-              linear-gradient(180deg, #faf6ee 0%, var(--bg) 100%);
+              radial-gradient(circle at 12% 8%, rgba(14, 138, 134, 0.28), transparent 38%),
+              radial-gradient(circle at 88% 6%, rgba(31, 94, 68, 0.28), transparent 36%),
+              radial-gradient(circle at 70% 90%, rgba(255, 122, 38, 0.14), transparent 40%),
+              linear-gradient(180deg, #d4e6df 0%, var(--bg) 100%);
             color: var(--ink);
           }
 
           .block-container {
-            padding-top: 2.2rem;
+            padding-top: 0.6rem;
             padding-bottom: 2rem;
+          }
+
+          /* Hide Streamlit's default top chrome so our nav owns the top */
+          header[data-testid="stHeader"],
+          div[data-testid="stDecoration"],
+          div[data-testid="stToolbar"] {
+            display: none !important;
+          }
+          div[data-testid="stAppViewContainer"] > .main,
+          div[data-testid="stAppViewContainer"] section.main {
+            padding-top: 0 !important;
+          }
+
+          /* Top-nav style tab bar — matches olive-grey buttons */
+          div[data-testid="stTabs"] > div[role="tablist"] {
+            position: sticky;
+            top: 0;
+            z-index: 50;
+            margin: -0.6rem -2rem 1.4rem -2rem;
+            padding: 0.55rem 2rem 0.55rem;
+            background: rgba(34, 41, 38, 0.92);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(7, 37, 42, 0.45);
+            box-shadow: 0 4px 16px rgba(7, 37, 42, 0.18);
+            gap: 0.5rem;
+          }
+          div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] {
+            font-family: 'Manrope', sans-serif !important;
+            font-weight: 700 !important;
+            font-size: 0.95rem;
+            color: #e4e2db !important;
+            padding: 0.6rem 1rem;
+            border-bottom: 2px solid transparent;
+            background: transparent;
+            border-radius: 10px 10px 0 0;
+            transition: background 0.15s ease, color 0.15s ease;
+          }
+          div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"]:hover {
+            background: rgba(77, 84, 80, 0.55);
+            color: #ffffff !important;
+          }
+          div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"][aria-selected="true"] {
+            color: var(--warm) !important;
+            background: #4d5450;
+            border-bottom-color: var(--warm);
+          }
+          div[data-testid="stTabs"] > div[role="tablist"] div[data-baseweb="tab-highlight"] {
+            display: none;
           }
 
           button[role="tab"] {
             font-family: 'Manrope', sans-serif;
-            font-weight: 800;
-            color: var(--ink);
+            font-weight: 700;
           }
 
           h1, h2, h3 {
@@ -161,8 +257,119 @@ def _inject_styles() -> None:
             font-family: 'Manrope', sans-serif;
           }
 
+          /* Transparent chart backgrounds (Altair / Vega / Plotly canvas) */
+          div[data-testid="stVegaLiteChart"],
+          div[data-testid="stPlotlyChart"],
+          .vega-embed,
+          .vega-embed canvas,
+          .vega-embed svg {
+            background: transparent !important;
+          }
+
+          /* Matt olive-grey buttons; selected (kind="primary") uses warm orange text */
+          div[data-testid="stButton"] > button,
+          div[data-testid="stFormSubmitButton"] > button {
+            background: #4d5450 !important;
+            background-image: none !important;
+            color: #e4e2db !important;
+            border: 1px solid rgba(7, 37, 42, 0.32) !important;
+            border-radius: 12px !important;
+            box-shadow: none !important;
+            font-family: 'Manrope', sans-serif !important;
+            font-weight: 700 !important;
+            height: 44px !important;
+            min-height: 44px !important;
+            padding: 0 14px !important;
+            width: 100% !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            transition: background 0.15s ease, color 0.15s ease;
+          }
+          div[data-testid="stButton"] > button:hover,
+          div[data-testid="stFormSubmitButton"] > button:hover {
+            background: #404641 !important;
+            color: #ffffff !important;
+            border-color: rgba(7, 37, 42, 0.40) !important;
+          }
+          div[data-testid="stButton"] > button[kind="primary"],
+          div[data-testid="stButton"] > button[data-testid="baseButton-primary"] {
+            background: #404641 !important;
+            color: var(--warm) !important;
+            border-color: rgba(255, 122, 38, 0.55) !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+            border-bottom-color: rgba(255, 122, 38, 0.55) !important;
+            margin-bottom: 0 !important;
+          }
+          div[data-testid="stButton"] > button[kind="primary"]:hover {
+            background: #363b37 !important;
+            color: var(--warm) !important;
+          }
+
+          /* Transposed ranked-recommendations grid — mirrors st.columns layout so
+             spot columns line up under each switcher button. */
+          .ranked-stack {
+            display: grid;
+            gap: 1rem;
+            width: 100%;
+            margin-top: -1px;
+            font-family: 'Manrope', sans-serif;
+          }
+          .ranked-stack .col {
+            display: flex;
+            flex-direction: column;
+          }
+          .ranked-stack .col.lead {
+            text-align: right;
+            color: var(--muted);
+            padding-top: 8px;
+          }
+          .ranked-stack .col.lead .cell {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 6px 12px;
+          }
+          .ranked-stack .col.spot {
+            text-align: center;
+            color: var(--ink);
+            padding: 8px 12px 12px;
+            border: 1px solid transparent;
+            border-top: none;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+          }
+          .ranked-stack .col.spot.active {
+            background: #404641;
+            color: var(--warm);
+            font-weight: 700;
+            border-color: rgba(255, 122, 38, 0.55);
+          }
+          .ranked-stack .col.spot .cell {
+            font-size: 0.9rem;
+            padding: 6px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          /* Spot map panel */
+          .spot-map-shell {
+            border: 1px solid var(--line);
+            border-radius: 28px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
+            padding: 18px 22px 22px;
+            margin-top: 1rem;
+          }
+          .spot-map-shell p.eyebrow {
+            margin-bottom: 8px;
+          }
+
           section[data-testid="stSidebar"] {
-            background: rgba(252, 248, 242, 0.86);
+            background: rgba(210, 226, 220, 0.88);
             border-right: 1px solid var(--line);
             color: var(--ink);
           }
@@ -173,6 +380,21 @@ def _inject_styles() -> None:
           section[data-testid="stSidebar"] .stCaption,
           section[data-testid="stSidebar"] label {
             color: var(--ink) !important;
+          }
+
+          /* Sidebar buttons keep cream text on olive-grey, overriding the
+             sidebar ink-color rule above. */
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button span,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button div {
+            color: #e4e2db !important;
+          }
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover p,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover span,
+          section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover div {
+            color: #ffffff !important;
           }
 
           div[data-testid="stMetric"] {
@@ -226,7 +448,7 @@ def _inject_styles() -> None:
             padding: 24px 26px;
             margin-bottom: 1rem;
             background:
-              linear-gradient(135deg, rgba(14, 109, 110, 0.08), rgba(209, 131, 61, 0.12)),
+              linear-gradient(135deg, rgba(14, 138, 134, 0.10), rgba(255, 122, 38, 0.12)),
               var(--panel-strong);
           }
 
@@ -252,8 +474,8 @@ def _inject_styles() -> None:
           .stat-chip {
             border-radius: 18px;
             padding: 12px 14px;
-            background: rgba(255, 255, 255, 0.72);
-            border: 1px solid rgba(23, 50, 77, 0.08);
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid var(--line);
           }
 
           .stat-chip span {
@@ -575,6 +797,8 @@ def _render_sidebar_ml_panels() -> None:
     # Show "—" when no validated pairs exist (avoids misleading "0%")
     if hindcast_n is not None and hindcast_n < 1:
         hindcast_acc = None
+    drift_max = _prom_query('max(foehncast_drift_metric{metric_name="drift_score"})')
+    confidence = max(0.0, min(1.0, 1.0 - drift_max)) if drift_max is not None else None
 
     if verified:
         badge_color = "var(--accent)"
@@ -588,22 +812,24 @@ def _render_sidebar_ml_panels() -> None:
     def _stat(label: str, value: float | None, fmt: str = ".2f") -> str:
         display = f"{value:{fmt}}" if value is not None else "—"
         return (
-            f'<div style="flex:1;min-width:0">'
-            f'<span style="display:block;font-family:Manrope,sans-serif;'
-            f"font-size:0.62rem;font-weight:700;letter-spacing:0.04em;"
+            '<div style="display:flex;align-items:baseline;'
+            "justify-content:space-between;gap:8px;padding:4px 0;"
+            'border-bottom:1px solid rgba(23,50,77,0.06)">'
+            f'<span style="font-family:Manrope,sans-serif;'
+            "font-size:0.62rem;font-weight:700;letter-spacing:0.04em;"
             f'text-transform:uppercase;color:var(--muted)">{label}</span>'
-            f'<strong style="display:block;margin-top:2px;'
-            f"font-family:Newsreader,serif;font-size:1.05rem;"
-            f'color:var(--ink)">{display}</strong></div>'
+            f'<strong style="font-family:Newsreader,serif;'
+            f'font-size:0.95rem;color:var(--ink)">{display}</strong></div>'
         )
 
     stats_html = (
-        '<div style="display:flex;gap:8px;margin-top:12px;'
-        'padding-top:10px;border-top:1px solid rgba(23,50,77,0.08)">'
+        '<div style="margin-top:10px;padding-top:8px;'
+        'border-top:1px solid rgba(23,50,77,0.08)">'
+        + _stat("Confidence", confidence, ".0%")
         + _stat("R²", r2_val)
         + _stat("RMSE", rmse_val)
-        + _stat("Hind.", hindcast_acc, ".0%")
-        + _stat("Feats", feat_count, ".0f")
+        + _stat("Hindcast", hindcast_acc, ".0%")
+        + _stat("Features", feat_count, ".0f")
         + _stat("Rows", train_rows, ".0f")
         + "</div>"
     )
@@ -643,53 +869,6 @@ def _render_sidebar_ml_panels() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-    # --- Model Confidence (Grafana gauge embed) ---------------------------
-    if _grafana_embedding_enabled():
-        st.caption("Confidence (1 − drift score)")
-        url = _grafana_solo_panel_url(
-            "foehncast-rider",
-            "foehncast-rider",
-            panel_id=304,
-            from_range="now-1h",
-            refresh=None,
-        )
-        st.iframe(url, height=120)
-
-    st.divider()
-
-    # --- Pipeline Status (side-by-side stats) -----------------------------
-    if _grafana_embedding_enabled():
-        col_a, col_b = st.columns(2)
-        with col_a:
-            url = _grafana_solo_panel_url(
-                "foehncast-operations",
-                "foehncast-operations",
-                panel_id=7,
-                from_range="now-1h",
-                refresh=None,
-            )
-            st.iframe(url, height=90)
-        with col_b:
-            url = _grafana_solo_panel_url(
-                "foehncast-operations",
-                "foehncast-operations",
-                panel_id=8,
-                from_range="now-1h",
-                refresh=None,
-            )
-            st.iframe(url, height=90)
-
-    # --- Stage Timing (bargauge) ------------------------------------------
-    if _grafana_embedding_enabled():
-        url = _grafana_solo_panel_url(
-            "foehncast-operations",
-            "foehncast-operations",
-            panel_id=22,
-            from_range="now-1h",
-            refresh=None,
-        )
-        st.iframe(url, height=140)
 
     st.caption(f"[Full ML dashboard ↗]({full_url})")
 
@@ -747,112 +926,274 @@ def _render_monitoring_tab(config: dict[str, Any]) -> None:
     st.iframe(dashboard_url, height=config["height"])
 
 
+def _render_spot_map(ranked_spots: list[dict[str, Any]]) -> None:
+    """Render a map showing every spot plus the rider home."""
+    spots_cfg = get_spots()
+    coord_lookup = {s["id"]: (float(s["lat"]), float(s["lon"])) for s in spots_cfg}
+    rider = get_rider_config()
+    home_lat = float(rider["home_lat"])
+    home_lon = float(rider["home_lon"])
+
+    spot_points: list[dict[str, Any]] = []
+    for rank, spot in enumerate(ranked_spots, start=1):
+        coords = coord_lookup.get(spot["spot_id"])
+        if coords is None:
+            continue
+        lat, lon = coords
+        spot_points.append(
+            {
+                "lat": lat,
+                "lon": lon,
+                "name": spot["spot_name"],
+                "rank": rank,
+                "quality_label": spot["quality_label"],
+            }
+        )
+
+    home_point = [{"lat": home_lat, "lon": home_lon, "name": "Rider home"}]
+
+    if not spot_points:
+        return
+
+    try:
+        import pydeck as pdk
+    except ImportError:
+        # Fallback: simple Streamlit map with a single layer
+        frame = pd.DataFrame(spot_points + home_point)
+        st.markdown('<p class="eyebrow">Spot map</p>', unsafe_allow_html=True)
+        st.map(frame[["lat", "lon"]], zoom=7)
+        return
+
+    lats = [p["lat"] for p in spot_points] + [home_lat]
+    lons = [p["lon"] for p in spot_points] + [home_lon]
+    center_lat = (min(lats) + max(lats)) / 2
+    center_lon = (min(lons) + max(lons)) / 2
+
+    spot_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=spot_points,
+        get_position="[lon, lat]",
+        get_fill_color=[14, 138, 134, 220],
+        get_radius=3500,
+        pickable=True,
+        stroked=True,
+        get_line_color=[7, 37, 42, 255],
+        line_width_min_pixels=1,
+    )
+    home_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=home_point,
+        get_position="[lon, lat]",
+        get_fill_color=[255, 122, 38, 240],
+        get_radius=4500,
+        pickable=True,
+        stroked=True,
+        get_line_color=[7, 37, 42, 255],
+        line_width_min_pixels=1,
+    )
+    label_layer = pdk.Layer(
+        "TextLayer",
+        data=spot_points + home_point,
+        get_position="[lon, lat]",
+        get_text="name",
+        get_size=14,
+        get_color=[7, 37, 42, 255],
+        get_alignment_baseline="'bottom'",
+        get_pixel_offset=[0, -12],
+    )
+
+    view = pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=7,
+        pitch=0,
+    )
+    deck = pdk.Deck(
+        layers=[spot_layer, home_layer, label_layer],
+        initial_view_state=view,
+        map_style="light",
+        tooltip={"text": "{name}"},
+    )
+
+    st.markdown(
+        '<div style="margin-top:1rem"></div>',
+        unsafe_allow_html=True,
+    )
+    st.pydeck_chart(deck, use_container_width=True)
+
+
+@st.fragment
 def _render_rider_console(
     dashboard_data: dict[str, Any],
     selected_spot_ids: list[str],
     spot_lookup: dict[str, dict[str, Any]],
 ) -> None:
     ranked_spots = dashboard_data["ranked_spots"]
-    prediction_by_spot_id = {
-        prediction["spot_id"]: prediction
-        for prediction in dashboard_data["predictions"]
-    }
 
-    metric_columns = st.columns(4)
-    top_spot = ranked_spots[0] if ranked_spots else None
-    metric_columns[0].metric("Model version", dashboard_data["model_version"])
-    metric_columns[1].metric("Spots in scope", len(selected_spot_ids))
-    metric_columns[2].metric("Forecast window", f"{dashboard_data['horizon_hours']} h")
-    metric_columns[3].metric(
-        "Top signal",
-        top_spot["quality_label"] if top_spot is not None else "Unavailable",
-    )
-    st.caption(horizon_caption(dashboard_data["horizon_hours"]))
+    # --- Focus timeline (full width, past + future) ----------------------
+    focus_spot_ids = [spot["spot_id"] for spot in ranked_spots] or selected_spot_ids
+    default_focus = focus_spot_ids[0] if focus_spot_ids else None
+    if "rider_focus_spot" not in st.session_state or (
+        st.session_state["rider_focus_spot"] not in focus_spot_ids
+    ):
+        st.session_state["rider_focus_spot"] = default_focus
 
-    if top_spot is not None:
-        st.markdown(
-            _top_pick_card(top_spot, dashboard_data["model_version"]),
-            unsafe_allow_html=True,
-        )
+    focus_spot_id = st.session_state.get("rider_focus_spot") or default_focus
 
-    left_column, right_column = st.columns([1.25, 1.0], gap="large")
-
-    with left_column:
-        st.subheader("Ranked Recommendations")
-        st.dataframe(
-            build_ranking_frame(ranked_spots),
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.caption(
-            "Ranking combines peak forecast quality, rideable duration, and ride-to-drive return."
-        )
-
-    with right_column:
-        st.subheader("Forecast Detail")
-        focus_spot_ids = [spot["spot_id"] for spot in ranked_spots]
-        focus_default = focus_spot_ids[0] if focus_spot_ids else selected_spot_ids[0]
-        focus_spot_id = st.selectbox(
-            "Spot detail",
-            options=focus_spot_ids or selected_spot_ids,
-            index=(focus_spot_ids or selected_spot_ids).index(focus_default),
-            format_func=lambda spot_id: _spot_label(spot_lookup, spot_id),
-        )
-        focus_prediction = prediction_by_spot_id[focus_spot_id]
-        focus_summary = next(
-            spot for spot in ranked_spots if spot["spot_id"] == focus_spot_id
-        )
-        focus_frame = build_forecast_frame(focus_prediction)
-
-        detail_metrics = st.columns(2)
-        detail_metrics[0].metric("Best window", focus_summary["peak_time_label"])
-        detail_metrics[1].metric("Rideable hours", focus_summary["rideable_hours"])
-
-        if focus_frame.empty:
-            st.info("The current API call returned no forecast rows for this spot.")
+    if focus_spot_id is not None:
+        timeline_frame = _focus_spot_timeline(focus_spot_id)
+        st.subheader(f"Focus timeline — {_spot_label(spot_lookup, focus_spot_id)}")
+        if timeline_frame.empty:
+            st.info("No timeline data available for this spot right now.")
         else:
-            chart_frame = focus_frame.set_index("time")[["quality_index"]].copy()
-            chart_frame["rideable_threshold"] = 2.0
-            st.line_chart(chart_frame, use_container_width=True, height=320)
-
-            best_windows = (
-                focus_frame.sort_values(
-                    ["quality_index", "time"], ascending=[False, True]
-                )
-                .head(5)
-                .loc[:, ["display_time", "quality_index", "quality_label"]]
-                .rename(
-                    columns={
-                        "display_time": "Time",
-                        "quality_index": "Quality",
-                        "quality_label": "Signal",
-                    }
+            now_ts = pd.Timestamp.now(tz=timeline_frame["time"].dt.tz)
+            chart_frame = timeline_frame.copy()
+            chart_frame["phase"] = chart_frame["time"].apply(
+                lambda ts: "Observed" if ts <= now_ts else "Forecast"
+            )
+            line = (
+                alt.Chart(chart_frame)
+                .mark_line(interpolate="monotone", strokeWidth=2.5)
+                .encode(
+                    x=alt.X("time:T", title="Time"),
+                    y=alt.Y(
+                        "quality_index:Q",
+                        title="Quality index",
+                        scale=alt.Scale(domain=[0, 5]),
+                    ),
+                    color=alt.Color(
+                        "phase:N",
+                        scale=alt.Scale(
+                            domain=["Observed", "Forecast"],
+                            range=["#3b5a5a", "#0e8a86"],
+                        ),
+                        legend=alt.Legend(title=None, orient="top"),
+                    ),
                 )
             )
-            st.dataframe(best_windows, use_container_width=True, hide_index=True)
+            threshold = (
+                alt.Chart(pd.DataFrame({"y": [2.0]}))
+                .mark_rule(strokeDash=[4, 4], color="#1f5e44")
+                .encode(y="y:Q")
+            )
+            now_rule = (
+                alt.Chart(pd.DataFrame({"x": [now_ts]}))
+                .mark_rule(color="#ff7a26", strokeWidth=2)
+                .encode(x="x:T")
+            )
+            st.altair_chart(
+                (line + threshold + now_rule)
+                .properties(height=300, background="transparent")
+                .configure_view(strokeWidth=0, fill=None)
+                .configure_axis(
+                    domainColor="#3b5a5a",
+                    gridColor="rgba(7, 37, 42, 0.10)",
+                    labelColor="#07252a",
+                    titleColor="#07252a",
+                ),
+                use_container_width=True,
+            )
 
-    with st.expander("Full forecast rows", expanded=False):
-        full_forecast_frame = focus_frame.rename(
-            columns={
-                "display_time": "Time",
-                "quality_index": "Quality",
-                "quality_label": "Signal",
-                "rideable": "Rideable",
-            }
-        )
-        st.dataframe(
-            full_forecast_frame[["Time", "Quality", "Signal", "Rideable"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        # Spot switcher buttons (one per ranked spot) — equal width, blank lead column
+        n = len(focus_spot_ids)
+        if n:
+            # Lead column weight is shared between the button row and the
+            # transposed metrics grid so spot columns line up under each button.
+            lead_weight = 0.9
+            button_cols = st.columns([lead_weight] + [1] * n)
+            for index, spot_id in enumerate(focus_spot_ids):
+                spot = spot_lookup[spot_id]
+                button_label = spot["name"]
+                is_active = spot_id == focus_spot_id
+                if button_cols[index + 1].button(
+                    button_label,
+                    key=f"focus_spot_{spot_id}",
+                    use_container_width=True,
+                    type="primary" if is_active else "secondary",
+                ):
+                    st.session_state["rider_focus_spot"] = spot_id
+                    # Scope the rerun to this fragment so the System tab's
+                    # Grafana iframes stay mounted and don't reload.
+                    st.rerun(scope="fragment")
+
+            # Transposed metrics grid: a CSS grid with the same column ratios
+            # and gap as the button row above, so column centers line up.
+            metric_rows: list[tuple[str, list[str]]] = [
+                ("Signal", [s["quality_label"] for s in ranked_spots]),
+                (
+                    "Peak quality",
+                    [f"{float(s['quality_index']):.2f}" for s in ranked_spots],
+                ),
+                (
+                    "Rideable hrs",
+                    [f"{int(s['rideable_hours'])}" for s in ranked_spots],
+                ),
+                (
+                    "Drive min",
+                    [f"{float(s['drive_minutes']):.1f}" for s in ranked_spots],
+                ),
+                (
+                    "Session hrs",
+                    [f"{float(s['session_hours']):.1f}" for s in ranked_spots],
+                ),
+                (
+                    "Ride/drive",
+                    [f"{float(s['ride_drive_ratio']):.2f}" for s in ranked_spots],
+                ),
+                ("Score", [f"{float(s['score']):.3f}" for s in ranked_spots]),
+            ]
+            grid_cols = f"{lead_weight}fr " + " ".join(["1fr"] * n)
+            lead_cells = "".join(
+                f'<div class="cell">{label}</div>' for label, _ in metric_rows
+            )
+            spot_cols_html: list[str] = []
+            for col_idx, spot in enumerate(ranked_spots):
+                active_cls = " active" if spot["spot_id"] == focus_spot_id else ""
+                cells = "".join(
+                    f'<div class="cell">{values[col_idx]}</div>'
+                    for _, values in metric_rows
+                )
+                spot_cols_html.append(
+                    f'<div class="col spot{active_cls}">{cells}</div>'
+                )
+            st.markdown(
+                f'<div class="ranked-stack" style="grid-template-columns:{grid_cols}">'
+                f'<div class="col lead">{lead_cells}</div>'
+                + "".join(spot_cols_html)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
     st.divider()
-    _render_monitoring_tab(_RIDER_GRAFANA)
+
+    _render_spot_map(ranked_spots)
 
 
+@st.fragment
 def _render_system_tab() -> None:
-    """System tab: operations + ML diagnostics dashboards."""
+    """System tab: rider live conditions + operations + ML diagnostics dashboards.
+
+    The embedded Grafana dashboards are heavy; we gate them behind a one-time
+    toggle so the Rider Console stays snappy on Cloud Run. Streamlit renders
+    both tab bodies on every script run, so without this gate the iframes
+    would load even when the rider tab is active.
+    """
+    if not st.session_state.get("system_tab_loaded"):
+        st.info(
+            "Monitoring dashboards load on demand to keep the rider tab fast. "
+            "Click below to load them — they will stay loaded for the rest of "
+            "this session."
+        )
+        if st.button("Load monitoring dashboards", type="primary"):
+            st.session_state["system_tab_loaded"] = True
+            st.rerun(scope="fragment")
+        return
+
+    _render_monitoring_tab(_RIDER_GRAFANA)
+    st.divider()
     _render_monitoring_tab(_PIPELINE_GRAFANA)
+    st.divider()
+    _render_timeline_panels()
     st.divider()
     ml_config = {
         "title": "ML Diagnostics",
@@ -863,7 +1204,7 @@ def _render_system_tab() -> None:
         "uid": _ML_DASHBOARD_UID,
         "slug": _ML_DASHBOARD_SLUG,
         "from": "now-24h",
-        "refresh": "30s",
+        "refresh": "5m",
         "height": 2200,
     }
     _render_monitoring_tab(ml_config)
@@ -923,8 +1264,6 @@ def main() -> None:
                     st.error("Failed to trigger pipeline")
         st.caption(f"Grafana: {_grafana_base_url()}")
 
-    _render_timeline_panels()
-
     rider_tab, system_tab = st.tabs(["Rider Console", "System"])
 
     with rider_tab:
@@ -936,7 +1275,6 @@ def main() -> None:
             st.exception(dashboard_error)
         elif dashboard_data is not None:
             _render_rider_console(dashboard_data, all_spot_ids, spot_lookup)
-        _render_monitoring_tab(_RIDER_GRAFANA)
 
     with system_tab:
         _render_system_tab()
