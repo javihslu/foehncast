@@ -295,6 +295,8 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_grafana provision_cloud_run_grafana)"
   FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_grafana_prometheus_url cloud_run_grafana_prometheus_url)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_ui provision_cloud_run_ui)"
+  FOEHNCAST_TF_CLOUD_RUN_UI_GRAFANA_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_ui_grafana_url cloud_run_ui_grafana_url)"
+  FOEHNCAST_TF_CLOUD_RUN_UI_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_ui_prometheus_url cloud_run_ui_prometheus_url)"
   FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_workflows provision_cloud_workflows)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
@@ -342,6 +344,8 @@ terraform_repo_variable_names() {
     GCP_PROVISION_CLOUD_RUN_GRAFANA \
     GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL \
     GCP_PROVISION_CLOUD_RUN_UI \
+    GCP_CLOUD_RUN_UI_GRAFANA_URL \
+    GCP_CLOUD_RUN_UI_PROMETHEUS_URL \
     GCP_PROVISION_CLOUD_WORKFLOWS \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
     GCP_ONLINE_COMPOSE_HOST_NAME \
@@ -403,6 +407,8 @@ terraform_repo_variable_pairs() {
   printf 'GCP_PROVISION_CLOUD_RUN_GRAFANA\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA"
   printf 'GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL"
   printf 'GCP_PROVISION_CLOUD_RUN_UI\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI"
+  printf 'GCP_CLOUD_RUN_UI_GRAFANA_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_UI_GRAFANA_URL"
+  printf 'GCP_CLOUD_RUN_UI_PROMETHEUS_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_UI_PROMETHEUS_URL"
   printf 'GCP_PROVISION_CLOUD_WORKFLOWS\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS"
 
   if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_IMAGE" ]]; then

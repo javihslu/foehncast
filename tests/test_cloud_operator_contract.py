@@ -48,6 +48,8 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_PROVISION_CLOUD_RUN_GRAFANA", "provision_cloud_run_grafana"),
     ("GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL", "cloud_run_grafana_prometheus_url"),
     ("GCP_PROVISION_CLOUD_RUN_UI", "provision_cloud_run_ui"),
+    ("GCP_CLOUD_RUN_UI_GRAFANA_URL", "cloud_run_ui_grafana_url"),
+    ("GCP_CLOUD_RUN_UI_PROMETHEUS_URL", "cloud_run_ui_prometheus_url"),
     ("GCP_PROVISION_CLOUD_WORKFLOWS", "provision_cloud_workflows"),
     ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
     ("GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),

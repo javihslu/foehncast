@@ -120,11 +120,17 @@ def test_grafana_provisioning_points_to_prometheus_dashboard_dir() -> None:
     ops_panels = {p["title"]: p for p in ops["panels"]}
     assert "Feature Stage Durations" in ops_panels
     assert "Training Stage Durations" in ops_panels
-    assert "Request Latency Distribution" in ops_panels
-    assert "Request Rate" in ops_panels
-    assert "Error Rate" in ops_panels
     assert "Spot Pipeline Funnel" in ops_panels
-    assert any(
+    # Inference SLI panels (Request Rate, Error Rate, Latency p95, Request
+    # Latency Distribution, Requests by Endpoint) were removed because the
+    # in-process Prometheus surface served by `serve.py` does not retain a
+    # time-series history and so rate()/histogram_quantile() panels render
+    # as empty. They are tracked for restoration once a real Prometheus
+    # scrape backend is in place.
+    assert "Request Latency Distribution" not in ops_panels
+    assert "Request Rate" not in ops_panels
+    assert "Error Rate" not in ops_panels
+    assert not any(
         p["type"] == "row" and p["title"] == "Inference SLIs" for p in ops["panels"]
     )
 
@@ -304,15 +310,8 @@ def test_operations_dashboard_covers_pipeline_and_inference_metrics() -> None:
         panels["Seconds Since Last Success"]["targets"][0]["expr"]
         == 'time() - max(foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="success"})'
     )
-    # Inference SLIs
-    assert (
-        panels["Request Latency Distribution"]["targets"][0]["expr"]
-        == "histogram_quantile(0.50, sum(rate(foehncast_http_request_duration_seconds_bucket[5m])) by (le))"
-    )
-    assert (
-        panels["Requests by Endpoint"]["targets"][0]["expr"]
-        == "sum by (endpoint) (rate(foehncast_http_requests_total[5m]))"
-    )
+    # Inference SLI assertions removed alongside the stripped panels (see
+    # `test_grafana_provisioning_points_to_prometheus_dashboard_dir`).
     assert (
         panels["Sync Status File"]["targets"][0]["expr"]
         == "foehncast_online_compose_sync_status_file_present"
@@ -382,10 +381,12 @@ def test_rider_dashboard_covers_drift_and_prediction_metrics() -> None:
         panels["Feature Drift Score"]["targets"][0]["expr"]
         == 'foehncast_drift_metric{dataset_name=~".+",metric_name="drift_score"}'
     )
-    # Model confidence gauge
+    # Model confidence gauge (sourced from the inference Prometheus surface,
+    # which records the mean forecast quality index per spot after every
+    # `/predict` or `/rank` call).
     assert (
         panels["Model Confidence"]["targets"][0]["expr"]
-        == '1 - clamp_max(max(foehncast_drift_metric{metric_name="drift_score",dataset_name=~".+"}), 1)'
+        == "avg(foehncast_inference_model_confidence)"
     )
     # System pulse
     assert (

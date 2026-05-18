@@ -31,7 +31,7 @@ services:
 
   grafana:
     container_name: grafana
-    image: grafana/grafana
+    image: grafana/grafana:11.3.0
     depends_on:
       - prometheus
     environment:

@@ -89,6 +89,12 @@ outputs:
   provision_cloud_run_ui:
     description: Cloud Run UI provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
+  cloud_run_ui_grafana_url:
+    description: UI Grafana base URL repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_ui_grafana_url }}
+  cloud_run_ui_prometheus_url:
+    description: UI Prometheus query URL repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_ui_prometheus_url }}
   provision_cloud_workflows:
     description: Cloud Workflows provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
@@ -169,6 +175,8 @@ runs:
           echo "provision_cloud_run_grafana=$(read_repo_var GCP_PROVISION_CLOUD_RUN_GRAFANA)"
           echo "cloud_run_grafana_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL)"
           echo "provision_cloud_run_ui=$(read_repo_var GCP_PROVISION_CLOUD_RUN_UI)"
+          echo "cloud_run_ui_grafana_url=$(read_repo_var GCP_CLOUD_RUN_UI_GRAFANA_URL)"
+          echo "cloud_run_ui_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_UI_PROMETHEUS_URL)"
           echo "provision_cloud_workflows=$(read_repo_var GCP_PROVISION_CLOUD_WORKFLOWS)"
           echo "provision_online_compose_host=$(read_repo_var GCP_PROVISION_ONLINE_COMPOSE_HOST)"
           echo "online_compose_host_name=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_NAME)"

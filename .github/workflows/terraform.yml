@@ -252,6 +252,8 @@ jobs:
           REPO_GCP_PROVISION_CLOUD_RUN_GRAFANA: ${{ steps.repo_config.outputs.provision_cloud_run_grafana }}
           REPO_GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL: ${{ steps.repo_config.outputs.cloud_run_grafana_prometheus_url }}
           REPO_GCP_PROVISION_CLOUD_RUN_UI: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
+          REPO_GCP_CLOUD_RUN_UI_GRAFANA_URL: ${{ steps.repo_config.outputs.cloud_run_ui_grafana_url }}
+          REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL: ${{ steps.repo_config.outputs.cloud_run_ui_prometheus_url }}
           REPO_GCP_PROVISION_CLOUD_WORKFLOWS: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
           REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
           REPO_GCP_ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
@@ -490,6 +492,9 @@ jobs:
 
           cloud_run_grafana_prometheus_url="$REPO_GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL"
 
+          cloud_run_ui_grafana_url="$REPO_GCP_CLOUD_RUN_UI_GRAFANA_URL"
+          cloud_run_ui_prometheus_url="$REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL"
+
           provision_cloud_run_ui="$REPO_GCP_PROVISION_CLOUD_RUN_UI"
           if [[ -z "$provision_cloud_run_ui" ]]; then
             provision_cloud_run_ui='false'
@@ -573,6 +578,8 @@ jobs:
             echo "TF_VAR_provision_cloud_run_mlflow=${provision_cloud_run_mlflow}"
             echo "TF_VAR_provision_cloud_run_grafana=${provision_cloud_run_grafana}"
             echo "TF_VAR_cloud_run_grafana_prometheus_url=${cloud_run_grafana_prometheus_url}"
+            echo "TF_VAR_cloud_run_ui_grafana_url=${cloud_run_ui_grafana_url}"
+            echo "TF_VAR_cloud_run_ui_prometheus_url=${cloud_run_ui_prometheus_url}"
             echo "TF_VAR_provision_cloud_run_ui=${provision_cloud_run_ui}"
             echo "TF_VAR_provision_cloud_workflows=${provision_cloud_workflows}"
             echo "TF_VAR_provision_online_compose_host=${provision_online_compose_host}"
