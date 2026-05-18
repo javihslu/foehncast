@@ -86,7 +86,6 @@ Prometheus metrics, Grafana dashboards, drift detection, hindcast validation, an
 | Hindcast validation | `src/foehncast/monitoring/hindcast.py` — predictions vs. observed weather |
 | 3 Grafana dashboards | `grafana_work/dashboards/` — Rider, Operations, ML Diagnostics |
 | 9 Prometheus alert rules | `prometheus_config/alerting_rules.yml` — AppDown, HighRequestLatency, FeaturePipelineStageFailure, etc. |
-| 6 Grafana-provisioned alert rules | `grafana_work/etc/provisioning/alerting/foehncast-alert-rules.yml` |
 | Prediction event history | `.state/monitoring/prediction-events.jsonl` (local), BigQuery `prediction_events` table (cloud) |
 | Pipeline summary evidence | `airflow/reports/feature-pipeline-*-latest.json`, `training-pipeline-*-latest.json` |
 | Scrape config version-controlled | `prometheus_config/prometheus.yml` — 4 scrape targets |

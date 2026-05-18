@@ -80,9 +80,7 @@ flowchart TD
 
 - `prometheus`: scrapes the app `/metrics` route, the StatsD exporter, and stack monitoring surfaces.
 - `statsd`: exposes the UDP sink that FoehnCast monitoring helpers push to, then republishes them in Prometheus format.
-- `grafana`: provisions the Prometheus datasource, starter FoehnCast dashboard, alert rules, and a starter notification route from checked-in config.
-
-The starter notification route stays on a built-in placeholder address for the local Docker path. If the hosted full-stack target needs real mail delivery, inject `FOEHNCAST_GRAFANA_ALERT_EMAIL` through Terraform `online_compose_env_vars` and add Grafana SMTP settings for that tenant.
+- `grafana`: provisions the Prometheus datasource and the FoehnCast dashboards from checked-in config.
 
 ### `feast_online_store/`
 
