@@ -16,9 +16,6 @@ services:
     environment:
       MLFLOW_TRACKING_URI: http://model-registry:5001
       FOEHNCAST_PROMETHEUS_URL: http://prometheus:9090
-      # Grafana URL must be browser-reachable (iframes render client-side)
-      FOEHNCAST_GRAFANA_BASE_URL: ${FOEHNCAST_GRAFANA_BASE_URL:-http://127.0.0.1:3000}
-      FOEHNCAST_GRAFANA_ALLOW_EMBEDDING: "true"
     ports:
       - ${UI_BIND_HOST:-127.0.0.1}:8501:8501
     networks:

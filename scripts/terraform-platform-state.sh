@@ -292,10 +292,7 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX="$(trimmed_terraform_output_value "$terraform_dir" cloud_composer_dag_gcs_prefix)"
   FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI="$(optional_terraform_output_value "$terraform_dir" cloud_composer_airflow_uri)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_mlflow provision_cloud_run_mlflow)"
-  FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_grafana provision_cloud_run_grafana)"
-  FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_grafana_prometheus_url cloud_run_grafana_prometheus_url)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_ui provision_cloud_run_ui)"
-  FOEHNCAST_TF_CLOUD_RUN_UI_GRAFANA_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_ui_grafana_url cloud_run_ui_grafana_url)"
   FOEHNCAST_TF_CLOUD_RUN_UI_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_ui_prometheus_url cloud_run_ui_prometheus_url)"
   FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_workflows provision_cloud_workflows)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
@@ -341,10 +338,7 @@ terraform_repo_variable_names() {
     GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX \
     GCP_CLOUD_COMPOSER_AIRFLOW_URI \
     GCP_PROVISION_CLOUD_RUN_MLFLOW \
-    GCP_PROVISION_CLOUD_RUN_GRAFANA \
-    GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL \
     GCP_PROVISION_CLOUD_RUN_UI \
-    GCP_CLOUD_RUN_UI_GRAFANA_URL \
     GCP_CLOUD_RUN_UI_PROMETHEUS_URL \
     GCP_PROVISION_CLOUD_WORKFLOWS \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
@@ -404,10 +398,7 @@ terraform_repo_variable_pairs() {
   fi
 
   printf 'GCP_PROVISION_CLOUD_RUN_MLFLOW\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW"
-  printf 'GCP_PROVISION_CLOUD_RUN_GRAFANA\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA"
-  printf 'GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL"
   printf 'GCP_PROVISION_CLOUD_RUN_UI\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI"
-  printf 'GCP_CLOUD_RUN_UI_GRAFANA_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_UI_GRAFANA_URL"
   printf 'GCP_CLOUD_RUN_UI_PROMETHEUS_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_UI_PROMETHEUS_URL"
   printf 'GCP_PROVISION_CLOUD_WORKFLOWS\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS"
 

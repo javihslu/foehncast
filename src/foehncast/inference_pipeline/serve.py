@@ -126,16 +126,15 @@ _SYNTHETIC_UP_METRICS = (
     b"# HELP up Synthetic scrape health indicator (1 = healthy).\n"
     b"# TYPE up gauge\n"
     b'up{job="foehncast_app"} 1\n'
-    b'up{job="grafana"} 1\n'
     b'up{job="prometheus"} 1\n'
     b'up{job="statsd_exporter"} 1\n'
 )
 
 
 def _metrics_payload() -> bytes:
-    # Synthetic ``up`` series so Grafana "service status" panels render
-    # green when the inference API is reachable. Standard Prometheus
-    # convention: ``up{job="..."} 1`` means the scrape target is healthy.
+    # Synthetic ``up`` series so status panels render green when the
+    # inference API is reachable. Standard Prometheus convention:
+    # ``up{job="..."} 1`` means the scrape target is healthy.
     return (
         _SYNTHETIC_UP_METRICS
         # Durable metrics: rendered from retained files and survive restarts.
@@ -280,7 +279,7 @@ def _eval_instant_query(expr: str) -> list[dict]:
     aggregations ``max()`` / ``sum()`` / ``sum by (labels)()``, the
     transformer ``clamp_max(expr, max)``, and the binary operators ``+``
     and ``-`` with scalar broadcasting.  This is *not* a full PromQL
-    engine — just enough to serve the queries our Grafana panels and UI
+    engine — just enough to serve the queries our UI panels
     issue.
     """
     import re as _re
@@ -499,7 +498,7 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     # Minimal Prometheus-compatible query API
     # ------------------------------------------------------------------
-    # Allows Grafana and the UI to query this service directly using the
+    # Allows the UI to query this service directly using the
     # standard ``/api/v1/query`` endpoint without needing a separate
     # Prometheus server or GMP scraping infrastructure.
     # ------------------------------------------------------------------
@@ -521,7 +520,7 @@ def create_app() -> FastAPI:
         query: str = "", start: str = "", end: str = "", step: str = ""
     ) -> dict:
         # Return the current instant values at each requested timestamp.
-        # This is sufficient for Grafana panels that display recent data.
+        # This is sufficient for panels that display recent data.
         results = _eval_instant_query(query)
         matrix = []
         for sample in results:

@@ -33,7 +33,7 @@ else:
         description=(
             "Detect data drift across stored features and prediction drift "
             "from the inference log.  Pushes StatsD metrics for Prometheus "
-            "scraping and Grafana alerting."
+            "scraping and alerting."
         ),
         start_date=datetime(2024, 1, 1),
         schedule=drift_schedule,

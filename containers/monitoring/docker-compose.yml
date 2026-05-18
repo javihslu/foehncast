@@ -29,27 +29,5 @@ services:
     networks:
       - production
 
-  grafana:
-    container_name: grafana
-    image: grafana/grafana:11.3.0
-    depends_on:
-      - prometheus
-    environment:
-      GRAFANA_PROMETHEUS_URL: http://prometheus:9090
-      GF_SECURITY_ADMIN_USER: ${FOEHNCAST_GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${FOEHNCAST_GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_SECURITY_ALLOW_EMBEDDING: ${FOEHNCAST_GRAFANA_ALLOW_EMBEDDING:-false}
-      GF_AUTH_DISABLE_LOGIN_FORM: ${FOEHNCAST_GRAFANA_DISABLE_LOGIN_FORM:-false}
-      GF_AUTH_ANONYMOUS_ENABLED: ${FOEHNCAST_GRAFANA_ANONYMOUS_ENABLED:-false}
-      GF_AUTH_ANONYMOUS_ORG_ROLE: ${FOEHNCAST_GRAFANA_ANONYMOUS_ORG_ROLE:-Viewer}
-    ports:
-      - ${GRAFANA_BIND_HOST:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000
-    volumes:
-      - ../../grafana_work/etc:/etc/grafana:ro
-      - ../../grafana_work/data:/var/lib/grafana
-      - ../../grafana_work/dashboards:/opt/grafana/dashboards:ro
-    networks:
-      - production
-
 volumes:
   prometheus_data:

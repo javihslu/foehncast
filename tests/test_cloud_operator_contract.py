@@ -45,10 +45,7 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX", "cloud_composer_dag_gcs_prefix"),
     ("GCP_CLOUD_COMPOSER_AIRFLOW_URI", "cloud_composer_airflow_uri"),
     ("GCP_PROVISION_CLOUD_RUN_MLFLOW", "provision_cloud_run_mlflow"),
-    ("GCP_PROVISION_CLOUD_RUN_GRAFANA", "provision_cloud_run_grafana"),
-    ("GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL", "cloud_run_grafana_prometheus_url"),
     ("GCP_PROVISION_CLOUD_RUN_UI", "provision_cloud_run_ui"),
-    ("GCP_CLOUD_RUN_UI_GRAFANA_URL", "cloud_run_ui_grafana_url"),
     ("GCP_CLOUD_RUN_UI_PROMETHEUS_URL", "cloud_run_ui_prometheus_url"),
     ("GCP_PROVISION_CLOUD_WORKFLOWS", "provision_cloud_workflows"),
     ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
@@ -1273,7 +1270,6 @@ def test_publish_runtime_images_excludes_local_only_development_env() -> None:
     assert "cloudbuild/**" in push_paths
     assert {target["image_name"] for target in image_targets} == {
         "foehncast-airflow",
-        "foehncast-grafana",
         "foehncast-mlflow",
         "foehncast-ui",
     }
@@ -2546,10 +2542,6 @@ def test_bootstrap_scripts_share_payload_check_helper() -> None:
     assert "payload_check_require_patterns()" in helper
     assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in local_bootstrap
     assert 'source "${ROOT_DIR}/scripts/payload-check-common.sh"' in cloud_bootstrap
-    assert (
-        'payload_check_require_pattern "Grafana provisioning check failed"'
-        in local_bootstrap
-    )
     assert (
         'payload_check_require_pattern "Hosted bootstrap verification failed"'
         in cloud_bootstrap
