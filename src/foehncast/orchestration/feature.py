@@ -256,48 +256,13 @@ def _feature_pipeline_result(
     }
 
 
-def _emit_feature_pipeline_summary(
-    feature_context: FeaturePipelineState,
-    *,
-    run_status: str,
-    error: str | None = None,
-    auto_retraining_mode: str | None = None,
-    training_request_stage: str = "Production",
-) -> None:
-    context = _copy_feature_pipeline_context(feature_context)
+def _collect_spot_summaries(
+    context: FeaturePipelineState,
+) -> list[dict[str, object]]:
     run_dir = context.run_dir
-    fetched_spots = set(context.fetched_spots)
     stored_spots = set(context.stored_spots)
     spot_errors = dict(context.spot_errors)
     spot_summaries: list[dict[str, object]] = []
-
-    has_stage_artifacts = run_dir.exists() and any(run_dir.rglob("*"))
-
-    if (
-        run_status == "failed"
-        and not fetched_spots
-        and not spot_errors
-        and not has_stage_artifacts
-    ):
-        summary = build_feature_pipeline_run_summary(
-            dataset=context.dataset,
-            storage_backend=context.storage_backend,
-            expected_spots=list(context.expected_spots),
-            fetched_spots=[],
-            engineered_spots=[],
-            validated_spots=[],
-            stored_spots=[],
-            drifted_spots=[],
-            stage_durations_seconds=dict(context.stage_durations_seconds),
-            stage_failure_counts=dict(context.stage_failure_counts),
-            spot_summaries=[],
-            run_status=run_status,
-            error=error,
-            auto_retraining_mode=auto_retraining_mode,
-            training_request_stage=training_request_stage,
-        )
-        emit_feature_pipeline_run_summary(summary)
-        return
 
     for spot_id in context.expected_spots:
         forecast_df = _read_optional_feature_pipeline_frame(
@@ -329,6 +294,50 @@ def _emit_feature_pipeline_summary(
             )
         )
 
+    return spot_summaries
+
+
+def _emit_feature_pipeline_summary(
+    feature_context: FeaturePipelineState,
+    *,
+    run_status: str,
+    error: str | None = None,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
+) -> None:
+    context = _copy_feature_pipeline_context(feature_context)
+    run_dir = context.run_dir
+    fetched_spots = set(context.fetched_spots)
+    spot_errors = dict(context.spot_errors)
+
+    has_stage_artifacts = run_dir.exists() and any(run_dir.rglob("*"))
+
+    if (
+        run_status == "failed"
+        and not fetched_spots
+        and not spot_errors
+        and not has_stage_artifacts
+    ):
+        summary = build_feature_pipeline_run_summary(
+            dataset=context.dataset,
+            storage_backend=context.storage_backend,
+            expected_spots=list(context.expected_spots),
+            fetched_spots=[],
+            engineered_spots=[],
+            validated_spots=[],
+            stored_spots=[],
+            drifted_spots=[],
+            stage_durations_seconds=dict(context.stage_durations_seconds),
+            stage_failure_counts=dict(context.stage_failure_counts),
+            spot_summaries=[],
+            run_status=run_status,
+            error=error,
+            auto_retraining_mode=auto_retraining_mode,
+            training_request_stage=training_request_stage,
+        )
+        emit_feature_pipeline_run_summary(summary)
+        return
+
     summary = build_feature_pipeline_run_summary(
         dataset=context.dataset,
         storage_backend=context.storage_backend,
@@ -340,7 +349,7 @@ def _emit_feature_pipeline_summary(
         drifted_spots=list(context.drifted_spots),
         stage_durations_seconds=dict(context.stage_durations_seconds),
         stage_failure_counts=dict(context.stage_failure_counts),
-        spot_summaries=spot_summaries,
+        spot_summaries=_collect_spot_summaries(context),
         run_status=run_status,
         error=error,
         auto_retraining_mode=auto_retraining_mode,
@@ -595,6 +604,29 @@ def validate_feature_pipeline_context(
     ).to_payload()
 
 
+def _finalize_store_stage(
+    context: FeaturePipelineState,
+    *,
+    started_at: float,
+    run_status: str,
+    error: str | None = None,
+    auto_retraining_mode: str | None = None,
+    training_request_stage: str = "Production",
+) -> None:
+    if run_status == "failed":
+        increment_stage_failure(
+            context, stage="store", stage_names=FEATURE_PIPELINE_STAGES
+        )
+    record_stage_duration(context, stage="store", started_at=started_at)
+    _emit_feature_pipeline_summary(
+        context,
+        run_status=run_status,
+        error=error,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
+
+
 def _store_feature_pipeline_context_state(
     feature_context: FeaturePipelineState,
     *,
@@ -607,105 +639,80 @@ def _store_feature_pipeline_context_state(
     drifted_spots: list[str] = []
     started_at = perf_counter()
 
-    try:
-        for spot_id in context.validated_spots:
-            try:
-                feature_df = _read_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "feature", spot_id)
-                )
-                previous_stored_df = _read_optional_feature_slice(
-                    spot_id,
-                    context.dataset,
-                )
-                write_features(
-                    feature_df,
-                    spot_id=spot_id,
-                    dataset=context.dataset,
-                )
-                stored_df = read_features(
-                    spot_id=spot_id,
-                    dataset=context.dataset,
-                )
-                _write_feature_pipeline_frame(
-                    _feature_pipeline_stage_path(run_dir, "stored", spot_id),
-                    stored_df,
-                )
-
-                if _emit_feature_drift_metrics(
-                    spot_id=spot_id,
-                    dataset=context.dataset,
-                    reference_df=previous_stored_df,
-                    current_df=stored_df,
-                ):
-                    drifted_spots.append(spot_id)
-
-                stored_spots.append(spot_id)
-            except Exception as exc:
-                context.stored_spots = stored_spots
-                context.drifted_spots = drifted_spots
-                context.spot_errors[spot_id] = str(exc)
-                increment_stage_failure(
-                    context,
-                    stage="store",
-                    stage_names=FEATURE_PIPELINE_STAGES,
-                )
-                record_stage_duration(
-                    context,
-                    stage="store",
-                    started_at=started_at,
-                )
-                _emit_feature_pipeline_summary(
-                    context,
-                    run_status="failed",
-                    error=str(exc),
-                    auto_retraining_mode=auto_retraining_mode,
-                    training_request_stage=training_request_stage,
-                )
-                raise
-
-        if not stored_spots:
-            context.stored_spots = []
-            context.drifted_spots = []
-            error = "No feature data was generated for any configured spot"
-            increment_stage_failure(
-                context,
-                stage="store",
-                stage_names=FEATURE_PIPELINE_STAGES,
+    for spot_id in context.validated_spots:
+        try:
+            feature_df = _read_feature_pipeline_frame(
+                _feature_pipeline_stage_path(run_dir, "feature", spot_id)
             )
-            record_stage_duration(
+            previous_stored_df = _read_optional_feature_slice(
+                spot_id,
+                context.dataset,
+            )
+            write_features(
+                feature_df,
+                spot_id=spot_id,
+                dataset=context.dataset,
+            )
+            stored_df = read_features(
+                spot_id=spot_id,
+                dataset=context.dataset,
+            )
+            _write_feature_pipeline_frame(
+                _feature_pipeline_stage_path(run_dir, "stored", spot_id),
+                stored_df,
+            )
+
+            if _emit_feature_drift_metrics(
+                spot_id=spot_id,
+                dataset=context.dataset,
+                reference_df=previous_stored_df,
+                current_df=stored_df,
+            ):
+                drifted_spots.append(spot_id)
+
+            stored_spots.append(spot_id)
+        except Exception as exc:
+            context.stored_spots = stored_spots
+            context.drifted_spots = drifted_spots
+            context.spot_errors[spot_id] = str(exc)
+            _finalize_store_stage(
                 context,
-                stage="store",
                 started_at=started_at,
-            )
-            _emit_feature_pipeline_summary(
-                context,
                 run_status="failed",
-                error=error,
+                error=str(exc),
                 auto_retraining_mode=auto_retraining_mode,
                 training_request_stage=training_request_stage,
             )
-            raise ValueError(error)
+            raise
 
-        context.stored_spots = stored_spots
-        context.drifted_spots = drifted_spots
-        record_stage_duration(
+    if not stored_spots:
+        context.stored_spots = []
+        context.drifted_spots = []
+        error = "No feature data was generated for any configured spot"
+        _finalize_store_stage(
             context,
-            stage="store",
             started_at=started_at,
-        )
-        _emit_feature_pipeline_summary(
-            context,
-            run_status="succeeded",
+            run_status="failed",
+            error=error,
             auto_retraining_mode=auto_retraining_mode,
             training_request_stage=training_request_stage,
         )
-        return _feature_pipeline_result(
-            context,
-            auto_retraining_mode=auto_retraining_mode,
-            training_request_stage=training_request_stage,
-        )
-    except Exception:
-        raise
+        raise ValueError(error)
+
+    context.stored_spots = stored_spots
+    context.drifted_spots = drifted_spots
+    _finalize_store_stage(
+        context,
+        started_at=started_at,
+        run_status="succeeded",
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
+    return _feature_pipeline_result(
+        context,
+        auto_retraining_mode=auto_retraining_mode,
+        training_request_stage=training_request_stage,
+    )
 
 
 def store_feature_pipeline_context(

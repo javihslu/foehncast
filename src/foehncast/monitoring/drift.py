@@ -443,39 +443,16 @@ def _is_drift_detected(
 def _statsd_lines(report: DriftReport, prefix: str) -> list[str]:
     dataset_name = _sanitize_metric_segment(report.dataset_name)
     dataset_version = _sanitize_metric_segment(report.dataset_version)
+
+    dataset_metrics = [
+        ("threshold", report.threshold),
+        ("drifted_column_count", float(report.drifted_column_count)),
+        ("share_of_drifted_columns", report.share_of_drifted_columns),
+        ("dataset_drift", float(report.dataset_drift)),
+    ]
     lines = [
-        _statsd_line(
-            prefix,
-            dataset_name,
-            dataset_version,
-            "dataset",
-            "threshold",
-            report.threshold,
-        ),
-        _statsd_line(
-            prefix,
-            dataset_name,
-            dataset_version,
-            "dataset",
-            "drifted_column_count",
-            float(report.drifted_column_count),
-        ),
-        _statsd_line(
-            prefix,
-            dataset_name,
-            dataset_version,
-            "dataset",
-            "share_of_drifted_columns",
-            report.share_of_drifted_columns,
-        ),
-        _statsd_line(
-            prefix,
-            dataset_name,
-            dataset_version,
-            "dataset",
-            "dataset_drift",
-            float(report.dataset_drift),
-        ),
+        _statsd_line(prefix, dataset_name, dataset_version, "dataset", name, value)
+        for name, value in dataset_metrics
     ]
 
     for metric in report.metrics:
