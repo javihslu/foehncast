@@ -952,6 +952,39 @@ resource "google_cloud_run_v2_service" "grafana" {
         name  = "GF_LIVE_MAX_CONNECTIONS"
         value = "0"
       }
+
+      # Performance: enable SQLite WAL so concurrent iframe dashboard reads
+      # (the Streamlit sidebar embeds 7+ solo panels) stop serializing
+      # behind a single writer lock. Documented Grafana recommendation
+      # for embedded SQLite under any non-trivial read concurrency.
+      env {
+        name  = "GF_DATABASE_WAL"
+        value = "true"
+      }
+
+      # Performance: silence outbound analytics/update probes that block
+      # the request pipeline on startup. Cloud Run cold starts then warm
+      # the dashboards faster.
+      env {
+        name  = "GF_ANALYTICS_REPORTING_ENABLED"
+        value = "false"
+      }
+      env {
+        name  = "GF_ANALYTICS_CHECK_FOR_UPDATES"
+        value = "false"
+      }
+      env {
+        name  = "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES"
+        value = "false"
+      }
+
+      # Performance: cap minimum auto-refresh on dashboards so a stray
+      # `refresh=5s` URL param cannot stampede Prometheus from multiple
+      # browser iframes at once.
+      env {
+        name  = "GF_DASHBOARDS_MIN_REFRESH_INTERVAL"
+        value = "30s"
+      }
     }
   }
 
