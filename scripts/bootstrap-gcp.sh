@@ -201,10 +201,6 @@ tfvars_value_or_default() {
     [[ "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_SERVICE" == "true" ]]
   }
 
-  online_compose_is_enabled() {
-    [[ "$FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST" == "true" ]]
-  }
-
   cloud_composer_is_enabled() {
     [[ "$FOEHNCAST_TF_PROVISION_CLOUD_COMPOSER_ENVIRONMENT" == "true" ]]
   }
@@ -212,10 +208,6 @@ tfvars_value_or_default() {
   print_bootstrap_identity_summary() {
     if cloud_composer_is_enabled; then
       print_terraform_summary_line_if_present "Cloud Composer runtime service account" "$FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT"
-    fi
-
-    if online_compose_is_enabled; then
-      print_terraform_summary_line_if_present "Online compose runtime service account" "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT"
     fi
 
     echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"
@@ -245,7 +237,7 @@ tfvars_value_or_default() {
   }
 
   require_primary_hosted_api_configuration() {
-    local primary_target primary_url online_compose_app_url
+    local primary_target primary_url
 
     load_bootstrap_platform_state
 
@@ -256,15 +248,9 @@ tfvars_value_or_default() {
 
     primary_target="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_target)"
     primary_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" primary_hosted_api_url)"
-    online_compose_app_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
 
     if [[ "$primary_target" != "cloud-run" ]] || ! terraform_platform_value_present "$primary_url"; then
       echo "Hosted bootstrap could not resolve the promoted Cloud Run API URL. Fix the Cloud Run configuration instead of falling back to the VM app surface." >&2
-      exit 1
-    fi
-
-    if terraform_platform_value_present "$online_compose_app_url"; then
-      echo "Hosted bootstrap found a public online compose app URL (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2
       exit 1
     fi
   }
@@ -293,19 +279,6 @@ tfvars_value_or_default() {
     echo "After curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
   }
 
-  print_online_compose_summary() {
-    load_bootstrap_platform_state
-
-    if ! online_compose_is_enabled; then
-      return
-    fi
-
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose host IP" online_compose_host_ip
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url
-    print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url
-  }
-
   print_cloud_composer_summary() {
     load_bootstrap_platform_state
 
@@ -316,26 +289,6 @@ tfvars_value_or_default() {
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer environment" cloud_composer_environment_name
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer Airflow URL" cloud_composer_airflow_uri
     print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Cloud Composer DAG bucket prefix" cloud_composer_dag_gcs_prefix
-  }
-
-  verify_online_compose_runtime() {
-    local app_url
-
-    load_bootstrap_platform_state
-
-    if ! online_compose_is_enabled; then
-      return
-    fi
-
-    app_url="$(trimmed_terraform_output_value "$TERRAFORM_DIR" online_compose_app_url)"
-
-    if ! terraform_platform_value_present "$app_url"; then
-      echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."
-      return
-    fi
-
-    echo "Hosted online compose app URL is public (${app_url}), but this configuration requires Cloud Run to remain the only public API path." >&2
-    exit 1
   }
 
   require_curl_payload_patterns() {
@@ -615,8 +568,6 @@ tfvars_value_or_default() {
     local provision_cloud_run cloud_run_default cloud_run_service mlflow_tracking_uri
     local provision_cloud_composer_environment provision_cloud_composer_environment_default
     local cloud_composer_environment_name
-    local provision_online_compose_host provision_online_compose_host_default
-    local online_compose_host_name online_compose_host_zone online_compose_machine_type online_compose_disk_size_gb
     local repo_default target_repo_owner target_repo_name
 
     prepare_file_from_template "${ROOT_DIR}/.env.example" "$ENV_FILE"
@@ -685,27 +636,6 @@ tfvars_value_or_default() {
       cloud_composer_environment_name="$(prompt_with_default "Cloud Composer environment name" "$cloud_composer_environment_name")"
     fi
 
-    provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"
-
-    if prompt_yes_no "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM." "$provision_online_compose_host_default"; then
-      provision_online_compose_host=true
-    else
-      provision_online_compose_host=false
-    fi
-
-    online_compose_host_name="$(tfvars_value_or_default online_compose_host_name "$(foehncast_default_online_compose_host_name)")"
-    online_compose_host_zone="$(tfvars_value_or_default online_compose_host_zone "$(foehncast_default_online_compose_host_zone "$current_region")")"
-    online_compose_machine_type="$(tfvars_value_or_default online_compose_machine_type "e2-standard-4")"
-    online_compose_disk_size_gb="$(tfvars_value_or_default online_compose_disk_size_gb "40")"
-
-    if [[ "$provision_online_compose_host" == "true" ]]; then
-      online_compose_host_name="$(prompt_with_default "Online compose host name" "$online_compose_host_name")"
-      online_compose_host_zone="$(prompt_with_default "Online compose host zone" "$online_compose_host_zone")"
-      online_compose_machine_type="$(prompt_with_default "Online compose machine type" "$online_compose_machine_type")"
-      online_compose_disk_size_gb="$(prompt_with_default "Online compose disk size in GB" "$online_compose_disk_size_gb")"
-      replace_or_append_line "$TFVARS_FILE" '^[[:space:]]*online_compose_public_ports[[:space:]]*=' 'online_compose_public_ports = []'
-    fi
-
     if [[ "$CONFIGURE_GITHUB" != "true" && "$INTERACTIVE" == "true" ]]; then
       local github_default_answer="n"
 
@@ -757,12 +687,7 @@ tfvars_value_or_default() {
       "$cloud_run_service" \
       "$mlflow_tracking_uri" \
       "$provision_cloud_composer_environment" \
-      "$cloud_composer_environment_name" \
-      "$provision_online_compose_host" \
-      "$online_compose_host_name" \
-      "$online_compose_host_zone" \
-      "$online_compose_machine_type" \
-      "$online_compose_disk_size_gb"
+      "$cloud_composer_environment_name"
   }
 
 while [[ $# -gt 0 ]]; do
@@ -897,11 +822,9 @@ else
     print_auth_summary
     print_primary_hosted_api_summary
     print_cloud_run_summary
-    print_online_compose_summary
     print_cloud_composer_summary
     print_feast_runtime_summary
     verify_cloud_run_runtime
-    verify_online_compose_runtime
   fi
 fi
 

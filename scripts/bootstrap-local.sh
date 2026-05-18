@@ -203,7 +203,6 @@ cleanup_local_runtime_state() {
   rm -rf "$ROOT_DIR/airflow/reports"
   rm -rf "$ROOT_DIR/.state/feast"
   rm -rf "$ROOT_DIR/.state/monitoring"
-  rm -rf "$ROOT_DIR/.state/online-compose-sync"
   rm -rf "$ROOT_DIR/data/$dataset"
   rm -f "$ROOT_DIR/data/feast/$dataset.parquet"
 }
@@ -219,7 +218,6 @@ prepare_bind_mounted_runtime_paths() {
     "$ROOT_DIR/.state/airflow"
     "$ROOT_DIR/.state/feast"
     "$ROOT_DIR/.state/monitoring"
-    "$ROOT_DIR/.state/online-compose-sync"
     "$ROOT_DIR/data/$dataset"
     "$ROOT_DIR/data/feast"
     "$ROOT_DIR/.state/feast"

@@ -13,11 +13,6 @@ from foehncast.monitoring.drift_prometheus import (
     build_drift_prometheus_registry,
     render_drift_prometheus_metrics,
 )
-from foehncast.monitoring.hosted_sync_prometheus import (
-    build_hosted_sync_prometheus_registry,
-    read_hosted_sync_status,
-    render_hosted_sync_prometheus_metrics,
-)
 from foehncast.monitoring.pipeline_metrics import (
     FEATURE_PIPELINE_METRIC_CONTRACT,
     TRAINING_PIPELINE_METRIC_CONTRACT,

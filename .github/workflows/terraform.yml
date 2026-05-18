@@ -100,26 +100,6 @@ on:
         description: Cloud Composer environment name (leave blank to use repo vars)
         required: false
         type: string
-      provision_online_compose_host:
-        description: Provision the full online compose host (`true` or `false`; leave blank to use repo vars)
-        required: false
-        type: string
-      online_compose_host_name:
-        description: Compute Engine host name (leave blank to use repo vars)
-        required: false
-        type: string
-      online_compose_host_zone:
-        description: Compute Engine zone (leave blank to use repo vars)
-        required: false
-        type: string
-      online_compose_machine_type:
-        description: Compute Engine machine type (leave blank to use repo vars)
-        required: false
-        type: string
-      online_compose_disk_size_gb:
-        description: Boot disk size in GB (leave blank to use repo vars)
-        required: false
-        type: string
 permissions:
   contents: read
 
@@ -249,17 +229,9 @@ jobs:
           REPO_GCP_PROVISION_CLOUD_COMPOSER_ENVIRONMENT: ${{ steps.repo_config.outputs.provision_cloud_composer_environment }}
           REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME: ${{ steps.repo_config.outputs.cloud_composer_environment_name }}
           REPO_GCP_PROVISION_CLOUD_RUN_MLFLOW: ${{ steps.repo_config.outputs.provision_cloud_run_mlflow }}
-          REPO_GCP_PROVISION_CLOUD_RUN_GRAFANA: ${{ steps.repo_config.outputs.provision_cloud_run_grafana }}
-          REPO_GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL: ${{ steps.repo_config.outputs.cloud_run_grafana_prometheus_url }}
           REPO_GCP_PROVISION_CLOUD_RUN_UI: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
-          REPO_GCP_CLOUD_RUN_UI_GRAFANA_URL: ${{ steps.repo_config.outputs.cloud_run_ui_grafana_url }}
           REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL: ${{ steps.repo_config.outputs.cloud_run_ui_prometheus_url }}
           REPO_GCP_PROVISION_CLOUD_WORKFLOWS: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
-          REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST: ${{ steps.repo_config.outputs.provision_online_compose_host }}
-          REPO_GCP_ONLINE_COMPOSE_HOST_NAME: ${{ steps.repo_config.outputs.online_compose_host_name }}
-          REPO_GCP_ONLINE_COMPOSE_HOST_ZONE: ${{ steps.repo_config.outputs.online_compose_host_zone }}
-          REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE: ${{ steps.repo_config.outputs.online_compose_machine_type }}
-          REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB: ${{ steps.repo_config.outputs.online_compose_disk_size_gb }}
           REPO_GCP_CLOUD_RUN_IMAGE: ${{ steps.repo_config.outputs.cloud_run_image }}
           REPO_GCP_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
         run: |
@@ -505,45 +477,9 @@ jobs:
           if [[ -z "$provision_cloud_workflows" ]]; then
             provision_cloud_workflows='false'
           fi
-          provision_cloud_workflows="$(normalize_bool provision_cloud_workflows "$provision_cloud_workflows")"
+          provision_cloud_workflows="$(normalize_bool provision_cloud_workflows \"$provision_cloud_workflows\")"
 
-          provision_online_compose_host="${{ inputs.provision_online_compose_host }}"
-          if [[ -z "$provision_online_compose_host" ]]; then
-            provision_online_compose_host="$REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST"
-          fi
-          if [[ -z "$provision_online_compose_host" ]]; then
-            provision_online_compose_host='false'
-          fi
-          provision_online_compose_host="$(normalize_bool provision_online_compose_host "$provision_online_compose_host")"
-          online_compose_host_name="${{ inputs.online_compose_host_name }}"
-          if [[ -z "$online_compose_host_name" ]]; then
-            online_compose_host_name="$REPO_GCP_ONLINE_COMPOSE_HOST_NAME"
-          fi
-          if [[ -z "$online_compose_host_name" ]]; then
-            online_compose_host_name='foehncast-online'
-          fi
-          online_compose_host_zone="${{ inputs.online_compose_host_zone }}"
-          if [[ -z "$online_compose_host_zone" ]]; then
-            online_compose_host_zone="$REPO_GCP_ONLINE_COMPOSE_HOST_ZONE"
-          fi
-          if [[ -z "$online_compose_host_zone" ]]; then
-            online_compose_host_zone='europe-west6-b'
-          fi
-          online_compose_machine_type="${{ inputs.online_compose_machine_type }}"
-          if [[ -z "$online_compose_machine_type" ]]; then
-            online_compose_machine_type="$REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE"
-          fi
-          if [[ -z "$online_compose_machine_type" ]]; then
-            online_compose_machine_type='e2-standard-4'
-          fi
-          online_compose_disk_size_gb="${{ inputs.online_compose_disk_size_gb }}"
-          if [[ -z "$online_compose_disk_size_gb" ]]; then
-            online_compose_disk_size_gb="$REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB"
-          fi
-          if [[ -z "$online_compose_disk_size_gb" ]]; then
-            online_compose_disk_size_gb='40'
-          fi
-          cloud_run_image="$REPO_GCP_CLOUD_RUN_IMAGE"
+          cloud_run_image=\"$REPO_GCP_CLOUD_RUN_IMAGE\"
 
           github_owner="${{ github.repository_owner }}"
           github_repository="${{ github.event.repository.name }}"
@@ -576,17 +512,9 @@ jobs:
             echo "TF_VAR_provision_cloud_composer_environment=${provision_cloud_composer_environment}"
             echo "TF_VAR_cloud_composer_environment_name=${cloud_composer_environment_name}"
             echo "TF_VAR_provision_cloud_run_mlflow=${provision_cloud_run_mlflow}"
-            echo "TF_VAR_provision_cloud_run_grafana=${provision_cloud_run_grafana}"
-            echo "TF_VAR_cloud_run_grafana_prometheus_url=${cloud_run_grafana_prometheus_url}"
-            echo "TF_VAR_cloud_run_ui_grafana_url=${cloud_run_ui_grafana_url}"
             echo "TF_VAR_cloud_run_ui_prometheus_url=${cloud_run_ui_prometheus_url}"
             echo "TF_VAR_provision_cloud_run_ui=${provision_cloud_run_ui}"
             echo "TF_VAR_provision_cloud_workflows=${provision_cloud_workflows}"
-            echo "TF_VAR_provision_online_compose_host=${provision_online_compose_host}"
-            echo "TF_VAR_online_compose_host_name=${online_compose_host_name}"
-            echo "TF_VAR_online_compose_host_zone=${online_compose_host_zone}"
-            echo "TF_VAR_online_compose_machine_type=${online_compose_machine_type}"
-            echo "TF_VAR_online_compose_disk_size_gb=${online_compose_disk_size_gb}"
             echo "TF_VAR_github_owner=${github_owner}"
             echo "TF_VAR_github_repository=${github_repository}"
             echo "TF_STATE_BUCKET=${state_bucket}"
@@ -718,7 +646,6 @@ jobs:
           set -euo pipefail
 
           verify_failure=false
-          online_compose_verification_status="skipped"
           cloud_run_verification_status="skipped"
           cloud_run_invocation_mode="not-provisioned"
           primary_hosted_api_target="not-provisioned"
@@ -727,18 +654,6 @@ jobs:
           if [[ "${TF_VAR_provision_cloud_run_service}" != 'true' ]]; then
             echo "Hosted runtime verification requires TF_VAR_provision_cloud_run_service=true. Cloud Run is the only supported public API path in this configuration." >&2
             exit 1
-          fi
-
-          online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"
-          # The setup-terraform wrapper emits ::error:: annotations to stdout on failure;
-          # treat non-URL output as empty (null output from terraform).
-          if [[ "$online_compose_app_url" == http* ]]; then
-            echo "Hosted runtime verification failed: online compose app URL is public (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2
-            online_compose_verification_status="failed"
-            verify_failure=true
-          else
-            online_compose_verification_status="not-public"
-            echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."
           fi
 
           cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"
@@ -820,7 +735,6 @@ jobs:
           fi
 
           {
-            echo "online_compose_verification_status=${online_compose_verification_status}"
             echo "cloud_run_verification_status=${cloud_run_verification_status}"
             echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"
             echo "primary_hosted_api_target=${primary_hosted_api_target}"
@@ -860,12 +774,9 @@ jobs:
             echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"
             echo "- Primary hosted API URL: $(render_output primary_hosted_api_url not-provisioned)"
             echo "- Primary hosted API verification: ${{ steps.verify_hosted_runtimes.outputs.primary_hosted_api_verification_status }}"
-            echo "- Airflow URL: $(render_output online_compose_airflow_url host-local-by-default)"
-            echo "- MLflow URL: $(render_output online_compose_mlflow_url host-local-by-default)"
             echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
             echo "- Cloud Run verification: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_verification_status }}"
             echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"
-            echo "- Hosted VM public app surface: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"
             echo "- Hosted Feast source: bigquery"
             echo "- Hosted Feast offline source table: ${TF_VAR_project_id}.${feast_bigquery_dataset}.${feast_bigquery_table}"
             echo "- Hosted Feast online store database: ${feast_online_store_database_name}"

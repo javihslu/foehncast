@@ -48,11 +48,6 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_PROVISION_CLOUD_RUN_UI", "provision_cloud_run_ui"),
     ("GCP_CLOUD_RUN_UI_PROMETHEUS_URL", "cloud_run_ui_prometheus_url"),
     ("GCP_PROVISION_CLOUD_WORKFLOWS", "provision_cloud_workflows"),
-    ("GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
-    ("GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
-    ("GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
-    ("GCP_ONLINE_COMPOSE_MACHINE_TYPE", "online_compose_machine_type"),
-    ("GCP_ONLINE_COMPOSE_DISK_SIZE_GB", "online_compose_disk_size_gb"),
     ("GCP_CLOUD_RUN_IMAGE", "cloud_run_image"),
     ("GCP_CLOUD_RUN_SERVICE", "cloud_run_service"),
 ]
@@ -86,11 +81,6 @@ WORKFLOW_REPO_ENV_OUTPUTS: list[tuple[str, str]] = [
         "REPO_GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME",
         "cloud_composer_environment_name",
     ),
-    ("REPO_GCP_PROVISION_ONLINE_COMPOSE_HOST", "provision_online_compose_host"),
-    ("REPO_GCP_ONLINE_COMPOSE_HOST_NAME", "online_compose_host_name"),
-    ("REPO_GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
-    ("REPO_GCP_ONLINE_COMPOSE_MACHINE_TYPE", "online_compose_machine_type"),
-    ("REPO_GCP_ONLINE_COMPOSE_DISK_SIZE_GB", "online_compose_disk_size_gb"),
     ("REPO_GCP_CLOUD_RUN_SERVICE", "cloud_run_service"),
 ]
 
@@ -110,11 +100,6 @@ REPO_BACKED_WORKFLOW_INPUTS = {
     "cloud_run_allow_unauthenticated",
     "provision_cloud_composer_environment",
     "cloud_composer_environment_name",
-    "provision_online_compose_host",
-    "online_compose_host_name",
-    "online_compose_host_zone",
-    "online_compose_machine_type",
-    "online_compose_disk_size_gb",
 }
 
 FEAST_CLOUD_ENV_KEYS = {
@@ -222,7 +207,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
 
     assert inputs["provision_cloud_run_service"]["type"] == "string"
     assert inputs["provision_cloud_composer_environment"]["type"] == "string"
-    assert inputs["provision_online_compose_host"]["type"] == "string"
 
     resolve_step = _workflow_step(workflow, "remote", "Resolve Terraform inputs")
     env = resolve_step["env"]
@@ -237,10 +221,6 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert (
         'provision_cloud_run_service="$(normalize_bool '
         'provision_cloud_run_service "$provision_cloud_run_service")"' in run_script
-    )
-    assert (
-        'provision_online_compose_host="$(normalize_bool '
-        'provision_online_compose_host "$provision_online_compose_host")"' in run_script
     )
     assert 'cloud_run_container_port="$REPO_GCP_CLOUD_RUN_CONTAINER_PORT"' in run_script
     assert "cloud_run_container_port='8080'" in run_script
@@ -443,10 +423,6 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
         'echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"'
         in summary_script
     )
-    assert (
-        'echo "- Hosted VM public app surface: ${{ steps.verify_hosted_runtimes.outputs.online_compose_verification_status }}"'
-        in summary_script
-    )
 
     assert (
         'feast_bigquery_dataset="$(render_output bigquery_dataset_id "${TF_VAR_bigquery_dataset_id}")"'
@@ -482,15 +458,6 @@ def test_terraform_outputs_expose_primary_hosted_api_contract() -> None:
     assert 'output "primary_hosted_api_url"' in outputs
     assert '"cloud-run"' in outputs
     assert "google_cloud_run_v2_service.app[0].uri" in outputs
-
-
-def test_terraform_online_compose_public_ports_default_to_private_control_plane() -> (
-    None
-):
-    variables = _read_text("terraform/variables.tf")
-
-    assert 'variable "online_compose_public_ports"' in variables
-    assert "default     = []" in variables
 
 
 def test_terraform_seeds_reviewed_composer_pypi_baseline() -> None:
@@ -542,8 +509,6 @@ def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
         tfvars,
         flags=re.MULTILINE,
     )
-    assert "provision_online_compose_host  = true" in tfvars
-    assert "online_compose_public_ports    = []" in tfvars
 
 
 def test_composer_readiness_docs_describe_reviewed_pypi_baseline() -> None:
@@ -576,18 +541,6 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert verify_step["id"] == "verify_hosted_runtimes"
     assert (
         "if [[ \"${TF_VAR_provision_cloud_run_service}\" != 'true' ]]; then"
-        in verify_script
-    )
-    assert (
-        'online_compose_app_url="$(terraform -chdir=terraform output -raw online_compose_app_url 2>/dev/null || true)"'
-        in verify_script
-    )
-    assert (
-        'echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."'
-        in verify_script
-    )
-    assert (
-        'echo "Hosted runtime verification failed: online compose app URL is public (${online_compose_app_url}). Remove port 8000 from online_compose_public_ports so Cloud Run remains the only public API path." >&2'
         in verify_script
     )
     assert (
@@ -1353,43 +1306,26 @@ def test_terraform_injects_feast_runtime_contract_into_both_hosted_targets() -> 
         terraform,
         flags=re.DOTALL,
     )
-    online_compose_block = re.search(
-        r"online_compose_env_vars = merge\(\n\s*\{\n(?P<body>.*?)\n\s*\},\n\s*var\.online_compose_env_vars",
-        terraform,
-        flags=re.DOTALL,
-    )
 
     assert cloud_run_block is not None
-    assert online_compose_block is not None
 
     for key in FEAST_CLOUD_ENV_KEYS:
         assert key in cloud_run_block.group("body")
-        assert key in online_compose_block.group("body")
 
     assert "FOEHNCAST_PIPELINE_REPORT_DIR" in cloud_run_block.group("body")
-    assert "FOEHNCAST_PIPELINE_REPORT_DIR" in online_compose_block.group("body")
 
 
 def test_terraform_hosted_runtime_env_maps_avoid_gcp_bucket_name_alias() -> None:
     terraform = _read_text("terraform/main.tf")
-    online_compose_block = re.search(
-        r"online_compose_env_vars = merge\(\n\s*\{\n(?P<body>.*?)\n\s*\},\n\s*var\.online_compose_env_vars",
-        terraform,
-        flags=re.DOTALL,
-    )
     cloud_composer_block = re.search(
         r"cloud_composer_env_vars = merge\(\n\s*\{\n(?P<body>.*?)\n\s*\},\n\s*var\.cloud_composer_env_vars",
         terraform,
         flags=re.DOTALL,
     )
 
-    assert online_compose_block is not None
     assert cloud_composer_block is not None
-    assert "GCP_BUCKET_NAME" not in online_compose_block.group("body")
     assert "GCP_BUCKET_NAME" not in cloud_composer_block.group("body")
-    assert "MLFLOW_ARTIFACT_DESTINATION" in online_compose_block.group("body")
     assert "MLFLOW_ARTIFACT_DESTINATION" in cloud_composer_block.group("body")
-    assert "FOEHNCAST_FEAST_GCS_BUCKET" in online_compose_block.group("body")
     assert "FOEHNCAST_FEAST_GCS_BUCKET" in cloud_composer_block.group("body")
 
 
@@ -1403,55 +1339,25 @@ def test_terraform_grants_hosted_runtime_identities_bigquery_storage_and_bucket_
         in terraform
     )
     assert (
-        'resource "google_project_iam_member" "online_compose_bigquery_read_session_user"'
-        in terraform
-    )
-    assert (
         'resource "google_bigquery_dataset_iam_member" "cloud_run_monitoring_bigquery_editor"'
-        in terraform
-    )
-    assert (
-        'resource "google_bigquery_dataset_iam_member" "online_compose_monitoring_bigquery_editor"'
-        in terraform
-    )
-    assert (
-        'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
         in terraform
     )
     assert (
         'resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader"'
         in terraform
     )
-    assert (
-        'resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader"'
-        in terraform
-    )
     assert 'role    = "roles/bigquery.readSessionUser"' in terraform
     assert 'role       = "roles/bigquery.dataEditor"' in terraform
-    assert 'role   = "roles/storage.objectAdmin"' in terraform
     assert 'role   = "roles/storage.legacyBucketReader"' in terraform
     assert (
         "google_project_iam_member.cloud_run_bigquery_read_session_user," in terraform
-    )
-    assert (
-        "google_project_iam_member.online_compose_bigquery_read_session_user,"
-        in terraform
     )
     assert (
         "google_bigquery_dataset_iam_member.cloud_run_monitoring_bigquery_editor,"
         in terraform
     )
     assert (
-        "google_bigquery_dataset_iam_member.online_compose_monitoring_bigquery_editor,"
-        in terraform
-    )
-    assert "google_storage_bucket_iam_member.online_compose_bucket_admin," in terraform
-    assert (
         "google_storage_bucket_iam_member.cloud_run_bucket_metadata_reader,"
-        in terraform
-    )
-    assert (
-        "google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,"
         in terraform
     )
 
@@ -1471,18 +1377,6 @@ def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contra
         'artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"'
         in terraform_single_spaced
     )
-    assert (
-        'online_compose_app_image = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"'
-        in terraform_single_spaced
-    )
-    assert (
-        'online_compose_airflow_image = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"'
-        in terraform_single_spaced
-    )
-    assert (
-        'online_compose_mlflow_image = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"'
-        in terraform_single_spaced
-    )
     assert '"cloudbuild.googleapis.com",' in terraform
     assert '"roles/cloudbuild.builds.editor",' in terraform
     assert 'data "google_project" "current"' in terraform
@@ -1494,15 +1388,7 @@ def test_terraform_defines_cloud_build_and_artifact_registry_hosted_image_contra
         "serviceAccount:${data.google_project.current.number}@cloudbuild.gserviceaccount.com"
         in terraform
     )
-    assert (
-        'resource "google_artifact_registry_repository_iam_member" "online_compose_reader"'
-        in terraform
-    )
-    assert (
-        "google_artifact_registry_repository_iam_member.online_compose_reader,"
-        in terraform
-    )
-    assert "default Artifact Registry image" in variables
+    assert "default Artifact Registry image" not in variables
     assert "default GHCR image" not in variables
 
 
@@ -1574,12 +1460,7 @@ def test_terraform_outputs_split_runtime_identity_contract() -> None:
 
     assert 'output "github_deployer_service_account"' in outputs
     assert 'output "cloud_run_runtime_service_account"' in outputs
-    assert 'output "online_compose_runtime_service_account"' in outputs
     assert 'output "cloud_composer_runtime_service_account"' in outputs
-    assert (
-        'value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null'
-        in outputs
-    )
     assert (
         'value       = var.provision_cloud_composer_environment ? try(google_service_account.cloud_composer_runtime[0].email, "foehncast-composer@${var.project_id}.iam.gserviceaccount.com") : null'
         in outputs
@@ -1600,10 +1481,6 @@ def test_platform_state_tracks_hosted_runtime_identities_without_repo_var_sync()
     )
 
     assert (
-        'FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" online_compose_runtime_service_account)"'
-        in load_body
-    )
-    assert (
         'FOEHNCAST_TF_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT="$(optional_terraform_output_value "$terraform_dir" cloud_composer_runtime_service_account)"'
         in load_body
     )
@@ -1611,205 +1488,6 @@ def test_platform_state_tracks_hosted_runtime_identities_without_repo_var_sync()
     assert "GCP_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
     assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in names_body
     assert "GCP_CLOUD_COMPOSER_RUNTIME_SERVICE_ACCOUNT" not in pairs_body
-
-
-def test_online_compose_startup_template_prepares_writable_runtime_dirs() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert "airflow_uid=50000" in template
-    assert "app_uid=1000" in template
-    assert "grafana_uid=472" in template
-    assert (
-        "install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports"
-        in template
-    )
-    assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/airflow /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
-        in template
-    )
-    assert "install -d -m 0775 /opt/foehncast/data/feast" in template
-    assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
-    assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/airflow" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/feast" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/data/feast" in template
-    assert (
-        "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
-        in template
-    )
-    assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
-    assert "cat > /usr/local/bin/foehncast-online-compose-sync <<'EOF'" in template
-    assert "chmod 0755 /usr/local/bin/foehncast-online-compose-sync" in template
-    assert "systemctl enable --now foehncast-online-compose-sync.timer" in template
-    assert "systemctl start foehncast-online-compose-sync.service" in template
-
-
-def test_online_compose_startup_template_prepares_writable_runtime_directories() -> (
-    None
-):
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert "airflow_uid=50000" in template
-    assert "app_uid=1000" in template
-    assert "grafana_uid=472" in template
-    assert (
-        "install -d -m 0775 /opt/foehncast/airflow /opt/foehncast/airflow/logs /opt/foehncast/airflow/reports"
-        in template
-    )
-    assert (
-        "install -d -m 0755 /opt/foehncast/.state /opt/foehncast/.state/airflow /opt/foehncast/.state/feast /opt/foehncast/.state/online-compose-sync"
-        in template
-    )
-    assert "install -d -m 0775 /opt/foehncast/data/feast" in template
-    assert "install -d -m 0755 /opt/foehncast/grafana_work/data" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/airflow" in template
-    assert "chown -R $${app_uid}:$${app_uid} /opt/foehncast/.state" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/airflow" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/.state/feast" in template
-    assert "chown -R $${airflow_uid}:0 /opt/foehncast/data/feast" in template
-    assert (
-        "chown -R $${grafana_uid}:$${grafana_uid} /opt/foehncast/grafana_work/data"
-        in template
-    )
-    assert "chown $${airflow_uid}:0 /opt/foehncast/airflow/.admin-password" in template
-    assert "chmod 600 /opt/foehncast/airflow/.admin-password" in template
-
-
-def test_online_compose_startup_template_installs_periodic_repo_sync_timer() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert 'git -C /opt/foehncast fetch --depth 1 origin "${git_ref}"' in template
-    assert "git -C /opt/foehncast checkout --force FETCH_HEAD" in template
-    assert (
-        "cat > /etc/systemd/system/foehncast-online-compose-sync.service <<'EOF'"
-        in template
-    )
-    assert "ExecStart=/usr/local/bin/foehncast-online-compose-sync" in template
-    assert (
-        "cat > /etc/systemd/system/foehncast-online-compose-sync.timer <<'EOF'"
-        in template
-    )
-    assert "OnBootSec=2m" in template
-    assert "OnUnitActiveSec=5m" in template
-    assert "Persistent=true" in template
-    assert "compose_args=(" in template
-    assert "-f /opt/foehncast/docker-compose.yml" in template
-    assert "docker-compose.cloud.yml" not in template
-    assert "--env-file /opt/foehncast/.env" in template
-    assert (
-        'docker compose "$${compose_args[@]}" pull model-registry app airflow-init airflow-webserver airflow-dag-processor airflow-scheduler airflow-triggerer'
-        in template
-    )
-    assert (
-        "docker compose -f /opt/foehncast/docker-compose.yml --env-file /opt/foehncast/.env up -d --no-build"
-        in template
-    )
-    assert "--build" not in template
-
-
-def test_online_compose_startup_template_configures_artifact_registry_auth() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert "packages.cloud.google.com/apt/doc/apt-key.gpg" in template
-    assert "google-cloud-cli" in template
-    assert (
-        'gcloud auth configure-docker "${artifact_registry_host}" --quiet >/dev/null 2>&1'
-        in template
-    )
-
-
-def test_online_compose_startup_template_configures_docker_log_rotation() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert template.index("journalctl --vacuum-size=100M") < template.index(
-        "apt-get update"
-    )
-    assert "install -d -m 0755 /etc/docker" in template
-    assert "cat > /etc/docker/daemon.json <<'EOF'" in template
-    assert '"log-driver": "json-file"' in template
-    assert '"max-size": "10m"' in template
-    assert '"max-file": "3"' in template
-    assert "journalctl --vacuum-size=100M" in template
-    assert (
-        r"find /var/lib/docker/containers -name '*-json.log' -type f -size +50M -exec truncate -s 0 {} \;"
-        in template
-    )
-    assert "systemctl restart docker" in template
-
-
-def test_online_compose_sync_template_repairs_serving_surface_when_cold() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert (
-        'feature_logical_date="$${FEATURE_LOGICAL_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"'
-        in template
-    )
-    assert (
-        'feature_run_id="$${FEATURE_RUN_ID:-hosted_sync__$(date -u +"%Y-%m-%dT%H-%M-%SZ")}"'
-        in template
-    )
-    assert (
-        'airflow_health_url="http://127.0.0.1:8080/api/v2/monitor/health"' in template
-    )
-    assert 'app_health_url="http://127.0.0.1:8000/health"' in template
-    assert 'online_features_url="http://127.0.0.1:8000/features/online"' in template
-    assert "verify_airflow_api_health() {" in template
-    assert "wait_for_airflow_dag_run_state() {" in template
-    assert "serving_surface_ready() {" in template
-    assert "bootstrap_serving_surface() {" in template
-    assert "verify_serving_surface() {" in template
-    assert (
-        "airflow dags trigger feature_pipeline \\\n"
-        '    --logical-date "$${feature_logical_date}" \\\n'
-        '    --run-id "$${feature_run_id}" >/dev/null' in template
-    )
-    assert (
-        'curl --retry 1 --retry-all-errors --retry-delay 0 -fsS -X POST -H "Content-Type: application/json" -d \'{}\' "$${online_features_url}" >/dev/null 2>&1'
-        in template
-    )
-    assert (
-        'curl --retry 30 --retry-all-errors --retry-delay 2 -fsS -X POST -H "Content-Type: application/json" -d \'{}\' "$${online_features_url}" >/dev/null'
-        in template
-    )
-    assert (
-        "wait_for_airflow_dag_run_state feature_pipeline success manual 120 2"
-        in template
-    )
-    assert (
-        "wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2"
-        in template
-    )
-    assert (
-        'echo "Hosted runtime not ready; triggering feature and training convergence."'
-        in template
-    )
-    assert 'echo "Waiting for hosted feature pipeline..."' in template
-    assert "if ! serving_surface_ready; then" in template
-    assert 'echo "Checking hosted online features..."' in template
-
-
-def test_online_compose_sync_template_records_last_success_status_file() -> None:
-    template = _read_text("terraform/templates/online-compose-host.sh.tftpl")
-
-    assert (
-        "cat > /opt/foehncast/.state/online-compose-sync/last-success.json <<'EOF'"
-        in template
-    )
-    assert '"state": "pending"' in template
-    assert (
-        'sync_status_file="/opt/foehncast/.state/online-compose-sync/last-success.json"'
-        in template
-    )
-    assert 'sync_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"' in template
-    assert 'sync_commit="$(git -C /opt/foehncast rev-parse HEAD)"' in template
-    assert 'cat > "$${sync_status_file}.tmp" <<STATUS' in template
-    assert 'mv "$${sync_status_file}.tmp" "$${sync_status_file}"' in template
-    assert 'chmod 0644 "$${sync_status_file}"' in template
-    assert '"last_successful_sync_at": "$${sync_timestamp}"' in template
-    assert '"last_successful_commit": "$${sync_commit}"' in template
-    assert '"compose_deploy_mode": "$${compose_deploy_mode}"' in template
-    assert 'compose_deploy_mode="pull"' in template
 
 
 def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access() -> (
@@ -1823,27 +1501,11 @@ def test_terraform_runtime_iam_includes_bigquery_storage_api_and_bucket_access()
     )
     assert 'role    = "roles/bigquery.readSessionUser"' in terraform
     assert (
-        'resource "google_project_iam_member" "online_compose_bigquery_read_session_user"'
-        in terraform
-    )
-    assert (
         'resource "google_bigquery_dataset_iam_member" "cloud_run_monitoring_bigquery_editor"'
         in terraform
     )
     assert (
-        'resource "google_bigquery_dataset_iam_member" "online_compose_monitoring_bigquery_editor"'
-        in terraform
-    )
-    assert (
-        'resource "google_storage_bucket_iam_member" "online_compose_bucket_admin"'
-        in terraform
-    )
-    assert (
         'resource "google_storage_bucket_iam_member" "cloud_run_bucket_metadata_reader"'
-        in terraform
-    )
-    assert (
-        'resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader"'
         in terraform
     )
 
@@ -1888,10 +1550,6 @@ def test_terraform_readme_describes_hosted_prediction_event_warehouse_contract()
         "dataset-editor access there so hosted inference can append and read durable prediction-event history"
         in terraform_readme
     )
-    assert (
-        "BigQuery dataset edits for curated features and retained prediction-event history"
-        in terraform_readme
-    )
 
 
 def test_terraform_grants_github_deployer_firestore_admin() -> None:
@@ -1899,17 +1557,7 @@ def test_terraform_grants_github_deployer_firestore_admin() -> None:
 
     assert 'resource "google_project_iam_member" "github_project_admin"' in terraform
     assert '"roles/datastore.owner"' in terraform
-    assert 'role   = "roles/storage.objectAdmin"' in terraform
     assert "google_project_iam_member.cloud_run_bigquery_read_session_user" in terraform
-    assert (
-        "google_project_iam_member.online_compose_bigquery_read_session_user"
-        in terraform
-    )
-    assert "google_storage_bucket_iam_member.online_compose_bucket_admin" in terraform
-    assert (
-        "google_storage_bucket_iam_member.online_compose_bucket_metadata_reader"
-        in terraform
-    )
 
 
 def test_bootstrap_gcp_reports_hosted_feast_follow_up_step() -> None:
@@ -1999,33 +1647,6 @@ def test_bootstrap_gcp_uses_isolated_terraform_dir_for_remote_backend() -> None:
     )
 
 
-def test_bootstrap_gcp_reports_online_compose_urls_when_hosted_vm_is_enabled() -> None:
-    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
-    state_helper = _read_text("scripts/terraform-platform-state.sh")
-
-    assert "print_online_compose_summary()" in bootstrap
-    assert "trimmed_terraform_output_value()" in state_helper
-    assert "terraform_platform_value_present()" in state_helper
-    assert "print_terraform_summary_line_if_present()" in state_helper
-    assert "print_trimmed_terraform_output_summary()" in state_helper
-    assert (
-        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose host IP" online_compose_host_ip'
-        in bootstrap
-    )
-    assert (
-        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose app URL" online_compose_app_url'
-        in bootstrap
-    )
-    assert (
-        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose Airflow URL" online_compose_airflow_url'
-        in bootstrap
-    )
-    assert (
-        'print_trimmed_terraform_output_summary "$TERRAFORM_DIR" "Online compose MLflow URL" online_compose_mlflow_url'
-        in bootstrap
-    )
-
-
 def test_bootstrap_gcp_reports_cloud_run_url_when_service_is_enabled() -> None:
     bootstrap = _read_text("scripts/bootstrap-gcp.sh")
 
@@ -2056,39 +1677,14 @@ def test_bootstrap_gcp_reports_split_runtime_identities() -> None:
 
     assert "print_bootstrap_identity_summary()" in bootstrap
     assert "cloud_run_is_enabled()" in bootstrap
-    assert "online_compose_is_enabled()" in bootstrap
     assert (
         'echo "Cloud Run runtime service account: ${FOEHNCAST_TF_RUNTIME_SERVICE_ACCOUNT}"'
         in bootstrap
     )
     assert "print_bootstrap_identity_summary" in bootstrap
     assert (
-        'print_terraform_summary_line_if_present "Online compose runtime service account" "$FOEHNCAST_TF_ONLINE_COMPOSE_RUNTIME_SERVICE_ACCOUNT"'
-        in bootstrap
-    )
-    assert "if online_compose_is_enabled; then" in bootstrap
-    assert (
         'echo "GitHub deployer service account: ${FOEHNCAST_TF_SERVICE_ACCOUNT_EMAIL}"'
         in bootstrap
-    )
-
-
-def test_bootstrap_gcp_verifies_hosted_app_health_and_sync_metrics_after_apply() -> (
-    None
-):
-    bootstrap = _read_text("scripts/bootstrap-gcp.sh")
-
-    assert "verify_online_compose_runtime()" in bootstrap
-    assert (
-        'echo "Hosted online compose app URL is not publicly exposed, which matches the Cloud Run primary-path contract."'
-        in bootstrap
-    )
-    assert (
-        'echo "Hosted online compose app URL is public (${app_url}), but this configuration requires Cloud Run to remain the only public API path." >&2'
-        in bootstrap
-    )
-    assert bootstrap.index("print_feast_runtime_summary") < bootstrap.rindex(
-        "verify_online_compose_runtime"
     )
 
 
@@ -2139,7 +1735,6 @@ def test_bootstrap_gcp_prompts_for_primary_cloud_run_and_retained_vm() -> None:
     assert "foehncast_default_bigquery_table()" in state_helper
     assert "foehncast_default_feast_online_store_database()" in state_helper
     assert "foehncast_default_cloud_run_service_name()" in state_helper
-    assert "foehncast_default_online_compose_host_name()" in state_helper
     assert (
         'cloud_run_default="$(tfvars_yes_no_default provision_cloud_run_service)"'
         in bootstrap
@@ -2152,16 +1747,6 @@ def test_bootstrap_gcp_prompts_for_primary_cloud_run_and_retained_vm() -> None:
         "Provision Cloud Run as the primary hosted API now? This needs a reachable MLflow endpoint."
         in bootstrap
     )
-    assert (
-        "Provision the full online compose host now? This keeps the hosted Airflow, MLflow, and retained operator stack on one VM."
-        in bootstrap
-    )
-    assert (
-        'provision_online_compose_host_default="$(tfvars_yes_no_default provision_online_compose_host)"'
-        in bootstrap
-    )
-    assert 'replace_or_append_line "$TFVARS_FILE"' in bootstrap
-    assert "online_compose_public_ports = []" in bootstrap
 
 
 def test_prepare_feast_cloud_requires_bigquery_runtime_contract() -> None:

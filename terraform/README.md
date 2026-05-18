@@ -85,41 +85,6 @@ Terraform also injects the Feast runtime env contract for the hosted app path: t
 
 This Cloud Run runtime identity is intentionally narrower than the other hosted identities. It exists to serve the inference API, not to act as the general operator or deployment account.
 
-## Hosted Full-Stack Target Inputs
-
-When `provision_online_compose_host = true`, provide:
-
-- optional image overrides if you do not want the default Artifact Registry `:latest` tags
-- any extra stack environment in `online_compose_env_vars`
-
-Terraform creates a network, a static public IP, and a Compute Engine VM. The VM clones the repo, writes a runtime `.env` file with the GCP and BigQuery settings, configures Artifact Registry auth with its runtime identity, and pulls the reviewed runtime images from Artifact Registry. If the images are not available, the sync fails fast instead of building on the VM.
-That `.env` file uses the same Feast runtime settings as the Cloud Run path, so both hosted targets use the same Feast config.
-It also points MLflow artifacts to `gs://<artifact-bucket>/mlflow/artifacts`, so artifacts go to the shared bucket instead of a VM-local volume.
-The VM installs a `foehncast-online-compose-sync` systemd timer. Every run fetches the configured Git ref and refreshes the hosted compose stack, so DAG and runtime changes land on the host without a manual SSH pull.
-Each successful sync also updates `/opt/foehncast/.state/online-compose-sync/last-success.json`.
-The app exposes that status through Prometheus `/metrics`, and Grafana shows it on the monitoring dashboard.
-
-Terraform also creates a Firestore Datastore-mode database for Feast online serving. Using a named database keeps this setup separate from any default Firestore state in the project.
-
-The VM uses a dedicated service account with access to Artifact Registry pulls, BigQuery jobs, BigQuery Storage API read sessions, BigQuery dataset edits for curated features and retained prediction-event history, bucket objects for MLflow and Feast, and Datastore. This lets the Airflow, training, Feast, app, and MLflow containers use Application Default Credentials instead of key files.
-
-That broader VM identity is transitional by design. GitHub delivery uses the separate `github-actions-deployer` identity, and Cloud Run uses the separate `foehncast-cloud-run` runtime identity. The online compose host keeps the broader `foehncast-online-compose` identity only because the current VM still combines operator, training, and serving responsibilities on one machine.
-
-When curated BigQuery rows are ready, run `./scripts/prepare-feast-cloud.sh` on the host, or from another shell with ADC, to apply the Feast repo and materialize the hosted online store.
-
-On first boot, the host creates an Airflow admin password and stores it at `/opt/foehncast/airflow/.admin-password`. Use SSH to read it when you need to sign in.
-You can also check `/opt/foehncast/.state/online-compose-sync/last-success.json` over SSH to see the last successful hosted DAG and runtime refresh.
-
-The online host starts:
-
-- FastAPI on port `8000`
-- Airflow on port `8080` only if you explicitly expose it
-- MLflow on port `5001` only if you explicitly expose it
-
-By default, `online_compose_public_ports = []`, so the retained operator host stays private. If you need a public operator UI, add the specific port deliberately.
-
-The compose-host path is the simplest way to keep the whole stack online without forcing Airflow into Cloud Run.
-
 ## Managed Orchestration Target Inputs
 
 When `provision_cloud_composer_environment = true`, provide:
@@ -138,15 +103,11 @@ The retained host is still part of the shared environment, but several VM-specif
 
 | Surface | Why it still exists | Classification | Next migration issue |
 |--------|----------------------|----------------|----------------------|
-| `online_compose_*` Terraform inputs, outputs, and repo variables | the current VM target still needs host name, zone, sizing, and exposure controls | transitional | #224 |
-| compose-host-specific image overrides and sizing inputs | the current VM target still needs host name, zone, sizing, and optional image override controls even though default hosted images come from Artifact Registry | current but transitional | #224 |
-| VM runtime service account and IAM | the current host still combines Airflow, MLflow, training, Feast preparation, and private app checks on one machine | current but transitional | later host-shrink issue |
-| startup template and sync timer | the VM still refreshes the repo, pulls the stack, and records retained-host sync evidence for operators | current but transitional | later host-shrink issue |
-| public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface while the VM stays private | keep for now | keep until the VM role changes |
+| public-port outputs and verification rules | the current hosted contract still needs to prove that Cloud Run is the only public API surface | keep for now | keep until the role changes |
 
 ## Composer Readiness Boundary
 
-Terraform can provision an optional Cloud Composer environment today. The current online compose host remains the operational orchestration surface.
+Terraform can provision an optional Cloud Composer environment today.
 
 Before a later Composer cutover, this repo still needs explicit contract surfaces for:
 
@@ -222,11 +183,6 @@ Set these GitHub repository variables:
 - `GCP_CLOUD_COMPOSER_ENVIRONMENT_NAME`
 - `GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX` when Composer is enabled
 - `GCP_CLOUD_COMPOSER_AIRFLOW_URI` when Composer is enabled
-- `GCP_PROVISION_ONLINE_COMPOSE_HOST`
-- `GCP_ONLINE_COMPOSE_HOST_NAME`
-- `GCP_ONLINE_COMPOSE_HOST_ZONE`
-- `GCP_ONLINE_COMPOSE_MACHINE_TYPE`
-- `GCP_ONLINE_COMPOSE_DISK_SIZE_GB`
 - `GCP_WORKLOAD_IDENTITY_PROVIDER`
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `GCP_TERRAFORM_STATE_BUCKET`
@@ -331,9 +287,7 @@ After bootstrap, run the Terraform workflow with `apply` if you want to provisio
 
 If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks the Cloud Run `/health` endpoint and the `/spots` route. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling it.
 
-If a normal apply creates the hosted online compose target and exposes port `8000`, `./scripts/bootstrap-gcp.sh` waits for the hosted `/health` endpoint and checks that `/metrics` contains the online compose sync metrics.
-
-The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target or the full online compose host target.
+The script writes `.env` and `terraform/terraform.tfvars` during setup. It also asks whether the next apply should enable the inference-only Cloud Run target.
 
 Authentication stays in the active `gcloud` application default credentials for the shell you used. Terraform creates the runtime service accounts for Cloud Run and GitHub delivery.
 

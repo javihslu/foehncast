@@ -78,11 +78,6 @@ output "cloud_build_service_account" {
   value       = google_service_account.cloud_build.email
 }
 
-output "online_compose_runtime_service_account" {
-  description = "Service account intended for the online compose host runtime when that target is enabled."
-  value       = var.provision_online_compose_host ? try(google_service_account.online_compose_runtime[0].email, "foehncast-online-compose@${var.project_id}.iam.gserviceaccount.com") : null
-}
-
 output "cloud_composer_runtime_service_account" {
   description = "Service account intended for the Cloud Composer environment when that target is enabled."
   value       = var.provision_cloud_composer_environment ? try(google_service_account.cloud_composer_runtime[0].email, "foehncast-composer@${var.project_id}.iam.gserviceaccount.com") : null
@@ -216,49 +211,4 @@ output "cloud_run_ui_service_url" {
 output "cloud_workflows_pipeline_cascade_id" {
   description = "Cloud Workflows pipeline cascade ID, if provisioned."
   value       = try(google_workflows_workflow.pipeline_cascade[0].id, null)
-}
-
-output "online_compose_host_ip" {
-  description = "Public IP address of the online Docker host, if provisioned."
-  value       = try(google_compute_address.online_compose[0].address, null)
-}
-
-output "provision_online_compose_host" {
-  description = "Whether Terraform is configured to provision the online Docker host."
-  value       = var.provision_online_compose_host
-}
-
-output "online_compose_host_name" {
-  description = "Configured name for the online Docker host."
-  value       = var.online_compose_host_name
-}
-
-output "online_compose_host_zone" {
-  description = "Configured zone for the online Docker host."
-  value       = var.online_compose_host_zone
-}
-
-output "online_compose_machine_type" {
-  description = "Configured machine type for the online Docker host."
-  value       = var.online_compose_machine_type
-}
-
-output "online_compose_disk_size_gb" {
-  description = "Configured boot disk size in GB for the online Docker host."
-  value       = var.online_compose_disk_size_gb
-}
-
-output "online_compose_app_url" {
-  description = "Public URL for the online inference API, if provisioned."
-  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 8000) ? "http://${google_compute_address.online_compose[0].address}:8000" : null
-}
-
-output "online_compose_airflow_url" {
-  description = "Public URL for the online Airflow UI, if provisioned and explicitly exposed."
-  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 8080) ? "http://${google_compute_address.online_compose[0].address}:8080" : null
-}
-
-output "online_compose_mlflow_url" {
-  description = "Public URL for the online MLflow UI, if provisioned and explicitly exposed."
-  value       = var.provision_online_compose_host && contains(var.online_compose_public_ports, 5001) ? "http://${google_compute_address.online_compose[0].address}:5001" : null
 }

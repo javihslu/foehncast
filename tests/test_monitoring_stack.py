@@ -63,7 +63,6 @@ def test_prometheus_alerting_rules_cover_service_and_domain_health() -> None:
     assert "PredictionMonitoringExecutionFailure" in domain
     assert "FeaturePipelineStageFailure" in domain
     assert "TrainingPipelineStageFailure" in domain
-    assert "HostedSyncStale" in domain
     assert all(r["labels"]["severity"] == "warning" for r in domain.values())
 
 
