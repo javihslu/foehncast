@@ -119,6 +119,20 @@ The engineering layer creates the project's curated feature frame. The feature s
 - raw columns remain available alongside engineered columns so downstream validation and storage operate on one complete curated frame
 - the datetime index and time basis are preserved so later storage and Feast preparation can add persistence and serving context without redefining the feature set
 
+The engineering step keeps the raw forecast measurements intact and adds a small, explicit set of derived columns on top of them:
+
+| Derived feature | Raw input | What the calculation captures |
+|------|-----------|-------------------------------|
+| `hour_of_day_sin`, `hour_of_day_cos` | forecast timestamp | cyclical time-of-day encoding without a hard break between 23:00 and 00:00 |
+| `day_of_year_sin`, `day_of_year_cos` | forecast timestamp | cyclical season-of-year position, with leap years handled explicitly |
+| `wind_direction_10m_sin`, `wind_direction_10m_cos` | `wind_direction_10m` | circular wind-direction encoding so angular wraparound stays model-friendly |
+| `gust_excess_10m` | `wind_gusts_10m`, `wind_speed_10m` | non-negative gust surplus above sustained 10 m wind in km/h |
+| `gust_factor` | `wind_gusts_10m`, `wind_speed_10m` | gust-to-sustained ratio, retained as a label-facing gustiness signal |
+| `wind_steadiness` | rolling `wind_speed_10m` history | 3-hour coefficient of variation, where lower values indicate steadier wind |
+| `shore_alignment` | `wind_direction_10m`, spot `shore_orientation_deg` | cosine similarity between wind direction and the spot's cross-shore orientation |
+
+Most weather fields, such as the raw wind-speed, gust, and temperature measurements, are carried through unchanged. The derived columns above are the only feature-engineering step before validation and storage.
+
 The supported training path is tree-based, so feature representation quality matters more than blanket scaling. Circular wind-direction encoding and the shift toward `gust_excess_10m` follow that same choice. The engineering stage stays narrow: create curated rows first, then let validation, storage, and Feast-specific projection happen downstream.
 
 ## Validation Boundary
