@@ -857,8 +857,15 @@ def _render_sidebar_ml_panels() -> None:
     # Show "—" when no validated pairs exist (avoids misleading "0%")
     if hindcast_n is not None and hindcast_n < 1:
         hindcast_acc = None
-    drift_max = _prom_query('max(foehncast_drift_metric{metric_name="drift_score"})')
-    confidence = max(0.0, min(1.0, 1.0 - drift_max)) if drift_max is not None else None
+    # Confidence = 1 - share of features whose drift_detected fired.
+    # Per-column drift_score is on different scales (PSI, Wasserstein, ...)
+    # and can saturate at 1.0, which used to collapse confidence to 0 %.
+    drift_share = _prom_query(
+        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns"})'
+    )
+    confidence = (
+        max(0.0, min(1.0, 1.0 - drift_share)) if drift_share is not None else None
+    )
 
     if verified:
         badge_color = "var(--accent)"
@@ -1345,7 +1352,7 @@ def _render_pipelines_panel() -> None:
     triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
     cols = st.columns(4)
     cascade_clicked = cols[0].button(
-        "Run full cascade",
+        "DO NOT CLICK",
         type="primary",
         disabled=not triggers_available,
         help="Cloud Workflows: feature → training → inference",
@@ -1491,40 +1498,24 @@ def _render_pipelines_panel() -> None:
 
 @st.fragment
 def _render_system_tab() -> None:
-    """System tab: pipelines panel + Grafana dashboards (lazy loaded)."""
-    _render_pipelines_panel()
-    st.divider()
+    """System tab: pipelines panel, lazy loaded to keep the rider tab fast.
 
+    Streamlit executes every tab body on every script run, so any work done
+    here also blocks the rider tab. We gate the PromQL fan-out and the
+    Workflows ListExecutions call behind an explicit click.
+    """
     if not st.session_state.get("system_tab_loaded"):
         st.info(
-            "Monitoring dashboards load on demand to keep the rider tab fast. "
-            "Click below to load them — they will stay loaded for the rest of "
+            "Pipelines panel loads on demand to keep the rider tab fast. "
+            "Click below to load it — it stays loaded for the rest of "
             "this session."
         )
-        if st.button("Load monitoring dashboards", type="primary"):
+        if st.button("Load pipelines panel", type="primary"):
             st.session_state["system_tab_loaded"] = True
             st.rerun(scope="fragment")
         return
 
-    _render_monitoring_tab(_RIDER_GRAFANA)
-    st.divider()
-    _render_monitoring_tab(_PIPELINE_GRAFANA)
-    st.divider()
-    _render_timeline_panels()
-    st.divider()
-    ml_config = {
-        "title": "ML Diagnostics",
-        "description": (
-            "Drift analysis, training metrics, model registry status, "
-            "and prediction monitoring."
-        ),
-        "uid": _ML_DASHBOARD_UID,
-        "slug": _ML_DASHBOARD_SLUG,
-        "from": "now-24h",
-        "refresh": "5m",
-        "height": 2200,
-    }
-    _render_monitoring_tab(ml_config)
+    _render_pipelines_panel()
 
 
 def main() -> None:
