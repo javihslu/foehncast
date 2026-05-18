@@ -6,6 +6,7 @@ import json
 import os
 import time as _time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote as urlquote
 from urllib.parse import urlencode
@@ -900,12 +901,20 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool]] = [
 
 @st.fragment(run_every=30)
 def _render_freshness_bar() -> None:
-    """Source-by-source circular indicators, auto-refreshed every 30 s."""
+    """Source-by-source circular indicators, auto-refreshed every 30 s.
+
+    The three PromQL queries are fanned out in parallel so the sidebar
+    render is bounded by the slowest single query, not the sum of all
+    three. Important on Cloud Run + GMP where every query also pays a
+    metadata-server bearer fetch.
+    """
     cols = st.columns(len(_FRESHNESS_SOURCES))
     now = _time.time()
-    for col, (label, expr, scheduled) in zip(cols, _FRESHNESS_SOURCES):
+    exprs = [src[1] for src in _FRESHNESS_SOURCES]
+    with ThreadPoolExecutor(max_workers=len(exprs)) as pool:
+        values = list(pool.map(_prom_query, exprs))
+    for col, (label, _expr, scheduled), ts in zip(cols, _FRESHNESS_SOURCES, values):
         with col:
-            ts = _prom_query(expr)
             if ts is None:
                 st.markdown(
                     f'<div style="text-align:center;opacity:0.4;'
