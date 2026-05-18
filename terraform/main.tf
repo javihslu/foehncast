@@ -888,8 +888,8 @@ resource "google_cloud_run_v2_service" "grafana" {
     timeout = "30s"
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = 2
+      min_instance_count = 1
+      max_instance_count = 3
     }
 
     containers {
@@ -901,13 +901,15 @@ resource "google_cloud_run_v2_service" "grafana" {
 
       resources {
         limits = {
-          cpu = "1"
+          cpu = "2"
           # 512Mi caused continuous OOMs on Cloud Run (logs show
           # "Memory limit of 512 MiB exceeded with 515 MiB used"), which
           # in turn triggered grafana-apiserver Handler timeouts and
           # SQLite lock contention. 1Gi is the documented minimum for
-          # Grafana with embedded SQLite + provisioning.
-          memory = "1Gi"
+          # Grafana with embedded SQLite + provisioning. Bumped to 2Gi
+          # alongside cpu=2 and min_instances=1 to keep the embedded
+          # dashboards warm for the public UI.
+          memory = "2Gi"
         }
       }
 
@@ -1066,8 +1068,8 @@ resource "google_cloud_run_v2_service" "mlflow" {
     timeout         = "300s"
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = 2
+      min_instance_count = 1
+      max_instance_count = 3
     }
 
     volumes {
@@ -1086,8 +1088,8 @@ resource "google_cloud_run_v2_service" "mlflow" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "2Gi"
+          cpu    = "2"
+          memory = "4Gi"
         }
       }
 
@@ -1157,8 +1159,8 @@ resource "google_cloud_run_v2_service" "ui" {
     timeout         = "300s"
 
     scaling {
-      min_instance_count = 0
-      max_instance_count = 2
+      min_instance_count = 1
+      max_instance_count = 3
     }
 
     containers {
@@ -1170,8 +1172,8 @@ resource "google_cloud_run_v2_service" "ui" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "1Gi"
+          cpu    = "2"
+          memory = "2Gi"
         }
       }
 
@@ -1267,8 +1269,8 @@ resource "google_cloud_run_v2_job" "feature_pipeline" {
 
         resources {
           limits = {
-            cpu    = "2"
-            memory = "2Gi"
+            cpu    = "4"
+            memory = "4Gi"
           }
         }
 
@@ -1307,8 +1309,8 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
 
         resources {
           limits = {
-            cpu    = "2"
-            memory = "4Gi"
+            cpu    = "4"
+            memory = "8Gi"
           }
         }
 
@@ -1347,8 +1349,8 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
 
         resources {
           limits = {
-            cpu    = "1"
-            memory = "1Gi"
+            cpu    = "2"
+            memory = "2Gi"
           }
         }
 
