@@ -12,6 +12,8 @@ from urllib.parse import urlencode
 
 import streamlit as st
 
+import math
+
 import altair as alt
 import pandas as pd
 
@@ -918,13 +920,6 @@ def _render_freshness_bar() -> None:
 
 
 def _render_sidebar_ml_panels() -> None:
-    full_url = _grafana_dashboard_url(
-        _ML_DASHBOARD_UID,
-        _ML_DASHBOARD_SLUG,
-        from_range="now-24h",
-        refresh="30s",
-    )
-
     # --- Model Status (styled card with stats) -------------------------
     model_ver = _prom_query("foehncast_training_pipeline_registered_model_version")
     eval_ok = _prom_query("foehncast_training_pipeline_evaluation_report_exists")
@@ -1022,8 +1017,6 @@ def _render_sidebar_ml_panels() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-    st.caption(f"[Full ML dashboard ↗]({full_url})")
 
 
 def _render_timeline_panels() -> None:
@@ -1217,6 +1210,61 @@ def _render_rider_console(
                 .encode(x="x:T", x2="x2:T")
             )
 
+            # Night rectangles (~18:00–06:00 local) for diurnal context.
+            t_min = timeline_frame["time"].min()
+            t_max = timeline_frame["time"].max()
+            night_start = t_min.normalize() - pd.Timedelta(days=1)
+            nights: list[dict[str, pd.Timestamp]] = []
+            day = night_start
+            while day <= t_max.normalize() + pd.Timedelta(days=1):
+                nights.append(
+                    {
+                        "x": day + pd.Timedelta(hours=18),
+                        "x2": day + pd.Timedelta(days=1, hours=6),
+                    }
+                )
+                day = day + pd.Timedelta(days=1)
+            night_frame = pd.DataFrame(nights)
+            night_rect = (
+                alt.Chart(night_frame)
+                .mark_rect(color="#07252a", opacity=0.10)
+                .encode(x="x:T", x2="x2:T")
+            )
+
+            # Day/night cosine reference line: peaks at local noon, trough at midnight.
+            diurnal_idx = pd.date_range(
+                t_min.floor("h"), t_max.ceil("h"), freq="30min", tz=tz
+            )
+            max_wind = float(timeline_frame["wind_speed"].max() or 0.0)
+            amplitude = max(max_wind * 0.9, threshold_kmh)
+            diurnal_frame = pd.DataFrame(
+                {
+                    "time": diurnal_idx,
+                    "value": [
+                        amplitude
+                        * (
+                            0.5
+                            + 0.5
+                            * math.cos(
+                                2 * math.pi * ((ts.hour + ts.minute / 60.0) - 12) / 24.0
+                            )
+                        )
+                        for ts in diurnal_idx
+                    ],
+                }
+            )
+            diurnal_line = (
+                alt.Chart(diurnal_frame)
+                .mark_line(
+                    color="#e0a500",
+                    opacity=0.45,
+                    strokeDash=[2, 4],
+                    strokeWidth=1.5,
+                    interpolate="monotone",
+                )
+                .encode(x="time:T", y="value:Q")
+            )
+
             lines = (
                 alt.Chart(timeline_frame)
                 .mark_line(interpolate="monotone", strokeWidth=2.2)
@@ -1269,7 +1317,15 @@ def _render_rider_console(
                 .encode(x="x:T")
             )
             st.altair_chart(
-                (past_rect + lines + threshold + threshold_label + now_rule)
+                (
+                    night_rect
+                    + past_rect
+                    + diurnal_line
+                    + lines
+                    + threshold
+                    + threshold_label
+                    + now_rule
+                )
                 .properties(height=300, background="transparent")
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
@@ -1664,7 +1720,7 @@ def _render_pipelines_panel() -> None:
     triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
 
     # Top toolbar -----------------------------------------------------
-    toolbar = st.columns([1.2, 1, 1, 1, 0.7])
+    toolbar = st.columns([1.2, 4])
     cascade_clicked = toolbar[0].button(
         "DO NOT CLICK",
         type="primary",
@@ -1672,24 +1728,6 @@ def _render_pipelines_panel() -> None:
         help="Cloud Workflows: feature → training → inference",
         key="pipe_trigger_cascade",
     )
-    feature_clicked = toolbar[1].button(
-        "Feature", disabled=not triggers_available, key="pipe_trigger_feature"
-    )
-    training_clicked = toolbar[2].button(
-        "Training", disabled=not triggers_available, key="pipe_trigger_training"
-    )
-    inference_clicked = toolbar[3].button(
-        "Inference", disabled=not triggers_available, key="pipe_trigger_inference"
-    )
-    refresh_clicked = toolbar[4].button(
-        "Refresh", key="pipe_refresh", help="Clear cached PromQL and log queries"
-    )
-    if refresh_clicked:
-        _prom_query.clear()
-        _prom_query_vector.clear()
-        _list_job_logs.clear()
-        _list_workflow_executions.clear()
-        st.rerun(scope="fragment")
 
     if cascade_clicked:
         name = _trigger_pipeline()
@@ -1697,21 +1735,6 @@ def _render_pipelines_panel() -> None:
             "Failed to start cascade"
         )
         _list_workflow_executions.clear()
-    if feature_clicked:
-        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["feature"])
-        st.success(
-            f"Feature job started: {name.rsplit('/', 1)[-1]}"
-        ) if name else st.error("Failed to start feature job")
-    if training_clicked:
-        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["training"])
-        st.success(
-            f"Training job started: {name.rsplit('/', 1)[-1]}"
-        ) if name else st.error("Failed to start training job")
-    if inference_clicked:
-        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["inference"])
-        st.success(
-            f"Inference job started: {name.rsplit('/', 1)[-1]}"
-        ) if name else st.error("Failed to start inference job")
 
     if not triggers_available:
         st.caption(
@@ -1818,18 +1841,6 @@ def main() -> None:
         _render_freshness_bar()
         st.divider()
         _render_sidebar_ml_panels()
-        if _WORKFLOWS_PROJECT and _WORKFLOWS_REGION:
-            st.divider()
-            if st.button(
-                "Run Pipeline",
-                help="Trigger the feature → training → inference cascade in the cloud",
-            ):
-                execution_name = _trigger_pipeline()
-                if execution_name:
-                    st.success("Pipeline triggered")
-                else:
-                    st.error("Failed to trigger pipeline")
-        st.caption(f"Grafana: {_grafana_base_url()}")
 
     rider_tab, system_tab = st.tabs(["Rider Console", "System"])
 
