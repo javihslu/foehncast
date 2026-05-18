@@ -510,51 +510,6 @@ def create_app() -> FastAPI:
             },
         }
 
-    @app.get("/api/v1/query_range")
-    @app.post("/api/v1/query_range")
-    def prom_query_range(
-        query: str = "", start: str = "", end: str = "", step: str = ""
-    ) -> dict:
-        # Return the current instant values at each requested timestamp.
-        # This is sufficient for panels that display recent data.
-        results = _eval_instant_query(query)
-        matrix = []
-        for sample in results:
-            matrix.append(
-                {
-                    "metric": sample["metric"],
-                    "values": [sample["value"]],
-                }
-            )
-        return {
-            "status": "success",
-            "data": {
-                "resultType": "matrix",
-                "result": matrix,
-            },
-        }
-
-    @app.get("/api/v1/labels")
-    @app.post("/api/v1/labels")
-    def prom_labels() -> dict:
-        text = _metrics_payload().decode("utf-8", errors="replace")
-        samples = _parse_metrics_text(text)
-        labels: set[str] = set()
-        for s in samples:
-            labels.update(s["metric"].keys())
-        return {"status": "success", "data": sorted(labels)}
-
-    @app.get("/api/v1/label/{label_name}/values")
-    def prom_label_values(label_name: str) -> dict:
-        text = _metrics_payload().decode("utf-8", errors="replace")
-        samples = _parse_metrics_text(text)
-        values: set[str] = set()
-        for s in samples:
-            v = s["metric"].get(label_name, "")
-            if v:
-                values.add(v)
-        return {"status": "success", "data": sorted(values)}
-
     return app
 
 
