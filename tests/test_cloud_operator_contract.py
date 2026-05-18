@@ -615,7 +615,7 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert '"model_alias"[[:space:]]*:' in verify_script
     assert '"model_version"[[:space:]]*:' in verify_script
     assert '"id"[[:space:]]*:' in verify_script
-    assert "foehncast_online_compose_sync_status_file_present" in verify_script
+    assert 'up{job="foehncast_app"} 1' in verify_script
     assert (
         'echo "Cloud Run runtime verification failed: Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
         in verify_script
@@ -2121,7 +2121,7 @@ def test_bootstrap_gcp_verifies_cloud_run_runtime_after_apply() -> None:
     assert '"model_alias"[[:space:]]*:' in bootstrap
     assert '"model_version"[[:space:]]*:' in bootstrap
     assert '"id"[[:space:]]*:' in bootstrap
-    assert "foehncast_online_compose_sync_status_file_present" in bootstrap
+    assert 'up{job="foehncast_app"} 1' in bootstrap
     assert (
         'echo "Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
         in bootstrap

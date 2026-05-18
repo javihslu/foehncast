@@ -802,7 +802,7 @@ jobs:
                 echo "Cloud Run runtime verification failed: metrics endpoint did not respond." >&2
                 cloud_run_verification_status="failed"
                 verify_failure=true
-              elif ! printf '%s' "$metrics_payload" | grep -Eq 'up\{job="foehncast_app"\} 1'; then
+              elif ! printf '%s' "$metrics_payload" | grep -Fq 'up{job="foehncast_app"} 1'; then
                 echo "Cloud Run runtime verification failed: expected metrics payload with app health." >&2
                 printf '%s\n' "$metrics_payload" >&2
                 cloud_run_verification_status="failed"

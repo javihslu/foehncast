@@ -390,7 +390,7 @@ tfvars_value_or_default() {
     echo "Checking Cloud Run metrics at ${metrics_url}..."
     require_curl_payload_patterns \
       "$metrics_url" \
-      'foehncast_online_compose_sync_status_file_present' 'Cloud Run metrics payload'
+      'up{job="foehncast_app"} 1' 'Cloud Run metrics payload'
   }
 
   print_bootstrap_only_summary() {
