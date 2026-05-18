@@ -605,7 +605,7 @@ resource "google_storage_bucket_iam_member" "cloud_run_bucket_reader" {
 
 resource "google_storage_bucket_iam_member" "cloud_run_bucket_writer" {
   bucket = google_storage_bucket.artifacts.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
@@ -647,7 +647,7 @@ resource "google_project_iam_member" "cloud_run_monitoring_writer" {
 
 resource "google_bigquery_dataset_iam_member" "cloud_run_bigquery_reader" {
   dataset_id = google_bigquery_dataset.feature_store.dataset_id
-  role       = "roles/bigquery.dataViewer"
+  role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
