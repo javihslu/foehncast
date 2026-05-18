@@ -89,21 +89,6 @@ outputs:
   provision_cloud_workflows:
     description: Cloud Workflows provisioning repository variable
     value: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
-  provision_online_compose_host:
-    description: Online compose host provisioning repository variable
-    value: ${{ steps.repo_config.outputs.provision_online_compose_host }}
-  online_compose_host_name:
-    description: Online compose host name repository variable
-    value: ${{ steps.repo_config.outputs.online_compose_host_name }}
-  online_compose_host_zone:
-    description: Online compose host zone repository variable
-    value: ${{ steps.repo_config.outputs.online_compose_host_zone }}
-  online_compose_machine_type:
-    description: Online compose machine type repository variable
-    value: ${{ steps.repo_config.outputs.online_compose_machine_type }}
-  online_compose_disk_size_gb:
-    description: Online compose disk size repository variable
-    value: ${{ steps.repo_config.outputs.online_compose_disk_size_gb }}
   workload_identity_provider:
     description: Workload Identity Provider repository variable
     value: ${{ steps.repo_config.outputs.workload_identity_provider }}
@@ -166,11 +151,6 @@ runs:
           echo "provision_cloud_run_ui=$(read_repo_var GCP_PROVISION_CLOUD_RUN_UI)"
           echo "cloud_run_ui_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_UI_PROMETHEUS_URL)"
           echo "provision_cloud_workflows=$(read_repo_var GCP_PROVISION_CLOUD_WORKFLOWS)"
-          echo "provision_online_compose_host=$(read_repo_var GCP_PROVISION_ONLINE_COMPOSE_HOST)"
-          echo "online_compose_host_name=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_NAME)"
-          echo "online_compose_host_zone=$(read_repo_var GCP_ONLINE_COMPOSE_HOST_ZONE)"
-          echo "online_compose_machine_type=$(read_repo_var GCP_ONLINE_COMPOSE_MACHINE_TYPE)"
-          echo "online_compose_disk_size_gb=$(read_repo_var GCP_ONLINE_COMPOSE_DISK_SIZE_GB)"
           echo "workload_identity_provider=$(read_repo_var GCP_WORKLOAD_IDENTITY_PROVIDER)"
           echo "service_account_email=$(read_repo_var GCP_SERVICE_ACCOUNT_EMAIL)"
           echo "state_bucket=$(read_repo_var GCP_TERRAFORM_STATE_BUCKET)"

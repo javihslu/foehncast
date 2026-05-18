@@ -76,12 +76,3 @@ groups:
         annotations:
           summary: "Training pipeline stage failure"
           description: "Training pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.requested_stage }}."
-
-      - alert: HostedSyncStale
-        expr: (time() - max by (git_ref, compose_deploy_mode) (foehncast_online_compose_sync_last_success_timestamp_seconds)) > 900
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Hosted sync stale"
-          description: "Hosted compose sync for {{ $labels.git_ref }}/{{ $labels.compose_deploy_mode }} has not reported success for more than 15 minutes."

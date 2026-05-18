@@ -527,10 +527,6 @@ def test_metrics_endpoint_returns_prometheus_payload(
         b"# HELP foehncast_prediction_monitoring_schedule_total example\n"
         b'foehncast_prediction_monitoring_schedule_total{endpoint="predict",result="scheduled"} 1\n'
     )
-    hosted_sync_payload = (
-        b"# HELP foehncast_online_compose_sync_status_file_present example\n"
-        b"foehncast_online_compose_sync_status_file_present 1\n"
-    )
     monkeypatch.setattr(
         serve,
         "render_feature_pipeline_prometheus_metrics",
@@ -550,11 +546,6 @@ def test_metrics_endpoint_returns_prometheus_payload(
         serve,
         "render_prediction_monitoring_prometheus_metrics",
         lambda: monitoring_payload,
-    )
-    monkeypatch.setattr(
-        serve,
-        "render_hosted_sync_prometheus_metrics",
-        lambda: hosted_sync_payload,
     )
     hindcast_payload = (
         b"# HELP foehncast_hindcast_accuracy example\nfoehncast_hindcast_accuracy 0.5\n"
@@ -585,7 +576,6 @@ def test_metrics_endpoint_returns_prometheus_payload(
         + feature_payload
         + training_payload
         + prediction_payload
-        + hosted_sync_payload
         + hindcast_payload
         + drift_payload
         + monitoring_payload

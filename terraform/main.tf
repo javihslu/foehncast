@@ -5,9 +5,6 @@ locals {
   cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
   cloud_run_ui_image                = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
   cloud_run_mlflow_image            = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
-  online_compose_app_image          = var.online_compose_app_image != "" ? var.online_compose_app_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  online_compose_airflow_image      = var.online_compose_airflow_image != "" ? var.online_compose_airflow_image : "${local.artifact_registry_repository_path}/foehncast-airflow:latest"
-  online_compose_mlflow_image       = var.online_compose_mlflow_image != "" ? var.online_compose_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
   feast_registry_uri                = "gs://${var.artifact_bucket_name}/feast/registry.db"
   feast_staging_uri                 = "gs://${var.artifact_bucket_name}/feast/staging"
   feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
@@ -44,40 +41,6 @@ locals {
       FOEHNCAST_PIPELINE_REPORT_DIR        = "gs://${var.artifact_bucket_name}/airflow/reports"
     },
     var.cloud_run_env_vars,
-  )
-  online_compose_env_vars = merge(
-    {
-      APP_BIND_HOST                                 = contains(var.online_compose_public_ports, 8000) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_BIND_HOST                             = contains(var.online_compose_public_ports, 8080) ? "0.0.0.0" : "127.0.0.1"
-      MLFLOW_BIND_HOST                              = contains(var.online_compose_public_ports, 5001) ? "0.0.0.0" : "127.0.0.1"
-      AIRFLOW_ADMIN_USERNAME                        = var.online_compose_airflow_admin_username
-      AIRFLOW_ADMIN_PASSWORD_FILE                   = "/workspace/airflow/.admin-password"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS = "false"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS      = "${var.online_compose_airflow_admin_username}:admin"
-      AIRFLOW__API_AUTH__JWT_SECRET                 = random_password.airflow_api_auth_jwt_secret.result
-      GCP_PROJECT_ID                                = var.project_id
-      GCP_LOCATION                                  = var.region
-      MLFLOW_ARTIFACT_DESTINATION                   = "gs://${var.artifact_bucket_name}/mlflow/artifacts"
-      STORAGE_BACKEND                               = "bigquery"
-      STORAGE_BIGQUERY_PROJECT_ID                   = var.project_id
-      STORAGE_BIGQUERY_DATASET                      = var.bigquery_dataset_id
-      STORAGE_BIGQUERY_TABLE                        = var.bigquery_feature_table_id
-      FOEHNCAST_FEAST_SOURCE                        = "bigquery"
-      FOEHNCAST_FEAST_PROJECT                       = "foehncast"
-      FOEHNCAST_FEAST_PROJECT_ID                    = var.project_id
-      FOEHNCAST_FEAST_REGISTRY                      = local.feast_registry_uri
-      FOEHNCAST_FEAST_GCS_BUCKET                    = var.artifact_bucket_name
-      FOEHNCAST_FEAST_GCS_STAGING_LOCATION          = local.feast_staging_uri
-      FOEHNCAST_FEAST_BIGQUERY_DATASET              = var.bigquery_dataset_id
-      FOEHNCAST_FEAST_BIGQUERY_LOCATION             = var.bigquery_location
-      FOEHNCAST_FEAST_BIGQUERY_TABLE                = local.feast_bigquery_table
-      FOEHNCAST_FEAST_DATASTORE_DATABASE            = var.feast_online_store_database_name
-      FOEHNCAST_PIPELINE_REPORT_DIR                 = "gs://${var.artifact_bucket_name}/airflow/reports"
-      FOEHNCAST_APP_IMAGE                           = local.online_compose_app_image
-      FOEHNCAST_AIRFLOW_IMAGE                       = local.online_compose_airflow_image
-      FOEHNCAST_MLFLOW_IMAGE                        = local.online_compose_mlflow_image
-    },
-    var.online_compose_env_vars,
   )
   cloud_composer_secret_resource_paths = {
     for env_name, secret_id in var.cloud_composer_secret_env_vars :
@@ -513,13 +476,6 @@ resource "google_service_account" "cloud_run_runtime" {
   display_name = "FoehnCast Cloud Run runtime"
 }
 
-resource "google_service_account" "online_compose_runtime" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  account_id   = "foehncast-online-compose"
-  display_name = "FoehnCast online compose runtime"
-}
-
 resource "google_service_account" "cloud_composer_runtime" {
   count = var.provision_cloud_composer_environment ? 1 : 0
 
@@ -648,71 +604,6 @@ resource "google_bigquery_dataset_iam_member" "cloud_run_monitoring_bigquery_edi
   dataset_id = google_bigquery_dataset.monitoring_store.dataset_id
   role       = "roles/bigquery.dataEditor"
   member     = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
-}
-
-resource "google_project_iam_member" "online_compose_bigquery_job_user" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/bigquery.jobUser"
-  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_project_iam_member" "online_compose_bigquery_read_session_user" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/bigquery.readSessionUser"
-  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_project_iam_member" "online_compose_datastore_user" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_artifact_registry_repository_iam_member" "online_compose_reader" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  location   = google_artifact_registry_repository.containers.location
-  repository = google_artifact_registry_repository.containers.name
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_storage_bucket_iam_member" "online_compose_bucket_admin" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  bucket = google_storage_bucket.artifacts.name
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_storage_bucket_iam_member" "online_compose_bucket_metadata_reader" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  bucket = google_storage_bucket.artifacts.name
-  role   = "roles/storage.legacyBucketReader"
-  member = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_bigquery_dataset_iam_member" "online_compose_bigquery_editor" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  dataset_id = google_bigquery_dataset.feature_store.dataset_id
-  role       = "roles/bigquery.dataEditor"
-  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
-}
-
-resource "google_bigquery_dataset_iam_member" "online_compose_monitoring_bigquery_editor" {
-  count = var.provision_online_compose_host ? 1 : 0
-
-  dataset_id = google_bigquery_dataset.monitoring_store.dataset_id
-  role       = "roles/bigquery.dataEditor"
-  member     = "serviceAccount:${google_service_account.online_compose_runtime[0].email}"
 }
 
 resource "google_project_iam_member" "cloud_composer_worker" {
@@ -1358,22 +1249,6 @@ resource "google_project_iam_member" "ui_workflows_invoker" {
   member  = "serviceAccount:${google_service_account.cloud_run_runtime.email}"
 }
 
-resource "google_compute_network" "online_compose" {
-  count                   = var.provision_online_compose_host ? 1 : 0
-  name                    = "${var.online_compose_host_name}-network"
-  auto_create_subnetworks = false
-
-  depends_on = [google_project_service.required]
-}
-
-resource "google_compute_subnetwork" "online_compose" {
-  count         = var.provision_online_compose_host ? 1 : 0
-  name          = "${var.online_compose_host_name}-subnet"
-  ip_cidr_range = var.online_compose_subnet_cidr
-  region        = var.region
-  network       = google_compute_network.online_compose[0].id
-}
-
 resource "google_compute_network" "cloud_composer" {
   count                   = var.provision_cloud_composer_environment ? 1 : 0
   name                    = "${var.cloud_composer_environment_name}-network"
@@ -1388,76 +1263,6 @@ resource "google_compute_subnetwork" "cloud_composer" {
   ip_cidr_range = var.cloud_composer_subnet_cidr
   region        = var.region
   network       = google_compute_network.cloud_composer[0].id
-}
-
-resource "google_compute_firewall" "online_compose_public" {
-  count   = var.provision_online_compose_host ? 1 : 0
-  name    = "${var.online_compose_host_name}-public"
-  network = google_compute_network.online_compose[0].name
-
-  allow {
-    protocol = "tcp"
-    ports    = concat(["22"], [for port in var.online_compose_public_ports : tostring(port)])
-  }
-
-  source_ranges = ["0.0.0.0/0"]
-  target_tags   = [var.online_compose_host_name]
-}
-
-resource "google_compute_address" "online_compose" {
-  count  = var.provision_online_compose_host ? 1 : 0
-  name   = "${var.online_compose_host_name}-ip"
-  region = var.region
-}
-
-resource "google_compute_instance" "online_compose" {
-  count        = var.provision_online_compose_host ? 1 : 0
-  name         = var.online_compose_host_name
-  machine_type = var.online_compose_machine_type
-  zone         = var.online_compose_host_zone
-  tags         = [var.online_compose_host_name]
-
-  boot_disk {
-    initialize_params {
-      image = "projects/debian-cloud/global/images/family/debian-12"
-      size  = var.online_compose_disk_size_gb
-      type  = "pd-balanced"
-    }
-  }
-
-  network_interface {
-    subnetwork = google_compute_subnetwork.online_compose[0].id
-
-    access_config {
-      nat_ip = google_compute_address.online_compose[0].address
-    }
-  }
-
-  service_account {
-    email  = google_service_account.online_compose_runtime[0].email
-    scopes = ["cloud-platform"]
-  }
-
-  metadata_startup_script = templatefile("${path.module}/templates/online-compose-host.sh.tftpl", {
-    github_repository_path = local.github_repository_path
-    git_ref                = var.online_compose_git_ref
-    artifact_registry_host = local.artifact_registry_host
-    stack_env              = local.online_compose_env_vars
-  })
-
-  depends_on = [
-    google_project_service.required,
-    google_firestore_database.feast_online_store,
-    google_compute_firewall.online_compose_public,
-    google_project_iam_member.online_compose_bigquery_job_user,
-    google_project_iam_member.online_compose_bigquery_read_session_user,
-    google_project_iam_member.online_compose_datastore_user,
-    google_artifact_registry_repository_iam_member.online_compose_reader,
-    google_storage_bucket_iam_member.online_compose_bucket_admin,
-    google_storage_bucket_iam_member.online_compose_bucket_metadata_reader,
-    google_bigquery_dataset_iam_member.online_compose_bigquery_editor,
-    google_bigquery_dataset_iam_member.online_compose_monitoring_bigquery_editor,
-  ]
 }
 
 resource "google_composer_environment" "cloud_composer" {

@@ -216,7 +216,6 @@ def test_local_bootstrap_prepares_bind_mounted_runtime_paths_for_container_write
     assert '"$ROOT_DIR/airflow"' in bootstrap
     assert '"$ROOT_DIR/.state/airflow"' in bootstrap
     assert '"$ROOT_DIR/.state/monitoring"' in bootstrap
-    assert '"$ROOT_DIR/.state/online-compose-sync"' in bootstrap
     assert '"$ROOT_DIR/data/$dataset"' in bootstrap
     assert '"$ROOT_DIR/.state/feast"' in bootstrap
     assert '"$ROOT_DIR/data/feast"' in bootstrap
