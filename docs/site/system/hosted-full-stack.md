@@ -13,7 +13,7 @@ This page describes the hosted full-stack contract and how the managed services 
 ## Target Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef infra fill:#f5f5f5,stroke:#333
     classDef runner fill:#f4f1ea,stroke:#f05032
     classDef platform fill:#fff,stroke:#4285F4

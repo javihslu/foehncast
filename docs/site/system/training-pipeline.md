@@ -13,7 +13,7 @@ This page describes what each stage owns and what remains an explicit operator c
 ## Pipeline Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     CUR["Curated feature store asset"] --> LAB["Label curated rows"]
     REQ["Training-request asset"] --> LAB
     LAB --> TRN["Train model"]

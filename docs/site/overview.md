@@ -5,7 +5,7 @@ FoehnCast is a local-first ML system for deciding where to kite next. This page 
 ## Shared System Core
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
   %% Branded colors
   classDef app fill:#222,stroke:#333,color:#fff
   classDef data fill:#ececff,stroke:#9370db,color:#000

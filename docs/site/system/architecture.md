@@ -12,7 +12,7 @@ FoehnCast keeps the same Feature-Training-Inference split in every runtime. The 
 ## System In One View
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     %% Styling
     classDef cloud fill:#f5f5f5,stroke:#333
     classDef pipe fill:#e1f5fe,stroke:#01579b
@@ -90,7 +90,7 @@ The same feature and training boundaries are driven by two different control pat
 - The `inference_pipeline` DAG bridges inference into the Airflow world: it is asset-triggered by model registration and runs batch predictions across all configured spots, feeding the prediction-event history that hindcast validation and drift detection consume.
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef ctl fill:#f5f5f5,stroke:#333
     classDef pipe fill:#e1f5fe,stroke:#01579b
     classDef store fill:#ececff,stroke:#9370db
@@ -129,7 +129,7 @@ The runtime orchestration layer models main data products as Airflow assets. The
 ## Deployment Targets
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef core fill:#f5f5f5,stroke:#333
     classDef local fill:#e1f5fe,stroke:#01579b
     classDef cloud fill:#fff8e1,stroke:#f57f17
@@ -203,7 +203,7 @@ Cloud Composer runs the hosted Airflow surface used for scheduling, retries, bac
 ## Local Evaluator Architecture
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     %% Stylings
     classDef infra fill:#f5f5f5,stroke:#333
     classDef pipeline fill:#e1f5fe,stroke:#01579b
@@ -241,7 +241,7 @@ The Airflow control plane reflects those hand-offs directly. The feature pipelin
 ## Hosted Runtime Detail
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef data fill:#ececff,stroke:#9370db
     classDef operator fill:#fff8e1,stroke:#f57f17
 
@@ -263,7 +263,7 @@ flowchart LR
 </div>
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     classDef input fill:#f5f5f5,stroke:#333
     classDef data fill:#ececff,stroke:#9370db
     classDef serve fill:#fff8e1,stroke:#f57f17

@@ -5,7 +5,7 @@ FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live
 ## Product In One View
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     WX[Forecast + spot context] --> RANK[Rank session options]
     RIDER[Rider + drive context] --> RANK
     RANK --> DECIDE[Choose where to ride next]
@@ -36,7 +36,7 @@ flowchart LR
 ## System Flow
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     INGEST[Ingest forecasts] --> FEATURES[Build curated features] --> TRAIN[Train and register model] --> SERVE[Serve prediction and ranking]
 </div>
 

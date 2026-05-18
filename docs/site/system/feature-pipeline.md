@@ -13,7 +13,7 @@ This page describes the validated feature contract. It focuses on what each stag
 ## Pipeline Shape
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     subgraph Input ["Inputs"]
         direction TB
         CFG["Spot and storage config"]
@@ -141,7 +141,7 @@ This layer does not decide whether a forecast is good for riding. That belongs t
 Storage works only if it behaves like persistence rather than transformation. A stored feature frame should come back with the same schema, index semantics, and numeric values that validation approved.
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     FEAT["Curated feature frame"] --> WRITE["write_features"]
     WRITE --> BACKEND["Local, S3-compatible, or BigQuery backend"]
     BACKEND --> READ["read_features"]
@@ -191,7 +191,7 @@ Terraform is part of the storage boundary because it provisions the cloud-side G
 Feast is downstream from the curated feature store. It should consume curated rows, not reach back into raw ingestion or recompute engineering logic.
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     STORED["Stored curated rows"] --> OFF["build_offline_store_frame"]
     STORED --> ENT["build_entity_rows"]
     OFF --> HIST["Historical retrieval inputs"]

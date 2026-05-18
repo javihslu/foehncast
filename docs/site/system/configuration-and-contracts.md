@@ -13,7 +13,7 @@ The goal is not to document every environment variable in isolation. The goal is
 ## Contract In One View
 
 <div class="mermaid">
-flowchart LR
+flowchart TD
     TF["Terraform and GitHub delivery variables"] --> ENV[".env and environment variables"]
     YAML["config.yaml"] --> PY["src/foehncast/config.py"]
     ENV --> PY
