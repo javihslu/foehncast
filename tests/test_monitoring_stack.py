@@ -292,30 +292,23 @@ def test_operations_dashboard_covers_pipeline_and_inference_metrics() -> None:
         panels["Training Stage Durations"]["targets"][0]["expr"]
         == 'foehncast_training_pipeline_stage_duration_seconds{dataset="train"}'
     )
-    # Freshness
-    assert (
-        panels["Hosted Sync Age"]["targets"][0]["expr"]
-        == "time() - foehncast_online_compose_sync_last_success_timestamp_seconds"
-    )
-    # Prediction monitoring
-    assert (
-        panels["Schedule Count"]["targets"][0]["expr"]
-        == "sum(foehncast_prediction_monitoring_schedule_total)"
-    )
-    assert (
-        panels["Execution Count"]["targets"][0]["expr"]
-        == "sum(foehncast_prediction_monitoring_execution_total)"
-    )
-    assert (
-        panels["Seconds Since Last Success"]["targets"][0]["expr"]
-        == 'time() - max(foehncast_prediction_monitoring_last_execution_timestamp_seconds{result="success"})'
-    )
-    # Inference SLI assertions removed alongside the stripped panels (see
-    # `test_grafana_provisioning_points_to_prometheus_dashboard_dir`).
-    assert (
-        panels["Sync Status File"]["targets"][0]["expr"]
-        == "foehncast_online_compose_sync_status_file_present"
-    )
+    # Panels for metrics that the in-process /api/v1/query engine cannot
+    # serve (predmon counters, online compose sync, up{} synthetic probes)
+    # were dropped from the operations dashboard to keep the public view
+    # free of empty panels on Cloud Run. They are reintroduced once a real
+    # Prometheus scrape backend is available.
+    for stripped in (
+        "Hosted Sync Age",
+        "Schedule Count",
+        "Execution Count",
+        "Seconds Since Last Success",
+        "Sync Status File",
+        "App",
+        "Prometheus",
+        "Grafana",
+        "StatsD",
+    ):
+        assert stripped not in panels
     assert panels["Spot Pipeline Funnel"]["targets"][0]["expr"] == (
         'foehncast_feature_pipeline_expected_spot_count{dataset="train"}'
     )
