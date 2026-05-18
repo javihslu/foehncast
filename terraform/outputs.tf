@@ -123,6 +123,31 @@ output "provision_cloud_run_service" {
   value       = var.provision_cloud_run_service
 }
 
+output "provision_cloud_run_mlflow" {
+  description = "Whether Terraform is configured to provision the Cloud Run MLflow service."
+  value       = var.provision_cloud_run_mlflow
+}
+
+output "provision_cloud_run_grafana" {
+  description = "Whether Terraform is configured to provision the Cloud Run Grafana service."
+  value       = var.provision_cloud_run_grafana
+}
+
+output "cloud_run_grafana_prometheus_url" {
+  description = "Configured Prometheus datasource URL for the Cloud Run Grafana service."
+  value       = var.cloud_run_grafana_prometheus_url
+}
+
+output "provision_cloud_run_ui" {
+  description = "Whether Terraform is configured to provision the Cloud Run UI service."
+  value       = var.provision_cloud_run_ui
+}
+
+output "provision_cloud_workflows" {
+  description = "Whether Terraform is configured to provision Cloud Workflows."
+  value       = var.provision_cloud_workflows
+}
+
 output "configured_cloud_run_service_name" {
   description = "Configured Cloud Run service name for the inference API."
   value       = var.cloud_run_service_name

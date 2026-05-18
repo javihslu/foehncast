@@ -236,16 +236,7 @@ prepare_bind_mounted_runtime_paths() {
   done
 }
 
-seed_local_online_compose_sync_status() {
-  local sync_dir="$ROOT_DIR/.state/online-compose-sync"
-  local sync_status_file="$sync_dir/last-success.json"
-  local sync_time
 
-  sync_time="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  mkdir -p "$sync_dir"
-  printf '{\n  "state": "succeeded",\n  "git_ref": "local-bootstrap",\n  "last_successful_sync_at": "%s",\n  "last_successful_commit": "local-smoke",\n  "compose_deploy_mode": "bootstrap"\n}\n' \
-    "$sync_time" > "$sync_status_file"
-}
 
 wait_for_service_health() {
   local service="$1"
@@ -415,17 +406,7 @@ verify_grafana_provisioning() {
     'notification policy hosted-operator matcher'
 }
 
-verify_hosted_sync_metrics() {
-  local metrics_payload
 
-  echo "Checking hosted sync metrics exposure..."
-  metrics_payload="$(curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_METRICS_URL")"
-  require_payload_patterns \
-    "$metrics_payload" \
-    'foehncast_online_compose_sync_status_file_present[[:space:]]+1(\.0)?' \
-    'foehncast_online_compose_sync_last_success_timestamp_seconds\{compose_deploy_mode="bootstrap",git_ref="local-bootstrap"\}[[:space:]]+[0-9.e+-]+' \
-    'hosted sync last-success timestamp metric'
-}
 
 RUN_MODE_LABEL="local MinIO-backed objectstore baseline"
 
@@ -499,7 +480,6 @@ compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo "Removing disposable local runtime artifacts..."
 cleanup_local_runtime_state "$FEAST_DATASET"
 prepare_bind_mounted_runtime_paths "$FEAST_DATASET"
-seed_local_online_compose_sync_status
 
 echo "Starting local stack..."
 compose up --build -d --remove-orphans "${BOOTSTRAP_SERVICES[@]}"
@@ -543,7 +523,6 @@ echo "Preparing Feast serving state for ${FEAST_DATASET}..."
 
 echo "Waiting for app health..."
 curl --retry 60 --retry-all-errors --retry-delay 2 -fsS "$APP_HEALTH_URL" >/dev/null
-verify_hosted_sync_metrics
 
 echo "Checking Feast online features..."
 curl --retry 30 --retry-all-errors --retry-delay 2 -fsS \

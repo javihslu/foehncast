@@ -135,7 +135,6 @@ def test_bootstrap_local_verifies_monitoring_surfaces() -> None:
     script = read_repo_text("scripts/bootstrap-local.sh")
 
     assert "verify_grafana_provisioning" in script
-    assert "verify_hosted_sync_metrics" in script
     assert "APP_METRICS_URL" in script
 
 

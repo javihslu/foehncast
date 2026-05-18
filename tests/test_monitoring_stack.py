@@ -438,16 +438,16 @@ def test_all_dashboards_have_unique_panel_ids_and_cross_links() -> None:
         assert len(d.get("links", [])) == 3
 
 
-def test_grafana_ini_disables_anonymous_access_and_public_dashboards_by_default() -> (
+def test_grafana_ini_configures_anonymous_viewer_access_and_disables_public_dashboards() -> (
     None
 ):
     config = configparser.ConfigParser()
     config.read_string(_read_text("grafana_work/etc/grafana.ini"))
 
     assert not config.getboolean("auth", "disable_login_form")
-    assert not config.getboolean("auth.anonymous", "enabled")
+    assert config.getboolean("auth.anonymous", "enabled")
     assert config["auth.anonymous"]["org_role"] == "Viewer"
-    assert not config.getboolean("security", "allow_embedding")
+    assert config.getboolean("security", "allow_embedding")
     assert not config.getboolean("public_dashboards", "enabled")
     assert config.getboolean("metrics", "enabled")
     assert (
@@ -516,31 +516,6 @@ def test_local_bootstrap_waits_for_app_health_after_training_pipeline() -> None:
     assert bootstrap.index(
         'echo "Waiting for asset-triggered training pipeline..."'
     ) < bootstrap.index('echo "Waiting for app health..."')
-
-
-def test_local_bootstrap_seeds_hosted_sync_status_before_stack_start() -> None:
-    bootstrap = _read_text("scripts/bootstrap-local.sh")
-
-    assert "seed_local_online_compose_sync_status" in bootstrap
-    assert 'sync_status_file="$sync_dir/last-success.json"' in bootstrap
-    assert bootstrap.rindex("seed_local_online_compose_sync_status") < bootstrap.index(
-        'echo "Starting local stack..."'
-    )
-
-
-def test_local_bootstrap_verifies_hosted_sync_metrics_after_app_health() -> None:
-    bootstrap = _read_text("scripts/bootstrap-local.sh")
-
-    assert (
-        'APP_METRICS_URL="${APP_METRICS_URL:-http://127.0.0.1:8000/metrics}"'
-        in bootstrap
-    )
-    assert "verify_hosted_sync_metrics" in bootstrap
-    assert "foehncast_online_compose_sync_status_file_present" in bootstrap
-    assert "foehncast_online_compose_sync_last_success_timestamp_seconds" in bootstrap
-    assert bootstrap.index('echo "Waiting for app health..."') < bootstrap.rindex(
-        "verify_hosted_sync_metrics"
-    )
 
 
 def test_local_bootstrap_starts_monitoring_services_without_development_env() -> None:

@@ -291,6 +291,11 @@ load_terraform_platform_state() {
     FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_composer_airflow_access_ready cloud_composer_airflow_access_ready)"
   FOEHNCAST_TF_CLOUD_COMPOSER_DAG_GCS_PREFIX="$(trimmed_terraform_output_value "$terraform_dir" cloud_composer_dag_gcs_prefix)"
   FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI="$(optional_terraform_output_value "$terraform_dir" cloud_composer_airflow_uri)"
+  FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_mlflow provision_cloud_run_mlflow)"
+  FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_grafana provision_cloud_run_grafana)"
+  FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_grafana_prometheus_url cloud_run_grafana_prometheus_url)"
+  FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_ui provision_cloud_run_ui)"
+  FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_workflows provision_cloud_workflows)"
   FOEHNCAST_TF_CLOUD_RUN_SERVICE="$(optional_terraform_output_value "$terraform_dir" cloud_run_service_name)"
   FOEHNCAST_TF_PROVISION_ONLINE_COMPOSE_HOST="$(terraform_output_or_tfvars_value "$terraform_dir" provision_online_compose_host provision_online_compose_host)"
   FOEHNCAST_TF_ONLINE_COMPOSE_HOST_NAME="$(terraform_output_or_tfvars_value "$terraform_dir" online_compose_host_name online_compose_host_name)"
@@ -333,6 +338,11 @@ terraform_repo_variable_names() {
     GCP_CLOUD_COMPOSER_AIRFLOW_ACCESS_READY \
     GCP_CLOUD_COMPOSER_DAG_GCS_PREFIX \
     GCP_CLOUD_COMPOSER_AIRFLOW_URI \
+    GCP_PROVISION_CLOUD_RUN_MLFLOW \
+    GCP_PROVISION_CLOUD_RUN_GRAFANA \
+    GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL \
+    GCP_PROVISION_CLOUD_RUN_UI \
+    GCP_PROVISION_CLOUD_WORKFLOWS \
     GCP_PROVISION_ONLINE_COMPOSE_HOST \
     GCP_ONLINE_COMPOSE_HOST_NAME \
     GCP_ONLINE_COMPOSE_HOST_ZONE \
@@ -387,6 +397,12 @@ terraform_repo_variable_pairs() {
   if terraform_platform_value_present "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"; then
     printf 'GCP_CLOUD_COMPOSER_AIRFLOW_URI\t%s\n' "$FOEHNCAST_TF_CLOUD_COMPOSER_AIRFLOW_URI"
   fi
+
+  printf 'GCP_PROVISION_CLOUD_RUN_MLFLOW\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW"
+  printf 'GCP_PROVISION_CLOUD_RUN_GRAFANA\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_GRAFANA"
+  printf 'GCP_CLOUD_RUN_GRAFANA_PROMETHEUS_URL\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_GRAFANA_PROMETHEUS_URL"
+  printf 'GCP_PROVISION_CLOUD_RUN_UI\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI"
+  printf 'GCP_PROVISION_CLOUD_WORKFLOWS\t%s\n' "$FOEHNCAST_TF_PROVISION_CLOUD_WORKFLOWS"
 
   if [[ -n "$FOEHNCAST_TF_CLOUD_RUN_SERVICE" ]]; then
     printf 'GCP_CLOUD_RUN_SERVICE\t%s\n' "$FOEHNCAST_TF_CLOUD_RUN_SERVICE"
