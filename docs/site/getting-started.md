@@ -1,8 +1,22 @@
 # Getting Started
 
-This page keeps setup intentionally simple. The supported contributor path is the local evaluator flow with Docker. The shared cloud path is maintainer-only and documented separately.
+This page keeps setup intentionally simple. There are two ways to evaluate the project: try the **live Cloud Run demo** without any setup, or run the **local evaluator** flow with Docker.
 
-## Default Path
+## Try the Live Demo
+
+The shared environment hosts the inference, UI, observability, and tracking surfaces on Google Cloud Run. No clone, no install:
+
+| Surface | URL | Role |
+| --- | --- | --- |
+| Streamlit UI | <https://foehncast-ui-290885878569.europe-west6.run.app/> | Rider console with ranked spot recommendations |
+| Inference API | <https://foehncast-serve-290885878569.europe-west6.run.app/> | FastAPI service for `/health`, `/rank`, `/predict`, `/spots` |
+| API metrics | <https://foehncast-serve-290885878569.europe-west6.run.app/metrics> | Prometheus exposition for monitoring |
+| Grafana | <https://foehncast-grafana-290885878569.europe-west6.run.app/> | Rider, Operations, and ML Diagnostics dashboards |
+| MLflow | <https://foehncast-mlflow-290885878569.europe-west6.run.app/> | Tracking server (IAM-gated, expect `403`) |
+
+The inference container ships a Prometheus-compatible `/api/v1/query` endpoint so Grafana can render metrics directly without a separate Prometheus deployment.
+
+## Local Evaluator (Default Path)
 
 This is the default path for almost every reader.
 

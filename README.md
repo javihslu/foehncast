@@ -52,6 +52,21 @@ flowchart LR
 
 ## Quick Start
 
+### Live demo
+
+The shared environment hosts the inference, UI, observability, and tracking surfaces on Cloud Run:
+
+| Surface | URL |
+| --- | --- |
+| Streamlit UI | <https://foehncast-ui-290885878569.europe-west6.run.app/> |
+| Inference API | <https://foehncast-serve-290885878569.europe-west6.run.app/> |
+| API metrics + query | <https://foehncast-serve-290885878569.europe-west6.run.app/metrics> · <https://foehncast-serve-290885878569.europe-west6.run.app/api/v1/query?query=foehncast_feature_pipeline_run_success> |
+| Grafana dashboards | <https://foehncast-grafana-290885878569.europe-west6.run.app/> |
+| MLflow tracking (IAM-gated) | <https://foehncast-mlflow-290885878569.europe-west6.run.app/> |
+| Project documentation | <https://javihslu.github.io/foehncast/> |
+
+The Cloud Run inference container exposes a Prometheus-compatible `/api/v1/query` endpoint so Grafana can render metrics directly without a separate Prometheus deployment.
+
 ### Local evaluator
 
 This is the default path for a fresh machine.
