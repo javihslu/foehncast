@@ -14,6 +14,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 
 from foehncast.config import (
+    configure_mlflow_auth,
     get_mlflow_config,
     get_mlflow_tracking_uri,
     get_model_config,
@@ -116,6 +117,7 @@ def run_training_pipeline(
     mlflow_config = get_mlflow_config()
     resolved_model_name = str(mlflow_config.get("model_name") or "foehncast")
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+    configure_mlflow_auth()
     mlflow.set_experiment(mlflow_config["experiment_name"])
 
     features_df, target_series = load_training_data(dataset=dataset)
