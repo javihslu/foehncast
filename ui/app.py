@@ -9,7 +9,6 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from urllib.parse import quote as urlquote
-from urllib.parse import urlencode
 
 import streamlit as st
 
@@ -30,35 +29,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-_RIDER_GRAFANA = {
-    "title": "Live Conditions",
-    "description": (
-        "Rider-facing conditions, spot health, and drift posture from the "
-        "Grafana rider dashboard."
-    ),
-    "uid": "foehncast-rider",
-    "slug": "foehncast-rider",
-    "from": "now-12h",
-    "refresh": "2m",
-    "height": 1560,
-}
-_PIPELINE_GRAFANA = {
-    "tab": "Pipeline",
-    "title": "Pipeline",
-    "description": (
-        "Operations view for service health, feature and training stages, "
-        "freshness, and inference SLIs."
-    ),
-    "uid": "foehncast-operations",
-    "slug": "foehncast-operations",
-    "from": "now-24h",
-    "refresh": "2m",
-    "height": 1840,
-}
-_ML_DASHBOARD_UID = "foehncast-ml-diagnostics"
-_ML_DASHBOARD_SLUG = "foehncast-ml-diagnostics"
-_TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 _PROMETHEUS_BASE_URL = os.getenv(
     "FOEHNCAST_PROMETHEUS_URL", "http://127.0.0.1:9090"
@@ -616,36 +586,6 @@ def _top_pick_card(top_spot: dict[str, Any], model_version: str) -> str:
     """
 
 
-def _grafana_base_url() -> str:
-    for key in ("FOEHNCAST_GRAFANA_BASE_URL", "GRAFANA_BASE_URL"):
-        value = os.getenv(key, "").strip()
-        if value:
-            return value.rstrip("/")
-    return "http://127.0.0.1:3000"
-
-
-def _grafana_embedding_enabled() -> bool:
-    return (
-        os.getenv("FOEHNCAST_GRAFANA_ALLOW_EMBEDDING", "").strip().lower()
-        in _TRUTHY_VALUES
-    )
-
-
-def _grafana_dashboard_url(
-    uid: str, slug: str, *, from_range: str, refresh: str
-) -> str:
-    query = urlencode(
-        {
-            "orgId": 1,
-            "theme": "dark",
-            "from": from_range,
-            "to": "now",
-            "refresh": refresh,
-        }
-    )
-    return f"{_grafana_base_url()}/d/{uid}/{slug}?{query}&kiosk"
-
-
 def _gcp_access_token() -> str | None:
     """Fetch a GCP access token from the metadata server (Cloud Run only)."""
     try:
@@ -778,38 +718,6 @@ def _list_job_logs(job_name: str, limit: int = 8) -> list[dict[str, str]]:
             }
         )
     return rows
-
-
-def _grafana_solo_panel_url(
-    uid: str,
-    slug: str,
-    panel_id: int,
-    *,
-    from_range: str = "now-24h",
-    refresh: str | None = "30s",
-    variables: dict[str, str] | None = None,
-) -> str:
-    """Build a Grafana solo-panel embed URL (no chrome, no branding).
-
-    *variables* passes Grafana template variables, e.g.
-    ``{"var-spot": "silvaplana", "var-dataset": "data"}``.
-
-    Pass ``refresh=None`` (or empty string) to skip auto-refresh entirely;
-    this avoids constant PromQL re-queries on static stat panels.
-    """
-    params: dict[str, str | int] = {
-        "orgId": 1,
-        "theme": "dark",
-        "panelId": panel_id,
-        "from": from_range,
-        "to": "now",
-        "hideLogo": "true",
-    }
-    if refresh:
-        params["refresh"] = refresh
-    if variables:
-        params.update(variables)
-    return f"{_grafana_base_url()}/d-solo/{uid}/{slug}?{urlencode(params)}"
 
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
@@ -1026,59 +934,6 @@ def _render_sidebar_ml_panels() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-
-def _render_timeline_panels() -> None:
-    """Grafana timeseries panels shown above the tabs in the main area."""
-    if not _grafana_embedding_enabled():
-        return
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.caption("Feature Drift Score")
-        url = _grafana_solo_panel_url(
-            _ML_DASHBOARD_UID,
-            _ML_DASHBOARD_SLUG,
-            panel_id=505,
-            from_range="now-24h",
-            refresh="1m",
-            variables={"var-dataset": "train"},
-        )
-        st.iframe(url, height=200)
-    with col_b:
-        st.caption("Model R²")
-        url = _grafana_solo_panel_url(
-            _ML_DASHBOARD_UID,
-            _ML_DASHBOARD_SLUG,
-            panel_id=513,
-            from_range="now-24h",
-            refresh="1m",
-            variables={"var-dataset": "train"},
-        )
-        st.iframe(url, height=200)
-
-
-def _render_monitoring_tab(config: dict[str, Any]) -> None:
-    dashboard_url = _grafana_dashboard_url(
-        config["uid"],
-        config["slug"],
-        from_range=config["from"],
-        refresh=config["refresh"],
-    )
-
-    st.subheader(config["title"])
-    st.caption(config["description"])
-    st.markdown(f"[Open in Grafana]({dashboard_url})")
-
-    if not _grafana_embedding_enabled():
-        st.info(
-            "Grafana embedding is disabled for this local run. Restart the local "
-            "stack with FOEHNCAST_GRAFANA_ALLOW_EMBEDDING=true, or use "
-            "./scripts/bootstrap-local.sh so the monitoring tabs can render inline."
-        )
-        return
-
-    st.iframe(dashboard_url, height=config["height"])
 
 
 def _render_spot_map(ranked_spots: list[dict[str, Any]]) -> None:
@@ -1364,8 +1219,8 @@ def _render_rider_console(
                     type="primary" if is_active else "secondary",
                 ):
                     st.session_state["rider_focus_spot"] = spot_id
-                    # Scope the rerun to this fragment so the System tab's
-                    # Grafana iframes stay mounted and don't reload.
+                    # Scope the rerun to this fragment so the System tab
+                    # stays mounted and doesn't reload.
                     st.rerun(scope="fragment")
 
             # Transposed metrics grid: a CSS grid with the same column ratios
@@ -1422,7 +1277,7 @@ def _render_rider_console(
 
 
 # ---------------------------------------------------------------------------
-# System tab — pipelines panel (PromQL-driven, no Grafana iframes).
+# System tab — pipelines panel (PromQL-driven).
 #
 # Layout, per pipeline (feature / training / inference), in a single column:
 #   [ Header strip ] pipeline name · status pill · summary age
@@ -1722,7 +1577,7 @@ def _render_pipeline_rail(rail: dict[str, Any]) -> None:
 def _render_pipelines_panel() -> None:
     """System tab body: triggers, three pipeline rails, recent executions.
 
-    No Grafana iframes; every visible value is fed by an instant PromQL
+    Every visible value is fed by an instant PromQL
     query against the serve container's mini engine, plus a Cloud
     Logging tail per pipeline.
     """
