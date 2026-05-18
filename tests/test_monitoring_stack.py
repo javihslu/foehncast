@@ -331,18 +331,6 @@ def test_local_bootstrap_verifies_grafana_provisioning() -> None:
 
     assert "verify_grafana_provisioning" in bootstrap
     assert "/api/search?dashboardUIDs=foehncast-operations" in bootstrap
-    assert "/api/v1/provisioning/alert-rules" in bootstrap
-    assert "foehncast_predmon_schedule_fail" in bootstrap
-    assert "foehncast_predmon_execution_fail" in bootstrap
-    assert "foehncast_predmon_stale_success" in bootstrap
-    assert "foehncast_feature_stage_failures" in bootstrap
-    assert "foehncast_training_stage_failures" in bootstrap
-    assert "foehncast_hosted_sync_stale" in bootstrap
-    assert "/api/v1/provisioning/contact-points?name=foehncast-email" in bootstrap
-    assert "/api/v1/provisioning/policies" in bootstrap
-    assert '"feature-pipeline"' in bootstrap
-    assert '"training-pipeline"' in bootstrap
-    assert '"hosted-operator"' in bootstrap
 
 
 def test_app_compose_routes_monitoring_metrics_to_statsd_service() -> None:

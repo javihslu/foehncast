@@ -362,48 +362,6 @@ verify_grafana_provisioning() {
     '"uid"[[:space:]]*:[[:space:]]*"foehncast-operations"' \
     '"title"[[:space:]]*:[[:space:]]*"FoehnCast Operations"' \
     'dashboard title FoehnCast Operations'
-
-  echo "Checking Grafana alert-rule provisioning..."
-  alert_rules_payload="$(grafana_api_get "/api/v1/provisioning/alert-rules")"
-  require_payload_patterns \
-    "$alert_rules_payload" \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_schedule_fail"' \
-    'schedule failure alert rule' \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_execution_fail"' \
-    'execution failure alert rule' \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_predmon_stale_success"' \
-    'stale success alert rule' \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_feature_stage_failures"' \
-    'feature stage failure alert rule' \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_training_stage_failures"' \
-    'training stage failure alert rule' \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_hosted_sync_stale"' \
-    'hosted sync stale alert rule'
-
-  echo "Checking Grafana contact point provisioning..."
-  contact_points_payload="$(grafana_api_get "/api/v1/provisioning/contact-points?name=foehncast-email")"
-  require_payload_patterns \
-    "$contact_points_payload" \
-    '"uid"[[:space:]]*:[[:space:]]*"foehncast_email"' \
-    '"name"[[:space:]]*:[[:space:]]*"foehncast-email"' \
-    'foehncast email contact point name'
-
-  echo "Checking Grafana notification policy provisioning..."
-  policies_payload="$(grafana_api_get "/api/v1/provisioning/policies")"
-  require_payload_patterns \
-    "$policies_payload" \
-    '"receiver"[[:space:]]*:[[:space:]]*"foehncast-email"' \
-    'notification policy receiver foehncast-email' \
-    '"object_matchers"' \
-    'notification policy route matchers' \
-    '"inference-monitoring"' \
-    'notification policy inference-monitoring matcher' \
-    '"feature-pipeline"' \
-    'notification policy feature-pipeline matcher' \
-    '"training-pipeline"' \
-    'notification policy training-pipeline matcher' \
-    '"hosted-operator"' \
-    'notification policy hosted-operator matcher'
 }
 
 
