@@ -54,6 +54,7 @@ REPO_VARIABLE_OUTPUTS: list[tuple[str, str]] = [
     ("GCP_ONLINE_COMPOSE_HOST_ZONE", "online_compose_host_zone"),
     ("GCP_ONLINE_COMPOSE_MACHINE_TYPE", "online_compose_machine_type"),
     ("GCP_ONLINE_COMPOSE_DISK_SIZE_GB", "online_compose_disk_size_gb"),
+    ("GCP_CLOUD_RUN_IMAGE", "cloud_run_image"),
     ("GCP_CLOUD_RUN_SERVICE", "cloud_run_service"),
 ]
 
