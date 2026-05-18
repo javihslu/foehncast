@@ -70,9 +70,24 @@ mkdir -p "$STATE_DIR"
 CONFIG_PATH="$(render_feast_runtime_config_path "$ROOT_DIR")"
 export_feast_runtime_config_path "$CONFIG_PATH"
 
-uv run python -m foehncast.feature_pipeline.feast export \
+# Retry the offline export a few times: on CI the prior Airflow DAG run
+# occasionally needs a moment for the S3-backed feature rows to be
+# readable from the host, so a single export can race and produce a
+# missing parquet that breaks `feast apply` downstream.
+export_attempts=0
+export_max_attempts=5
+until uv run python -m foehncast.feature_pipeline.feast export \
   --dataset "$DATASET" \
-  --output "$OUTPUT_PATH" >/dev/null
+  --output "$OUTPUT_PATH" >/dev/null && [[ -s "$OUTPUT_PATH" ]]; do
+  export_attempts=$((export_attempts + 1))
+  if (( export_attempts >= export_max_attempts )); then
+    echo "Feast offline export did not produce $OUTPUT_PATH after ${export_max_attempts} attempts" >&2
+    ls -la "$(dirname "$OUTPUT_PATH")" >&2 || true
+    exit 1
+  fi
+  echo "Feast offline export attempt ${export_attempts} did not produce ${OUTPUT_PATH}; retrying..." >&2
+  sleep 2
+done
 
 run_feast_repo_apply_and_maybe_materialize "$ROOT_DIR/feature_repo" "$MATERIALIZE" "$MATERIALIZE_TS"
 
