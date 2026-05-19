@@ -1,6 +1,7 @@
 # Cloud Build config for the FoehnCast MLflow image.
 #
-# Trigger contract: GitHub Actions submits this build after merge to main.
+# Trigger: Cloud Build trigger fires on push to main when
+# containers/mlflow/ changes (via Developer Connect).
 # The build context is containers/mlflow/ because the MLflow Dockerfile
 # only needs files from that directory.
 #

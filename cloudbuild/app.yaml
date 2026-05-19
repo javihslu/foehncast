@@ -1,9 +1,7 @@
 # Cloud Build config for the FoehnCast app image.
 #
-# Trigger contract: GitHub Actions submits this build after merge to main.
-# The workflow authenticates via OIDC, resolves the image repository from
-# Terraform-managed GitHub repository variables, and passes substitutions
-# for the commit SHA and floating tag.
+# Trigger: Cloud Build trigger fires on push to main when src/ or
+# containers/app/ changes (via Developer Connect).
 #
 # Manual submission (for testing):
 #   gcloud builds submit . \

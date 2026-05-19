@@ -1,6 +1,7 @@
 # Cloud Build config for the FoehnCast Airflow image.
 #
-# Trigger contract: GitHub Actions submits this build after merge to main.
+# Trigger: Cloud Build trigger fires on push to main when
+# containers/airflow/ or dags/ changes (via Developer Connect).
 # The build context is the repo root because the Airflow Dockerfile copies
 # pyproject.toml, uv.lock, and src/ from the workspace root.
 #
