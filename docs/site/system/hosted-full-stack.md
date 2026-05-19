@@ -55,8 +55,24 @@ These don't get deployed to the cloud:
 ## Bootstrap and Day-2
 
 1. One-time: `./scripts/bootstrap-gcp.sh` from Cloud Shell
-2. Day-2: GitHub Actions runs Terraform and publishes images
-3. Rollback: `scripts/trigger-runtime-release.sh` against local Airflow
+2. Day-2: Terraform (manual dispatch), Cloud Build triggers (on push)
+3. Rollback: Cloud Run probes auto-rollback unhealthy revisions
+
+## Cost Profile
+
+All serverless, scale-to-zero:
+
+| Service | Idle cost | Notes |
+|---------|-----------|-------|
+| Cloud Run (3 services) | ~$0 | Scale to zero, pay per request |
+| Cloud SQL (micro) | ~$7/mo | Only always-on cost |
+| Cloud Workflows | ~$0.01/mo | 5000 free steps/month |
+| Cloud Scheduler | ~$0.10/mo | 3 free jobs |
+| BigQuery | ~$0 | 10 GB free storage, 1 TB free queries |
+| GCS | ~$0.02/mo | Pennies for artifacts |
+| Cloud Build | ~$0 | 120 free min/day |
+| Managed Prometheus | ~$0 | Free tier covers low volumes |
+| **Total idle** | **~$7/mo** | Cloud SQL is the only fixed cost |
 
 See [Delivery Workflow](delivery-and-operator-workflow.md) for the full process.
 

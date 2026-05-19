@@ -1,6 +1,6 @@
 # Cloud Architecture
 
-Everything runs on GCP serverless — scale-to-zero, no VMs. The only fixed cost is a Cloud SQL micro instance for MLflow (~$8/mo).
+Everything runs on GCP serverless — scale-to-zero, no VMs. The only fixed cost is a Cloud SQL micro instance for MLflow (~$7/mo).
 
 ## Architecture Map
 
