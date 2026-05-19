@@ -41,6 +41,6 @@ images:
   - "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
 
 substitutions:
-  _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/example-project/foehncast-docker/foehncast-airflow
-  _COMMIT_SHA: dev
+  _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker/foehncast-airflow
+  _COMMIT_SHA: ${SHORT_SHA}
   _FLOATING_TAG: ""
