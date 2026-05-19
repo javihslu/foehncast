@@ -16,11 +16,9 @@ flowchart TB
     classDef monitor fill:#fff8e1,stroke:#f57f17
     classDef infra fill:#fce4ec,stroke:#880e4f
 
-    %% ─── Sources ────────────────────────────────────────────────────────
-    WEATHER["Weather APIs<br/>(Open-Meteo)"]:::source
-    CONFIG["config.yaml<br/>(spots, model params)"]:::source
+    WEATHER["Weather APIs (Open-Meteo)"]:::source
+    CONFIG["config.yaml"]:::source
 
-    %% ─── Pipelines ──────────────────────────────────────────────────────
     subgraph Pipelines ["Data Pipelines (Python)"]
         direction TB
         subgraph FP ["Feature Pipeline"]
@@ -34,54 +32,47 @@ flowchart TB
         end
     end
 
-    %% ─── Storage ────────────────────────────────────────────────────────
     subgraph Storage ["Persistent State"]
         direction TB
-        PARQUET["Curated Parquet<br/>(MinIO / GCS)"]:::store
-        FEAST["Feast online store<br/>(SQLite / Firestore)"]:::store
-        MLFLOW["MLflow registry<br/>(models + metrics)"]:::store
-        BQ["BigQuery<br/>(feature warehouse)"]:::store
+        PARQUET["Curated Parquet (MinIO / GCS)"]:::store
+        FEAST["Feast online store"]:::store
+        MLFLOW["MLflow registry"]:::store
+        BQ["BigQuery"]:::store
     end
 
-    %% ─── Serving ────────────────────────────────────────────────────────
     subgraph Serving ["User-Facing"]
         direction TB
-        API["FastAPI<br/>(/predict, /rank, /spots, /metrics)"]:::serve
+        API["FastAPI (/predict, /rank, /spots, /metrics)"]:::serve
         UI["Streamlit dashboard"]:::serve
     end
 
-    %% ─── Orchestration ──────────────────────────────────────────────────
-    subgraph Orchestration ["Scheduling & Reproducibility"]
+    subgraph Orchestration ["Scheduling"]
         direction TB
-        AIRFLOW["Airflow<br/>(DAGs: feature, training, inference)"]:::ops
-        DVC["DVC<br/>(offline reproducible runs)"]:::ops
+        AIRFLOW["Airflow DAGs"]:::ops
+        DVC["DVC (offline)"]:::ops
     end
 
-    %% ─── CI/CD ──────────────────────────────────────────────────────────
     subgraph CICD ["CI/CD (GitHub Actions)"]
         direction TB
-        CI["CI workflow<br/>(lint, test, compose, docs)"]:::ops
-        PUB["Publish Images<br/>(Cloud Build → Artifact Registry)"]:::ops
-        TF["Terraform<br/>(plan / apply / destroy)"]:::ops
-        DOCSDEPLOY["Deploy Docs<br/>(MkDocs → GitHub Pages)"]:::ops
+        CI["CI (lint, test, compose, docs)"]:::ops
+        PUB["Publish Images (Cloud Build)"]:::ops
+        TF["Terraform"]:::ops
+        DOCSDEPLOY["Deploy Docs"]:::ops
     end
 
-    %% ─── Monitoring ─────────────────────────────────────────────────────
     subgraph Monitoring ["Observability"]
         direction TB
-        PROM["Prometheus<br/>(scrapes /metrics)"]:::monitor
-        GRAFANA["Grafana<br/>(dashboards)"]:::monitor
+        PROM["Prometheus"]:::monitor
+        GRAFANA["Grafana"]:::monitor
     end
 
-    %% ─── Infrastructure ─────────────────────────────────────────────────
     subgraph Infra ["Infrastructure"]
         direction TB
-        COMPOSE["Docker Compose<br/>(local)"]:::infra
-        CLOUDRUN["Cloud Run<br/>(production)"]:::infra
-        AR["Artifact Registry<br/>(container images)"]:::infra
+        COMPOSE["Docker Compose (local)"]:::infra
+        CLOUDRUN["Cloud Run (production)"]:::infra
+        AR["Artifact Registry"]:::infra
     end
 
-    %% ─── Connections ────────────────────────────────────────────────────
     WEATHER --> ING
     CONFIG --> ING & TRN & PRED
 

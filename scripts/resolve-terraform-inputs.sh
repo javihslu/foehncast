@@ -14,8 +14,6 @@
 #   ./scripts/resolve-terraform-inputs.sh >> "$GITHUB_ENV"
 set -euo pipefail
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
 normalize_bool() {
   local name="$1"
   local value="$2"
@@ -46,8 +44,6 @@ normalize_positive_integer() {
   printf '%s\n' "$value"
 }
 
-# ─── Resolve each variable (input > repo var > default) ──────────────────────
-
 project_id="${INPUT_PROJECT_ID:-$REPO_GCP_PROJECT_ID}"
 if [[ -z "$project_id" ]]; then
   echo "Set project_id in the workflow input or repository variable GCP_PROJECT_ID." >&2
@@ -69,8 +65,6 @@ bigquery_feature_table_id="${INPUT_BIGQUERY_FEATURE_TABLE_ID:-${REPO_GCP_BIGQUER
 
 feast_online_store_location="${INPUT_FEAST_ONLINE_STORE_LOCATION:-${REPO_GCP_FEAST_ONLINE_STORE_LOCATION:-$region}}"
 feast_online_store_database_name="${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-${REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-feast-online}}"
-
-# ─── Cloud Run settings ──────────────────────────────────────────────────────
 
 provision_cloud_run_service="${INPUT_PROVISION_CLOUD_RUN_SERVICE:-${REPO_GCP_PROVISION_CLOUD_RUN_SERVICE:-false}}"
 provision_cloud_run_service="$(normalize_bool provision_cloud_run_service "$provision_cloud_run_service")"
@@ -98,8 +92,6 @@ fi
 cloud_run_cpu="${REPO_GCP_CLOUD_RUN_CPU:-1}"
 cloud_run_memory="${REPO_GCP_CLOUD_RUN_MEMORY:-512Mi}"
 
-# ─── MLflow and UI ───────────────────────────────────────────────────────────
-
 provision_cloud_run_mlflow="${REPO_GCP_PROVISION_CLOUD_RUN_MLFLOW:-false}"
 provision_cloud_run_mlflow="$(normalize_bool provision_cloud_run_mlflow "$provision_cloud_run_mlflow")"
 
@@ -118,15 +110,11 @@ provision_cloud_workflows="$(normalize_bool provision_cloud_workflows "$provisio
 
 cloud_run_image="${REPO_GCP_CLOUD_RUN_IMAGE:-}"
 
-# ─── Command and confirmations ───────────────────────────────────────────────
-
 terraform_command="${INPUT_COMMAND:-plan}"
 destroy_confirmation="${INPUT_DESTROY_CONFIRMATION:-}"
 cleanup_confirmation="${INPUT_CLEANUP_CONFIRMATION:-}"
 cleanup_clear_github_actions="${INPUT_CLEANUP_CLEAR_GITHUB_ACTIONS:-false}"
 cleanup_delete_state_bucket="${INPUT_CLEANUP_DELETE_STATE_BUCKET:-false}"
-
-# ─── Output ──────────────────────────────────────────────────────────────────
 
 cat <<ENVVARS
 TF_COMMAND=${terraform_command}
