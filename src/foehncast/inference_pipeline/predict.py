@@ -29,10 +29,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVING_ALIAS = "champion"
 
-_LATEST_PREDICTIONS_DIR = (
-    Path(env_value("FOEHNCAST_STATE_DIR") or ".state") / "predictions"
-)
-_LATEST_PREDICTIONS_PATH = _LATEST_PREDICTIONS_DIR / "latest.json"
+_STATE_DIR = env_value("FOEHNCAST_STATE_DIR") or ".state"
+_SNAPSHOT_LOCATION = f"{_STATE_DIR.rstrip('/')}/predictions/latest.json"
 # Maximum age (seconds) before the snapshot is considered stale and live
 # inference is triggered instead.  Default: 7 hours (one full pipeline cycle
 # plus buffer).
@@ -175,28 +173,42 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Prediction snapshot: pre-computed predictions persisted to disk so the UI
-# can serve them instantly without re-running inference on every page load.
+# Prediction snapshot: pre-computed predictions persisted to disk/GCS so the
+# UI can serve them instantly without re-running inference on every page load.
+# Supports both local paths (.state/predictions/latest.json) and GCS URIs
+# (gs://bucket/state/predictions/latest.json) via FOEHNCAST_STATE_DIR.
 # ---------------------------------------------------------------------------
 
 
-def write_latest_predictions(payload: dict[str, Any]) -> Path:
+def _is_gcs_snapshot() -> bool:
+    return _SNAPSHOT_LOCATION.startswith("gs://")
+
+
+def write_latest_predictions(payload: dict[str, Any]) -> str:
     """Persist the prediction payload as the latest snapshot.
 
     Called by the inference pipeline orchestrator after a successful run.
     The snapshot is timestamped so consumers can evaluate freshness.
+    Works with both local filesystem and GCS (when FOEHNCAST_STATE_DIR
+    starts with gs://).
     """
-    _LATEST_PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
     snapshot = {
         "written_at": time.time(),
         "written_iso": pd.Timestamp.now(tz="UTC").isoformat(),
         **payload,
     }
-    _LATEST_PREDICTIONS_PATH.write_text(
-        json.dumps(snapshot, default=str), encoding="utf-8"
-    )
-    logger.info("Wrote prediction snapshot to %s", _LATEST_PREDICTIONS_PATH)
-    return _LATEST_PREDICTIONS_PATH
+
+    if _is_gcs_snapshot():
+        from foehncast._report_store import write_json_object
+
+        write_json_object(_SNAPSHOT_LOCATION, snapshot)
+    else:
+        path = Path(_SNAPSHOT_LOCATION)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(snapshot, default=str), encoding="utf-8")
+
+    logger.info("Wrote prediction snapshot to %s", _SNAPSHOT_LOCATION)
+    return _SNAPSHOT_LOCATION
 
 
 def read_latest_predictions(
@@ -206,16 +218,30 @@ def read_latest_predictions(
 
     Returns the prediction payload dict (same shape as ``predict_spots``
     output) or *None* if the file is missing, corrupt, or older than
-    *max_age_s* seconds.
+    *max_age_s* seconds.  Supports both local and GCS paths.
     """
     age_limit = max_age_s if max_age_s is not None else _SNAPSHOT_MAX_AGE_S
-    if not _LATEST_PREDICTIONS_PATH.is_file():
-        return None
+
     try:
-        raw = _LATEST_PREDICTIONS_PATH.read_text(encoding="utf-8")
+        if _is_gcs_snapshot():
+            from foehncast._report_store import _new_storage_client, _parse_gcs_location
+
+            bucket_name, object_name = _parse_gcs_location(_SNAPSHOT_LOCATION)
+            blob = _new_storage_client().bucket(bucket_name).blob(object_name)
+            if not blob.exists():
+                return None
+            raw = blob.download_as_text(encoding="utf-8")
+        else:
+            path = Path(_SNAPSHOT_LOCATION)
+            if not path.is_file():
+                return None
+            raw = path.read_text(encoding="utf-8")
+
         snapshot = json.loads(raw)
-    except (OSError, json.JSONDecodeError):
-        logger.warning("Could not read prediction snapshot; falling back to live.")
+    except (OSError, json.JSONDecodeError, Exception) as exc:
+        logger.warning(
+            "Could not read prediction snapshot (%s); falling back to live.", exc
+        )
         return None
 
     written_at = snapshot.get("written_at")
