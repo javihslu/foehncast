@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import foehncast.runtime_release as runtime_release
+import foehncast._report_store as _report_store
 
 
 class _FakeStorageBlob:
@@ -341,7 +342,7 @@ def test_main_verify_report_prints_gcs_verified_summary(
     fake_storage.objects[
         ("demo-bucket", "airflow/reports/runtime-release-latest.json")
     ] = json.dumps({"dag_run_id": "runtime_release__ok"}) + "\n"
-    monkeypatch.setattr(runtime_release, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setattr(_report_store, "_new_storage_client", lambda: fake_storage)
     monkeypatch.setenv(
         "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH",
         "gs://demo-bucket/airflow/reports/runtime-release-latest.json",
@@ -470,7 +471,7 @@ def test_write_runtime_release_summary_supports_gcs_location(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_storage = _FakeStorageClient()
-    monkeypatch.setattr(runtime_release, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setattr(_report_store, "_new_storage_client", lambda: fake_storage)
     monkeypatch.setenv(
         "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH",
         "gs://demo-bucket/airflow/reports/runtime-release-latest.json",
@@ -523,7 +524,7 @@ def test_verify_runtime_release_summary_adds_gcs_report_path(
     fake_storage.objects[
         ("demo-bucket", "airflow/reports/runtime-release-latest.json")
     ] = json.dumps({"dag_run_id": "runtime_release__ok"}) + "\n"
-    monkeypatch.setattr(runtime_release, "_new_storage_client", lambda: fake_storage)
+    monkeypatch.setattr(_report_store, "_new_storage_client", lambda: fake_storage)
     monkeypatch.setenv(
         "FOEHNCAST_RUNTIME_RELEASE_REPORT_PATH",
         "gs://demo-bucket/airflow/reports/runtime-release-latest.json",

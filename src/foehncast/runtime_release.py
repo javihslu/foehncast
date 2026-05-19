@@ -12,9 +12,14 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from foehncast._json import json_object_mapping, read_json_file, write_pretty_json
-from foehncast._report_store import history_json_paths
-from foehncast._time import compact_utc_timestamp
+from foehncast._json import json_object_mapping, write_pretty_json
+from foehncast._report_store import (
+    _is_gcs_location,
+    history_json_paths,
+    read_json_object as _read_report_json,
+    write_history_copy as _write_report_history,
+    write_json_object as _write_report_json,
+)
 from foehncast.paths import project_root
 
 
@@ -42,143 +47,47 @@ def configured_runtime_release_summary_location() -> str:
     return configured_location or str(runtime_release_summary_path())
 
 
-def _is_gcs_location(location: str) -> bool:
-    return location.startswith("gs://")
-
-
-def _parse_gcs_location(location: str) -> tuple[str, str]:
-    normalized_location = location.strip()
-    bucket_name, separator, object_name = normalized_location[5:].partition("/")
-    object_name = object_name.strip("/")
-    if not bucket_name or not separator or not object_name:
-        raise ValueError(
-            "Runtime release GCS report path must look like "
-            "'gs://bucket/path/to/runtime-release-latest.json'."
-        )
-    return bucket_name, object_name
-
-
-def _new_storage_client() -> Any:
-    from google.cloud import storage
-
-    return storage.Client()
-
-
-def _write_gcs_json_object(location: str, payload: dict[str, Any]) -> None:
-    bucket_name, object_name = _parse_gcs_location(location)
-    blob = _new_storage_client().bucket(bucket_name).blob(object_name)
-    blob.upload_from_string(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        content_type="application/json",
-    )
-
-
-def _read_gcs_json_object(location: str, *, error_message: str) -> dict[str, Any]:
-    bucket_name, object_name = _parse_gcs_location(location)
-    blob = _new_storage_client().bucket(bucket_name).blob(object_name)
-    if not blob.exists():
-        raise FileNotFoundError(
-            f"Runtime release report was not written to {location}."
-        )
-
-    payload = json.loads(blob.download_as_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(error_message)
-    return payload
-
-
-def _history_location(
-    summary_location: str,
-    *,
-    prefix: str,
-    payload: dict[str, Any],
-    timestamp_field: str = "generated_at",
-) -> str:
-    filename = f"{prefix}-{compact_utc_timestamp(payload.get(timestamp_field))}.json"
-
-    if _is_gcs_location(summary_location):
-        bucket_name, object_name = _parse_gcs_location(summary_location)
-        object_dir = object_name.rpartition("/")[0]
-        history_name = "/".join(
-            part for part in (object_dir, "history", filename) if part
-        )
-        return f"gs://{bucket_name}/{history_name}"
-
-    return str(Path(summary_location).parent / "history" / filename)
-
-
-def _gcs_history_prefix(summary_location: str, *, prefix: str) -> tuple[str, str]:
-    bucket_name, object_name = _parse_gcs_location(summary_location)
-    object_dir = object_name.rpartition("/")[0]
-    history_prefix = "/".join(
-        part for part in (object_dir, "history", f"{prefix}-") if part
-    )
-    return bucket_name, history_prefix
-
-
 def runtime_release_summary_history_paths() -> list[str | Path]:
     """Return persisted runtime release handoff history paths or URIs."""
     summary_location = configured_runtime_release_summary_location()
-    if _is_gcs_location(summary_location):
-        bucket_name, history_prefix = _gcs_history_prefix(
-            summary_location,
-            prefix="runtime-release",
-        )
-        return [
-            f"gs://{bucket_name}/{blob.name}"
-            for blob in sorted(
-                _new_storage_client().list_blobs(bucket_name, prefix=history_prefix),
-                key=lambda item: item.name,
-            )
-            if blob.name.endswith(".json")
-        ]
-
-    return history_json_paths(
-        Path(summary_location).parent,
-        "runtime-release-*.json",
+    report_dir = (
+        str(Path(summary_location).parent)
+        if not summary_location.startswith("gs://")
+        else summary_location.rstrip("/").rsplit("/", 1)[0]
     )
+    return history_json_paths(report_dir, "runtime-release-*.json")
 
 
 def _write_runtime_release_history(
     summary: dict[str, Any],
     summary_location: str,
 ) -> str | Path:
-    history_location = _history_location(
-        summary_location,
+    report_dir = (
+        str(Path(summary_location).parent)
+        if not summary_location.startswith("gs://")
+        else summary_location.rstrip("/").rsplit("/", 1)[0]
+    )
+    return _write_report_history(
+        report_dir,
         prefix="runtime-release",
         payload=summary,
     )
-    _write_runtime_release_json(history_location, summary)
-    if _is_gcs_location(history_location):
-        return history_location
-    return Path(history_location)
 
 
 def _write_runtime_release_json(location: str, payload: dict[str, Any]) -> None:
-    if _is_gcs_location(location):
-        _write_gcs_json_object(location, payload)
-        return
-
-    write_pretty_json(Path(location), payload)
+    _write_report_json(location, payload)
 
 
 def _read_runtime_release_json(location: str) -> dict[str, Any]:
-    if _is_gcs_location(location):
-        return _read_gcs_json_object(
+    try:
+        return _read_report_json(
             location,
             error_message="Runtime release report must decode to a JSON object.",
         )
-
-    path = Path(location)
-    if not path.is_file():
+    except FileNotFoundError:
         raise FileNotFoundError(
             f"Runtime release report was not written to {location}."
-        )
-
-    payload = read_json_file(path)
-    if not isinstance(payload, dict):
-        raise ValueError("Runtime release report must decode to a JSON object.")
-    return payload
+        ) from None
 
 
 def _request_mapping(request: Mapping[str, Any] | str | None) -> dict[str, Any]:
