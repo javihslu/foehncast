@@ -1115,3 +1115,34 @@ def test_run_prediction_drift_detection_step_handles_exception(
 
     assert result["prediction_drift"] is None
     assert "connection refused" in result["error"]
+
+
+def test_run_inference_pipeline_step_calls_predict_and_emit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_payload = {
+        "predictions": [{"spot_id": "urnersee"}],
+        "model_version": "16",
+    }
+    called: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "foehncast.inference_pipeline.predict.predict_spots",
+        lambda spot_ids: fake_payload,
+    )
+
+    def fake_emit(prediction_payload: dict, endpoint: str) -> None:
+        called["emit"] = {"payload": prediction_payload, "endpoint": endpoint}
+
+    monkeypatch.setattr(
+        "foehncast.monitoring.prediction_log.emit_prediction_drift_metrics",
+        fake_emit,
+    )
+
+    from foehncast.orchestration.inference import run_inference_pipeline_step
+
+    result = run_inference_pipeline_step()
+
+    assert result == fake_payload
+    assert called["emit"]["endpoint"] == "scheduled"
+    assert called["emit"]["payload"] is fake_payload
