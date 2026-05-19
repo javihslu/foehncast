@@ -283,10 +283,7 @@ data "google_project" "current" {
   project_id = var.project_id
 }
 
-resource "random_password" "airflow_api_auth_jwt_secret" {
-  length  = 32
-  special = false
-}
+
 
 resource "google_project_service" "required" {
   for_each = local.required_services
@@ -308,41 +305,45 @@ resource "google_artifact_registry_repository" "containers" {
   depends_on = [google_project_service.required]
 }
 
-# Developer Connect links the GitHub repo to GCP for native Cloud Build triggers.
-# After terraform apply, complete the OAuth handshake in the GCP Console:
-# Developer Connect > Connections > foehncast-github > Complete setup
-resource "google_developer_connect_connection" "github" {
-  count         = var.provision_cloud_build_triggers ? 1 : 0
-  location      = var.region
-  connection_id = "foehncast-github"
+# Cloud Build 2nd-gen connection links the GitHub repo to GCP for triggers.
+# Created by scripts/setup-cloud-triggers.sh (gcloud + OAuth flow) and imported.
+resource "google_cloudbuildv2_connection" "github" {
+  count    = var.provision_cloud_build_triggers ? 1 : 0
+  location = var.region
+  name     = "foehncast-github"
 
   github_config {
-    github_app          = "GITHUB_APP"
     app_installation_id = var.github_app_installation_id
+  }
+
+  # Connection is created by setup script and imported into state.
+  lifecycle {
+    ignore_changes = [github_config]
   }
 
   depends_on = [google_project_service.required]
 }
 
-resource "google_developer_connect_git_repository_link" "foehncast" {
-  count                  = var.provision_cloud_build_triggers ? 1 : 0
-  location               = var.region
-  parent_connection      = google_developer_connect_connection.github[0].connection_id
-  git_repository_link_id = "foehncast"
-  clone_uri              = "https://github.com/${var.github_owner}/${var.github_repository}.git"
+resource "google_cloudbuildv2_repository" "foehncast" {
+  count             = var.provision_cloud_build_triggers ? 1 : 0
+  location          = var.region
+  name              = "foehncast"
+  parent_connection = google_cloudbuildv2_connection.github[0].name
+  remote_uri        = "https://github.com/${var.github_owner}/${var.github_repository}.git"
 
-  depends_on = [google_developer_connect_connection.github]
+  depends_on = [google_cloudbuildv2_connection.github]
 }
 
 # Cloud Build triggers — replace GitHub Actions publish-images.yml.
 # Each trigger watches specific paths and builds the corresponding image.
 resource "google_cloudbuild_trigger" "publish_app" {
-  count    = var.provision_cloud_build_triggers ? 1 : 0
-  name     = "publish-app"
-  location = var.region
+  count           = var.provision_cloud_build_triggers ? 1 : 0
+  name            = "publish-app"
+  location        = var.region
+  service_account = google_service_account.cloud_build.id
 
   repository_event_config {
-    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    repository = google_cloudbuildv2_repository.foehncast[0].id
     push {
       branch = "^main$"
     }
@@ -354,31 +355,16 @@ resource "google_cloudbuild_trigger" "publish_app" {
   depends_on = [google_project_service.required]
 }
 
-resource "google_cloudbuild_trigger" "publish_airflow" {
-  count    = var.provision_cloud_build_triggers ? 1 : 0
-  name     = "publish-airflow"
-  location = var.region
 
-  repository_event_config {
-    repository = google_developer_connect_git_repository_link.foehncast[0].id
-    push {
-      branch = "^main$"
-    }
-  }
-
-  included_files = ["containers/airflow/**", "dags/**", "pyproject.toml", "uv.lock"]
-  filename       = "cloudbuild/airflow.yaml"
-
-  depends_on = [google_project_service.required]
-}
 
 resource "google_cloudbuild_trigger" "publish_mlflow" {
-  count    = var.provision_cloud_build_triggers ? 1 : 0
-  name     = "publish-mlflow"
-  location = var.region
+  count           = var.provision_cloud_build_triggers ? 1 : 0
+  name            = "publish-mlflow"
+  location        = var.region
+  service_account = google_service_account.cloud_build.id
 
   repository_event_config {
-    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    repository = google_cloudbuildv2_repository.foehncast[0].id
     push {
       branch = "^main$"
     }
@@ -391,12 +377,13 @@ resource "google_cloudbuild_trigger" "publish_mlflow" {
 }
 
 resource "google_cloudbuild_trigger" "publish_ui" {
-  count    = var.provision_cloud_build_triggers ? 1 : 0
-  name     = "publish-ui"
-  location = var.region
+  count           = var.provision_cloud_build_triggers ? 1 : 0
+  name            = "publish-ui"
+  location        = var.region
+  service_account = google_service_account.cloud_build.id
 
   repository_event_config {
-    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    repository = google_cloudbuildv2_repository.foehncast[0].id
     push {
       branch = "^main$"
     }
@@ -1118,6 +1105,71 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
   }
 
   depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_v2_job" "drift_detection" {
+  count    = var.provision_cloud_workflows ? 1 : 0
+  name     = "foehncast-drift-detection"
+  location = var.region
+
+  deletion_protection = false
+
+  template {
+    template {
+      service_account = google_service_account.cloud_run_runtime.email
+      timeout         = "300s"
+      max_retries     = 1
+
+      containers {
+        image = local.cloud_run_image
+
+        command = ["python", "-c"]
+        args    = ["from foehncast.orchestration import run_feature_drift_detection_step, run_prediction_drift_detection_step; run_feature_drift_detection_step(dataset='train'); run_prediction_drift_detection_step()"]
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "2Gi"
+          }
+        }
+
+        dynamic "env" {
+          for_each = local.cloud_run_env_vars
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_scheduler_job" "drift_detection" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  name             = "foehncast-drift-detection"
+  description      = "Run drift detection every 12 hours"
+  schedule         = "0 */12 * * *"
+  time_zone        = "Europe/Zurich"
+  attempt_deadline = "30s"
+  region           = var.region
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://${var.region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${var.project_id}/jobs/foehncast-drift-detection:run"
+
+    oauth_token {
+      service_account_email = google_service_account.workflows[0].email
+    }
+  }
+
+  depends_on = [
+    google_project_service.required,
+    google_cloud_run_v2_job.drift_detection,
+  ]
 }
 
 resource "google_service_account" "workflows" {

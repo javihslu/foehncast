@@ -362,11 +362,9 @@ def test_cloud_build_triggers_defined_in_terraform() -> None:
     terraform = _read_text("terraform/main.tf")
 
     assert 'resource "google_cloudbuild_trigger" "publish_app"' in terraform
-    assert 'resource "google_cloudbuild_trigger" "publish_airflow"' in terraform
     assert 'resource "google_cloudbuild_trigger" "publish_mlflow"' in terraform
     assert 'resource "google_cloudbuild_trigger" "publish_ui"' in terraform
     assert "cloudbuild/app.yaml" in terraform
-    assert "cloudbuild/airflow.yaml" in terraform
     assert "cloudbuild/mlflow.yaml" in terraform
     assert "cloudbuild/ui.yaml" in terraform
 
@@ -379,6 +377,8 @@ def test_cloud_workflows_pipeline_cascade_defined_in_terraform() -> None:
     assert 'resource "google_cloud_run_v2_job" "feature_pipeline"' in terraform
     assert 'resource "google_cloud_run_v2_job" "training_pipeline"' in terraform
     assert 'resource "google_cloud_run_v2_job" "inference_pipeline"' in terraform
+    assert 'resource "google_cloud_run_v2_job" "drift_detection"' in terraform
+    assert 'resource "google_cloud_scheduler_job" "drift_detection"' in terraform
 
 
 def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
