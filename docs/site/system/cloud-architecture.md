@@ -1,10 +1,6 @@
 # Cloud Architecture
 
-FoehnCast runs entirely on serverless and managed GCP services. Every compute component scales to zero when idle. The only fixed-cost resource is the Cloud SQL micro instance for MLflow metadata.
-
-!!! note "What this page covers"
-
-    Interactive architecture map, service inventory, access model, and cost forecast for the hosted environment.
+Everything runs on GCP serverless — scale-to-zero, no VMs. The only fixed cost is a Cloud SQL micro instance for MLflow (~$8/mo).
 
 ## Architecture Map
 

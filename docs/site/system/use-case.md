@@ -1,81 +1,75 @@
 # Use Case and Data
 
-FoehnCast is a trip-planning tool for one rider profile and a fixed set of Swiss kite spots. It answers one question: where is the best session worth driving to next?
+FoehnCast helps you pick the best Swiss kiteboarding spot for today. One rider, six spots, one question: where should I drive?
 
-The scope stays intentionally narrow. The project ranks a small known spot set for one rider baseline instead of trying to be a universal weather portal.
+We keep the scope small on purpose — it's a real decision for a real rider, not a generic weather app.
 
-## Decision Model
+## How the Ranking Works
 
 <div class="mermaid">
 flowchart TD
-        WX[Weather forecasts] --> QUAL[Per-spot quality]
-        SPOT[Spot metadata and shore orientation] --> QUAL
-        QUAL --> RANK[Rank session options]
+        WX[Weather forecasts] --> QUAL[Per-spot quality score]
+        SPOT[Spot metadata + shore orientation] --> QUAL
+        QUAL --> RANK[Rank spots]
         WINDOW[Rideable time window] --> RANK
         RIDER[Rider profile] --> RANK
-        DRIVE[OSRM drive time] --> RANK
+        DRIVE[Drive time from home] --> RANK
 </div>
 
-## What Shapes The Ranking
+## What Goes Into the Score
 
 <div class="grid cards" markdown>
 
 - **Wind quality**
 
-    The model predicts how good each spot looks for the configured rider profile.
+    The model predicts how good conditions look at each spot.
 
-- **Session window**
+- **Session length**
 
-    Longer rideable periods score better than short spikes.
+    Longer rideable windows beat short spikes.
 
 - **Drive time**
 
-    Distance matters because the system is choosing a trip, not only a forecast.
+    We're choosing a trip, not just reading a forecast.
 
 - **Spot fit**
 
-    Shore orientation and local spot rules shape whether the forecast is useful.
+    Shore orientation and local rules matter — not every wind direction works everywhere.
 
 </div>
 
-## Rider Baseline
+## Rider Profile
 
-| Field | Baseline value |
-|-------|----------------|
-| Home location | Schwyz |
+| Field | Value |
+|-------|-------|
+| Home | Schwyz |
 | Weight | 80 kg |
-| Quiver | 5 / 7 / 8 / 10 / 12 m2 |
+| Kite sizes | 5 / 7 / 8 / 10 / 12 m² |
 
-This baseline keeps the ranking problem consistent across the project. The model does not try to optimize for every possible rider at once.
+One fixed profile keeps the problem consistent. The model doesn't try to serve every rider.
 
-## Spots in Scope
+## Spots
 
-| Spot | Canton | Difficulty | Water | Ideal wind window |
-|------|--------|------------|-------|-------------------|
-| Silvaplana | GR | intermediate | lake | 180°-270° |
-| Urnersee | UR | intermediate | lake | 150°-210° |
-| Lac de Neuchatel | NE | beginner | lake | 200°-310° |
-| Bodensee | TG | beginner | lake | 180°-300° |
-| Walensee | SG | intermediate | lake | 220°-320° |
-| Thunersee | BE | advanced | lake | 220°-330° |
+| Spot | Canton | Level | Ideal wind |
+|------|--------|-------|-----------|
+| Silvaplana | GR | intermediate | 180°–270° |
+| Urnersee | UR | intermediate | 150°–210° |
+| Lac de Neuchatel | NE | beginner | 200°–310° |
+| Bodensee | TG | beginner | 180°–300° |
+| Walensee | SG | intermediate | 220°–320° |
+| Thunersee | BE | advanced | 220°–330° |
 
-These six spots define the ranking scope.
+## Data Sources
 
-## Main Inputs
+| Source | What it provides |
+|--------|-----------------|
+| Open-Meteo | Weather forecasts (wind, gusts, temperature, etc.) |
+| OSRM | Drive time from home to each spot |
+| Spot metadata | Shore orientation, difficulty, local rules |
 
-| Input | Role |
-|-------|------|
-| Open-Meteo | forecast weather inputs for feature generation and prediction |
-| OSRM | drive-time inputs for trip ranking |
-| Spot metadata | local wind context, shore orientation, and spot-level rules |
+## Why Fixed Scope
 
-Open-Meteo supplies the weather signal. OSRM supplies travel time. Spot metadata keeps the ranking grounded in the local riding context.
-
-## Why The Scope Stays Fixed
-
-- It keeps the labeling and ranking problem aligned with one real rider scenario.
-- It makes route-time personalization meaningful instead of theoretical.
-- It avoids turning the project into a generic weather portal with weak decision support.
-- It keeps implementation work focused on one concrete product question.
-
-See [Architecture](architecture.md) for the system structure and [Feature Pipeline](feature-pipeline.md) for how the data moves through the stack.
+- Keeps labeling aligned with one real rider scenario
+- Makes drive-time ranking meaningful (not theoretical)
+- Avoids becoming a generic weather portal
+- One clear product question = focused implementation

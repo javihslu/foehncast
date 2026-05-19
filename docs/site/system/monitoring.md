@@ -1,48 +1,32 @@
 # Monitoring
 
-FoehnCast keeps monitoring as an operator surface, not a rider-facing one. The monitoring stack turns pipeline summaries, prediction events, drift signals, and serving health into scrapeable metrics and checked-in alert rules.
+FoehnCast uses Prometheus for metrics collection, Evidently for drift detection, and Streamlit for visualization. This page explains what gets measured and how.
 
-This page describes what is measured, where the evidence comes from, and how operators verify it.
-
-!!! note "Scope"
-
-    This page describes the validated monitoring contract.
-    It focuses on monitoring evidence and boundaries.
-    It does not redefine orchestration or the hosted build.
-
-## Signal Path
+## Signal Flow
 
 <div class="mermaid">
 flowchart TD
-    subgraph Sources ["Evidence sources"]
-        direction TB
-        AIR["Airflow pipeline summaries"]
+    subgraph Sources ["What generates signals"]
+        AIR["Pipeline summaries (JSON)"]
         PRED["Prediction requests"]
-        SYNC["Hosted sync status"]
         HIND["Hindcast validation"]
+        DRIFT["Drift detection (Evidently)"]
     end
 
-    subgraph Processing ["Metric composition"]
-        direction TB
-        APP["App /metrics endpoint"]
-        LOG["Prediction log + event history"]
-        DRIFT["Evidently drift detection"]
+    subgraph Collection ["How they're collected"]
+        APP["/metrics endpoint"]
         STATSD["StatsD exporter"]
     end
 
-    subgraph Operator ["Operator tooling"]
-        direction TB
+    subgraph Display ["Where you see them"]
         PROM["Prometheus"]
         ALERT["Alert rules"]
-        UI["Streamlit native charts"]
+        UI["Streamlit charts"]
     end
 
     AIR --> APP
-    PRED --> LOG
-    SYNC --> APP
+    PRED --> APP
     HIND --> APP
-    LOG --> APP
-    LOG --> DRIFT
     DRIFT --> STATSD
     APP --> PROM
     STATSD --> PROM
@@ -50,177 +34,88 @@ flowchart TD
     PROM --> ALERT
 </div>
 
-Monitoring consumes persisted or runtime state after the pipeline and serving paths run. It does not own feature engineering, model scoring, or orchestration.
-
-## Runtime Role
-
-| Runtime mode | Monitoring contract |
-|------|---------------------|
-| Local evaluator | app `/metrics`, StatsD drift export, persisted pipeline summaries, and native Altair charts in the Streamlit UI validate the full monitoring path on one machine |
-| Shared hosted environment | Cloud Run exposes `/metrics`; the operator lane keeps Prometheus and hosted sync evidence online |
-| Public docs | rendered metrics snippets, checked-in configs, and summary artifacts explain the contract without live control planes |
-
-The public-versus-private surface rule is documented in [Interfaces and Surfaces](interfaces-and-surfaces.md).
-
-## Evidence Sources
-
-| Source | Kind | What it shows |
-|------|------|---------------|
-| `airflow/reports/*.json` | durable | latest feature and training pipeline summaries plus history |
-| `.state/monitoring/prediction-events.jsonl` | durable | prediction-event history by model version (local S3-backed runtimes) |
-| `foehncast_monitoring.prediction_events` BigQuery table | durable | prediction-event history (Cloud Run and cloud-native readers) |
-| `.state/monitoring/prediction-log.jsonl` | bounded working set | recent prediction rows for local drift evaluation; not a history source |
-| `.state/monitoring/hindcast-validation.json` | durable | latest hindcast accuracy, MAE, and validated-pair counts |
-| `.state/hosted-sync/last-success.json` | durable | latest hosted sync success marker |
-| app `/metrics` | composed scrape | app-owned monitoring state and summary-derived metrics |
-| StatsD exporter `:9102` | scrape | Evidently-backed drift metrics |
-
-Durable files survive restarts and support audits. Runtime counters on `/metrics` describe process health and reset with the process.
-
 ## Metrics
 
-The serving application publishes one composed Prometheus payload on `/metrics`:
+The app serves one combined `/metrics` endpoint with everything Prometheus needs:
 
-<div class="mermaid">
-flowchart TD
-    subgraph App ["/metrics payload"]
-        direction TB
-        FPS["Feature pipeline summary gauges"]
-        TPS["Training pipeline summary gauges"]
-        PHS["Prediction history gauges"]
-        PMC["Prediction monitoring counters"]
-        HSS["Hosted sync status"]
-        REG["Registered model version"]
-    end
-
-    subgraph StatsD ["StatsD path"]
-        direction TB
-        EVD["Evidently drift report"]
-        SDE["StatsD exporter"]
-    end
-
-    FPS --> PROM["Prometheus"]
-    TPS --> PROM
-    PHS --> PROM
-    PMC --> PROM
-    HSS --> PROM
-    REG --> PROM
-    EVD --> SDE --> PROM
-</div>
-
-Key metric families:
-
-| Metric prefix | Source | Labels |
-|------|--------|--------|
-| `foehncast_feature_pipeline_*` | persisted `airflow/reports/` summaries | `dataset`, `storage_backend` |
-| `foehncast_training_pipeline_*` | persisted training summaries | `dataset` |
-| `foehncast_prediction_monitoring_*` | in-process counters (ephemeral) | `endpoint`, `result` |
-| `foehncast_drift_metric` | Evidently via StatsD | column-level drift scores |
-
-Feature and training summary metrics include per-stage state gauges (`succeeded`, `failed`, `not_run`), spot counts, row counts, duration gauges, and failure counts. Prediction monitoring counters track background task scheduling and execution attempts.
+| Metric prefix | What it tracks |
+|--------------|---------------|
+| `foehncast_feature_pipeline_*` | Feature pipeline stage status, row counts, durations |
+| `foehncast_training_pipeline_*` | Training results, model versions |
+| `foehncast_prediction_monitoring_*` | Background task scheduling and execution |
+| `foehncast_drift_metric` | Per-column drift scores (via StatsD) |
 
 ## Drift Detection
 
-Drift detection uses Evidently to compare reference and current datasets, then exports results through StatsD.
+Uses Evidently to compare feature distributions:
 
-| Drift kind | Reference | Current | Method |
+| Type | Reference | Current | Method |
 |------|-----------|---------|--------|
-| Feature drift | stored reference feature dataset | latest curated features | column-level statistical tests via Evidently |
-| Prediction drift | historical prediction events | recent prediction window | comparison across `prediction-events.jsonl` or the BigQuery warehouse contract |
+| Feature drift | Stored reference dataset | Latest curated features | Column-level statistical tests |
+| Prediction drift | Historical predictions | Recent prediction window | Distribution comparison |
 
-Emitted StatsD metrics are mapped into Prometheus as `foehncast_drift_metric`. The StatsD host defaults to `127.0.0.1:8125` and can be overridden through `monitoring.statsd_host` in `config.yaml`.
-
-## Scrape Configuration
-
-Prometheus scrapes four targets, all checked in at `prometheus_config/prometheus.yml`:
-
-| Job | Target | What it collects |
-|------|--------|------------------|
-| `foehncast_app` | `app:8000/metrics` | app-owned pipeline, prediction, and sync metrics |
-| `statsd_exporter` | `statsd:9102` | Evidently drift metrics |
-| `prometheus` | `prometheus:9090` | Prometheus self-monitoring |
-
-Scrape interval is 15 seconds. Alert rules are evaluated at the same interval.
-
-## Alert Rules
-
-The checked-in Prometheus rules at `prometheus_config/alerting_rules.yml` cover service health and domain health:
-
-| Alert | Group | Severity | Trigger | What it guards |
-|------|-------|----------|---------|----------------|
-| `AppDown` | service-health | critical | app target unreachable for 2 min | serving availability |
-| `HighRequestLatency` | service-health | warning | p95 latency above 2 s for 5 min | request performance |
-| `PredictionErrorRateHigh` | service-health | warning | error rate above 0.1/s for 5 min | prediction reliability |
-| `StatsdExporterDown` | service-health | warning | StatsD target unreachable for 5 min | drift pipeline availability |
-| `PredictionMonitoringScheduleFailure` | domain-health | warning | schedule failures in last 15 min | background monitoring scheduling |
-| `PredictionMonitoringExecutionFailure` | domain-health | warning | execution failures in last 15 min | background monitoring execution |
-| `FeaturePipelineStageFailure` | domain-health | warning | any feature stage failure count > 0 | feature pipeline reliability |
-| `TrainingPipelineStageFailure` | domain-health | warning | any training stage failure count > 0 | training pipeline reliability |
-| `HostedSyncStale` | domain-health | warning | no sync success for 15 min | hosted environment freshness |
-
-The alert rules are version-controlled so the alerting contract is reviewable without a live Prometheus instance.
-
-## Visualization
-
-Monitoring visualization uses native Altair charts in the Streamlit UI with direct PromQL queries against the app's `/api/v1/query` endpoint.
-
-The Streamlit sidebar renders:
-
-- system health indicators from Prometheus counters
-- pipeline status and timing from persisted summary metrics
-- drift scores from StatsD-exported Evidently results
-- hindcast accuracy from the cached validation result
-
-All chart data comes from the same Prometheus metrics that the alert rules consume, ensuring consistency between what operators see and what alerts fire on.
+Results go through StatsD → Prometheus as `foehncast_drift_metric`.
 
 ## Hindcast Validation
 
-Hindcast validation compares past predictions against observed weather data to measure real-world forecast accuracy.
+Compares past predictions against what actually happened:
 
-The validation path is:
+1. Background task runs hourly
+2. Waits 5 days (Open-Meteo archive API latency)
+3. Fetches observed weather for each past prediction
+4. Recomputes quality using the same labeling function
+5. Reports accuracy, MAE, and per-class counts
 
-- the app runs a background hindcast task hourly via `asyncio.to_thread` inside the FastAPI lifespan
-- eligible predictions are those older than a 120-hour buffer (accounting for Open-Meteo archive API latency of roughly five days)
-- for each eligible prediction, the archive API provides observed weather at the same spot and timestamp
-- ground-truth quality labels are recomputed from observed values using the same `compute_quality_index` function used in training
-- accuracy, MAE, and per-class counts are calculated and persisted to `.state/monitoring/hindcast-validation.json`
-- Prometheus scrapes the cached result; the app never calls the archive API on scrape
+Results persist in `.state/monitoring/hindcast-validation.json` and show up on `/metrics` and in the Streamlit model card.
 
-The Streamlit sidebar model card also embeds the hindcast accuracy gauge.
+## Alert Rules
 
-This closes the prediction-to-observation feedback loop without relying on manual evaluation notebooks.
+9 rules in `prometheus_config/alerting_rules.yml`:
 
-## Recovery Evidence
+| Alert | Fires when |
+|-------|-----------|
+| `AppDown` | App unreachable for 2 min |
+| `HighRequestLatency` | p95 > 2s for 5 min |
+| `PredictionErrorRateHigh` | Error rate > 0.1/s for 5 min |
+| `StatsdExporterDown` | StatsD target gone for 5 min |
+| `PredictionMonitoringScheduleFailure` | Background scheduling fails |
+| `PredictionMonitoringExecutionFailure` | Background execution fails |
+| `FeaturePipelineStageFailure` | Any feature stage fails |
+| `TrainingPipelineStageFailure` | Any training stage fails |
+| `HostedSyncStale` | No sync success for 15 min |
 
-Recovery work should leave durable evidence that operators can compare before and after the intervention.
+## Scrape Config
 
-| Recovery task | Evidence | Check |
-|------|----------|-------|
-| Feature retry or backfill | latest feature summary JSON | summary timestamp advances |
-| Training follow-up | latest training summary JSON | stage and model version are recorded |
-| Deploy, promote, or rollback | latest runtime-release summary | GitHub summary and runtime acknowledgement match |
-| Hosted sync refresh | latest sync status file | sync state updates on `/metrics` |
+Three targets in `prometheus_config/prometheus.yml` (15s interval):
 
-Capture the run reference with the summary artifacts: the GitHub workflow URL for reviewed delivery, or the logical date and DAG run id for hosted Airflow recovery. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for retry and backfill procedures.
+| Job | Target |
+|-----|--------|
+| `foehncast_app` | `app:8000/metrics` |
+| `statsd_exporter` | `statsd:9102` |
+| `prometheus` | `prometheus:9090` |
 
-## Public-Safe Evidence
+## Visualization
 
-Explain monitoring with rendered evidence, not live control-plane embeds:
+The Streamlit UI renders native Altair charts from PromQL queries:
 
-- rendered `/metrics` snippets or screenshots
-- checked-in Prometheus scrape and alert configs
-- native Altair charts in the Streamlit UI
-- pipeline summary JSON artifacts under `airflow/reports/`
-- prediction-event file structure under `.state/monitoring/`
+- System health indicators
+- Pipeline status and timing
+- Drift scores
+- Hindcast accuracy gauge
 
-This keeps public docs understandable in review while leaving live Prometheus and Airflow as operator tools.
+All charts read from the same metrics that alerts fire on — so what you see matches what triggers.
 
-## Why This Structure Works
+## Evidence Sources
 
-- operator monitoring stays separate from the rider-facing app
-- durable evidence survives restarts without turning runtime state into product data
-- alerting is reviewable because dashboards, rules, and scrape config live in git
-- the monitoring boundary stays stable even while hosted operator surfaces change
-- one `/metrics` surface describes the app-owned contract while StatsD handles drift export
+| Source | Type | Location |
+|--------|------|----------|
+| Pipeline summaries | JSON | `airflow/reports/*-latest.json` |
+| Prediction history | JSONL | `.state/monitoring/prediction-events.jsonl` (local) or BigQuery (cloud) |
+| Hindcast results | JSON | `.state/monitoring/hindcast-validation.json` |
+| Scrape + alert config | YAML | `prometheus_config/` (version-controlled) |
 
-See [Architecture](architecture.md), [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Feature Pipeline](feature-pipeline.md), and [Getting Started](../getting-started.md) for the surrounding system and local operator path.
+## Related Pages
+
+- [Architecture](architecture.md) — where monitoring fits
+- [Inference Pipeline](inference-pipeline.md) — generates prediction events
+- [Grading Checklist](grading-checklist.md) — monitoring evidence for grading
