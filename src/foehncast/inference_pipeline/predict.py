@@ -99,6 +99,8 @@ def _prepare_feature_frame(
 
 def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
     """Fetch forecasts for the requested spots and return model predictions."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     requested_spots = _resolve_spots(spot_ids)
     serving_alias = get_serving_model_alias()
     model = get_model_by_alias(serving_alias)
@@ -106,11 +108,26 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
     inference_config = get_inference_config()
     feature_columns = model_config["features"]
     max_horizon_hours = inference_config["max_horizon_hours"]
-    predictions: list[dict[str, Any]] = []
 
+    # Fetch all forecasts in parallel (I/O-bound Open-Meteo HTTP calls).
+    forecast_map: dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=min(len(requested_spots), 8)) as pool:
+        futures = {
+            pool.submit(fetch_forecast, spot["lat"], spot["lon"]): spot["id"]
+            for spot in requested_spots
+        }
+        for future in as_completed(futures):
+            spot_id = futures[future]
+            try:
+                forecast_map[spot_id] = future.result().head(max_horizon_hours)
+            except Exception:
+                logger.warning("Failed to fetch forecast for %s", spot_id)
+                forecast_map[spot_id] = pd.DataFrame()
+
+    # Run model prediction sequentially (CPU-bound, fast).
+    predictions: list[dict[str, Any]] = []
     for spot in requested_spots:
-        forecast_df = fetch_forecast(spot["lat"], spot["lon"])
-        forecast_df = forecast_df.head(max_horizon_hours)
+        forecast_df = forecast_map.get(spot["id"], pd.DataFrame())
         if forecast_df.empty:
             predictions.append(
                 {

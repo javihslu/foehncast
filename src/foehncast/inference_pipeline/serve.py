@@ -235,13 +235,16 @@ def create_app() -> FastAPI:
         background_tasks: BackgroundTasks,
     ) -> dict[str, Any]:
         try:
-            prediction_payload = predict_spots(request.spot_ids)
-            _schedule_prediction_monitoring(
-                background_tasks,
-                prediction_payload,
-                endpoint="rank",
-                spot_ids=request.spot_ids,
-            )
+            if request.spot_ids is None:
+                prediction_payload = run_inference(endpoint="rank")
+            else:
+                prediction_payload = predict_spots(request.spot_ids)
+                _schedule_prediction_monitoring(
+                    background_tasks,
+                    prediction_payload,
+                    endpoint="rank",
+                    spot_ids=request.spot_ids,
+                )
             return _rank_response(prediction_payload)
         except KeyError as exc:
             raise _not_found(exc) from exc
