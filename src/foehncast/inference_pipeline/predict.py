@@ -218,3 +218,47 @@ def read_latest_predictions(
         "model_version": snapshot.get("model_version", "unknown"),
         "predictions": snapshot.get("predictions", []),
     }
+
+
+# ---------------------------------------------------------------------------
+# Full inference run: predict + snapshot + monitoring.
+# Single entry point used by Airflow, Cloud Run Jobs, and the serve API.
+# ---------------------------------------------------------------------------
+
+
+def run_inference(
+    *,
+    spot_ids: list[str] | None = None,
+    endpoint: str = "scheduled",
+) -> dict[str, Any]:
+    """Run inference, persist the snapshot, and emit monitoring metrics.
+
+    This is the canonical "do everything" function. Both the Airflow
+    orchestrator and the serving API delegate here so the pipeline logic
+    lives in one place.
+    """
+    from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
+
+    logger.info(
+        "Inference run (%s): predicting for %s", endpoint, spot_ids or "all spots"
+    )
+    prediction_payload = predict_spots(spot_ids=spot_ids)
+
+    n_spots = len(prediction_payload.get("predictions", []))
+    model_version = prediction_payload.get("model_version", "unknown")
+    logger.info(
+        "Inference run (%s): %d spots predicted with model v%s",
+        endpoint,
+        n_spots,
+        model_version,
+    )
+
+    # Persist snapshot for fast UI reads (only when all spots were predicted).
+    if spot_ids is None:
+        write_latest_predictions(prediction_payload)
+
+    emit_prediction_drift_metrics(prediction_payload, endpoint=endpoint)
+    logger.info(
+        "Inference run (%s): prediction log and drift metrics updated", endpoint
+    )
+    return prediction_payload

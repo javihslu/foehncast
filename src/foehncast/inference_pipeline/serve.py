@@ -21,7 +21,7 @@ from foehncast.inference_pipeline.predict import (
     get_serving_model_version,
     list_available_spots,
     predict_spots,
-    write_latest_predictions,
+    run_inference,
 )
 from foehncast.inference_pipeline.rank import rank_spots
 from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
@@ -214,6 +214,10 @@ def create_app() -> FastAPI:
         background_tasks: BackgroundTasks,
     ) -> dict[str, Any]:
         try:
+            if request.spot_ids is None:
+                # Full inference: predict + snapshot + monitor in one shot.
+                return run_inference(endpoint="predict")
+            # Subset: just predict the requested spots and schedule monitoring.
             prediction_payload = predict_spots(request.spot_ids)
             _schedule_prediction_monitoring(
                 background_tasks,
@@ -221,9 +225,6 @@ def create_app() -> FastAPI:
                 endpoint="predict",
                 spot_ids=request.spot_ids,
             )
-            # Update the snapshot when all spots were predicted.
-            if request.spot_ids is None:
-                background_tasks.add_task(write_latest_predictions, prediction_payload)
             return prediction_payload
         except KeyError as exc:
             raise _not_found(exc) from exc
