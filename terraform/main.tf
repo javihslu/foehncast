@@ -266,6 +266,7 @@ locals {
     "cloudscheduler.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",
+    "developerconnect.googleapis.com",
     "firestore.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
@@ -303,6 +304,106 @@ resource "google_artifact_registry_repository" "containers" {
   repository_id = var.artifact_registry_repository_id
   description   = "Docker images for the FoehnCast services"
   format        = "DOCKER"
+
+  depends_on = [google_project_service.required]
+}
+
+# Developer Connect links the GitHub repo to GCP for native Cloud Build triggers.
+# After terraform apply, complete the OAuth handshake in the GCP Console:
+# Developer Connect > Connections > foehncast-github > Complete setup
+resource "google_developer_connect_connection" "github" {
+  count         = var.provision_cloud_build_triggers ? 1 : 0
+  location      = var.region
+  connection_id = "foehncast-github"
+
+  github_config {
+    github_app          = "GITHUB_APP"
+    app_installation_id = var.github_app_installation_id
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_developer_connect_git_repository_link" "foehncast" {
+  count                  = var.provision_cloud_build_triggers ? 1 : 0
+  location               = var.region
+  parent_connection      = google_developer_connect_connection.github[0].connection_id
+  git_repository_link_id = "foehncast"
+  clone_uri              = "https://github.com/${var.github_owner}/${var.github_repository}.git"
+
+  depends_on = [google_developer_connect_connection.github]
+}
+
+# Cloud Build triggers — replace GitHub Actions publish-images.yml.
+# Each trigger watches specific paths and builds the corresponding image.
+resource "google_cloudbuild_trigger" "publish_app" {
+  count    = var.provision_cloud_build_triggers ? 1 : 0
+  name     = "publish-app"
+  location = var.region
+
+  repository_event_config {
+    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  included_files = ["src/**", "containers/app/**", "pyproject.toml", "uv.lock"]
+  filename       = "cloudbuild/app.yaml"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudbuild_trigger" "publish_airflow" {
+  count    = var.provision_cloud_build_triggers ? 1 : 0
+  name     = "publish-airflow"
+  location = var.region
+
+  repository_event_config {
+    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  included_files = ["containers/airflow/**", "dags/**", "pyproject.toml", "uv.lock"]
+  filename       = "cloudbuild/airflow.yaml"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudbuild_trigger" "publish_mlflow" {
+  count    = var.provision_cloud_build_triggers ? 1 : 0
+  name     = "publish-mlflow"
+  location = var.region
+
+  repository_event_config {
+    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  included_files = ["containers/mlflow/**"]
+  filename       = "cloudbuild/mlflow.yaml"
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudbuild_trigger" "publish_ui" {
+  count    = var.provision_cloud_build_triggers ? 1 : 0
+  name     = "publish-ui"
+  location = var.region
+
+  repository_event_config {
+    repository = google_developer_connect_git_repository_link.foehncast[0].id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  included_files = ["ui/**", "containers/ui/**", "pyproject.toml", "uv.lock"]
+  filename       = "cloudbuild/ui.yaml"
 
   depends_on = [google_project_service.required]
 }
@@ -574,6 +675,24 @@ resource "google_cloud_run_v2_service" "app" {
           value = env.value
         }
       }
+
+      startup_probe {
+        http_get {
+          path = "/health"
+          port = var.cloud_run_container_port
+        }
+        initial_delay_seconds = 5
+        period_seconds        = 10
+        failure_threshold     = 3
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/health"
+          port = var.cloud_run_container_port
+        }
+        period_seconds = 30
+      }
     }
   }
 
@@ -731,6 +850,24 @@ resource "google_cloud_run_v2_service" "mlflow" {
         name  = "MLFLOW_PORT"
         value = "5001"
       }
+
+      startup_probe {
+        http_get {
+          path = "/health"
+          port = 5001
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        failure_threshold     = 5
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/health"
+          port = 5001
+        }
+        period_seconds = 30
+      }
     }
   }
 
@@ -813,6 +950,24 @@ resource "google_cloud_run_v2_service" "ui" {
       env {
         name  = "GCP_LOCATION"
         value = var.region
+      }
+
+      startup_probe {
+        http_get {
+          path = "/_stcore/health"
+          port = 8501
+        }
+        initial_delay_seconds = 10
+        period_seconds        = 10
+        failure_threshold     = 5
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/_stcore/health"
+          port = 8501
+        }
+        period_seconds = 30
       }
     }
   }

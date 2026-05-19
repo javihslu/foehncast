@@ -108,6 +108,10 @@ provision_cloud_run_ui="$(normalize_bool provision_cloud_run_ui "$provision_clou
 provision_cloud_workflows="${REPO_GCP_PROVISION_CLOUD_WORKFLOWS:-false}"
 provision_cloud_workflows="$(normalize_bool provision_cloud_workflows "$provision_cloud_workflows")"
 
+provision_cloud_build_triggers="${REPO_GCP_PROVISION_CLOUD_BUILD_TRIGGERS:-false}"
+provision_cloud_build_triggers="$(normalize_bool provision_cloud_build_triggers "$provision_cloud_build_triggers")"
+github_app_installation_id="${REPO_GCP_GITHUB_APP_INSTALLATION_ID:-}"
+
 cloud_run_image="${REPO_GCP_CLOUD_RUN_IMAGE:-}"
 
 terraform_command="${INPUT_COMMAND:-plan}"
@@ -145,6 +149,8 @@ TF_VAR_provision_cloud_run_mlflow=${provision_cloud_run_mlflow}
 TF_VAR_cloud_run_ui_prometheus_url=${cloud_run_ui_prometheus_url}
 TF_VAR_provision_cloud_run_ui=${provision_cloud_run_ui}
 TF_VAR_provision_cloud_workflows=${provision_cloud_workflows}
+TF_VAR_provision_cloud_build_triggers=${provision_cloud_build_triggers}
+TF_VAR_github_app_installation_id=${github_app_installation_id}
 TF_VAR_github_owner=${GITHUB_OWNER}
 TF_VAR_github_repository=${GITHUB_REPOSITORY_NAME}
 TF_STATE_BUCKET=${state_bucket}

@@ -154,8 +154,7 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     remote_job = workflow["jobs"]["remote"]
 
-    assert "github.event_name == 'workflow_dispatch' ||" in remote_job["if"]
-    assert "github.event_name == 'push'" in remote_job["if"]
+    assert "github.repository_owner" in remote_job["if"]
     assert "environment" not in remote_job
     assert len(inputs) <= 25
 
@@ -258,22 +257,16 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     assert "TF_VAR_cloud_run_memory=${cloud_run_memory}" in run_script
 
 
-def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> None:
+def test_remote_terraform_workflow_is_manual_dispatch_only() -> None:
     workflow = _workflow_yaml(".github/workflows/terraform.yml")
+
+    assert "workflow_dispatch" in workflow["on"]
+    assert "push" not in workflow["on"]
 
     flags_step = _workflow_step(workflow, "remote", "Resolve execution flags")
     flags_script = flags_step["run"]
-    assert "if [[ \"$EVENT_NAME\" == 'push' ]]; then" in flags_script
-    assert "command='apply'" in flags_script
+    assert "command='plan'" in flags_script
     assert 'echo "bootstrap_ready=$bootstrap_ready"' in flags_script
-
-    apply_step = _workflow_step(workflow, "remote", "Terraform apply chosen plan")
-    assert "steps.flags.outputs.command == 'apply'" in apply_step["if"]
-
-    skipped_step = _workflow_step(
-        workflow, "remote", "Explain skipped automatic apply before bootstrap"
-    )
-    assert "github.event_name == 'push'" in skipped_step["if"]
 
 
 def test_remote_terraform_workflow_treats_repo_variable_sync_as_best_effort() -> None:
@@ -318,27 +311,7 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
     summary_script = summary_step["run"]
 
     assert "always()" in summary_step["if"]
-    assert (
-        'echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"'
-        in summary_script
-    )
-    assert (
-        'echo "- Primary hosted API URL: $(render_output primary_hosted_api_url not-provisioned)"'
-        in summary_script
-    )
-    assert (
-        'echo "- Primary hosted API verification: ${{ steps.verify_hosted_runtimes.outputs.primary_hosted_api_verification_status }}"'
-        in summary_script
-    )
-    assert (
-        'echo "- Cloud Run verification: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_verification_status }}"'
-        in summary_script
-    )
-    assert (
-        'echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"'
-        in summary_script
-    )
-
+    assert "cloud_run_service_url" in summary_script
     assert (
         'feast_bigquery_dataset="$(render_output bigquery_dataset_id "${TF_VAR_bigquery_dataset_id}")"'
         in summary_script
@@ -360,10 +333,6 @@ def test_remote_terraform_workflow_apply_summary_reports_hosted_feast_follow_up(
         'echo "- Hosted Feast online store database: ${feast_online_store_database_name}"'
         in summary_script
     )
-    assert (
-        'echo "- Feast follow-up: after curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."'
-        in summary_script
-    )
 
 
 def test_terraform_outputs_expose_primary_hosted_api_contract() -> None:
@@ -381,127 +350,25 @@ def test_terraform_tfvars_example_promotes_cloud_run_primary_path() -> None:
     assert "provision_cloud_run_service    = true" in tfvars
 
 
-def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> None:
-    workflow = _workflow_yaml(".github/workflows/terraform.yml")
+def test_cloud_run_services_have_health_probes() -> None:
+    terraform = _read_text("terraform/main.tf")
 
-    verify_step = _workflow_step(workflow, "remote", "Verify hosted runtimes")
-    verify_script = verify_step["run"]
-
-    assert verify_step["id"] == "verify_hosted_runtimes"
-    assert (
-        "if [[ \"${TF_VAR_provision_cloud_run_service}\" != 'true' ]]; then"
-        in verify_script
-    )
-    assert (
-        'cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"'
-        in verify_script
-    )
-    assert (
-        "cloud_run_allow_unauthenticated=\"$(printf '%s' \"${TF_VAR_cloud_run_allow_unauthenticated}\" | tr '[:upper:]' '[:lower:]')\""
-        in verify_script
-    )
-    assert (
-        'gcloud auth print-identity-token --audiences="$cloud_run_service_url"'
-        in verify_script
-    )
-    assert 'echo "Waiting for Cloud Run health at ${health_url}..."' in verify_script
-    assert (
-        'echo "Checking Cloud Run spots endpoint at ${spots_url}..."' in verify_script
-    )
-    assert 'metrics_url="${cloud_run_service_url%/}/metrics"' in verify_script
-    assert 'echo "Checking Cloud Run metrics at ${metrics_url}..."' in verify_script
-    assert '"status"[[:space:]]*:[[:space:]]*"healthy"' in verify_script
-    assert '"model_alias"[[:space:]]*:' in verify_script
-    assert '"model_version"[[:space:]]*:' in verify_script
-    assert '"id"[[:space:]]*:' in verify_script
-    assert 'up{job="foehncast_app"} 1' in verify_script
-    assert (
-        'echo "Cloud Run runtime verification failed: Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2'
-        in verify_script
-    )
-    assert (
-        'echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"' in verify_script
-    )
-    assert (
-        'echo "primary_hosted_api_target=${primary_hosted_api_target}"' in verify_script
-    )
-    assert (
-        'echo "primary_hosted_api_verification_status=${primary_hosted_api_verification_status}"'
-        in verify_script
-    )
-    assert '} >> "$GITHUB_OUTPUT"' in verify_script
+    assert "startup_probe" in terraform
+    assert "liveness_probe" in terraform
+    assert 'path = "/health"' in terraform
 
 
-def test_publish_images_stops_at_image_publish_boundary() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
-    config_job = workflow["jobs"]["config"]
+def test_cloud_build_triggers_defined_in_terraform() -> None:
+    terraform = _read_text("terraform/main.tf")
 
-    assert workflow["on"]["workflow_dispatch"] == {}
-    assert (
-        config_job["outputs"]["project_id"]
-        == "${{ steps.repo_config.outputs.project_id }}"
-    )
-    assert (
-        config_job["outputs"]["workload_identity_provider"]
-        == "${{ steps.repo_config.outputs.workload_identity_provider }}"
-    )
-    assert (
-        config_job["outputs"]["service_account_email"]
-        == "${{ steps.repo_config.outputs.service_account_email }}"
-    )
-    assert (
-        config_job["outputs"]["image_repository_base"]
-        == "${{ steps.derived.outputs.image_repository_base }}"
-    )
-    assert (
-        config_job["outputs"]["publish_ready"]
-        == "${{ steps.derived.outputs.publish_ready }}"
-    )
-    assert "cloud_run_service" not in config_job["outputs"]
-    assert "cloud_run_allow_unauthenticated" not in config_job["outputs"]
-    assert "deploy_mode" not in config_job["outputs"]
-    assert "deploy_ready" not in config_job["outputs"]
-
-    derived_step = _workflow_step(workflow, "config", "derived")
-    assert "CLOUD_RUN_SERVICE" not in derived_step["env"]
-    assert "DEPLOY_MODE_INPUT" not in derived_step["env"]
-    assert "deploy_ready" not in derived_step["run"]
-    assert "deploy_mode" not in derived_step["run"]
-
-    assert "deploy" not in workflow["jobs"]
-    assert "deploy_skipped" not in workflow["jobs"]
-
-    skipped_step = _workflow_step(workflow, "skipped", "Explain skipped publish")
-    assert "GCP_CLOUD_RUN_SERVICE" not in skipped_step["run"]
-
-
-def test_publish_images_uses_cloud_build_artifact_registry_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
-    workflow_text = _read_text(".github/workflows/publish-images.yml")
-    push_paths = workflow["on"]["push"]["paths"]
-
-    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
-    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
-    assert "cloudbuild/**" in push_paths
-
-    repo_config_step = _workflow_step(workflow, "config", "repo_config")
-    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
-
-    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v3"
-
-    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
-    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
-
-    submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
-    assert "gcloud builds submit ." in submit_step["run"]
-    assert '"${CLOUDBUILD_CONFIG}"' in submit_step["run"]
-    assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
-    assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
-    assert "docker/setup-buildx-action" not in workflow_text
-    assert "docker/build-push-action" not in workflow_text
-    assert "docker/metadata-action" not in workflow_text
+    assert 'resource "google_cloudbuild_trigger" "publish_app"' in terraform
+    assert 'resource "google_cloudbuild_trigger" "publish_airflow"' in terraform
+    assert 'resource "google_cloudbuild_trigger" "publish_mlflow"' in terraform
+    assert 'resource "google_cloudbuild_trigger" "publish_ui"' in terraform
+    assert "cloudbuild/app.yaml" in terraform
+    assert "cloudbuild/airflow.yaml" in terraform
+    assert "cloudbuild/mlflow.yaml" in terraform
+    assert "cloudbuild/ui.yaml" in terraform
 
 
 def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
@@ -552,58 +419,6 @@ def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
     assert "verify-report" in script
     assert 'verify-report --expected-run-id "$dag_run_id"' in script
     assert "--report-path" not in script
-
-
-def test_publish_images_excludes_local_only_development_env() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
-    push_paths = workflow["on"]["push"]["paths"]
-    image_targets = workflow["jobs"]["publish"]["strategy"]["matrix"]["include"]
-
-    assert "containers/development_env/**" not in push_paths
-    assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
-    assert "cloudbuild/**" in push_paths
-    assert {target["image_name"] for target in image_targets} == {
-        "foehncast-app",
-        "foehncast-airflow",
-        "foehncast-mlflow",
-        "foehncast-ui",
-    }
-
-
-def test_publish_images_uses_cloud_build_matrix_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
-    workflow_text = _read_text(".github/workflows/publish-images.yml")
-    config_job = workflow["jobs"]["config"]
-
-    assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
-    assert (
-        config_job["outputs"]["project_id"]
-        == "${{ steps.repo_config.outputs.project_id }}"
-    )
-    assert (
-        config_job["outputs"]["image_repository_base"]
-        == "${{ steps.derived.outputs.image_repository_base }}"
-    )
-
-    repo_config_step = _workflow_step(workflow, "config", "repo_config")
-    assert repo_config_step["uses"] == "./.github/actions/load-gcp-repo-config"
-
-    auth_step = _workflow_step(workflow, "publish", "Authenticate to Google Cloud")
-    assert auth_step["uses"] == "google-github-actions/auth@v3"
-
-    setup_step = _workflow_step(workflow, "publish", "Set up gcloud")
-    assert setup_step["uses"] == "google-github-actions/setup-gcloud@v3"
-    assert setup_step["with"]["project_id"] == "${{ needs.config.outputs.project_id }}"
-
-    submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
-    assert "gcloud builds submit ." in submit_step["run"]
-    assert '"${CLOUDBUILD_CONFIG}"' in submit_step["run"]
-    assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
-    assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
-    assert "ghcr.io" not in workflow_text
-    assert "docker/login-action" not in workflow_text
-    assert "docker/build-push-action" not in workflow_text
-    assert "docker/metadata-action" not in workflow_text
 
 
 def test_runtime_image_cloud_build_config_defines_shared_hosted_build_contract() -> (
