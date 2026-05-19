@@ -39,6 +39,7 @@ locals {
       FOEHNCAST_FEAST_BIGQUERY_TABLE       = local.feast_bigquery_table
       FOEHNCAST_FEAST_DATASTORE_DATABASE   = var.feast_online_store_database_name
       FOEHNCAST_PIPELINE_REPORT_DIR        = "gs://${var.artifact_bucket_name}/airflow/reports"
+      FOEHNCAST_STATE_DIR                  = "gs://${var.artifact_bucket_name}/state"
     },
     var.cloud_run_env_vars,
   )
