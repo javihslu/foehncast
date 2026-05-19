@@ -448,7 +448,7 @@ def test_runtime_image_cloud_build_config_defines_shared_hosted_build_contract()
     assert '"${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"' in cloudbuild
     assert "CLOUD_LOGGING_ONLY" in cloudbuild
     assert (
-        "_IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/example-project/foehncast-docker/foehncast-app"
+        "_IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker/foehncast-app"
         in cloudbuild
     )
     assert '_FLOATING_TAG: ""' in cloudbuild
