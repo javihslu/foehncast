@@ -371,6 +371,16 @@ def test_cloud_build_triggers_defined_in_terraform() -> None:
     assert "cloudbuild/ui.yaml" in terraform
 
 
+def test_cloud_workflows_pipeline_cascade_defined_in_terraform() -> None:
+    terraform = _read_text("terraform/main.tf")
+
+    assert 'resource "google_workflows_workflow" "pipeline_cascade"' in terraform
+    assert 'resource "google_cloud_scheduler_job" "pipeline_cascade"' in terraform
+    assert 'resource "google_cloud_run_v2_job" "feature_pipeline"' in terraform
+    assert 'resource "google_cloud_run_v2_job" "training_pipeline"' in terraform
+    assert 'resource "google_cloud_run_v2_job" "inference_pipeline"' in terraform
+
+
 def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
     script = _read_text("scripts/trigger-runtime-release.sh")
     cli_common = _read_text("scripts/cli-common.sh")
