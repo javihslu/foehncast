@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import importlib
-import types
 from typing import Any
 
 import pandas as pd
 
 from foehncast.config import get_storage_config
 from foehncast.env import env_value
+from foehncast._bigquery import (
+    bigquery_module as _bigquery_module,
+    bigquery_schema_update_options as _bigquery_schema_update_options,
+    bigquery_time_partitioning as _bigquery_time_partitioning,
+    google_exceptions_module as _google_exceptions_module,
+)
 
 _BQ_TIME_COLUMN = "forecast_time"
 _BQ_DATASET_COLUMN = "dataset_name"
@@ -108,14 +113,6 @@ def _s3fs_module() -> Any:
     return importlib.import_module("s3fs")
 
 
-def _bigquery_module() -> Any:
-    return importlib.import_module("google.cloud.bigquery")
-
-
-def _google_exceptions_module() -> Any:
-    return importlib.import_module("google.api_core.exceptions")
-
-
 def _s3_feature_path(storage_config: dict[str, Any], spot_id: str, dataset: str) -> str:
     return f"s3://{_s3_bucket(storage_config)}/{dataset}/{spot_id}.parquet"
 
@@ -196,40 +193,6 @@ def _bigquery_curated_feature_contract(
         "cluster_fields": resolved_cluster_fields,
         "retention_days": resolved_retention_days,
     }
-
-
-def _bigquery_time_partitioning(bigquery: Any, contract: dict[str, Any]) -> Any:
-    partition_type = contract["partition_granularity"]
-    enum = getattr(bigquery, "TimePartitioningType", None)
-    if enum is not None:
-        partition_type = getattr(enum, partition_type, partition_type)
-
-    time_partitioning = getattr(bigquery, "TimePartitioning", None)
-    expiration_ms = contract["retention_days"] * 24 * 60 * 60 * 1000
-    if time_partitioning is None:
-        return types.SimpleNamespace(
-            type_=partition_type,
-            field=contract["partition_field"],
-            expiration_ms=expiration_ms,
-            require_partition_filter=False,
-        )
-
-    return time_partitioning(
-        type_=partition_type,
-        field=contract["partition_field"],
-        expiration_ms=expiration_ms,
-        require_partition_filter=False,
-    )
-
-
-def _bigquery_schema_update_options(bigquery: Any) -> list[Any]:
-    schema_update_option = getattr(bigquery, "SchemaUpdateOption", None)
-    allow_field_addition = getattr(
-        schema_update_option,
-        "ALLOW_FIELD_ADDITION",
-        "ALLOW_FIELD_ADDITION",
-    )
-    return [allow_field_addition]
 
 
 def _validate_bigquery_contract_frame(

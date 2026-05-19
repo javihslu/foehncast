@@ -6,13 +6,17 @@ clustering), schema evolution, writes, and retention-aware reads.
 
 from __future__ import annotations
 
-import importlib
 import json
-import types
 from typing import Any
 
 import pandas as pd
 
+from foehncast._bigquery import (
+    bigquery_module as _bigquery_module,
+    bigquery_schema_update_options as _bigquery_schema_update_options,
+    bigquery_time_partitioning as _bigquery_time_partitioning,
+    google_exceptions_module as _google_exceptions_module,
+)
 from foehncast.monitoring._prediction_log_common import (
     _DEFAULT_BIGQUERY_PARTITION_GRANULARITY,
     _DEFAULT_PREDICTION_EVENT_CLUSTER_FIELDS,
@@ -21,14 +25,6 @@ from foehncast.monitoring._prediction_log_common import (
     _prediction_log_max_rows,
     _prediction_log_retention_days,
 )
-
-
-def _bigquery_module() -> Any:
-    return importlib.import_module("google.cloud.bigquery")
-
-
-def _google_exceptions_module() -> Any:
-    return importlib.import_module("google.api_core.exceptions")
 
 
 def prediction_event_bigquery_contract(
@@ -117,43 +113,6 @@ def _prediction_event_bigquery_not_found(storage_config: dict[str, Any]) -> bool
     return False
 
 
-def _prediction_event_bigquery_time_partitioning(
-    bigquery: Any,
-    contract: dict[str, Any],
-) -> Any:
-    partition_type = contract["partition_granularity"]
-    enum = getattr(bigquery, "TimePartitioningType", None)
-    if enum is not None:
-        partition_type = getattr(enum, partition_type, partition_type)
-
-    time_partitioning = getattr(bigquery, "TimePartitioning", None)
-    expiration_ms = contract["retention_days"] * 24 * 60 * 60 * 1000
-    if time_partitioning is None:
-        return types.SimpleNamespace(
-            type_=partition_type,
-            field=contract["partition_field"],
-            expiration_ms=expiration_ms,
-            require_partition_filter=False,
-        )
-
-    return time_partitioning(
-        type_=partition_type,
-        field=contract["partition_field"],
-        expiration_ms=expiration_ms,
-        require_partition_filter=False,
-    )
-
-
-def _prediction_event_bigquery_schema_update_options(bigquery: Any) -> list[Any]:
-    schema_update_option = getattr(bigquery, "SchemaUpdateOption", None)
-    allow_field_addition = getattr(
-        schema_update_option,
-        "ALLOW_FIELD_ADDITION",
-        "ALLOW_FIELD_ADDITION",
-    )
-    return [allow_field_addition]
-
-
 def _prediction_event_bigquery_write_frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     if frame.empty:
@@ -200,13 +159,11 @@ def write_prediction_events_bigquery(
 
     job_config_kwargs: dict[str, Any] = {
         "write_disposition": "WRITE_APPEND",
-        "schema_update_options": _prediction_event_bigquery_schema_update_options(
-            bigquery
-        ),
+        "schema_update_options": _bigquery_schema_update_options(bigquery),
     }
     if table_missing:
-        job_config_kwargs["time_partitioning"] = (
-            _prediction_event_bigquery_time_partitioning(bigquery, contract)
+        job_config_kwargs["time_partitioning"] = _bigquery_time_partitioning(
+            bigquery, contract
         )
         job_config_kwargs["clustering_fields"] = contract["cluster_fields"]
 
