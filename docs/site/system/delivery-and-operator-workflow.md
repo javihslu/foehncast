@@ -49,9 +49,7 @@ After bootstrap, everything goes through GitHub Actions:
 | Workflow | What it does |
 |----------|-------------|
 | `terraform.yml` | Plan/apply/destroy infrastructure |
-| `publish-app-image.yml` | Build and push container images |
-| `promote-candidate.yml` | Promote model to champion |
-| `rollback-live-release.yml` | Roll back to previous model |
+| Cloud Build triggers | Build and push container images (GCP-native) |
 
 Repository variables store project IDs, bucket names, and Cloud Run settings. No secrets in repo vars — those stay in runtime env or Secret Manager.
 
@@ -90,12 +88,13 @@ The script calls the Airflow API, waits for the DAG to finish, and captures the 
 
 | GitHub owns | GCP owns |
 |-------------|----------|
-| Source, lint, test, build | Runtime serving |
-| Image publishing | Metrics and telemetry |
-| Terraform plan/apply | Cloud Run responses |
-| Reviewed delivery | Runtime scheduling |
+| Source, lint, test | Runtime serving |
+| Terraform plan/apply | Image builds (Cloud Build) |
+| Reviewed delivery | Metrics and telemetry |
+| | Cloud Run responses |
+| | Runtime scheduling |
 
-GitHub triggers delivery. GCP runs services. They don't mix responsibilities.
+GitHub owns CI and infrastructure declarations. GCP owns builds, serving, and runtime.
 
 ## Related Pages
 

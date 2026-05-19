@@ -26,13 +26,13 @@ Everything runs without manual steps after bootstrap.
 | What | Where |
 |------|-------|
 | CI (7 jobs: shell, lint, terraform, dvc, compose, test, docs) | `.github/workflows/ci.yml` |
-| Auto image publishing | `.github/workflows/publish-app-image.yml` |
+| Auto image publishing | Cloud Build triggers (GCP-native, path-filtered) |
 | Infrastructure-as-code | `terraform/main.tf` + `terraform.yml` workflow |
 | Asset-triggered training | Feature DAG → training-request asset → Training DAG |
 | Asset-triggered inference | Model registered → Inference DAG runs batch predictions |
 | Pre-commit hooks (8) | `.pre-commit-config.yaml` (ruff, whitespace, YAML, etc.) |
 | Bootstrap scripts | `scripts/bootstrap-local.sh`, `scripts/bootstrap-gcp.sh` |
-| Runtime release + rollback | `promote-candidate.yml`, `rollback-live-release.yml` |
+| Runtime release + rollback | Cloud Build triggers + Cloud Run probes (automatic rollback) |
 
 **Docs**: [Delivery Workflow](delivery-and-operator-workflow.md)
 

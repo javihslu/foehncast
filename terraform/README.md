@@ -155,14 +155,11 @@ See [../docs/site/system/configuration-and-contracts.md](../docs/site/system/con
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
 
 When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
-Manual workflow dispatch also supports `deploy_mode=candidate`. That path deploys a tagged no-traffic Cloud Run revision, sets `FOEHNCAST_MLFLOW_SERVING_ALIAS` for that revision, and smoke-checks the tagged URL before any later traffic shift.
-After a candidate revision has been validated, `.github/workflows/promote-candidate.yml` promotes the exact validated model version to the live `champion` alias, redeploys the live Cloud Run service with the validated candidate image, and verifies the live `/health` response reports `champion` plus the promoted model version.
-That promotion summary also records the pre-promotion live revision and model version so operators can feed those exact values into `.github/workflows/rollback-live-release.yml` if the release needs to be reversed later.
-If a live release needs to be reversed, `.github/workflows/rollback-live-release.yml` restores a specific previous Cloud Run revision and a specific previous `champion` model version, verifies the tagged rollback target first, rechecks that tagged target after the alias restore, then restores live traffic and confirms the live `/health` response reports the requested rollback version.
+Cloud Build triggers handle image publishing on merge to `main` with path-based filters. Cloud Run startup and liveness probes verify each new revision and automatically roll back unhealthy deployments without external verification scripts.
 
 ## GitHub Actions Terraform Path
 
-Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. After the one-time bootstrap has established OIDC and the remote backend, pushes to `main` automatically run the shared remote apply path for Terraform-managed cloud changes. Successful applies also attempt to resync the repository variables, then verify the hosted targets that Terraform exposed through its outputs. A repository-variable permission limit should not mark the apply itself as failed.
+Use `.github/workflows/terraform.yml` to run validate, plan, apply, destroy, or cleanup from GitHub Actions without requiring local Terraform. The workflow is manual-dispatch only. Successful applies attempt to resync repository variables. A repository-variable permission limit should not mark the apply itself as failed.
 
 Manual workflow dispatch is still available for plan, destroy, cleanup, and explicit overrides. `./scripts/terraform-remote.sh` remains optional maintainer convenience for people who already use `gh`, but the GitHub Actions workflow is the primary operator surface.
 
@@ -200,7 +197,7 @@ State-changing upstream jobs should use safeguards that match their risk:
 
 Personal cloud deployments are out of scope for the default repo documentation. The documented path here is the shared project environment plus the local Docker setup for contributors.
 
-Automatic Terraform apply on `main` is no longer paused behind a GitHub environment approval. The workflow now relies on owner-only execution plus explicit destroy and cleanup confirmations instead of a per-run reviewer gate.
+The Terraform workflow is manual-dispatch only. It relies on owner-only execution plus explicit destroy and cleanup confirmations instead of a per-run reviewer gate.
 
 ## Recommended Reading Order
 
@@ -230,7 +227,7 @@ The bootstrap script will:
 5. Choose which hosted targets to enable.
 6. Sync the GitHub repository variables used by the shared cloud path.
 
-After bootstrap, run the Terraform workflow with `apply` if you want to provision the shared environment right away. After that, pushes to `main` keep it up to date automatically.
+After bootstrap, run the Terraform workflow with `apply` to provision the shared environment. Use manual dispatch for subsequent infrastructure changes.
 
 If a normal apply provisions the inference-only Cloud Run target, `./scripts/bootstrap-gcp.sh` checks the Cloud Run `/health` endpoint and the `/spots` route. When the service does not allow unauthenticated access, the script requests an identity token from `gcloud` before calling it.
 
