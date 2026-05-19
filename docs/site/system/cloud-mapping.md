@@ -43,6 +43,10 @@ flowchart TD
 | Image builds | — | Cloud Build → Artifact Registry |
 | Delivery | — | GitHub Actions + Terraform + OIDC |
 
+## Why Airflow Locally, Cloud Workflows in Production
+
+The orchestration layer is intentionally asymmetric. Airflow locally demonstrates scheduling, retries, assets, and DAG dependencies — proving orchestration competence without cloud spend. Cloud Workflows in production keeps costs near zero (no always-on scheduler). The pipeline code is identical in both — only the trigger mechanism differs. Contributors who just want reproducible results use `dvc repro` without any orchestrator.
+
 ## What Stays the Same
 
 - `config.yaml` means the same thing in both environments

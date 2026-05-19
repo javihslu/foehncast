@@ -59,7 +59,7 @@ Static analysis, tests, and consistent structure.
 | What | Where |
 |------|-------|
 | Linting + formatting | `ruff` via pre-commit and `make lint` |
-| 452 tests, 88% coverage, ~4s | `tests/` (43 test files) |
+| 447 tests, 88% coverage, ~4s | `tests/` (57 test files) |
 | CI enforces everything | Lint, test, shell checks, terraform validate on every PR |
 | Type annotations | `from __future__ import annotations` throughout |
 | Clean package structure | Domain subpackages + shared utilities (`_bigquery.py`, etc.) |

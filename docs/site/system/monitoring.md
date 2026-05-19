@@ -117,5 +117,19 @@ All charts read from the same metrics that alerts fire on — so what you see ma
 ## Related Pages
 
 - [Architecture](architecture.md) — where monitoring fits
+- [Cloud Mapping](cloud-mapping.md) — local Prometheus → Managed Prometheus
 - [Inference Pipeline](inference-pipeline.md) — generates prediction events
 - [Grading Checklist](grading-checklist.md) — monitoring evidence for grading
+
+## Local vs Cloud
+
+| Concern | Local | Cloud |
+|---------|-------|-------|
+| Metrics collection | Prometheus (Docker) | Managed Prometheus (GMP) |
+| Scraping | `prometheus_config/prometheus.yml` | Cloud Run auto-scrape of `/metrics` |
+| Drift emission | StatsD → exporter → Prometheus | Same `/metrics` endpoint (no StatsD needed) |
+| Alerting | Prometheus alerting rules | Cloud Monitoring alerting policies |
+| Visualization | Streamlit PromQL queries | Same Streamlit (different `FOEHNCAST_PROMETHEUS_URL`) |
+| Prediction log | `.state/monitoring/` JSONL | BigQuery `foehncast_monitoring.prediction_events` |
+
+The same `/metrics` endpoint serves both environments. Cloud Run v2 services expose Prometheus metrics to Managed Prometheus automatically via the Cloud Run metrics integration — no sidecar required.
