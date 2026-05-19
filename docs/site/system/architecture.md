@@ -2,6 +2,114 @@
 
 FoehnCast follows the Feature → Training → Inference (FTI) pattern. The same code runs locally in Docker and in the cloud on GCP. This page explains how the pieces connect.
 
+## Complete System Map
+
+Everything in the project — data flow, automation, infrastructure, monitoring — in one diagram.
+
+<div class="mermaid">
+flowchart TB
+    classDef source fill:#e8f5e9,stroke:#2e7d32
+    classDef pipe fill:#e1f5fe,stroke:#01579b
+    classDef store fill:#ececff,stroke:#9370db
+    classDef serve fill:#222,stroke:#333,color:#fff
+    classDef ops fill:#fff3e0,stroke:#e65100
+    classDef monitor fill:#fff8e1,stroke:#f57f17
+    classDef infra fill:#fce4ec,stroke:#880e4f
+
+    %% ─── Sources ────────────────────────────────────────────────────────
+    WEATHER["Weather APIs<br/>(Open-Meteo)"]:::source
+    CONFIG["config.yaml<br/>(spots, model params)"]:::source
+
+    %% ─── Pipelines ──────────────────────────────────────────────────────
+    subgraph Pipelines ["Data Pipelines (Python)"]
+        direction TB
+        subgraph FP ["Feature Pipeline"]
+            ING[Ingest] --> ENG[Engineer] --> VAL[Validate] --> STO[Store]
+        end
+        subgraph TP ["Training Pipeline"]
+            LAB[Label] --> TRN[Train] --> EVAL[Evaluate] --> REG[Register]
+        end
+        subgraph IP ["Inference Pipeline"]
+            PRED[Predict] --> RANK[Rank]
+        end
+    end
+
+    %% ─── Storage ────────────────────────────────────────────────────────
+    subgraph Storage ["Persistent State"]
+        direction TB
+        PARQUET["Curated Parquet<br/>(MinIO / GCS)"]:::store
+        FEAST["Feast online store<br/>(SQLite / Firestore)"]:::store
+        MLFLOW["MLflow registry<br/>(models + metrics)"]:::store
+        BQ["BigQuery<br/>(feature warehouse)"]:::store
+    end
+
+    %% ─── Serving ────────────────────────────────────────────────────────
+    subgraph Serving ["User-Facing"]
+        direction TB
+        API["FastAPI<br/>(/predict, /rank, /spots, /metrics)"]:::serve
+        UI["Streamlit dashboard"]:::serve
+    end
+
+    %% ─── Orchestration ──────────────────────────────────────────────────
+    subgraph Orchestration ["Scheduling & Reproducibility"]
+        direction TB
+        AIRFLOW["Airflow<br/>(DAGs: feature, training, inference)"]:::ops
+        DVC["DVC<br/>(offline reproducible runs)"]:::ops
+    end
+
+    %% ─── CI/CD ──────────────────────────────────────────────────────────
+    subgraph CICD ["CI/CD (GitHub Actions)"]
+        direction TB
+        CI["CI workflow<br/>(lint, test, compose, docs)"]:::ops
+        PUB["Publish Images<br/>(Cloud Build → Artifact Registry)"]:::ops
+        TF["Terraform<br/>(plan / apply / destroy)"]:::ops
+        DOCSDEPLOY["Deploy Docs<br/>(MkDocs → GitHub Pages)"]:::ops
+    end
+
+    %% ─── Monitoring ─────────────────────────────────────────────────────
+    subgraph Monitoring ["Observability"]
+        direction TB
+        PROM["Prometheus<br/>(scrapes /metrics)"]:::monitor
+        GRAFANA["Grafana<br/>(dashboards)"]:::monitor
+    end
+
+    %% ─── Infrastructure ─────────────────────────────────────────────────
+    subgraph Infra ["Infrastructure"]
+        direction TB
+        COMPOSE["Docker Compose<br/>(local)"]:::infra
+        CLOUDRUN["Cloud Run<br/>(production)"]:::infra
+        AR["Artifact Registry<br/>(container images)"]:::infra
+    end
+
+    %% ─── Connections ────────────────────────────────────────────────────
+    WEATHER --> ING
+    CONFIG --> ING & TRN & PRED
+
+    STO --> PARQUET & FEAST & BQ
+    PARQUET --> LAB
+    REG --> MLFLOW
+    FEAST --> API
+    MLFLOW --> API
+    WEATHER --> API
+
+    AIRFLOW --> FP & TP & IP
+    DVC --> FP & TP
+
+    API --> PROM
+    PROM --> GRAFANA
+    UI --> API
+
+    PUB --> AR --> CLOUDRUN
+    TF --> CLOUDRUN
+    CI --> PUB
+</div>
+
+**Reading this diagram:**
+
+- **Left to right** = data flow (weather → features → model → predictions → user)
+- **Top to bottom** = abstraction layers (sources → processing → storage → serving → ops)
+- **Green** = external sources, **Blue** = pipelines, **Purple** = storage, **Black** = user-facing, **Orange** = automation, **Yellow** = monitoring, **Pink** = infrastructure
+
 ## The Big Picture
 
 <div class="mermaid">

@@ -76,5 +76,6 @@ nav:
       - Seasonality: system/seasonality.md
   - Operations:
       - Monitoring: system/monitoring.md
+      - CI/CD and Automation: system/ci-cd.md
   - Evidence:
       - Grading Checklist: system/grading-checklist.md

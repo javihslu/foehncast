@@ -177,103 +177,85 @@ def test_remote_terraform_workflow_consumes_repo_backed_contract() -> None:
     for env_name, output_name in WORKFLOW_REPO_ENV_OUTPUTS:
         assert env[env_name] == f"${{{{ steps.repo_config.outputs.{output_name} }}}}"
 
-    run_script = resolve_step["run"]
+    assert "resolve-terraform-inputs.sh" in resolve_step["run"]
+
+    run_script = _read_text("scripts/resolve-terraform-inputs.sh")
     for env_name, _ in WORKFLOW_REPO_ENV_OUTPUTS:
-        assert f"${env_name}" in run_script
+        assert f"${env_name}" in run_script or f"${{{env_name}" in run_script
 
     assert (
         'provision_cloud_run_service="$(normalize_bool '
         'provision_cloud_run_service "$provision_cloud_run_service")"' in run_script
     )
-    assert 'cloud_run_container_port="$REPO_GCP_CLOUD_RUN_CONTAINER_PORT"' in run_script
-    assert "cloud_run_container_port='8080'" in run_script
+    assert (
+        'cloud_run_container_port="${REPO_GCP_CLOUD_RUN_CONTAINER_PORT:-8080}"'
+        in run_script
+    )
     assert (
         'cloud_run_container_port="$(normalize_positive_integer cloud_run_container_port "$cloud_run_container_port")"'
         in run_script
     )
     assert (
-        'cloud_run_allow_unauthenticated="${{ inputs.cloud_run_allow_unauthenticated }}"'
+        'cloud_run_allow_unauthenticated="${INPUT_CLOUD_RUN_ALLOW_UNAUTHENTICATED:-${REPO_GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED:-true}}"'
         in run_script
     )
-    assert (
-        'cloud_run_allow_unauthenticated="$REPO_GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED"'
-        in run_script
-    )
-    assert "cloud_run_allow_unauthenticated='true'" in run_script
     assert (
         'cloud_run_allow_unauthenticated="$(normalize_bool cloud_run_allow_unauthenticated "$cloud_run_allow_unauthenticated")"'
         in run_script
     )
     assert (
-        'cloud_run_min_instance_count="$REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT"'
+        'cloud_run_min_instance_count="${REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT:-0}"'
         in run_script
     )
-    assert "cloud_run_min_instance_count='0'" in run_script
     assert (
         'cloud_run_min_instance_count="$(normalize_non_negative_integer cloud_run_min_instance_count "$cloud_run_min_instance_count")"'
         in run_script
     )
     assert (
-        'cloud_run_max_instance_count="$REPO_GCP_CLOUD_RUN_MAX_INSTANCE_COUNT"'
+        'cloud_run_max_instance_count="${REPO_GCP_CLOUD_RUN_MAX_INSTANCE_COUNT:-2}"'
         in run_script
     )
-    assert "cloud_run_max_instance_count='2'" in run_script
     assert (
         'cloud_run_max_instance_count="$(normalize_non_negative_integer cloud_run_max_instance_count "$cloud_run_max_instance_count")"'
         in run_script
     )
     assert (
-        'echo "cloud_run_max_instance_count must be greater than or equal to cloud_run_min_instance_count." >&2'
+        'echo "cloud_run_max_instance_count must be >= cloud_run_min_instance_count." >&2'
         in run_script
     )
-    assert 'cloud_run_cpu="$REPO_GCP_CLOUD_RUN_CPU"' in run_script
-    assert "cloud_run_cpu='1'" in run_script
-    assert 'cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"' in run_script
-    assert "cloud_run_memory='512Mi'" in run_script
+    assert 'cloud_run_cpu="${REPO_GCP_CLOUD_RUN_CPU:-1}"' in run_script
+    assert 'cloud_run_memory="${REPO_GCP_CLOUD_RUN_MEMORY:-512Mi}"' in run_script
     assert (
-        'feast_online_store_location="${{ inputs.feast_online_store_location }}"'
+        'feast_online_store_location="${INPUT_FEAST_ONLINE_STORE_LOCATION:-${REPO_GCP_FEAST_ONLINE_STORE_LOCATION:-$region}}"'
         in run_script
     )
     assert (
-        'feast_online_store_location="$REPO_GCP_FEAST_ONLINE_STORE_LOCATION"'
-        in run_script
-    )
-    assert 'feast_online_store_location="$region"' in run_script
-    assert (
-        'feast_online_store_database_name="${{ inputs.feast_online_store_database_name }}"'
+        'feast_online_store_database_name="${INPUT_FEAST_ONLINE_STORE_DATABASE_NAME:-${REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME:-feast-online}}"'
         in run_script
     )
     assert (
-        'feast_online_store_database_name="$REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME"'
-        in run_script
-    )
-    assert "feast_online_store_database_name='feast-online'" in run_script
-    assert (
-        'echo "TF_VAR_feast_online_store_location=${feast_online_store_location}"'
+        "TF_VAR_feast_online_store_location=${feast_online_store_location}"
         in run_script
     )
     assert (
-        'echo "TF_VAR_feast_online_store_database_name=${feast_online_store_database_name}"'
+        "TF_VAR_feast_online_store_database_name=${feast_online_store_database_name}"
+        in run_script
+    )
+    assert "TF_VAR_cloud_run_container_port=${cloud_run_container_port}" in run_script
+    assert (
+        "TF_VAR_cloud_run_allow_unauthenticated=${cloud_run_allow_unauthenticated}"
         in run_script
     )
     assert (
-        'echo "TF_VAR_cloud_run_container_port=${cloud_run_container_port}"'
+        "TF_VAR_cloud_run_min_instance_count=${cloud_run_min_instance_count}"
         in run_script
     )
     assert (
-        'echo "TF_VAR_cloud_run_allow_unauthenticated=${cloud_run_allow_unauthenticated}"'
+        "TF_VAR_cloud_run_max_instance_count=${cloud_run_max_instance_count}"
         in run_script
     )
-    assert (
-        'echo "TF_VAR_cloud_run_min_instance_count=${cloud_run_min_instance_count}"'
-        in run_script
-    )
-    assert (
-        'echo "TF_VAR_cloud_run_max_instance_count=${cloud_run_max_instance_count}"'
-        in run_script
-    )
-    assert 'echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"' in run_script
-    assert 'echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"' in run_script
+    assert "TF_VAR_cloud_run_cpu=${cloud_run_cpu}" in run_script
+    assert "TF_VAR_cloud_run_memory=${cloud_run_memory}" in run_script
 
 
 def test_remote_terraform_workflow_auto_applies_on_push_when_bootstrapped() -> None:
@@ -450,8 +432,8 @@ def test_remote_terraform_workflow_verifies_hosted_runtimes_after_apply() -> Non
     assert '} >> "$GITHUB_OUTPUT"' in verify_script
 
 
-def test_publish_app_image_stops_at_image_publish_boundary() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
+def test_publish_images_stops_at_image_publish_boundary() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
     config_job = workflow["jobs"]["config"]
 
     assert workflow["on"]["workflow_dispatch"] == {}
@@ -468,12 +450,8 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
         == "${{ steps.repo_config.outputs.service_account_email }}"
     )
     assert (
-        config_job["outputs"]["registry_host"]
-        == "${{ steps.derived.outputs.registry_host }}"
-    )
-    assert (
-        config_job["outputs"]["image_repository"]
-        == "${{ steps.derived.outputs.image_repository }}"
+        config_job["outputs"]["image_repository_base"]
+        == "${{ steps.derived.outputs.image_repository_base }}"
     )
     assert (
         config_job["outputs"]["publish_ready"]
@@ -482,50 +460,24 @@ def test_publish_app_image_stops_at_image_publish_boundary() -> None:
     assert "cloud_run_service" not in config_job["outputs"]
     assert "cloud_run_allow_unauthenticated" not in config_job["outputs"]
     assert "deploy_mode" not in config_job["outputs"]
-    assert "cloud_run_revision_tag" not in config_job["outputs"]
-    assert "serving_alias" not in config_job["outputs"]
     assert "deploy_ready" not in config_job["outputs"]
 
     derived_step = _workflow_step(workflow, "config", "derived")
     assert "CLOUD_RUN_SERVICE" not in derived_step["env"]
     assert "DEPLOY_MODE_INPUT" not in derived_step["env"]
-    assert "CANDIDATE_REVISION_TAG_INPUT" not in derived_step["env"]
-    assert "SERVING_ALIAS_INPUT" not in derived_step["env"]
     assert "deploy_ready" not in derived_step["run"]
     assert "deploy_mode" not in derived_step["run"]
-    assert "cloud_run_revision_tag" not in derived_step["run"]
-    assert "serving_alias" not in derived_step["run"]
-
-    publish_job = workflow["jobs"]["publish"]
-    assert (
-        publish_job["outputs"]["image_uri"]
-        == "${{ steps.image.outputs.immutable_tag }}"
-    )
-
-    summary_step = _workflow_step(workflow, "publish", "Summarize published image")
-    assert (
-        'echo "- Runtime handoff: not executed from GitHub in this workflow"'
-        in summary_step["run"]
-    )
-    assert (
-        'echo "- Next step: use the reviewed runtime release handoff with action deploy_candidate and this immutable image URI"'
-        in summary_step["run"]
-    )
 
     assert "deploy" not in workflow["jobs"]
     assert "deploy_skipped" not in workflow["jobs"]
 
     skipped_step = _workflow_step(workflow, "skipped", "Explain skipped publish")
-    assert (
-        "This workflow stops at image publication and does not deploy or promote runtime state."
-        in skipped_step["run"]
-    )
     assert "GCP_CLOUD_RUN_SERVICE" not in skipped_step["run"]
 
 
-def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-app-image.yml")
-    workflow_text = _read_text(".github/workflows/publish-app-image.yml")
+def test_publish_images_uses_cloud_build_artifact_registry_contract() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
+    workflow_text = _read_text(".github/workflows/publish-images.yml")
     push_paths = workflow["on"]["push"]["paths"]
 
     assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
@@ -544,168 +496,12 @@ def test_publish_app_image_uses_cloud_build_artifact_registry_contract() -> None
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
     assert "gcloud builds submit ." in submit_step["run"]
-    assert "--config cloudbuild/app.yaml" in submit_step["run"]
+    assert '"${CLOUDBUILD_CONFIG}"' in submit_step["run"]
     assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
     assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
     assert "docker/setup-buildx-action" not in workflow_text
     assert "docker/build-push-action" not in workflow_text
     assert "docker/metadata-action" not in workflow_text
-
-
-def test_promote_candidate_workflow_redirects_to_runtime_trigger_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/promote-candidate.yml")
-    config_job = workflow["jobs"]["config"]
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    config_steps = {
-        step.get("id") or step.get("name")
-        for step in workflow["jobs"]["config"]["steps"]
-    }
-
-    assert workflow["permissions"] == {"contents": "read"}
-    assert dispatch_inputs["candidate_revision_tag"]["default"] == "candidate"
-    assert dispatch_inputs["candidate_alias"]["default"] == "candidate"
-    assert dispatch_inputs["target_alias"]["default"] == "champion"
-
-    assert set(config_job["outputs"]) == {
-        "owner_allowed",
-        "candidate_revision_tag",
-        "candidate_alias",
-        "target_alias",
-    }
-    assert "repo_config" not in config_steps
-
-    derived_step = _workflow_step(workflow, "config", "derived")
-    assert (
-        derived_step["env"]["CANDIDATE_REVISION_TAG_INPUT"]
-        == "${{ github.event.inputs.candidate_revision_tag }}"
-    )
-    assert (
-        derived_step["env"]["CANDIDATE_ALIAS_INPUT"]
-        == "${{ github.event.inputs.candidate_alias }}"
-    )
-    assert (
-        derived_step["env"]["TARGET_ALIAS_INPUT"]
-        == "${{ github.event.inputs.target_alias }}"
-    )
-    assert "candidate_revision_tag='candidate'" in derived_step["run"]
-    assert "candidate_alias='candidate'" in derived_step["run"]
-    assert "target_alias='champion'" in derived_step["run"]
-    assert "promote_ready" not in derived_step["run"]
-
-    assert "promote" not in workflow["jobs"]
-
-    blocked_job = workflow["jobs"]["blocked"]
-    assert "environment" not in blocked_job
-    assert (
-        blocked_job["env"]["CANDIDATE_REVISION_TAG"]
-        == "${{ needs.config.outputs.candidate_revision_tag }}"
-    )
-    assert (
-        blocked_job["env"]["CANDIDATE_ALIAS"]
-        == "${{ needs.config.outputs.candidate_alias }}"
-    )
-    assert (
-        blocked_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
-    )
-
-    blocked_step = _workflow_step(
-        workflow, "blocked", "Explain blocked promotion workflow"
-    )
-    assert (
-        "Candidate promotion moved behind Trigger Runtime Release"
-        in blocked_step["run"]
-    )
-    assert (
-        "Candidate promotion is no longer executed directly from GitHub Actions."
-        in blocked_step["run"]
-    )
-    assert (
-        "Use the reviewed runtime release handoff with action promote_candidate"
-        in blocked_step["run"]
-    )
-
-
-def test_rollback_live_release_workflow_redirects_to_runtime_trigger_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/rollback-live-release.yml")
-    config_job = workflow["jobs"]["config"]
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    config_steps = {
-        step.get("id") or step.get("name")
-        for step in workflow["jobs"]["config"]["steps"]
-    }
-
-    assert workflow["permissions"] == {"contents": "read"}
-    assert dispatch_inputs["rollback_revision"]["required"] is True
-    assert dispatch_inputs["rollback_model_version"]["required"] is True
-    assert dispatch_inputs["rollback_revision_tag"]["default"] == "rollback"
-    assert dispatch_inputs["target_alias"]["default"] == "champion"
-
-    assert set(config_job["outputs"]) == {
-        "owner_allowed",
-        "rollback_revision",
-        "rollback_model_version",
-        "rollback_revision_tag",
-        "target_alias",
-    }
-    assert "repo_config" not in config_steps
-
-    derived_step = _workflow_step(workflow, "config", "derived")
-    assert (
-        derived_step["env"]["ROLLBACK_REVISION_INPUT"]
-        == "${{ github.event.inputs.rollback_revision }}"
-    )
-    assert (
-        derived_step["env"]["ROLLBACK_MODEL_VERSION_INPUT"]
-        == "${{ github.event.inputs.rollback_model_version }}"
-    )
-    assert (
-        derived_step["env"]["ROLLBACK_REVISION_TAG_INPUT"]
-        == "${{ github.event.inputs.rollback_revision_tag }}"
-    )
-    assert (
-        derived_step["env"]["TARGET_ALIAS_INPUT"]
-        == "${{ github.event.inputs.target_alias }}"
-    )
-    assert 'echo "rollback_revision=$rollback_revision"' in derived_step["run"]
-    assert (
-        'echo "rollback_model_version=$rollback_model_version"' in derived_step["run"]
-    )
-    assert "rollback_revision_tag='rollback'" in derived_step["run"]
-    assert "target_alias='champion'" in derived_step["run"]
-    assert "rollback_ready" not in derived_step["run"]
-
-    assert "rollback" not in workflow["jobs"]
-
-    blocked_job = workflow["jobs"]["blocked"]
-    assert "environment" not in blocked_job
-    assert (
-        blocked_job["env"]["ROLLBACK_REVISION"]
-        == "${{ needs.config.outputs.rollback_revision }}"
-    )
-    assert (
-        blocked_job["env"]["ROLLBACK_MODEL_VERSION"]
-        == "${{ needs.config.outputs.rollback_model_version }}"
-    )
-    assert (
-        blocked_job["env"]["ROLLBACK_REVISION_TAG"]
-        == "${{ needs.config.outputs.rollback_revision_tag }}"
-    )
-    assert (
-        blocked_job["env"]["TARGET_ALIAS"] == "${{ needs.config.outputs.target_alias }}"
-    )
-
-    blocked_step = _workflow_step(
-        workflow, "blocked", "Explain blocked rollback workflow"
-    )
-    assert "Live rollback moved behind Trigger Runtime Release" in blocked_step["run"]
-    assert (
-        "Live rollback is no longer executed directly from GitHub Actions."
-        in blocked_step["run"]
-    )
-    assert (
-        "Use the reviewed runtime release handoff with action rollback_live"
-        in blocked_step["run"]
-    )
 
 
 def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
@@ -758,25 +554,25 @@ def test_trigger_runtime_release_script_uses_airflow_api_contract() -> None:
     assert "--report-path" not in script
 
 
-def test_publish_runtime_images_excludes_local_only_development_env() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
+def test_publish_images_excludes_local_only_development_env() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
     push_paths = workflow["on"]["push"]["paths"]
     image_targets = workflow["jobs"]["publish"]["strategy"]["matrix"]["include"]
 
     assert "containers/development_env/**" not in push_paths
-    assert "containers/app/**" not in push_paths
     assert ".github/actions/load-gcp-repo-config/action.yml" in push_paths
     assert "cloudbuild/**" in push_paths
     assert {target["image_name"] for target in image_targets} == {
+        "foehncast-app",
         "foehncast-airflow",
         "foehncast-mlflow",
         "foehncast-ui",
     }
 
 
-def test_publish_runtime_images_uses_cloud_build_artifact_registry_contract() -> None:
-    workflow = _workflow_yaml(".github/workflows/publish-runtime-images.yml")
-    workflow_text = _read_text(".github/workflows/publish-runtime-images.yml")
+def test_publish_images_uses_cloud_build_matrix_contract() -> None:
+    workflow = _workflow_yaml(".github/workflows/publish-images.yml")
+    workflow_text = _read_text(".github/workflows/publish-images.yml")
     config_job = workflow["jobs"]["config"]
 
     assert workflow["permissions"] == {"contents": "read", "id-token": "write"}
@@ -801,7 +597,7 @@ def test_publish_runtime_images_uses_cloud_build_artifact_registry_contract() ->
 
     submit_step = _workflow_step(workflow, "publish", "Submit Cloud Build")
     assert "gcloud builds submit ." in submit_step["run"]
-    assert '--config "${CLOUDBUILD_CONFIG}"' in submit_step["run"]
+    assert '"${CLOUDBUILD_CONFIG}"' in submit_step["run"]
     assert "_IMAGE_REPOSITORY=${IMAGE_REPOSITORY}" in submit_step["run"]
     assert "_FLOATING_TAG=${LATEST_TAG}" in submit_step["run"]
     assert "ghcr.io" not in workflow_text

@@ -1,3 +1,6 @@
+# CI — runs on every PR and push to main.
+# Gate job restricts execution to the repository owner.
+# Jobs run in parallel after the gate passes.
 name: CI
 
 on:
@@ -11,13 +14,17 @@ permissions:
   contents: read
 
 jobs:
-  changes:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+  # Single access-control check. All other jobs depend on this.
+  gate:
     runs-on: ubuntu-latest
     outputs:
       compose: ${{ steps.filter.outputs.compose }}
     steps:
+      - name: Verify owner
+        if: ${{ github.actor != github.repository_owner || (github.event_name == 'pull_request' && github.triggering_actor != github.repository_owner) }}
+        run: |
+          echo "::notice::Skipping CI — only the repository owner can trigger runs."
+          exit 1
       - uses: actions/checkout@v6.0.2
       - uses: dorny/paths-filter@v3.0.2
         id: filter
@@ -37,9 +44,10 @@ jobs:
               - 'config.yaml'
               - '.github/workflows/ci.yml'
 
+  # Validates Docker Compose configs and builds key images.
   compose:
-    needs: changes
-    if: ${{ needs.changes.outputs.compose == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    needs: gate
+    if: ${{ needs.gate.outputs.compose == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -47,15 +55,13 @@ jobs:
         with:
           enable-cache: true
       - run: docker compose -f docker-compose.yml config
-      - run: GCP_PROJECT_ID=ci-validate docker compose -f docker-compose.yml -f
-          docker-compose.gcp.yml config
-      - run: docker compose -f docker-compose.yml build model-registry app
-          airflow-webserver
+      - run: GCP_PROJECT_ID=ci-validate docker compose -f docker-compose.yml -f docker-compose.gcp.yml config
+      - run: docker compose -f docker-compose.yml build model-registry app airflow-webserver
       - run: make smoke-local-evaluator
 
+  # Syntax-checks all bash scripts and validates --help output.
   shell:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -65,9 +71,9 @@ jobs:
       - run: bash scripts/teardown-gcp.sh --help >/dev/null
       - run: bash scripts/teardown-gcp.sh --plan-only >/dev/null
 
+  # Validates Terraform syntax and formatting (no remote state needed).
   terraform:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -76,9 +82,9 @@ jobs:
       - run: terraform -chdir=terraform fmt -check
       - run: terraform -chdir=terraform validate
 
+  # Ruff check + format verification.
   lint:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -89,9 +95,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
+  # Runs the full pytest suite.
   test:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -101,9 +107,9 @@ jobs:
       - run: uv sync --frozen
       - run: uv run pytest tests/ -v
 
+  # Validates pipeline DAG, checks for parameter drift, verifies lockfile.
   dvc:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
@@ -149,9 +155,9 @@ jobs:
           print('All source dependencies present')
           "
 
+  # Builds MkDocs with --strict to catch broken links.
   docs:
-    if: ${{ github.actor == github.repository_owner && (github.event_name ==
-      'pull_request' || github.triggering_actor == github.repository_owner) }}
+    needs: gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6.0.2
