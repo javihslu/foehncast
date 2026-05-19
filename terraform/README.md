@@ -103,12 +103,7 @@ Remote destroy intentionally stops at Terraform-managed resources tracked in the
 
 ## GitHub Delivery Inputs
 
-The repository uses two image-publication workflows that share one hosted build contract:
-
-- `.github/workflows/publish-app-image.yml` submits the app image build to Cloud Build and publishes the reviewed image to Artifact Registry for the Cloud Run path
-- `.github/workflows/publish-runtime-images.yml` submits the Airflow and MLflow image builds to Cloud Build and publishes the reviewed images to Artifact Registry
-
-Artifact Registry is the canonical hosted image registry in this contract.
+Cloud Build triggers (defined in `terraform/main.tf`) handle image builds on merge to `main` with path-based filters. Each trigger builds and pushes to Artifact Registry, the canonical hosted image registry.
 
 Set these GitHub repository variables:
 
@@ -134,15 +129,15 @@ Set these GitHub repository variables:
 - `GCP_SERVICE_ACCOUNT_EMAIL`
 - `GCP_TERRAFORM_STATE_BUCKET`
 - `GCP_TERRAFORM_STATE_PREFIX`
-- `GCP_CLOUD_RUN_SERVICE` to enable automatic deploys after publish
+- `GCP_CLOUD_RUN_SERVICE` when Cloud Run is provisioned
 
 The normal shared-environment path is:
 
 1. one-time maintainer bootstrap from Google Cloud Shell
-2. GitHub Actions remote apply
+2. manual Terraform apply via workflow dispatch
 3. best-effort repository-variable resync after each successful apply
 
-GitHub remains the review gate for hosted image publication, but Cloud Build now executes the reviewed hosted image builds on GCP.
+GitHub owns CI (lint, test, docs). Cloud Build triggers own image publication. Terraform owns infrastructure declarations.
 
 In normal operation you should not edit these variables by hand. The bootstrap path seeds the shared contract automatically. Remote applies also attempt to resync it, but GitHub's default workflow token may not be allowed to edit repository variables in every repository configuration.
 
@@ -152,10 +147,9 @@ If the shared cloud runtime later needs secret-bearing values beyond local-safe 
 
 See [../docs/site/system/configuration-and-contracts.md](../docs/site/system/configuration-and-contracts.md) for the reviewed inventory of checked-in examples, bootstrap outputs, GitHub repository variables, runtime environment injection, and identity-backed auth.
 
-`GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service. After that, publish automation can update the service with newly built images.
+`GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service.
 
-When `GCP_CLOUD_RUN_SERVICE` is set and the service already exists, the workflow publishes an immutable `sha-<commit>` image tag, updates the existing Cloud Run service to that image, and then smoke-checks `/health` plus `/spots`. If the service blocks unauthenticated access, the workflow requests an identity token before calling those routes. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
-Cloud Build triggers handle image publishing on merge to `main` with path-based filters. Cloud Run startup and liveness probes verify each new revision and automatically roll back unhealthy deployments without external verification scripts.
+Cloud Build triggers handle image publishing on merge to `main` with path-based filters. Each trigger builds an immutable `sha-<commit>` tagged image and pushes it to Artifact Registry. Cloud Run startup and liveness probes verify each new revision and automatically roll back unhealthy deployments. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
 
 ## GitHub Actions Terraform Path
 
@@ -193,7 +187,7 @@ The upstream workflows are guarded so jobs run only when both the original actor
 State-changing upstream jobs should use safeguards that match their risk:
 
 - the remote Terraform workflow uses owner-only execution plus exact project-id confirmations for destroy and cleanup
-- `cloud-run-production` remains the protected environment for Cloud Run updates after image publish
+- Cloud Run health probes provide automatic rollback for unhealthy revisions
 
 Personal cloud deployments are out of scope for the default repo documentation. The documented path here is the shared project environment plus the local Docker setup for contributors.
 
