@@ -1,43 +1,34 @@
 # Architecture
 
-FoehnCast keeps the same Feature-Training-Inference split in every runtime. The cloud path adds a public API lane on Cloud Run plus private operator services and managed cloud automation on the same shared data layer. Image builds run through Cloud Build, while local Airflow remains the reviewed DAG runtime.
+FoehnCast follows the Feature → Training → Inference (FTI) pattern. The same code runs locally in Docker and in the cloud on GCP. This page explains how the pieces connect.
 
-!!! note "How to read this page"
-
-    Start with the local Compose stack.
-    In the cloud, Cloud Run is the public API lane.
-    Cloud Workflows and Cloud Scheduler automate the hosted cloud path.
-    Rider-facing screens are separate from operator dashboards.
-
-## System In One View
+## The Big Picture
 
 <div class="mermaid">
 flowchart TD
-    %% Styling
-    classDef cloud fill:#f5f5f5,stroke:#333
     classDef pipe fill:#e1f5fe,stroke:#01579b
     classDef store fill:#ececff,stroke:#9370db
     classDef app fill:#222,stroke:#333,color:#fff
 
-    EXT["External inputs"]:::cloud
+    EXT["Weather APIs"]
 
-    subgraph FeatureP ["Feature path"]
+    subgraph Feature ["Feature Pipeline"]
         direction TB
         ING[Ingest] --> ENG[Engineer] --> VAL[Validate] --> STO[Store]
     end
 
-    subgraph TrainingP ["Training path"]
+    subgraph Training ["Training Pipeline"]
         direction TB
-        LAB[Label] --> TRN[Train] --> EVAL[Eval] --> REG[Register]
+        LAB[Label] --> TRN[Train] --> EVAL[Evaluate] --> REG[Register]
     end
 
-    subgraph InferenceP ["Serving path"]
+    subgraph Inference ["Inference Pipeline"]
         direction TB
-        API[API Endpoint] --> PRED[Predict] --> RANK[Rank]
+        API[API]:::app --> PRED[Predict] --> RANK[Rank]
     end
 
-    FEAST["Feast layer"]:::store
-    MLF["Registry"]:::store
+    FEAST["Feast online store"]:::store
+    MLF["MLflow registry"]:::store
 
     EXT --> ING
     STO --> LAB
@@ -49,45 +40,17 @@ flowchart TD
     EXT --> API
 </div>
 
-## Surface Boundaries
+## Three Pipelines
 
-See [Interfaces and Surfaces](interfaces-and-surfaces.md) for the dedicated public overview of this boundary.
+| Pipeline | Input | Output | Triggered by |
+|----------|-------|--------|-------------|
+| Feature | Weather API responses | Curated parquet files | Airflow schedule or `dvc repro` |
+| Training | Curated features | Registered model in MLflow | Feature pipeline completion |
+| Inference | Live forecast + model | Ranked spots | API request |
 
-| Surface class | Primary audience | Exposure | Example surfaces |
-|------|------------------|----------|------------------|
-| Rider-facing demo surface | rider, reviewer, contributor | public-safe when shown as screenshots or rendered examples | Streamlit rider console and the online-features demo page |
-| Service endpoints | clients, smoke tests, support services | service-only | `/health`, `/spots`, `/predict`, `/rank`, `/features/online`, and `/metrics` |
-| Operator dashboards and control planes | maintainer or deployment operator | internal-only by default | Airflow, MLflow, and Prometheus |
-| Public docs and rendered evidence | course reviewer, fork reader, maintainer | public-safe | docs pages, evaluation markdown, summary JSON-derived charts, and screenshots |
+## DVC vs. Airflow
 
-Monitoring visualization uses native Altair charts in the Streamlit UI. Public docs show rendered evidence or screenshots, not live embeds of private dashboards.
-
-## Runtime Lanes
-
-| Lane | Concrete target | State | Main role | Exposure |
-|------|----------------|-------|-----------|----------|
-| Local evaluator lane | local Compose stack | stable baseline | validate the full system on one machine | local-only |
-| Shared API lane | hosted inference target on Cloud Run | active hosted target | serve the shared FastAPI product and service routes | public |
-| Operator lane | hosted operator services on Cloud Run and managed GCP surfaces | active hosted operator surface | provide private tracking, monitoring, and automation surfaces | private by default |
-
-## Stable Pipeline Boundaries
-
-| Layer | Responsibility | Representative runtime surface |
-|------|----------------|-------------------------|
-| Feature pipeline | Collect data, engineer curated rows, validate them, and store the result | local Airflow DAG plus the configured storage backend |
-| Training pipeline | Label data, train the model, evaluate it, and register a serving version | local Airflow DAG plus MLflow |
-| Inference pipeline | Serve health, predict, rank, and spot-list responses; run batch predictions after model registration | FastAPI app container plus the asset-triggered `inference_pipeline` DAG |
-| Orchestration | Schedule runtime DAGs, retries, backfills, and operator inspection | local Airflow in the local evaluator; Cloud Workflows and Cloud Scheduler in the hosted environment |
-| Online features | Surface curated fields through an online lookup route | Feast-backed service path plus demo page |
-| Monitoring | Scrape runtime metrics, collect pushed gauges, run hindcast validation, and visualize through native Altair charts in the Streamlit UI | Prometheus, StatsD exporter, and Streamlit metric panels |
-
-## DVC And Airflow
-
-The same feature and training boundaries are driven by two different control paths.
-
-- DVC is the reproducible path for local reruns and CI. It tracks file dependencies and outputs in `dvc.yaml`.
-- Airflow is the runtime control plane. It schedules DAG runs, handles retries, and shows asset hand-offs.
-- The `inference_pipeline` DAG bridges inference into the Airflow world: it is asset-triggered by model registration and runs batch predictions across all configured spots, feeding the prediction-event history that hindcast validation and drift detection consume.
+Both run the same Python code. DVC is for reproducibility, Airflow is for scheduling.
 
 <div class="mermaid">
 flowchart TD
@@ -96,11 +59,11 @@ flowchart TD
     classDef store fill:#ececff,stroke:#9370db
     classDef serve fill:#fff8e1,stroke:#f57f17
 
-    subgraph DVCPath ["DVC reproducibility path"]
+    subgraph DVCPath ["DVC (offline, reproducible)"]
         DVCY["dvc.yaml"]:::ctl --> DVCCLI["python -m foehncast.dvc_stages"]:::ctl
     end
 
-    subgraph AirflowPath ["Airflow runtime path"]
+    subgraph AirflowPath ["Airflow (scheduled, monitored)"]
         FDAG["feature_dag"]:::ctl --> FEAT["Feature pipeline"]:::pipe
         TDAG["training_dag"]:::ctl --> TRAIN["Training pipeline"]:::pipe
         IDAG["inference_dag"]:::ctl --> INF["Inference pipeline"]:::pipe
@@ -110,124 +73,47 @@ flowchart TD
     DVCCLI --> TRAIN
     FEAT --> CUR["Curated dataset"]:::store
     CUR --> TRAIN
-    CUR --> FEAST["Feast serving prep"]:::store
-    TRAIN --> REG["MLflow model + reports"]:::store
+    CUR --> FEAST["Feast online store"]:::store
+    TRAIN --> REG["MLflow model"]:::store
     REG --> INF
-    INF --> PLOG["Prediction event log"]:::store
-    FEAST --> API["FastAPI inference"]:::serve
+    INF --> PLOG["Prediction log"]:::store
+    FEAST --> API["FastAPI"]:::serve
     REG --> API
 </div>
 
-| Path | Main job | Main outputs |
-|------|----------|--------------|
-| DVC | repeatable offline reruns in local or CI contexts | `data/${dataset}`, `reports/train_metrics.json`, `reports/feature_importance.png` |
-| Airflow | scheduled or asset-triggered runtime execution | curated-feature, Feast-sync, training-request, MLflow, evaluation, registry, and prediction-log assets |
-| FastAPI | live serving | `/predict`, `/rank`, `/spots`, `/features/online`, `/metrics` |
+| Path | Use case | Outputs |
+|------|----------|---------|
+| DVC | Reproduce offline pipelines locally or in CI | `data/`, `reports/` |
+| Airflow | Schedule runs, handle retries, show DAG dependencies | Curated features, model, predictions |
+| FastAPI | Serve live predictions | `/predict`, `/rank`, `/spots`, `/metrics` |
 
-The runtime orchestration layer models main data products as Airflow assets. The feature DAG publishes curated-feature, Feast-sync, and training-request assets. The training DAG consumes the training request and emits MLflow training, evaluation, and registry assets. The inference DAG consumes the registry asset and produces prediction-log events for monitoring. DVC mirrors the offline feature and training boundaries for reproducible reruns but does not replace the Airflow asset graph.
+## Local Stack
 
-## Deployment Targets
-
-<div class="mermaid">
-flowchart TD
-    classDef core fill:#f5f5f5,stroke:#333
-    classDef local fill:#e1f5fe,stroke:#01579b
-    classDef cloud fill:#fff8e1,stroke:#f57f17
-
-    CORE["Shared pipeline boundaries"]:::core
-
-    subgraph LocalTarget ["fab:fa-docker Local lane"]
-        direction TB
-        LFLOW["Airflow + MLflow + app"]:::local
-        LDATA["MinIO + Feast + metrics"]:::local
-    end
-
-    subgraph HostedTargets ["fab:fa-google Hosted lanes"]
-        direction TB
-        RUN["Cloud Run API"]:::cloud
-        WF["Cloud Workflows + Scheduler"]:::cloud
-        CB["Cloud Build"]:::cloud
-    end
-
-    CORE --> LocalTarget
-    CORE --> HostedTargets
-</div>
-
-| Target | What runs | Main use |
-|------|-----------|----------|
-| Local evaluator target | Airflow, MLflow, FastAPI, Prometheus, StatsD exporter, MinIO, Feast emulator, and optional `development_env` | default development and evaluation |
-| Hosted inference target | FastAPI only, backed by shared GCP services | primary hosted API surface |
-| Hosted operator target | Cloud Build for runtime images, Cloud Workflows and Cloud Scheduler for hosted automation, and managed operator services for MLflow and monitoring | hosted build, automation, and operator surface |
-| GitHub automation | review, workflow dispatch, and Terraform workflows | shared cloud delivery control plane |
-
-The hosted targets deploy runtime services only. Development assets, notebooks, docs tooling, and local emulators stay local or CI-only. Cloud Run owns the public API lane. Hosted automation stays on managed cloud services. Operator services stay private by default.
-
-### Compose Overlay Pattern
-
-The local stack uses a layered Compose architecture. A shared base defines pipeline services. Storage and identity overlays swap the backend without changing the application layer.
-
-| File | Role | Storage backend |
-|------|------|----------------|
-| `docker-compose.yml` | Base services: Airflow, MLflow, app, UI, monitoring | None — storage is injected by an overlay |
-| `docker-compose.objectstore.yml` | Local overlay: MinIO, Feast Datastore emulator, S3 credentials | `STORAGE_BACKEND=s3`, MinIO on port 9000 |
-| `docker-compose.gcp.yml` | Cloud overlay: ADC credential mounts, BigQuery/GCS wiring, Feast GCS registry | `STORAGE_BACKEND=bigquery`, `gs://` artifact paths |
-
-Usage:
-
-```bash
-# Local development (default)
-docker compose -f docker-compose.yml -f docker-compose.objectstore.yml up
-
-# Cloud-parity testing with GCP credentials
-GCP_PROJECT_ID=my-project docker compose -f docker-compose.yml -f docker-compose.gcp.yml up
-```
-
-The overlays are mutually exclusive. Each injects environment variables into all services through YAML anchors (`x-objectstore-runtime-env` / `x-gcp-runtime-env`). The Python config layer reads `STORAGE_BACKEND` to resolve storage paths at runtime. CI validates both overlay configurations on every pull request.
-
-See [Cloud Mapping](cloud-mapping.md) and [Hosted Full-Stack](hosted-full-stack.md) for the hosted topology and managed service boundaries.
-
-## Shared Core Vs Runtime Differences
-
-| Shared in every runtime | Local evaluator adds | Cloud path adds |
-|------|----------------------|-----------------|
-| Feature, training, and inference boundaries | one-machine validation with Airflow, MLflow, MinIO, Feast emulator, and monitoring | Cloud Run public API lane, private operator lane, and managed cloud services |
-| FastAPI product and service contract | local app routes and local evaluation surfaces | public API serving on Cloud Run and private hosted app checks |
-| Curated data, model registry, and Feast-backed feature path | local object-backed and emulator-backed support services | BigQuery, GCS, Datastore, and runtime identities |
-
-Read the left column as the stable design. Read the other columns as deployment choices around that design.
-
-## Hosted Automation
-
-The hosted cloud path uses Cloud Workflows and Cloud Scheduler for serverless automation, while the reviewed runtime-release handoff still targets an Airflow API endpoint. See [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the delivery boundary.
-
-## Local Evaluator Architecture
+Everything runs in Docker Compose. One command starts it all.
 
 <div class="mermaid">
 flowchart TD
-    %% Stylings
-    classDef infra fill:#f5f5f5,stroke:#333
     classDef pipeline fill:#e1f5fe,stroke:#01579b
-    classDef registry fill:#fff,stroke:#d32f2f
+    classDef storage fill:#ececff,stroke:#9370db
     classDef app fill:#222,stroke:#333,color:#fff
-    classDef storage fill:#fff,stroke:#9370db
-    classDef monitor fill:#fff,stroke:#f57f17
+    classDef monitor fill:#fff8e1,stroke:#f57f17
 
-    EXT["External APIs"]:::infra
+    EXT["Weather APIs"]
 
-    subgraph LocalStack ["fab:fa-docker Local stack"]
+    subgraph Stack ["Docker Compose"]
         direction LR
         FEAT["Feature DAG"]:::pipeline
-        MIN["MinIO curated store"]:::storage
+        MIN["MinIO"]:::storage
         TRAIN["Training DAG"]:::pipeline
-        MLF["MLflow registry"]:::registry
-        FEAST["Feast layer"]:::storage
-        APP["FastAPI API"]:::app
-        MON["Monitoring stack"]:::monitor
+        MLF["MLflow"]:::storage
+        FEAST["Feast"]:::storage
+        APP["FastAPI"]:::app
+        MON["Prometheus"]:::monitor
     end
 
     EXT --> FEAT
-    FEAT -- "Persist rows" --> MIN
-    FEAT -- "Emit request" --> TRAIN
+    FEAT --> MIN
+    FEAT --> TRAIN
     MIN --> TRAIN
     TRAIN --> MLF
     MIN --> FEAST
@@ -236,42 +122,19 @@ flowchart TD
     APP --> MON
 </div>
 
-The Airflow control plane reflects those hand-offs directly. The feature pipeline owns curated-row and Feast-sync publication, then emits a training-request asset. The training pipeline starts from that asset instead of a direct DAG-to-DAG trigger, so the Assets view shows the real dependency graph.
+## Cloud Stack
 
-## Hosted Runtime Detail
-
-<div class="mermaid">
-flowchart TD
-    classDef data fill:#ececff,stroke:#9370db
-    classDef operator fill:#fff8e1,stroke:#f57f17
-
-    subgraph DataPlane ["fab:fa-google Cloud data"]
-        direction TB
-        OPSDATA["GCS artifacts + BigQuery"]:::data
-        APPDATA["BigQuery + Datastore"]:::data
-    end
-
-    subgraph ManagedOps ["fab:fa-google Managed ops"]
-        direction TB
-        WF["Cloud Workflows + Scheduler"]:::operator
-        MLF["MLflow + monitoring"]:::operator
-        WF --> MLF
-    end
-
-    OPSDATA --> MLF
-    APPDATA --> WF
-</div>
+Same pipelines, different infrastructure. Cloud Run handles serving, Cloud Workflows handles scheduling.
 
 <div class="mermaid">
 flowchart TD
-    classDef input fill:#f5f5f5,stroke:#333
     classDef data fill:#ececff,stroke:#9370db
     classDef serve fill:#fff8e1,stroke:#f57f17
 
-    LIVE["Forecast + drive-time inputs"]:::input
-    DATA["BigQuery + Datastore + MLflow"]:::data
+    LIVE["Weather + drive-time data"]
+    DATA["BigQuery + GCS + MLflow"]:::data
 
-    subgraph Run ["fab:fa-google Cloud Run API"]
+    subgraph Run ["Cloud Run"]
         direction TB
         RAPI["FastAPI app"]:::serve
     end
@@ -280,33 +143,52 @@ flowchart TD
     DATA --> RAPI
 </div>
 
-The hosted lanes reuse the same application boundaries but deploy different runtime surfaces. The first diagram shows the private operator and automation surfaces. The second shows the public API lane on Cloud Run. Changing the build or automation plane does not change the core pipeline split.
+| Concern | Local | Cloud |
+|---------|-------|-------|
+| Storage | MinIO (S3-compatible) | BigQuery + GCS |
+| Orchestration | Airflow (Docker) | Cloud Workflows + Scheduler |
+| Serving | FastAPI on localhost | Cloud Run (scale-to-zero) |
+| Monitoring | Prometheus + StatsD | Managed Prometheus |
+| Model registry | MLflow (SQLite) | MLflow (Cloud SQL) |
 
-## Representative Validation
+## Compose Overlay Pattern
 
-| Check | What it shows |
-|-------|---------------|
-| feature DAG run through Airflow | the feature path executes inside the orchestration layer |
-| asset-triggered training DAG run through Airflow | the training path starts from the published training-request asset and executes inside the orchestration layer |
-| API health and prediction routes | the app serves a real model-backed inference surface |
-| Feast serving path | the curated features are surfaced through the required online-serving layer without changing the base pipeline split |
-| container-side test suite | the local runtime remains reproducible after stack setup |
+The Docker Compose setup uses overlays to swap backends without changing application code:
 
-## Why This Architecture Holds Up
+| File | What it does |
+|------|-------------|
+| `docker-compose.yml` | Base services (Airflow, MLflow, app, UI, monitoring) |
+| `docker-compose.objectstore.yml` | Local overlay: adds MinIO + Feast emulator |
+| `docker-compose.gcp.yml` | Cloud overlay: wires in BigQuery/GCS credentials |
 
-- Personalized ranking stays in the inference layer.
-- Feature engineering and training are reusable across local and hosted paths.
-- Hosted changes mostly affect storage, auth, orchestration, and image delivery.
-- Hosted operator services stay thin and reuse the same pipeline boundaries without reintroducing a hosted Airflow stack.
-- Feast layers on top of the same curated features instead of splitting the design.
+```bash
+# Local (default)
+docker compose -f docker-compose.yml -f docker-compose.objectstore.yml up
 
-## Storage Contract
+# Cloud-parity testing
+GCP_PROJECT_ID=my-project docker compose -f docker-compose.yml -f docker-compose.gcp.yml up
+```
 
-- Raw landing is optional and stays separate from the curated feature store.
-- The local default uses MinIO-backed object storage for curated features and MLflow artifacts, plus local Feast parquet and a Datastore-mode emulator for online serving.
-- The local stack mirrors the hosted object-access layer as closely as possible without pretending BigQuery and Datastore are themselves object storage.
-- In the cloud, raw landing fits object storage, while curated features fit native BigQuery tables.
-- Retained prediction-event history is a monitoring fact store, not a rider-facing page or a substitute for dashboards.
-- Feast stays attached to the curated layer rather than becoming the primary ingestion or archive system.
+The Python config reads `STORAGE_BACKEND` (either `s3` or `bigquery`) to resolve paths at runtime.
 
-See [Use Case and Data](use-case.md) for the rider-focused problem framing, [Cloud Mapping](cloud-mapping.md) for the hosted path details, and [Delivery and Operator Workflow](delivery-and-operator-workflow.md) for the contributor and maintainer rollout split.
+## Storage Rules
+
+- **Curated features** go in MinIO locally, BigQuery in the cloud
+- **Model artifacts** go in MinIO locally, GCS in the cloud
+- **Prediction logs** are for monitoring, not for users
+- **Feast** reads from the curated layer — it doesn't replace the feature pipeline
+
+## Why This Works
+
+- Same code runs everywhere (local = cloud minus infra)
+- Clear pipeline boundaries prevent spaghetti
+- Each pipeline can be tested independently
+- Adding a new spot or feature doesn't require changing the architecture
+
+## Related Pages
+
+- [Feature Pipeline](feature-pipeline.md) — how ingestion and feature engineering work
+- [Training Pipeline](training-pipeline.md) — labelling, training, and model registration
+- [Inference Pipeline](inference-pipeline.md) — API serving and ranking logic
+- [Cloud Architecture](cloud-architecture.md) — GCP deployment details
+- [Monitoring](monitoring.md) — metrics, alerts, drift detection

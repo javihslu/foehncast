@@ -1,93 +1,85 @@
 # Grading Checklist
 
-This page maps each grading dimension to concrete evidence in the repository. Use the links to verify coverage directly.
+Quick reference: what we built and where to find it. Each section maps to 20% of the grade.
 
 ## Architecture (20%)
 
-FoehnCast follows a Feature-Training-Inference (FTI) split with clear module boundaries, a feature store, a model registry, and container-based deployment.
+Clean FTI split, feature store, model registry, containerized deployment.
 
-| Claim | Evidence |
-|-------|----------|
-| FTI pipeline separation | `src/foehncast/feature_pipeline/`, `src/foehncast/training_pipeline/`, `src/foehncast/inference_pipeline/` |
-| Airflow orchestration with asset-based hand-offs | `dags/feature_dag.py`, `dags/training_dag.py`, `dags/inference_dag.py`, `dags/runtime_release_dag.py` |
-| Feature store (Feast) | `feature_repo/feature_store.yaml`, `feature_repo/features.py` |
-| Model registry (MLflow) | Champion/candidate alias promotion in `src/foehncast/training_pipeline/register.py` |
-| Containerized services | 8 container definitions in `containers/` (Airflow, MLflow, app, UI, monitoring, development) |
-| Modular Compose with includes | `docker-compose.yml` includes from `docker_includes/` and `containers/` |
-| Local and cloud runtime lanes | `scripts/bootstrap-local.sh` (local), `scripts/bootstrap-gcp.sh` + Terraform (cloud) |
-| Cloud Run serving + hosted cloud automation | `terraform/main.tf`, `.github/workflows/publish-app-image.yml` |
-| Storage abstraction (S3/BigQuery) | `src/foehncast/feature_pipeline/store.py` with backend selection |
+| What | Where |
+|------|-------|
+| Feature / Training / Inference split | `src/foehncast/feature_pipeline/`, `training_pipeline/`, `inference_pipeline/` |
+| Airflow DAGs with asset triggers | `dags/feature_dag.py`, `training_dag.py`, `inference_dag.py` |
+| Feature store (Feast) | `feature_repo/` |
+| Model registry (MLflow) | Champion/candidate aliases in `training_pipeline/register.py` |
+| 6 container services | `containers/` (Airflow, MLflow, app, UI, monitoring, dev) |
+| Compose with overlay pattern | `docker-compose.yml` + `objectstore.yml` / `gcp.yml` |
+| Local + cloud deployment | `scripts/bootstrap-local.sh`, `terraform/main.tf` |
+| Storage abstraction | `feature_pipeline/store.py` switches between S3 and BigQuery |
 
-**Docs**: [Architecture](architecture.md), [Cloud Mapping](cloud-mapping.md)
+**Docs**: [Architecture](architecture.md)
 
 ## Automation (20%)
 
-CI/CD, infrastructure-as-code, and pipeline scheduling run without manual steps after initial bootstrap.
+Everything runs without manual steps after bootstrap.
 
-| Claim | Evidence |
-|-------|----------|
-| CI pipeline (7 jobs) | `.github/workflows/ci.yml` — shell, lint, terraform, dvc, compose, test, docs |
-| Automated image publishing | `.github/workflows/publish-app-image.yml`, `publish-runtime-images.yml` |
-| Hosted automation provisioning | `terraform/main.tf`, `.github/workflows/terraform.yml` |
-| Runtime release handoff | `scripts/trigger-runtime-release.sh`, `dags/runtime_release_dag.py`, `.github/workflows/promote-candidate.yml`, `.github/workflows/rollback-live-release.yml` |
-| Infrastructure-as-code (Terraform) | `terraform/main.tf`, `terraform/providers.tf`, `terraform/outputs.tf`, `terraform/versions.tf` |
-| Cloud Build configs | 4 configs in `cloudbuild/` |
-| Bootstrap scripts | `scripts/bootstrap-local.sh`, `scripts/bootstrap-gcp.sh` (19 scripts total) |
-| Asset-triggered training | Feature DAG publishes training-request asset → Training DAG auto-starts |
-| Asset-triggered inference | Training DAG registers model → Inference DAG auto-runs |
-| Pre-commit hooks | `.pre-commit-config.yaml` — 8 hooks including ruff lint and format |
+| What | Where |
+|------|-------|
+| CI (7 jobs: shell, lint, terraform, dvc, compose, test, docs) | `.github/workflows/ci.yml` |
+| Auto image publishing | `.github/workflows/publish-app-image.yml` |
+| Infrastructure-as-code | `terraform/main.tf` + `terraform.yml` workflow |
+| Asset-triggered training | Feature DAG → training-request asset → Training DAG |
+| Asset-triggered inference | Model registered → Inference DAG runs batch predictions |
+| Pre-commit hooks (8) | `.pre-commit-config.yaml` (ruff, whitespace, YAML, etc.) |
+| Bootstrap scripts | `scripts/bootstrap-local.sh`, `scripts/bootstrap-gcp.sh` |
+| Runtime release + rollback | `promote-candidate.yml`, `rollback-live-release.yml` |
 
-**Docs**: [Delivery and Operator Workflow](delivery-and-operator-workflow.md), [Cloud Architecture](cloud-architecture.md)
+**Docs**: [Delivery Workflow](delivery-and-operator-workflow.md)
 
 ## Reproducibility (20%)
 
-DVC pipelines, locked dependencies, and container-based execution make runs repeatable across machines.
+Same results on any machine.
 
-| Claim | Evidence |
-|-------|----------|
-| DVC pipeline with two stages | `dvc.yaml` — `curate` (features) and `train` (model) |
-| Tracked data and metrics | `dvc.lock`, `data/`, `reports/train_metrics.json`, `reports/feature_importance.png` |
-| Deterministic Python dependencies | `pyproject.toml` + `uv.lock` (uv package manager) |
-| Container-pinned environments | `containers/*/Dockerfile` — `python:3.12-slim`, multi-stage builds, `uv sync --frozen` |
-| Reproducible Make targets | `Makefile` — `make install`, `make dvc-validate`, `make bootstrap-local` |
-| Data lineage in MLflow | `data_hash` (SHA-256), `git_commit` logged per training run |
-| Config-driven workload | `config.yaml` owns spots, rider profile, model features, labeling bands, ranking weights |
-| Seed and split ratio pinned | `model.seed` and `model.test_size` in `config.yaml` |
-| Local smoke test | `make smoke-local-evaluator` runs in CI and locally |
+| What | Where |
+|------|-------|
+| DVC pipeline (curate + train) | `dvc.yaml`, `dvc.lock` |
+| Tracked outputs | `data/`, `reports/train_metrics.json`, `reports/feature_importance.png` |
+| Locked dependencies | `pyproject.toml` + `uv.lock` |
+| Pinned containers | `python:3.12-slim`, multi-stage, `uv sync --frozen` |
+| Config-driven (no magic numbers) | `config.yaml` has spots, model params, thresholds |
+| Data lineage in MLflow | SHA-256 hash + git commit logged per run |
+| Local smoke test = CI smoke test | `make smoke-local-evaluator` |
 
-**Docs**: [Feature Pipeline](feature-pipeline.md), [Training Pipeline](training-pipeline.md), [Configuration and Contracts](configuration-and-contracts.md)
+**Docs**: [Feature Pipeline](feature-pipeline.md), [Training Pipeline](training-pipeline.md)
 
 ## Code Quality (20%)
 
-Static analysis, a large test suite, and consistent project structure enforce quality.
+Static analysis, tests, and consistent structure.
 
-| Claim | Evidence |
-|-------|----------|
-| Linting and formatting | `ruff` configured in `pyproject.toml`, enforced via `make lint` and pre-commit |
-| Test suite | 43 test files, 415 tests in `tests/` covering pipelines, orchestration, config, monitoring, and CI contracts |
-| CI enforcement | `ci.yml` runs lint, test, shell checks, and Terraform validate on every push and PR |
-| Type annotations | `from __future__ import annotations` throughout `src/foehncast/` |
-| Clean package structure | `src/foehncast/` with dedicated subpackages per domain and shared utilities (`_bigquery.py`, `_report_store.py`) |
-| Pre-commit hooks | Trailing whitespace, EOF fix, YAML check, merge conflict detection, private key detection, ruff lint, ruff format |
-| Shell script validation | `ci.yml` shell job checks scripts with ShellCheck-style validation |
-| Module docstrings | Each pipeline module documents its boundary and responsibility |
+| What | Where |
+|------|-------|
+| Linting + formatting | `ruff` via pre-commit and `make lint` |
+| 452 tests, 88% coverage, ~4s | `tests/` (43 test files) |
+| CI enforces everything | Lint, test, shell checks, terraform validate on every PR |
+| Type annotations | `from __future__ import annotations` throughout |
+| Clean package structure | Domain subpackages + shared utilities (`_bigquery.py`, etc.) |
+| Shell validation | ShellCheck-style checks in CI |
 
 **Docs**: [Repository](repository.md)
 
 ## Monitoring (20%)
 
-Prometheus metrics, native Altair charts, drift detection, hindcast validation, and alerting rules form a complete observability stack.
+Prometheus metrics, drift detection, alerting, and visualization.
 
-| Claim | Evidence |
-|-------|----------|
-| Custom Prometheus exporters | `src/foehncast/monitoring/pipeline_prometheus.py`, `prediction_prometheus.py` |
-| Composed `/metrics` endpoint | Feature, training, prediction, sync, and hindcast metrics on one scrape target |
-| Drift detection (Evidently) | `src/foehncast/monitoring/drift.py` — column-level statistical tests, StatsD export |
-| Hindcast validation | `src/foehncast/monitoring/hindcast.py` — predictions vs. observed weather |
-| Native Altair charts in Streamlit UI | `ui/app.py` — direct PromQL queries for system health, pipeline status, drift, and hindcast panels |
-| 9 Prometheus alert rules | `prometheus_config/alerting_rules.yml` — AppDown, HighRequestLatency, FeaturePipelineStageFailure, etc. |
-| Prediction event history | `.state/monitoring/prediction-events.jsonl` (local), BigQuery `prediction_events` table (cloud) |
-| Pipeline summary evidence | `airflow/reports/feature-pipeline-*-latest.json`, `training-pipeline-*-latest.json` |
-| Scrape config version-controlled | `prometheus_config/prometheus.yml` — 3 scrape targets |
+| What | Where |
+|------|-------|
+| Custom Prometheus exporters | `monitoring/pipeline_prometheus.py`, `prediction_prometheus.py` |
+| Combined `/metrics` endpoint | Feature + training + prediction + drift metrics |
+| Drift detection (Evidently) | `monitoring/drift.py` — statistical tests per column |
+| Hindcast validation | `monitoring/hindcast.py` — predicted vs. observed |
+| Streamlit charts (Altair + PromQL) | `ui/app.py` — system health, drift, pipeline panels |
+| 9 alert rules | `prometheus_config/alerting_rules.yml` |
+| Prediction event log | `.state/monitoring/prediction-events.jsonl` (local), BigQuery (cloud) |
+| Scrape config in version control | `prometheus_config/prometheus.yml` |
 
 **Docs**: [Monitoring](monitoring.md)
