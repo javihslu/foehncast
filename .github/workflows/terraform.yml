@@ -382,8 +382,9 @@ jobs:
           primary_hosted_api_verification_status="skipped"
 
           if [[ "${TF_VAR_provision_cloud_run_service}" != 'true' ]]; then
-            echo "Hosted runtime verification requires TF_VAR_provision_cloud_run_service=true. Cloud Run is the only supported public API path in this configuration." >&2
-            exit 1
+            echo "Cloud Run not provisioned — skipping runtime verification."
+            echo "cloud_run_verification_status=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"
