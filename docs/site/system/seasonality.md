@@ -1,50 +1,31 @@
 # Seasonality
 
-FoehnCast handles seasonality through cyclical time features derived from the forecast timestamp. The project does not split the model by season. It keeps repeating daily and yearly patterns in the shared feature layer so the same contract works in local and hosted runtimes.
+Swiss kite spots behave differently across seasons — summer thermals, winter pressure systems, daylight changes. We handle this with cyclical time features instead of separate seasonal models.
 
-## Why It Matters
+## Features
 
-Swiss kite spots do not behave the same way all year. Summer thermals, winter pressure systems, daylight, and temperature patterns all affect when a spot becomes rideable. If the model only sees raw weather values, it misses part of that repeating structure.
+The feature pipeline creates four time-derived columns:
 
-## Current Contract
+| Feature | Encodes |
+|---------|---------|
+| `hour_of_day_sin/cos` | Time of day (smooth wrap at midnight) |
+| `day_of_year_sin/cos` | Season (smooth wrap at year-end) |
 
-The feature pipeline engineers four timestamp-derived fields:
+Sin/cos encoding means the model understands that 23:00 is close to 00:00, and December 31 is close to January 1.
 
-- `hour_of_day_sin`
-- `hour_of_day_cos`
-- `day_of_year_sin`
-- `day_of_year_cos`
+## Where They're Used
 
-These features let the model learn that `14:00` is close to `15:00`, and that late June is close to early July, without introducing a discontinuity at midnight or year-end.
+| Pipeline | Role |
+|----------|------|
+| Feature | Creates the cyclical columns from forecast timestamps |
+| Training | Includes them in the model feature vector |
+| Inference | Rebuilds them from live timestamps (same function) |
 
-## Where It Fits In FTI
+## Why Keep It Simple
 
-| Stage | Seasonality role |
-|------|------------------|
-| Feature pipeline | creates the cyclical time fields from each forecast timestamp |
-| Training pipeline | consumes those fields as part of the model feature vector |
-| Inference pipeline | rebuilds the same fields from live forecast timestamps |
+- No separate summer/winter models
+- No wide month-dummy encoding
+- No special seasonal architecture
+- Just four extra features that give the tree-based model time context
 
-This keeps training and inference aligned around the same time encoding.
-
-## Why The Current Scope Stays Simple
-
-The current implementation favors the smallest feature set that still captures recurring patterns.
-
-- No separate seasonal model families.
-- No wide month-dummy design.
-- No extra architecture dedicated only to seasonal logic.
-
-That keeps the design simple while still giving the model useful time context.
-
-## How It Is Reviewed
-
-Seasonality changes are reviewed through the same training and MLflow workflow used for the rest of the model.
-
-- compare training runs with and without additional seasonal features
-- inspect error metrics and ranking quality across different parts of the year
-- keep only changes that improve the model enough to justify the added complexity
-
-## Summary
-
-FoehnCast already accounts for seasonality in a lightweight way. The current design keeps cyclical time features in the shared feature layer and treats extra seasonal complexity as something that must earn its place through model evidence.
+If we ever need more seasonal complexity, it has to prove itself through better model metrics first.
