@@ -349,7 +349,7 @@ resource "google_cloudbuild_trigger" "publish_app" {
     }
   }
 
-  included_files = ["src/**", "containers/app/**", "pyproject.toml", "uv.lock"]
+  included_files = ["src/**", "containers/app/**", "cloudbuild/app.yaml", "pyproject.toml", "uv.lock"]
   filename       = "cloudbuild/app.yaml"
 
   depends_on = [google_project_service.required]
@@ -370,7 +370,7 @@ resource "google_cloudbuild_trigger" "publish_mlflow" {
     }
   }
 
-  included_files = ["containers/mlflow/**"]
+  included_files = ["containers/mlflow/**", "cloudbuild/mlflow.yaml"]
   filename       = "cloudbuild/mlflow.yaml"
 
   depends_on = [google_project_service.required]
@@ -389,7 +389,7 @@ resource "google_cloudbuild_trigger" "publish_ui" {
     }
   }
 
-  included_files = ["ui/**", "containers/ui/**", "pyproject.toml", "uv.lock"]
+  included_files = ["ui/**", "containers/ui/**", "cloudbuild/ui.yaml", "pyproject.toml", "uv.lock"]
   filename       = "cloudbuild/ui.yaml"
 
   depends_on = [google_project_service.required]
