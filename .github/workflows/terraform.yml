@@ -1,16 +1,9 @@
 # Terraform — manages GCP infrastructure lifecycle.
 # Commands: plan (preview), apply (deploy), destroy (teardown), cleanup (state bucket/vars removal).
-# On push to main: auto-applies if bootstrap is complete.
-# On workflow_dispatch: runs the selected command with optional overrides.
+# Manual dispatch only — infrastructure changes are deliberate, not automatic.
 name: Terraform
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - terraform/**
-      - scripts/resolve-terraform-inputs.sh
-      - .github/workflows/terraform.yml
   workflow_dispatch:
     inputs:
       command:
@@ -116,8 +109,7 @@ jobs:
   remote:
     if:
       ${{ github.actor == github.repository_owner && github.triggering_actor ==
-      github.repository_owner && (github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'push') }}
+      github.repository_owner }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -137,7 +129,6 @@ jobs:
       - name: Resolve execution flags
         id: flags
         env:
-          EVENT_NAME: ${{ github.event_name }}
           PROJECT_ID: ${{ steps.repo_config.outputs.project_id }}
           WORKLOAD_IDENTITY_PROVIDER: ${{ steps.repo_config.outputs.workload_identity_provider }}
           SERVICE_ACCOUNT_EMAIL: ${{ steps.repo_config.outputs.service_account_email }}
@@ -145,9 +136,7 @@ jobs:
           set -euo pipefail
 
           command='${{ inputs.command }}'
-          if [[ "$EVENT_NAME" == 'push' ]]; then
-            command='apply'
-          elif [[ -z "$command" ]]; then
+          if [[ -z "$command" ]]; then
             command='plan'
           fi
 
@@ -161,18 +150,8 @@ jobs:
             echo "bootstrap_ready=$bootstrap_ready"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Explain skipped automatic apply before bootstrap
-        if: ${{ github.event_name == 'push' && steps.flags.outputs.bootstrap_ready != 'true' }}
-        run: |
-          {
-            echo "## Terraform apply skipped"
-            echo
-            echo "Automatic remote apply is not active yet because the shared cloud bootstrap has not populated the required repository variables."
-            echo "Run the one-time maintainer bootstrap from Google Cloud Shell, then pushes to main can drive the shared cloud path automatically."
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Fail manual run before bootstrap
-        if: ${{ github.event_name == 'workflow_dispatch' && steps.flags.outputs.bootstrap_ready != 'true' }}
+        if: ${{ steps.flags.outputs.bootstrap_ready != 'true' }}
         run: |
           set -euo pipefail
           echo 'Remote Terraform is not bootstrapped yet. Run the one-time maintainer bootstrap from Google Cloud Shell first.' >&2
@@ -369,113 +348,6 @@ jobs:
             echo "If the shared contract needs a refresh, run ./scripts/configure-github-actions.sh from a maintainer shell authenticated with gh."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify hosted runtimes
-        id: verify_hosted_runtimes
-        if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
-        run: |
-          set -euo pipefail
-
-          verify_failure=false
-          cloud_run_verification_status="skipped"
-          cloud_run_invocation_mode="not-provisioned"
-          primary_hosted_api_target="not-provisioned"
-          primary_hosted_api_verification_status="skipped"
-
-          if [[ "${TF_VAR_provision_cloud_run_service}" != 'true' ]]; then
-            echo "Cloud Run not provisioned — skipping runtime verification."
-            echo "cloud_run_verification_status=skipped" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          cloud_run_service_url="$(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || true)"
-          if [[ -n "$cloud_run_service_url" ]]; then
-            cloud_run_verification_status="passed"
-            primary_hosted_api_target="cloud-run"
-            cloud_run_allow_unauthenticated="$(printf '%s' "${TF_VAR_cloud_run_allow_unauthenticated}" | tr '[:upper:]' '[:lower:]')"
-            health_url="${cloud_run_service_url%/}/health"
-            spots_url="${cloud_run_service_url%/}/spots"
-            metrics_url="${cloud_run_service_url%/}/metrics"
-            curl_args=(--retry 30 --retry-all-errors --retry-delay 10 -fsS)
-
-            if [[ "$cloud_run_allow_unauthenticated" != 'true' ]]; then
-              echo "Cloud Run service requires authenticated invocation; requesting identity token..."
-              cloud_run_invocation_mode="identity-token"
-              identity_token="$(gcloud auth print-identity-token --audiences="$cloud_run_service_url")"
-              curl_args+=(-H "Authorization: Bearer ${identity_token}")
-            else
-              cloud_run_invocation_mode="anonymous"
-            fi
-
-            echo "Waiting for Cloud Run health at ${health_url}..."
-            if ! health_payload="$(curl "${curl_args[@]}" "$health_url")"; then
-              echo "Cloud Run runtime verification failed: health endpoint did not respond." >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
-            elif ! printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
-              echo "Cloud Run runtime verification failed: expected healthy health payload." >&2
-              printf '%s\n' "$health_payload" >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
-            elif ! printf '%s' "$health_payload" | grep -Eq '"model_alias"[[:space:]]*:'; then
-              echo "Cloud Run runtime verification failed: expected health payload to report model alias." >&2
-              printf '%s\n' "$health_payload" >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
-            elif ! printf '%s' "$health_payload" | grep -Eq '"model_version"[[:space:]]*:'; then
-              echo "Cloud Run runtime verification failed: expected health payload to report model version." >&2
-              printf '%s\n' "$health_payload" >&2
-              cloud_run_verification_status="failed"
-              verify_failure=true
-            fi
-
-            if [[ "$cloud_run_verification_status" == 'passed' ]]; then
-              echo "Checking Cloud Run spots endpoint at ${spots_url}..."
-              if ! spots_payload="$(curl "${curl_args[@]}" "$spots_url")"; then
-                echo "Cloud Run runtime verification failed: spots endpoint did not respond." >&2
-                cloud_run_verification_status="failed"
-                verify_failure=true
-              elif ! printf '%s' "$spots_payload" | grep -Eq '"id"[[:space:]]*:'; then
-                echo "Cloud Run runtime verification failed: expected spots payload with ids." >&2
-                printf '%s\n' "$spots_payload" >&2
-                cloud_run_verification_status="failed"
-                verify_failure=true
-              fi
-            fi
-
-            if [[ "$cloud_run_verification_status" == 'passed' ]]; then
-              echo "Checking Cloud Run metrics at ${metrics_url}..."
-              if ! metrics_payload="$(curl "${curl_args[@]}" "$metrics_url")"; then
-                echo "Cloud Run runtime verification failed: metrics endpoint did not respond." >&2
-                cloud_run_verification_status="failed"
-                verify_failure=true
-              elif ! printf '%s' "$metrics_payload" | grep -Fq 'up{job="foehncast_app"} 1'; then
-                echo "Cloud Run runtime verification failed: expected metrics payload with app health." >&2
-                printf '%s\n' "$metrics_payload" >&2
-                cloud_run_verification_status="failed"
-                verify_failure=true
-              fi
-            fi
-          else
-            echo "Cloud Run runtime verification failed: Cloud Run service URL is not available. Fix the Cloud Run configuration instead of skipping hosted runtime verification." >&2
-            cloud_run_verification_status="failed"
-            verify_failure=true
-          fi
-
-          if [[ "$primary_hosted_api_target" == 'cloud-run' ]]; then
-            primary_hosted_api_verification_status="$cloud_run_verification_status"
-          fi
-
-          {
-            echo "cloud_run_verification_status=${cloud_run_verification_status}"
-            echo "cloud_run_invocation_mode=${cloud_run_invocation_mode}"
-            echo "primary_hosted_api_target=${primary_hosted_api_target}"
-            echo "primary_hosted_api_verification_status=${primary_hosted_api_verification_status}"
-          } >> "$GITHUB_OUTPUT"
-
-          if [[ "$verify_failure" == 'true' ]]; then
-            exit 1
-          fi
-
       - name: Summarize outputs
         if: ${{ always() && steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'apply' }}
         run: |
@@ -502,16 +374,12 @@ jobs:
           {
             echo "## Terraform apply"
             echo
-            echo "- Primary hosted API target: $(render_output primary_hosted_api_target not-provisioned)"
-            echo "- Primary hosted API URL: $(render_output primary_hosted_api_url not-provisioned)"
-            echo "- Primary hosted API verification: ${{ steps.verify_hosted_runtimes.outputs.primary_hosted_api_verification_status }}"
             echo "- Cloud Run URL: $(terraform -chdir=terraform output -raw cloud_run_service_url 2>/dev/null || echo not-provisioned)"
-            echo "- Cloud Run verification: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_verification_status }}"
-            echo "- Cloud Run invocation: ${{ steps.verify_hosted_runtimes.outputs.cloud_run_invocation_mode }}"
+            echo "- Cloud Run UI URL: $(terraform -chdir=terraform output -raw cloud_run_ui_url 2>/dev/null || echo not-provisioned)"
+            echo "- MLflow URL: $(terraform -chdir=terraform output -raw cloud_run_mlflow_url 2>/dev/null || echo not-provisioned)"
             echo "- Hosted Feast source: bigquery"
             echo "- Hosted Feast offline source table: ${TF_VAR_project_id}.${feast_bigquery_dataset}.${feast_bigquery_table}"
             echo "- Hosted Feast online store database: ${feast_online_store_database_name}"
-            echo "- Feast follow-up: after curated BigQuery rows are available, run ./scripts/prepare-feast-cloud.sh to apply the Feast repo and materialize the hosted online store."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize destroy

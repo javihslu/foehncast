@@ -220,3 +220,15 @@ variable "github_oidc_provider_id" {
   type        = string
   default     = "github-oidc"
 }
+
+variable "provision_cloud_build_triggers" {
+  description = "Whether to create Cloud Build triggers via Developer Connect."
+  type        = bool
+  default     = false
+}
+
+variable "github_app_installation_id" {
+  description = "GitHub App installation ID for Developer Connect (from GCP Console)."
+  type        = string
+  default     = ""
+}
