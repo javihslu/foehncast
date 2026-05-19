@@ -79,7 +79,7 @@ Both DVC stages use the same Python modules as the Airflow DAGs — there's only
 ### Tests
 
 ```bash
-make test          # 447 tests, ~4 seconds
+make test          # 449 tests, ~4 seconds
 make lint          # ruff
 make coverage      # pytest-cov (88%)
 ```
