@@ -1216,6 +1216,24 @@ resource "google_project_iam_member" "workflows_log_writer" {
   member  = "serviceAccount:${google_service_account.workflows[0].email}"
 }
 
+# The workflow SA needs workflows.invoker to allow Cloud Scheduler to create executions.
+resource "google_project_iam_member" "workflows_invoker" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/workflows.invoker"
+  member  = "serviceAccount:${google_service_account.workflows[0].email}"
+}
+
+# Cloud Scheduler service agent must be able to impersonate the workflows SA to mint OAuth tokens.
+resource "google_service_account_iam_member" "scheduler_act_as_workflows" {
+  count = var.provision_cloud_workflows ? 1 : 0
+
+  service_account_id = google_service_account.workflows[0].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:service-${data.google_project.current.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+}
+
 resource "google_workflows_workflow" "pipeline_cascade" {
   count = var.provision_cloud_workflows ? 1 : 0
 
