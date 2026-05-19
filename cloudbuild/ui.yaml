@@ -31,6 +31,16 @@ steps:
           docker push "${_FLOATING_TAG}"
         fi
 
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - foehncast-ui
+      - --image=${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}
+      - --region=${_REGION}
+      - --quiet
+
 options:
   dynamicSubstitutions: true
   logging: CLOUD_LOGGING_ONLY
@@ -42,3 +52,4 @@ substitutions:
   _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker/foehncast-ui
   _COMMIT_SHA: ${SHORT_SHA}
   _FLOATING_TAG: ""
+  _REGION: europe-west6
