@@ -7,6 +7,10 @@ name = "foehncast"
 version = "0.1.0"
 description = "Personalized kiteboarding forecast system with FTI pipeline"
 requires-python = ">=3.12"
+license = "MIT"
+authors = [
+    { name = "Javier Hernandez", email = "javier.hernandez@stud.hslu.ch" },
+]
 dependencies = [
     "certifi>=2024.0",
     "fastapi>=0.115",
@@ -26,6 +30,10 @@ dependencies = [
     "uvicorn>=0.30",
     "evidently>=0.7.21",
 ]
+
+[project.urls]
+Repository = "https://github.com/javihslu/foehncast"
+Documentation = "https://javihslu.github.io/foehncast/"
 
 [dependency-groups]
 dev = [
