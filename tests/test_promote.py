@@ -96,3 +96,54 @@ def test_promote_helpers_require_non_empty_alias_and_version() -> None:
 
     with pytest.raises(ValueError, match="Model version must be non-empty"):
         promote.promote_model_version("   ")
+
+
+def test_main_promotes_by_version_when_version_provided(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    logged: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        promote,
+        "promote_model",
+        lambda model_name, version, stage="Production": logged.update(
+            {"promotion": (model_name, version, stage)}
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["promote", "--version", "3", "--target-stage", "Production"],
+    )
+
+    promote.main()
+
+    assert logged["promotion"] == (None, "3", "Production")
+    assert capsys.readouterr().out.strip() == "3"
+
+
+def test_main_promotes_by_alias_when_no_version(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    logged: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        promote,
+        "resolve_model_version_by_alias",
+        lambda alias, model_name=None: "21",
+    )
+    monkeypatch.setattr(
+        promote,
+        "promote_model",
+        lambda model_name, version, stage="Production": logged.update(
+            {"promotion": (model_name, version, stage)}
+        ),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["promote", "--source-alias", "candidate"],
+    )
+
+    promote.main()
+
+    assert logged["promotion"] == (None, "21", "Production")
+    assert capsys.readouterr().out.strip() == "21"
