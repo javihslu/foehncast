@@ -1,63 +1,65 @@
 # FoehnCast Docs
 
-FoehnCast ranks Swiss kiteboarding spots for one rider profile by combining live weather forecasts, engineered wind features, drive-time information, and a trained quality model. Use the repository README for the short summary. Use this site for setup help, product scope, runtime notes, and operator guidance.
+FoehnCast tells you which Swiss kiteboarding spot is worth the drive today. It combines live weather forecasts, wind features, drive times, and a trained quality model into a single ranked recommendation.
 
-## Product In One View
+This site covers how the system works, how to set it up, and how the cloud deployment is structured.
+
+## What It Does
 
 <div class="mermaid">
 flowchart TD
-    WX[Forecast + spot context] --> RANK[Rank session options]
-    RIDER[Rider + drive context] --> RANK
-    RANK --> DECIDE[Choose where to ride next]
+    WX[Weather forecasts + spot data] --> RANK[Rank spots by quality]
+    RIDER[Rider profile + drive time] --> RANK
+    RANK --> DECIDE[Pick the best spot]
 </div>
 
-## Main Capabilities
+## Key Features
 
 <div class="grid cards fc-feature-grid" markdown>
 
-- **Rank the next session**
+- **Spot ranking**
 
-    Compare a fixed set of Swiss lake spots instead of browsing a generic forecast map.
+    Compares Swiss lake spots using a trained model instead of raw forecast numbers.
 
-- **Personalize the choice**
+- **Personalized**
 
-    Combine weather, rider profile, spot context, and drive time in one ranking decision.
+    Weights wind, drive time, and rider preferences into one score.
 
-- **Serve the same product through code and UI**
+- **Same code everywhere**
 
-    Expose the model through API routes and rider-facing demo surfaces built on the same inference path.
+    API, UI, and pipelines share the same Python modules.
 
-- **Keep the system reproducible**
+- **Reproducible**
 
-    Separate feature, training, and inference so local validation and deployment share the same core design.
+    FTI split + DVC + containers = same results on any machine.
 
 </div>
 
 ## System Flow
 
 <div class="mermaid">
-flowchart TD
-    INGEST[Ingest forecasts] --> FEATURES[Build curated features] --> TRAIN[Train and register model] --> SERVE[Serve prediction and ranking]
+flowchart LR
+    INGEST[Fetch forecasts] --> FEATURES[Engineer features] --> TRAIN[Train model] --> SERVE[Serve rankings]
 </div>
 
-## Read Next
+## Where to Start
 
 <div class="grid cards" markdown>
 
-- **Overview**
+- **[Overview](overview.md)**
 
-    Read [Overview](overview.md) for the documentation map, the shared system core, and the local-versus-cloud split.
+    How the system is organized and where local vs. cloud differ.
 
-- **Getting Started**
+- **[Getting Started](getting-started.md)**
 
-    Read [Getting Started](getting-started.md) for the default local evaluator path.
+    Run it locally with Docker in 3 steps.
 
-- **Use Case and Data**
+- **[Use Case and Data](system/use-case.md)**
 
-    Read [Use Case and Data](system/use-case.md) for the rider scope, spots, and inputs.
+    What data goes in and what comes out.
 
-- **Architecture**
+- **[Architecture](system/architecture.md)**
 
-    Read [Architecture](system/architecture.md) for the feature, training, and inference boundaries.
+    The FTI split, pipelines, and deployment targets.
 
 </div>
