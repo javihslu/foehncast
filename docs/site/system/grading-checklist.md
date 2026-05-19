@@ -64,10 +64,10 @@ Static analysis, a large test suite, and consistent project structure enforce qu
 | Claim | Evidence |
 |-------|----------|
 | Linting and formatting | `ruff` configured in `pyproject.toml`, enforced via `make lint` and pre-commit |
-| Test suite | 44 test files in `tests/` covering pipelines, orchestration, config, monitoring, and CI contracts |
+| Test suite | 43 test files, 415 tests in `tests/` covering pipelines, orchestration, config, monitoring, and CI contracts |
 | CI enforcement | `ci.yml` runs lint, test, shell checks, and Terraform validate on every push and PR |
 | Type annotations | `from __future__ import annotations` throughout `src/foehncast/` |
-| Clean package structure | `src/foehncast/` with dedicated subpackages per domain |
+| Clean package structure | `src/foehncast/` with dedicated subpackages per domain and shared utilities (`_bigquery.py`, `_report_store.py`) |
 | Pre-commit hooks | Trailing whitespace, EOF fix, YAML check, merge conflict detection, private key detection, ruff lint, ruff format |
 | Shell script validation | `ci.yml` shell job checks scripts with ShellCheck-style validation |
 | Module docstrings | Each pipeline module documents its boundary and responsibility |

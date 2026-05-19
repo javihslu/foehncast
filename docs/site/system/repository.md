@@ -7,12 +7,15 @@ The repository keeps runtime code, orchestration, tests, and public documentatio
 ```text
 dvc.yaml
 src/foehncast/
+  _bigquery.py
+  _report_store.py
   config.py
   dvc_stages.py
   feature_pipeline/
   training_pipeline/
   inference_pipeline/
   monitoring/
+  orchestration/
   spots/
 dags/
 containers/
@@ -24,6 +27,20 @@ prometheus_config/
 tests/
 docs/
 ```
+
+## Codebase Statistics
+
+| Metric | Value |
+|--------|-------|
+| Source modules | 63 Python files in `src/foehncast/` |
+| Source lines | ~10,500 |
+| Test files | 43 test modules |
+| Test functions | 415 |
+| Test suite runtime | ~4 seconds |
+| Test-to-source ratio | 1.15× |
+| Shell scripts | 18 in `scripts/` |
+| Container definitions | 6 Dockerfiles |
+| Pre-commit hooks | 8 (trailing whitespace, EOF, YAML, large files, merge conflicts, private keys, ruff lint, ruff format) |
 
 ## Repository Roles
 
@@ -55,6 +72,25 @@ flowchart TD
 | `containers/`, `scripts/`, and `terraform/` | runtime packaging, bootstrap helpers, and deployment tooling |
 | `feature_repo/` and `prometheus_config/` | Feast and operator-monitoring integration contracts |
 | `tests/` and `docs/` | regression coverage and public explanation |
+
+## Source Module Map
+
+The `src/foehncast/` package is organized by domain with shared utilities at the top level:
+
+| Module | Responsibility |
+|--------|---------------|
+| `config.py`, `env.py`, `paths.py` | Configuration loading, environment variable resolution, path conventions |
+| `_bigquery.py` | Shared BigQuery SDK lazy-loading and helpers (used by `store.py` and `monitoring/`) |
+| `_report_store.py` | GCS/local JSON report persistence (history, timestamped copies) |
+| `_json.py`, `_time.py` | JSON parsing and timestamp utilities |
+| `feature_pipeline/` | Ingest, engineer, validate, store curated weather features |
+| `training_pipeline/` | Label, train, evaluate, register ML models |
+| `inference_pipeline/` | FastAPI serving (predict, rank, spots, health, metrics) |
+| `orchestration/` | Airflow pipeline entry points split by domain (feature, training, inference, drift) |
+| `monitoring/` | Prometheus exporters, drift detection, prediction logging, pipeline contracts |
+| `runtime_release.py` | Runtime release handoff normalization and persistence |
+| `pipeline_state.py` | Shared pipeline execution state management |
+| `spots/` | Spot metadata and ranking logic |
 
 ## DVC Vs Airflow
 
