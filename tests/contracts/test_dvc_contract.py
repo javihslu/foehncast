@@ -8,7 +8,7 @@ import yaml
 
 from tests.repo_helpers import read_repo_text
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _load_dvc_yaml() -> dict:

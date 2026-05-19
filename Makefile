@@ -37,7 +37,7 @@ coverage:  ## Run tests with coverage report
 	cd $(ROOT_DIR) && uv run pytest --cov --cov-report=term-missing --cov-report=html:reports/htmlcov -q
 
 test-feature:  ## Run focused feature-pipeline and orchestration tests
-	cd $(ROOT_DIR) && uv run pytest tests/test_ingest.py tests/test_engineer.py tests/test_validate.py tests/test_store.py tests/test_feast_export.py tests/test_orchestration.py tests/test_dags.py -q
+	cd $(ROOT_DIR) && uv run pytest tests/feature_pipeline/ tests/orchestration/ -q
 
 check: lint test  ## Run lint and the full test suite
 

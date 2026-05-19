@@ -188,11 +188,11 @@ def test_hosted_dag_bundle_contains_feature_and_training_dags() -> None:
 
     assert (
         feature_dag.exists()
-        or (Path(__file__).resolve().parent.parent / feature_dag).exists()
+        or (Path(__file__).resolve().parent.parent.parent / feature_dag).exists()
     )
     assert (
         training_dag.exists()
-        or (Path(__file__).resolve().parent.parent / training_dag).exists()
+        or (Path(__file__).resolve().parent.parent.parent / training_dag).exists()
     )
 
 
@@ -213,7 +213,7 @@ def test_hosted_operator_terraform_exposes_cloud_run_contract() -> None:
 
 def test_dvc_pipeline_definition_exists() -> None:
     """DVC stages are now defined; validate the pipeline file is present."""
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     assert (repo_root / "dvc.yaml").exists(), "dvc.yaml must exist"
     assert (repo_root / ".dvc").is_dir(), ".dvc/ must exist"
 
