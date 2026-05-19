@@ -2,6 +2,105 @@
 
 FoehnCast follows the Feature → Training → Inference (FTI) pattern. The same code runs locally in Docker and in the cloud on GCP. This page explains how the pieces connect.
 
+## Complete System Map
+
+Everything in the project — data flow, automation, infrastructure, monitoring — in one diagram.
+
+<div class="mermaid">
+flowchart TB
+    classDef source fill:#e8f5e9,stroke:#2e7d32
+    classDef pipe fill:#e1f5fe,stroke:#01579b
+    classDef store fill:#ececff,stroke:#9370db
+    classDef serve fill:#222,stroke:#333,color:#fff
+    classDef ops fill:#fff3e0,stroke:#e65100
+    classDef monitor fill:#fff8e1,stroke:#f57f17
+    classDef infra fill:#fce4ec,stroke:#880e4f
+
+    WEATHER["Weather APIs (Open-Meteo)"]:::source
+    CONFIG["config.yaml"]:::source
+
+    subgraph Pipelines ["Data Pipelines (Python)"]
+        direction TB
+        subgraph FP ["Feature Pipeline"]
+            ING[Ingest] --> ENG[Engineer] --> VAL[Validate] --> STO[Store]
+        end
+        subgraph TP ["Training Pipeline"]
+            LAB[Label] --> TRN[Train] --> EVAL[Evaluate] --> REG[Register]
+        end
+        subgraph IP ["Inference Pipeline"]
+            PRED[Predict] --> RANK[Rank]
+        end
+    end
+
+    subgraph Storage ["Persistent State"]
+        direction TB
+        PARQUET["Curated Parquet (MinIO / GCS)"]:::store
+        FEAST["Feast online store"]:::store
+        MLFLOW["MLflow registry"]:::store
+        BQ["BigQuery"]:::store
+    end
+
+    subgraph Serving ["User-Facing"]
+        direction TB
+        API["FastAPI (/predict, /rank, /spots, /metrics)"]:::serve
+        UI["Streamlit dashboard"]:::serve
+    end
+
+    subgraph Orchestration ["Scheduling"]
+        direction TB
+        AIRFLOW["Airflow DAGs"]:::ops
+        DVC["DVC (offline)"]:::ops
+    end
+
+    subgraph CICD ["CI/CD (GitHub Actions)"]
+        direction TB
+        CI["CI (lint, test, compose, docs)"]:::ops
+        PUB["Publish Images (Cloud Build)"]:::ops
+        TF["Terraform"]:::ops
+        DOCSDEPLOY["Deploy Docs"]:::ops
+    end
+
+    subgraph Monitoring ["Observability"]
+        direction TB
+        PROM["Prometheus"]:::monitor
+        GRAFANA["Grafana"]:::monitor
+    end
+
+    subgraph Infra ["Infrastructure"]
+        direction TB
+        COMPOSE["Docker Compose (local)"]:::infra
+        CLOUDRUN["Cloud Run (production)"]:::infra
+        AR["Artifact Registry"]:::infra
+    end
+
+    WEATHER --> ING
+    CONFIG --> ING & TRN & PRED
+
+    STO --> PARQUET & FEAST & BQ
+    PARQUET --> LAB
+    REG --> MLFLOW
+    FEAST --> API
+    MLFLOW --> API
+    WEATHER --> API
+
+    AIRFLOW --> FP & TP & IP
+    DVC --> FP & TP
+
+    API --> PROM
+    PROM --> GRAFANA
+    UI --> API
+
+    PUB --> AR --> CLOUDRUN
+    TF --> CLOUDRUN
+    CI --> PUB
+</div>
+
+**Reading this diagram:**
+
+- **Left to right** = data flow (weather → features → model → predictions → user)
+- **Top to bottom** = abstraction layers (sources → processing → storage → serving → ops)
+- **Green** = external sources, **Blue** = pipelines, **Purple** = storage, **Black** = user-facing, **Orange** = automation, **Yellow** = monitoring, **Pink** = infrastructure
+
 ## The Big Picture
 
 <div class="mermaid">

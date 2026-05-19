@@ -1,3 +1,5 @@
+# Deploy Docs — builds MkDocs and publishes to GitHub Pages.
+# Triggers on push to main when docs source files change.
 name: Deploy Docs
 
 on:

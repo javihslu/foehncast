@@ -35,9 +35,7 @@ from foehncast.training_pipeline.train import run_training_pipeline
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Summary state management
-# ---------------------------------------------------------------------------
 
 
 def _training_summary_state(
@@ -125,9 +123,7 @@ def _run_training_stage(
     return result
 
 
-# ---------------------------------------------------------------------------
 # MLflow run introspection
-# ---------------------------------------------------------------------------
 
 
 def _training_run_metrics_and_params(
@@ -158,9 +154,7 @@ def _training_run_snapshot(training_run_id: str) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
 # Pipeline steps (Airflow task callables)
-# ---------------------------------------------------------------------------
 
 
 def run_training_pipeline_step(

@@ -68,9 +68,7 @@ def test_airflow_dag_run_status_reports_terminal_failure() -> None:
     assert result["run"]["dag_run_id"] == "runtime_release__1"
 
 
-# ---------------------------------------------------------------------------
 # CLI entrypoint (main)
-# ---------------------------------------------------------------------------
 
 
 def test_main_health_returns_0_for_healthy_payload(

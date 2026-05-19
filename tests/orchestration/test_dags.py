@@ -19,7 +19,7 @@ from foehncast.airflow_assets import (
     training_request_asset_uri,
 )
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _load_dag_module(

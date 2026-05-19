@@ -47,9 +47,7 @@ from foehncast.pipeline_state import FeaturePipelineState
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # State paths
-# ---------------------------------------------------------------------------
 
 
 def _feature_pipeline_state_root() -> Path:
@@ -78,9 +76,7 @@ def _feature_pipeline_validation_path(run_dir: Path, spot_id: str) -> Path:
     return run_dir / "validation" / f"{spot_id}.json"
 
 
-# ---------------------------------------------------------------------------
 # Frame I/O helpers
-# ---------------------------------------------------------------------------
 
 
 def _write_feature_pipeline_frame(destination: Path, frame: pd.DataFrame) -> None:
@@ -158,9 +154,7 @@ def _read_feature_pipeline_validation(source: Path) -> SimpleNamespace | None:
     )
 
 
-# ---------------------------------------------------------------------------
 # Context helpers
-# ---------------------------------------------------------------------------
 
 
 def _copy_feature_pipeline_context(
@@ -206,9 +200,7 @@ def _feature_pipeline_metric_count(
     return None
 
 
-# ---------------------------------------------------------------------------
 # Result and summary
-# ---------------------------------------------------------------------------
 
 
 def _feature_pipeline_result(
@@ -358,9 +350,7 @@ def _emit_feature_pipeline_summary(
     emit_feature_pipeline_run_summary(summary)
 
 
-# ---------------------------------------------------------------------------
 # Drift helpers (used within the feature store step)
-# ---------------------------------------------------------------------------
 
 
 def _feature_drift_frame(
@@ -411,9 +401,7 @@ def _read_optional_feature_slice(spot_id: str, dataset: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-# ---------------------------------------------------------------------------
 # Pipeline stages (Airflow task callables)
-# ---------------------------------------------------------------------------
 
 
 def _fetch_feature_pipeline_context_state(
@@ -808,9 +796,7 @@ def store_feature_pipeline_job_context(
     return result
 
 
-# ---------------------------------------------------------------------------
 # Convenience runners (all-in-one)
-# ---------------------------------------------------------------------------
 
 
 def _run_feature_pipeline_result(

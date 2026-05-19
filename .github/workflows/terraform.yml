@@ -1,3 +1,7 @@
+# Terraform — manages GCP infrastructure lifecycle.
+# Commands: plan (preview), apply (deploy), destroy (teardown), cleanup (state bucket/vars removal).
+# On push to main: auto-applies if bootstrap is complete.
+# On workflow_dispatch: runs the selected command with optional overrides.
 name: Terraform
 
 on:
@@ -5,6 +9,7 @@ on:
     branches: [main]
     paths:
       - terraform/**
+      - scripts/resolve-terraform-inputs.sh
       - .github/workflows/terraform.yml
   workflow_dispatch:
     inputs:
@@ -224,266 +229,27 @@ jobs:
           REPO_GCP_PROVISION_CLOUD_WORKFLOWS: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
           REPO_GCP_CLOUD_RUN_IMAGE: ${{ steps.repo_config.outputs.cloud_run_image }}
           REPO_GCP_CLOUD_RUN_SERVICE: ${{ steps.repo_config.outputs.cloud_run_service }}
-        run: |
-          set -euo pipefail
-
-          normalize_bool() {
-            local name="$1"
-            local value="$2"
-
-            case "$value" in
-              true|false)
-                printf '%s\n' "$value"
-                ;;
-              *)
-                echo "${name} must resolve to true or false, got '${value}'." >&2
-                exit 1
-                ;;
-            esac
-          }
-
-          normalize_non_negative_integer() {
-            local name="$1"
-            local value="$2"
-
-            if [[ ! "$value" =~ ^[0-9]+$ ]]; then
-              echo "${name} must resolve to a non-negative integer, got '${value}'." >&2
-              exit 1
-            fi
-
-            printf '%s\n' "$value"
-          }
-
-          normalize_positive_integer() {
-            local name="$1"
-            local value="$2"
-
-            value="$(normalize_non_negative_integer "$name" "$value")"
-            if [[ "$value" -lt 1 ]]; then
-              echo "${name} must resolve to an integer greater than zero, got '${value}'." >&2
-              exit 1
-            fi
-
-            printf '%s\n' "$value"
-          }
-
-          project_id="${{ inputs.project_id }}"
-          if [[ -z "$project_id" ]]; then
-            project_id="$REPO_GCP_PROJECT_ID"
-          fi
-
-          if [[ -z "$project_id" ]]; then
-            echo "Set project_id in the workflow input or repository variable GCP_PROJECT_ID." >&2
-            exit 1
-          fi
-
-          region="${{ inputs.region }}"
-          if [[ -z "$region" ]]; then
-            region="$REPO_GCP_LOCATION"
-          fi
-          if [[ -z "$region" ]]; then
-            region='europe-west6'
-          fi
-
-          artifact_bucket_name="${{ inputs.artifact_bucket_name }}"
-          if [[ -z "$artifact_bucket_name" ]]; then
-            artifact_bucket_name="$REPO_GCP_ARTIFACT_BUCKET_NAME"
-          fi
-          if [[ -z "$artifact_bucket_name" ]]; then
-            artifact_bucket_name="foehncast-artifacts-${project_id}"
-          fi
-
-          state_bucket="$REPO_GCP_TERRAFORM_STATE_BUCKET"
-          if [[ -z "$state_bucket" ]]; then
-            state_bucket="${project_id}-foehncast-tfstate"
-          fi
-
-          state_prefix="$REPO_GCP_TERRAFORM_STATE_PREFIX"
-          if [[ -z "$state_prefix" ]]; then
-            state_prefix='terraform/state'
-          fi
-
-          artifact_registry_repository_id="${{ inputs.artifact_registry_repository_id }}"
-          if [[ -z "$artifact_registry_repository_id" ]]; then
-            artifact_registry_repository_id="$REPO_GCP_ARTIFACT_REPOSITORY"
-          fi
-          if [[ -z "$artifact_registry_repository_id" ]]; then
-            artifact_registry_repository_id='foehncast-docker'
-          fi
-
-          bigquery_dataset_id="${{ inputs.bigquery_dataset_id }}"
-          if [[ -z "$bigquery_dataset_id" ]]; then
-            bigquery_dataset_id="$REPO_GCP_BIGQUERY_DATASET"
-          fi
-          if [[ -z "$bigquery_dataset_id" ]]; then
-            bigquery_dataset_id='foehncast'
-          fi
-
-          bigquery_location="${{ inputs.bigquery_location }}"
-          if [[ -z "$bigquery_location" ]]; then
-            bigquery_location="$REPO_GCP_BIGQUERY_LOCATION"
-          fi
-          if [[ -z "$bigquery_location" ]]; then
-            bigquery_location="$region"
-          fi
-
-          bigquery_feature_table_id="${{ inputs.bigquery_feature_table_id }}"
-          if [[ -z "$bigquery_feature_table_id" ]]; then
-            bigquery_feature_table_id="$REPO_GCP_BIGQUERY_TABLE"
-          fi
-          if [[ -z "$bigquery_feature_table_id" ]]; then
-            bigquery_feature_table_id='forecast_features'
-          fi
-
-          feast_online_store_location="${{ inputs.feast_online_store_location }}"
-          if [[ -z "$feast_online_store_location" ]]; then
-            feast_online_store_location="$REPO_GCP_FEAST_ONLINE_STORE_LOCATION"
-          fi
-          if [[ -z "$feast_online_store_location" ]]; then
-            feast_online_store_location="$region"
-          fi
-
-          feast_online_store_database_name="${{ inputs.feast_online_store_database_name }}"
-          if [[ -z "$feast_online_store_database_name" ]]; then
-            feast_online_store_database_name="$REPO_GCP_FEAST_ONLINE_STORE_DATABASE_NAME"
-          fi
-          if [[ -z "$feast_online_store_database_name" ]]; then
-            feast_online_store_database_name='feast-online'
-          fi
-
-          terraform_command="${{ steps.flags.outputs.command }}"
-          destroy_confirmation="${{ inputs.destroy_confirmation }}"
-          cleanup_confirmation="${{ inputs.cleanup_confirmation }}"
-          cleanup_clear_github_actions="${{ inputs.cleanup_clear_github_actions }}"
-          cleanup_delete_state_bucket="${{ inputs.cleanup_delete_state_bucket }}"
-          provision_cloud_run_service="${{ inputs.provision_cloud_run_service }}"
-          if [[ -z "$provision_cloud_run_service" ]]; then
-            provision_cloud_run_service="$REPO_GCP_PROVISION_CLOUD_RUN_SERVICE"
-          fi
-          if [[ -z "$provision_cloud_run_service" ]]; then
-            provision_cloud_run_service='false'
-          fi
-          provision_cloud_run_service="$(normalize_bool provision_cloud_run_service "$provision_cloud_run_service")"
-          mlflow_tracking_uri="${{ inputs.mlflow_tracking_uri }}"
-          if [[ -z "$mlflow_tracking_uri" ]]; then
-            mlflow_tracking_uri="$REPO_GCP_MLFLOW_TRACKING_URI"
-          fi
-          cloud_run_service_name="${{ inputs.cloud_run_service_name }}"
-          if [[ -z "$cloud_run_service_name" ]]; then
-            cloud_run_service_name="$REPO_GCP_CLOUD_RUN_SERVICE_NAME"
-          fi
-          if [[ -z "$cloud_run_service_name" ]]; then
-            cloud_run_service_name="$REPO_GCP_CLOUD_RUN_SERVICE"
-          fi
-          if [[ -z "$cloud_run_service_name" ]]; then
-            cloud_run_service_name='foehncast-serve'
-          fi
-
-          cloud_run_container_port="$REPO_GCP_CLOUD_RUN_CONTAINER_PORT"
-          if [[ -z "$cloud_run_container_port" ]]; then
-            cloud_run_container_port='8080'
-          fi
-          cloud_run_container_port="$(normalize_positive_integer cloud_run_container_port "$cloud_run_container_port")"
-
-          cloud_run_allow_unauthenticated="${{ inputs.cloud_run_allow_unauthenticated }}"
-          if [[ -z "$cloud_run_allow_unauthenticated" ]]; then
-            cloud_run_allow_unauthenticated="$REPO_GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED"
-          fi
-          if [[ -z "$cloud_run_allow_unauthenticated" ]]; then
-            cloud_run_allow_unauthenticated='true'
-          fi
-          cloud_run_allow_unauthenticated="$(normalize_bool cloud_run_allow_unauthenticated "$cloud_run_allow_unauthenticated")"
-
-          cloud_run_min_instance_count="$REPO_GCP_CLOUD_RUN_MIN_INSTANCE_COUNT"
-          if [[ -z "$cloud_run_min_instance_count" ]]; then
-            cloud_run_min_instance_count='0'
-          fi
-          cloud_run_min_instance_count="$(normalize_non_negative_integer cloud_run_min_instance_count "$cloud_run_min_instance_count")"
-
-          cloud_run_max_instance_count="$REPO_GCP_CLOUD_RUN_MAX_INSTANCE_COUNT"
-          if [[ -z "$cloud_run_max_instance_count" ]]; then
-            cloud_run_max_instance_count='2'
-          fi
-          cloud_run_max_instance_count="$(normalize_non_negative_integer cloud_run_max_instance_count "$cloud_run_max_instance_count")"
-          if [[ "$cloud_run_max_instance_count" -lt "$cloud_run_min_instance_count" ]]; then
-            echo "cloud_run_max_instance_count must be greater than or equal to cloud_run_min_instance_count." >&2
-            exit 1
-          fi
-
-          cloud_run_cpu="$REPO_GCP_CLOUD_RUN_CPU"
-          if [[ -z "$cloud_run_cpu" ]]; then
-            cloud_run_cpu='1'
-          fi
-
-          cloud_run_memory="$REPO_GCP_CLOUD_RUN_MEMORY"
-          if [[ -z "$cloud_run_memory" ]]; then
-            cloud_run_memory='512Mi'
-          fi
-
-          provision_cloud_run_mlflow="$REPO_GCP_PROVISION_CLOUD_RUN_MLFLOW"
-          if [[ -z "$provision_cloud_run_mlflow" ]]; then
-            provision_cloud_run_mlflow='false'
-          fi
-          provision_cloud_run_mlflow="$(normalize_bool provision_cloud_run_mlflow "$provision_cloud_run_mlflow")"
-
-          if [[ "$provision_cloud_run_service" == 'true' && "$provision_cloud_run_mlflow" != 'true' && -z "$mlflow_tracking_uri" ]]; then
-            echo "Resolve mlflow_tracking_uri from the workflow input or repository variable GCP_MLFLOW_TRACKING_URI when provision_cloud_run_service is true and provision_cloud_run_mlflow is false." >&2
-            exit 1
-          fi
-
-          cloud_run_ui_prometheus_url="$REPO_GCP_CLOUD_RUN_UI_PROMETHEUS_URL"
-
-          provision_cloud_run_ui="$REPO_GCP_PROVISION_CLOUD_RUN_UI"
-          if [[ -z "$provision_cloud_run_ui" ]]; then
-            provision_cloud_run_ui='false'
-          fi
-          provision_cloud_run_ui="$(normalize_bool provision_cloud_run_ui "$provision_cloud_run_ui")"
-
-          provision_cloud_workflows="$REPO_GCP_PROVISION_CLOUD_WORKFLOWS"
-          if [[ -z "$provision_cloud_workflows" ]]; then
-            provision_cloud_workflows='false'
-          fi
-          provision_cloud_workflows="$(normalize_bool provision_cloud_workflows \"$provision_cloud_workflows\")"
-
-          cloud_run_image=\"$REPO_GCP_CLOUD_RUN_IMAGE\"
-
-          github_owner="${{ github.repository_owner }}"
-          github_repository="${{ github.event.repository.name }}"
-
-          {
-            echo "TF_COMMAND=${terraform_command}"
-            echo "TF_DESTROY_CONFIRMATION=${destroy_confirmation}"
-            echo "TF_CLEANUP_CONFIRMATION=${cleanup_confirmation}"
-            echo "TF_CLEANUP_CLEAR_GITHUB_ACTIONS=${cleanup_clear_github_actions}"
-            echo "TF_CLEANUP_DELETE_STATE_BUCKET=${cleanup_delete_state_bucket}"
-            echo "TF_VAR_cloud_run_image=${cloud_run_image}"
-            echo "TF_VAR_project_id=${project_id}"
-            echo "TF_VAR_region=${region}"
-            echo "TF_VAR_artifact_bucket_name=${artifact_bucket_name}"
-            echo "TF_VAR_artifact_registry_repository_id=${artifact_registry_repository_id}"
-            echo "TF_VAR_bigquery_dataset_id=${bigquery_dataset_id}"
-            echo "TF_VAR_bigquery_location=${bigquery_location}"
-            echo "TF_VAR_bigquery_feature_table_id=${bigquery_feature_table_id}"
-            echo "TF_VAR_feast_online_store_location=${feast_online_store_location}"
-            echo "TF_VAR_feast_online_store_database_name=${feast_online_store_database_name}"
-            echo "TF_VAR_provision_cloud_run_service=${provision_cloud_run_service}"
-            echo "TF_VAR_mlflow_tracking_uri=${mlflow_tracking_uri}"
-            echo "TF_VAR_cloud_run_service_name=${cloud_run_service_name}"
-            echo "TF_VAR_cloud_run_container_port=${cloud_run_container_port}"
-            echo "TF_VAR_cloud_run_allow_unauthenticated=${cloud_run_allow_unauthenticated}"
-            echo "TF_VAR_cloud_run_min_instance_count=${cloud_run_min_instance_count}"
-            echo "TF_VAR_cloud_run_max_instance_count=${cloud_run_max_instance_count}"
-            echo "TF_VAR_cloud_run_cpu=${cloud_run_cpu}"
-            echo "TF_VAR_cloud_run_memory=${cloud_run_memory}"
-            echo "TF_VAR_provision_cloud_run_mlflow=${provision_cloud_run_mlflow}"
-            echo "TF_VAR_cloud_run_ui_prometheus_url=${cloud_run_ui_prometheus_url}"
-            echo "TF_VAR_provision_cloud_run_ui=${provision_cloud_run_ui}"
-            echo "TF_VAR_provision_cloud_workflows=${provision_cloud_workflows}"
-            echo "TF_VAR_github_owner=${github_owner}"
-            echo "TF_VAR_github_repository=${github_repository}"
-            echo "TF_STATE_BUCKET=${state_bucket}"
-            echo "TF_STATE_PREFIX=${state_prefix}"
-          } >> "$GITHUB_ENV"
+          INPUT_PROJECT_ID: ${{ inputs.project_id }}
+          INPUT_REGION: ${{ inputs.region }}
+          INPUT_ARTIFACT_BUCKET_NAME: ${{ inputs.artifact_bucket_name }}
+          INPUT_ARTIFACT_REGISTRY_REPOSITORY_ID: ${{ inputs.artifact_registry_repository_id }}
+          INPUT_BIGQUERY_DATASET_ID: ${{ inputs.bigquery_dataset_id }}
+          INPUT_BIGQUERY_LOCATION: ${{ inputs.bigquery_location }}
+          INPUT_BIGQUERY_FEATURE_TABLE_ID: ${{ inputs.bigquery_feature_table_id }}
+          INPUT_FEAST_ONLINE_STORE_LOCATION: ${{ inputs.feast_online_store_location }}
+          INPUT_FEAST_ONLINE_STORE_DATABASE_NAME: ${{ inputs.feast_online_store_database_name }}
+          INPUT_PROVISION_CLOUD_RUN_SERVICE: ${{ inputs.provision_cloud_run_service }}
+          INPUT_MLFLOW_TRACKING_URI: ${{ inputs.mlflow_tracking_uri }}
+          INPUT_CLOUD_RUN_SERVICE_NAME: ${{ inputs.cloud_run_service_name }}
+          INPUT_CLOUD_RUN_ALLOW_UNAUTHENTICATED: ${{ inputs.cloud_run_allow_unauthenticated }}
+          INPUT_COMMAND: ${{ steps.flags.outputs.command }}
+          INPUT_DESTROY_CONFIRMATION: ${{ inputs.destroy_confirmation }}
+          INPUT_CLEANUP_CONFIRMATION: ${{ inputs.cleanup_confirmation }}
+          INPUT_CLEANUP_CLEAR_GITHUB_ACTIONS: ${{ inputs.cleanup_clear_github_actions }}
+          INPUT_CLEANUP_DELETE_STATE_BUCKET: ${{ inputs.cleanup_delete_state_bucket }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: ./scripts/resolve-terraform-inputs.sh >> "$GITHUB_ENV"
 
       - name: Validate destroy confirmation
         if: ${{ steps.flags.outputs.bootstrap_ready == 'true' && steps.flags.outputs.command == 'destroy' }}
