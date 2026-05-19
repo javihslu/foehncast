@@ -79,7 +79,7 @@ Both DVC stages use the same Python modules as the Airflow DAGs — there's only
 ### Tests
 
 ```bash
-make test          # 452 tests, ~4 seconds
+make test          # 447 tests, ~4 seconds
 make lint          # ruff
 make coverage      # pytest-cov (88%)
 ```
@@ -107,7 +107,7 @@ flowchart LR
     WF -->|schedules pipelines| APP
 ```
 
-Deployment is handled by GitHub Actions + Terraform. See the [Cloud Architecture](https://javihslu.github.io/foehncast/system/cloud-architecture/) docs for details.
+Deployment is handled by Terraform (infrastructure) and Cloud Build triggers (images). See the [Cloud Architecture](https://javihslu.github.io/foehncast/system/cloud-architecture/) docs for details.
 
 ## Repo Layout
 
