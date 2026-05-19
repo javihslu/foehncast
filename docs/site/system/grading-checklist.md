@@ -9,7 +9,8 @@ Clean FTI split, feature store, model registry, containerized deployment.
 | What | Where |
 |------|-------|
 | Feature / Training / Inference split | `src/foehncast/feature_pipeline/`, `training_pipeline/`, `inference_pipeline/` |
-| Airflow DAGs with asset triggers | `dags/feature_dag.py`, `training_dag.py`, `inference_dag.py` |
+| Airflow DAGs with asset triggers (local) | `dags/feature_dag.py`, `training_dag.py`, `inference_dag.py` |
+| Cloud Run jobs + Workflows (cloud) | `terraform/main.tf` — FTI cascade (6 h), drift detection (12 h) |
 | Feature store (Feast) | `feature_repo/` |
 | Model registry (MLflow) | Champion/candidate aliases in `training_pipeline/register.py` |
 | 6 container services | `containers/` (Airflow, MLflow, app, UI, monitoring, dev) |
@@ -28,8 +29,9 @@ Everything runs without manual steps after bootstrap.
 | CI (7 jobs: shell, lint, terraform, dvc, compose, test, docs) | `.github/workflows/ci.yml` |
 | Auto image publishing | Cloud Build triggers (GCP-native, path-filtered) |
 | Infrastructure-as-code | `terraform/main.tf` + `terraform.yml` workflow |
-| Asset-triggered training | Feature DAG → training-request asset → Training DAG |
-| Asset-triggered inference | Model registered → Inference DAG runs batch predictions |
+| Asset-triggered training (local) | Feature DAG → training-request asset → Training DAG |
+| Cloud Workflows cascade (cloud) | Cloud Scheduler → feature → training → inference (scale-to-zero) |
+| Asset-triggered inference (local) | Model registered → Inference DAG runs batch predictions |
 | Pre-commit hooks (8) | `.pre-commit-config.yaml` (ruff, whitespace, YAML, etc.) |
 | Bootstrap scripts | `scripts/bootstrap-local.sh`, `scripts/bootstrap-gcp.sh` |
 | Runtime release + rollback | Cloud Build triggers + Cloud Run probes (automatic rollback) |
@@ -76,6 +78,7 @@ Prometheus metrics, drift detection, alerting, and visualization.
 | Custom Prometheus exporters | `monitoring/pipeline_prometheus.py`, `prediction_prometheus.py` |
 | Combined `/metrics` endpoint | Feature + training + prediction + drift metrics |
 | Drift detection (Evidently) | `monitoring/drift.py` — statistical tests per column |
+| Drift Cloud Run job (12 h schedule) | `terraform/main.tf` — runs `drift.py` on Cloud Run |
 | Hindcast validation | `monitoring/hindcast.py` — predicted vs. observed |
 | Streamlit charts (Altair + PromQL) | `ui/app.py` — system health, drift, pipeline panels |
 | 9 alert rules | `prometheus_config/alerting_rules.yml` |
