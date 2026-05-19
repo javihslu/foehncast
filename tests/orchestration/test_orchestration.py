@@ -932,9 +932,7 @@ def test_run_training_pipeline_step_emits_training_summary(
     assert emitted["summary"]["training_row_count"] == 240
 
 
-# ---------------------------------------------------------------------------
 # Drift detection pipeline steps
-# ---------------------------------------------------------------------------
 
 
 def test_run_feature_drift_detection_step_checks_all_spots(

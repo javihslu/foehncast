@@ -27,9 +27,7 @@ from foehncast.pipeline_stage_tracking import (
 from tests.repo_helpers import read_repo_text
 
 
-# ---------------------------------------------------------------------------
 # 1. Stage boundary stability
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -47,9 +45,7 @@ def test_pipeline_stages_are_ordered_and_complete(
     assert stages == expected
 
 
-# ---------------------------------------------------------------------------
 # 2. Monitoring contracts cover every pipeline stage
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -99,9 +95,7 @@ def test_monitoring_run_contract_tracks_stage_durations_and_failures(
     assert "stage_failure_counts" in run_fields
 
 
-# ---------------------------------------------------------------------------
 # 3. Feature→Training asset linkage
-# ---------------------------------------------------------------------------
 
 
 def test_feature_dag_training_request_asset_matches_training_dag_schedule() -> None:
@@ -120,9 +114,7 @@ def test_curated_feature_store_asset_uri_is_stable() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # 4. Local evaluator smoke covers the full FTI path
-# ---------------------------------------------------------------------------
 
 
 def test_bootstrap_local_runs_feature_then_waits_for_training() -> None:
@@ -160,9 +152,7 @@ def test_bootstrap_local_prepares_monitoring_state_dirs() -> None:
     assert ".state/monitoring" in script
 
 
-# ---------------------------------------------------------------------------
 # 5. CI contract enforces local evaluator smoke
-# ---------------------------------------------------------------------------
 
 
 def test_ci_compose_job_runs_smoke_after_build() -> None:
@@ -176,9 +166,7 @@ def test_ci_compose_job_runs_smoke_after_build() -> None:
     assert "make smoke-local-evaluator" in runs
 
 
-# ---------------------------------------------------------------------------
 # 6. Hosted operator lane exposes equivalent stage evidence
-# ---------------------------------------------------------------------------
 
 
 def test_hosted_dag_bundle_contains_feature_and_training_dags() -> None:
@@ -206,9 +194,7 @@ def test_hosted_operator_terraform_exposes_cloud_run_contract() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # 7. No DVC artefacts exist yet (pre-condition)
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_pipeline_definition_exists() -> None:
@@ -218,9 +204,7 @@ def test_dvc_pipeline_definition_exists() -> None:
     assert (repo_root / ".dvc").is_dir(), ".dvc/ must exist"
 
 
-# ---------------------------------------------------------------------------
 # 8. Stage-to-DAG task mapping consistency
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

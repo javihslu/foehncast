@@ -15,7 +15,6 @@ from foehncast.feature_pipeline.ingest import (
     fetch_spot,
 )
 
-# --- Fixtures ---
 
 MOCK_HOURLY_RESPONSE = {
     "hourly": {
@@ -40,9 +39,6 @@ MOCK_SPOT = {
     "lat": 46.45,
     "lon": 9.79,
 }
-
-
-# --- Unit tests ---
 
 
 class TestHourlyToDataframe:

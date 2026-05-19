@@ -15,9 +15,7 @@ def _load_dvc_yaml() -> dict:
     return yaml.safe_load(read_repo_text("dvc.yaml"))
 
 
-# ---------------------------------------------------------------------------
 # 1. DVC pipeline structure
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_yaml_defines_curate_and_train_stages() -> None:
@@ -58,9 +56,7 @@ def test_dvc_train_stage_produces_metrics() -> None:
     assert any("train_metrics.json" in p for p in metric_paths)
 
 
-# ---------------------------------------------------------------------------
 # 2. DVC stages use the shared entry point
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_curate_command_uses_dvc_stages_module() -> None:
@@ -77,9 +73,7 @@ def test_dvc_train_command_uses_dvc_stages_module() -> None:
     assert "train" in cmd
 
 
-# ---------------------------------------------------------------------------
 # 3. DVC stages align with pipeline stage boundaries
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_curate_covers_feature_pipeline_stages() -> None:
@@ -102,9 +96,7 @@ def test_dvc_train_covers_training_pipeline_stages() -> None:
     assert "label" in dep_text
 
 
-# ---------------------------------------------------------------------------
 # 4. DVC remote configuration
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_config_defines_local_objectstore_remote() -> None:
@@ -119,9 +111,7 @@ def test_dvc_config_uses_minio_endpoint() -> None:
     assert "127.0.0.1:9000" in config_text
 
 
-# ---------------------------------------------------------------------------
 # 5. DVC entry point module exists and is importable
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_stages_module_is_importable() -> None:
@@ -132,9 +122,7 @@ def test_dvc_stages_module_is_importable() -> None:
     assert hasattr(dvc_stages, "main")
 
 
-# ---------------------------------------------------------------------------
 # 6. DVC param keys actually exist in config.yaml
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_params_reference_valid_config_keys() -> None:
@@ -159,9 +147,7 @@ def test_dvc_params_reference_valid_config_keys() -> None:
                         node = node[part]
 
 
-# ---------------------------------------------------------------------------
 # 7. DVC source dependencies exist on disk
-# ---------------------------------------------------------------------------
 
 
 def test_dvc_source_deps_exist() -> None:
