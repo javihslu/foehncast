@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -60,6 +60,20 @@ smoke-local-evaluator:  ## Run the bounded local evaluator smoke and tear the st
 
 bootstrap-gcp:  ## Run the cloud-operator GCP bootstrap (prefer Cloud Shell)
 	cd $(ROOT_DIR) && ./scripts/bootstrap-gcp.sh
+
+cloud-triggers:  ## Setup Cloud Build triggers via Developer Connect (one browser click required)
+	cd $(ROOT_DIR) && ./scripts/setup-cloud-triggers.sh
+
+cloud-data:  ## Backfill 1yr historical data to BigQuery (requires gcloud ADC)
+	cd $(ROOT_DIR) && STORAGE_BACKEND=bigquery uv run python scripts/backfill-history.py --no-push
+
+cloud-verify:  ## Verify Cloud Run services are healthy and BigQuery has data
+	@echo "Checking Cloud Run inference API..."
+	@curl -fsS "$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw cloud_run_service_url)/health" | python3 -m json.tool
+	@echo ""
+	@echo "Checking BigQuery row count..."
+	@bq query --project_id="$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)" --use_legacy_sql=false \
+		'SELECT spot_id, COUNT(*) as row_count FROM `'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_dataset_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_feature_table_id)"'` GROUP BY spot_id ORDER BY spot_id'
 
 terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS='<command> [flags]'
 	cd $(ROOT_DIR) && ./scripts/terraform-remote.sh $(TF_REMOTE_ARGS)

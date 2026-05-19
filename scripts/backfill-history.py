@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -36,6 +37,35 @@ import pandas as pd
 # Ensure the project root is on sys.path so foehncast imports work.
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+# Load .env if present so GCP_PROJECT_ID and STORAGE_* are available.
+_ENV_FILE = _PROJECT_ROOT / ".env"
+if _ENV_FILE.is_file():
+    with open(_ENV_FILE) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                _key = _key.strip()
+                _val = _val.strip().strip('"').strip("'")
+                if _key and _val and _key not in os.environ:
+                    os.environ[_key] = _val
+
+# Fall back to terraform.tfvars for GCP_PROJECT_ID if not set or placeholder.
+_TFVARS_FILE = _PROJECT_ROOT / "terraform" / "terraform.tfvars"
+if (
+    os.environ.get("GCP_PROJECT_ID", "").strip() in ("", "your-gcp-project")
+    and _TFVARS_FILE.is_file()
+):
+    with open(_TFVARS_FILE) as _f:
+        for _line in _f:
+            if _line.strip().startswith("project_id"):
+                _val = _line.split("=", 1)[1].strip().strip('"').strip("'")
+                if _val:
+                    os.environ["GCP_PROJECT_ID"] = _val
+                    if not os.environ.get("STORAGE_BIGQUERY_PROJECT_ID"):
+                        os.environ["STORAGE_BIGQUERY_PROJECT_ID"] = _val
+                break
 
 from foehncast.config import get_rider_config, get_spots  # noqa: E402
 from foehncast.feature_pipeline.engineer import engineer_features  # noqa: E402
