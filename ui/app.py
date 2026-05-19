@@ -626,6 +626,18 @@ def _prom_query(expr: str) -> float | None:
     return None
 
 
+def _prom_query_batch(exprs: list[str]) -> list[float | None]:
+    """Fan out multiple instant PromQL queries in parallel.
+
+    Returns a list of scalar values (or None) in the same order as *exprs*.
+    This eliminates sequential round-trip latency to Cloud Run — critical
+    when the serve container is on a separate Cloud Run instance with
+    ~100-200ms per request.
+    """
+    with ThreadPoolExecutor(max_workers=min(len(exprs), 8)) as pool:
+        return list(pool.map(_prom_query, exprs))
+
+
 @st.cache_data(ttl=15, show_spinner=False)
 def _prom_query_vector(expr: str) -> list[dict[str, Any]]:
     """Run an instant PromQL query and return the full vector result.
@@ -838,29 +850,43 @@ def _render_freshness_bar() -> None:
 
 def _render_sidebar_ml_panels() -> None:
     # --- Model Status (styled card with stats) -------------------------
-    model_ver = _prom_query("foehncast_training_pipeline_registered_model_version")
-    eval_ok = _prom_query("foehncast_training_pipeline_evaluation_report_exists")
-    reg_ok = _prom_query("foehncast_training_pipeline_model_registered")
+    # Batch all sidebar PromQL queries in one parallel fan-out to eliminate
+    # sequential round-trip latency (~100-200ms each on Cloud Run).
+    _sidebar_exprs = [
+        "foehncast_training_pipeline_registered_model_version",
+        "foehncast_training_pipeline_evaluation_report_exists",
+        "foehncast_training_pipeline_model_registered",
+        'foehncast_training_pipeline_run_metric{metric_name="r2"}',
+        'foehncast_training_pipeline_run_metric{metric_name="rmse"}',
+        "foehncast_training_pipeline_feature_count",
+        "foehncast_training_pipeline_row_count",
+        "foehncast_hindcast_accuracy",
+        "foehncast_hindcast_validated_count",
+        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns"})',
+    ]
+    (
+        model_ver,
+        eval_ok,
+        reg_ok,
+        r2_val,
+        rmse_val,
+        feat_count,
+        train_rows,
+        hindcast_acc,
+        hindcast_n,
+        drift_share,
+    ) = _prom_query_batch(_sidebar_exprs)
+
     verified = (eval_ok is not None and eval_ok >= 1) and (
         reg_ok is not None and reg_ok >= 1
     )
     ver_label = f"v{int(model_ver)}" if model_ver is not None else "—"
-
-    r2_val = _prom_query('foehncast_training_pipeline_run_metric{metric_name="r2"}')
-    rmse_val = _prom_query('foehncast_training_pipeline_run_metric{metric_name="rmse"}')
-    feat_count = _prom_query("foehncast_training_pipeline_feature_count")
-    train_rows = _prom_query("foehncast_training_pipeline_row_count")
-    hindcast_acc = _prom_query("foehncast_hindcast_accuracy")
-    hindcast_n = _prom_query("foehncast_hindcast_validated_count")
     # Show "—" when no validated pairs exist (avoids misleading "0%")
     if hindcast_n is not None and hindcast_n < 1:
         hindcast_acc = None
     # Confidence = 1 - share of features whose drift_detected fired.
     # Per-column drift_score is on different scales (PSI, Wasserstein, ...)
     # and can saturate at 1.0, which used to collapse confidence to 0 %.
-    drift_share = _prom_query(
-        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns"})'
-    )
     confidence = (
         max(0.0, min(1.0, 1.0 - drift_share)) if drift_share is not None else None
     )
@@ -1415,6 +1441,11 @@ def _stage_pill_html(name: str, state: float, duration: float) -> str:
 def _chip_value(expr: str, kind: str) -> str:
     """Format a chip's value from an instant PromQL gauge."""
     value = _prom_query(expr)
+    return _format_chip(value, kind)
+
+
+def _format_chip(value: float | None, kind: str) -> str:
+    """Format a pre-fetched chip value."""
     if value is None:
         return "—"
     if kind == "int":
@@ -1506,16 +1537,14 @@ def _render_log_panel(job_name: str) -> None:
     )
 
 
-def _render_pipeline_rail(rail: dict[str, Any]) -> None:
-    """Render one pipeline as a horizontal rail: header / body / metrics."""
-    success = (
-        _prom_query(rail["success_metric"]) if rail.get("success_metric") else None
-    )
-    summary_ts = (
-        _prom_query(rail["summary_ts_metric"])
-        if rail.get("summary_ts_metric")
-        else None
-    )
+def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> None:
+    """Render one pipeline as a horizontal rail: header / body / metrics.
+
+    *prefetched* contains ``success``, ``summary_ts``, and ``chip_values``
+    already resolved by the batched fan-out in _render_pipelines_panel.
+    """
+    success = prefetched["success"]
+    summary_ts = prefetched["summary_ts"]
 
     # Header strip
     header_cols = st.columns([0.55, 0.45])
@@ -1552,10 +1581,12 @@ def _render_pipeline_rail(rail: dict[str, Any]) -> None:
     with body_cols[1]:
         _render_log_panel(_PIPELINE_JOB_NAMES[rail["job_name_key"]])
 
-    # Footer: metric chips
+    # Footer: metric chips (values already resolved by batch fan-out)
     chip_parts: list[str] = []
-    for label, expr, kind in rail["metric_chips"]:
-        value = _chip_value(expr, kind)
+    for (label, _expr, kind), value in zip(
+        rail["metric_chips"], prefetched["chip_values"]
+    ):
+        display = _format_chip(value, kind)
         chip_parts.append(
             f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
             "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
@@ -1563,7 +1594,7 @@ def _render_pipeline_rail(rail: dict[str, Any]) -> None:
             f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
             "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
             f'color:#5f6f7f">{label}</span>'
-            f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{value}</strong>'
+            f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{display}</strong>'
             "</div>"
         )
     st.markdown(
@@ -1580,6 +1611,9 @@ def _render_pipelines_panel() -> None:
     Every visible value is fed by an instant PromQL
     query against the serve container's mini engine, plus a Cloud
     Logging tail per pipeline.
+
+    All scalar PromQL queries for all three rails are batched into a single
+    parallel fan-out to eliminate sequential round-trip latency.
     """
     triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
 
@@ -1606,6 +1640,36 @@ def _render_pipelines_panel() -> None:
             "on the Cloud Run UI service."
         )
 
+    # Pre-fetch ALL scalar metrics for all rails in one parallel batch.
+    # This replaces ~15 sequential HTTP round-trips with one fan-out.
+    all_scalar_exprs: list[str] = []
+    expr_map: list[tuple[int, str]] = []  # (rail_index, "success"|"summary"|chip_idx)
+    for rail_idx, rail in enumerate(_PIPELINE_RAILS):
+        if rail.get("success_metric"):
+            all_scalar_exprs.append(rail["success_metric"])
+            expr_map.append((rail_idx, "success"))
+        if rail.get("summary_ts_metric"):
+            all_scalar_exprs.append(rail["summary_ts_metric"])
+            expr_map.append((rail_idx, "summary"))
+        for chip_idx, (_label, expr, _kind) in enumerate(rail["metric_chips"]):
+            all_scalar_exprs.append(expr)
+            expr_map.append((rail_idx, f"chip_{chip_idx}"))
+
+    batch_results = _prom_query_batch(all_scalar_exprs) if all_scalar_exprs else []
+
+    # Distribute results back to per-rail structures.
+    rail_data: list[dict[str, Any]] = [
+        {"success": None, "summary_ts": None, "chip_values": []}
+        for _ in _PIPELINE_RAILS
+    ]
+    for (rail_idx, key), value in zip(expr_map, batch_results):
+        if key == "success":
+            rail_data[rail_idx]["success"] = value
+        elif key == "summary":
+            rail_data[rail_idx]["summary_ts"] = value
+        elif key.startswith("chip_"):
+            rail_data[rail_idx]["chip_values"].append(value)
+
     # Pipeline rails -------------------------------------------------
     for index, rail in enumerate(_PIPELINE_RAILS):
         if index > 0:
@@ -1614,7 +1678,7 @@ def _render_pipelines_panel() -> None:
                 'margin:14px 0">',
                 unsafe_allow_html=True,
             )
-        _render_pipeline_rail(rail)
+        _render_pipeline_rail(rail, rail_data[index])
 
     # Recent cascade executions -------------------------------------
     st.markdown(
