@@ -1657,6 +1657,126 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
     )
 
 
+def _render_prediction_health() -> None:
+    """Prediction monitoring health panel using PromQL.
+
+    Shows per-model prediction distribution, monitoring execution counts,
+    and freshness indicators for the inference pipeline output.
+    """
+    st.markdown(
+        '<div style="font-family:Manrope,sans-serif;font-weight:800;'
+        'font-size:0.95rem;color:#07252a;letter-spacing:0.01em;padding-bottom:8px">'
+        "Prediction Health</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Batch-fetch all prediction health metrics in parallel.
+    health_exprs = [
+        "foehncast_prediction_log_total_row_count",
+        "foehncast_prediction_log_model_count",
+        "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
+        "foehncast_prediction_monitoring_execution_total",
+        "foehncast_hindcast_accuracy",
+        "foehncast_hindcast_validated_count",
+    ]
+    per_model_query = "foehncast_prediction_log_row_count"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        scalars_future = pool.submit(_prom_query_batch, health_exprs)
+        models_future = pool.submit(_prom_query_vector, per_model_query)
+
+    total_rows, model_count, last_pred_ts, exec_total, hindcast_acc, hindcast_n = (
+        scalars_future.result()
+    )
+    model_results = models_future.result()
+
+    now = _time.time()
+    pred_age = (
+        _fmt_delta(now - last_pred_ts) if last_pred_ts is not None else "unavailable"
+    )
+    # Freshness color
+    if last_pred_ts is None:
+        fresh_color = "#5f6f7f"
+    elif (now - last_pred_ts) < 3600:
+        fresh_color = "#0e8a86"
+    elif (now - last_pred_ts) < 6 * 3600:
+        fresh_color = "#ff7a26"
+    else:
+        fresh_color = "#c0392b"
+
+    # Summary chips row
+    chips = [
+        ("Predictions", f"{int(total_rows)}" if total_rows is not None else "—"),
+        ("Models seen", f"{int(model_count)}" if model_count is not None else "—"),
+        (
+            "Last prediction",
+            f'<span style="color:{fresh_color}">{pred_age}</span>',
+        ),
+        (
+            "Monitor runs",
+            f"{int(exec_total)}" if exec_total is not None else "—",
+        ),
+        (
+            "Hindcast",
+            (
+                f"{hindcast_acc * 100:.0f} % ({int(hindcast_n)} pairs)"
+                if hindcast_acc is not None
+                and hindcast_n is not None
+                and hindcast_n >= 1
+                else "—"
+            ),
+        ),
+    ]
+    chips_html = "".join(
+        f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
+        "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
+        'min-width:100px">'
+        f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
+        "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
+        f'color:#5f6f7f">{label}</span>'
+        f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{value}</strong>'
+        "</div>"
+        for label, value in chips
+    )
+    st.markdown(
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;padding-bottom:10px">'
+        + chips_html
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Per-model prediction count bars
+    if model_results:
+        models_sorted = sorted(model_results, key=lambda x: x["value"], reverse=True)
+        max_count = max(e["value"] for e in models_sorted) if models_sorted else 1
+        bars_html: list[str] = []
+        for entry in models_sorted:
+            version = entry["labels"].get("model_version", "?")
+            count = int(entry["value"])
+            pct = (count / max_count) * 100 if max_count > 0 else 0
+            bars_html.append(
+                f'<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+                f'<span style="font-family:Manrope,sans-serif;font-size:0.72rem;'
+                f'font-weight:600;min-width:50px;color:#07252a">v{version}</span>'
+                f'<div style="flex:1;height:14px;background:rgba(7,37,42,0.06);'
+                f'border-radius:7px;overflow:hidden">'
+                f'<div style="width:{pct:.0f}%;height:100%;background:#0e8a86;'
+                f'border-radius:7px"></div></div>'
+                f'<span style="font-family:Manrope,sans-serif;font-size:0.68rem;'
+                f'font-weight:700;min-width:40px;text-align:right;color:#07252a">'
+                f"{count}</span></div>"
+            )
+        st.markdown(
+            '<div style="padding:4px 0">'
+            '<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
+            "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
+            'color:#5f6f7f">predictions per model version</span>'
+            + "".join(bars_html)
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _render_drift_breakdown() -> None:
     """Per-spot drift heatmap using PromQL vector queries.
 
@@ -1763,14 +1883,32 @@ def _render_pipelines_panel() -> None:
     """
     triggers_available = bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
 
-    # Top toolbar -----------------------------------------------------
-    toolbar = st.columns([1.2, 4])
+    # Top toolbar — cascade + individual pipeline triggers ---------------
+    toolbar = st.columns([1, 1, 1, 1, 1.5])
     cascade_clicked = toolbar[0].button(
-        "DO NOT CLICK",
+        "▶ Cascade",
         type="primary",
         disabled=not triggers_available,
         help="Cloud Workflows: feature → training → inference",
         key="pipe_trigger_cascade",
+    )
+    feat_clicked = toolbar[1].button(
+        "Feature",
+        disabled=not triggers_available,
+        help="Run feature pipeline only",
+        key="pipe_trigger_feature",
+    )
+    train_clicked = toolbar[2].button(
+        "Training",
+        disabled=not triggers_available,
+        help="Run training pipeline only",
+        key="pipe_trigger_training",
+    )
+    infer_clicked = toolbar[3].button(
+        "Inference",
+        disabled=not triggers_available,
+        help="Run inference pipeline only",
+        key="pipe_trigger_inference",
     )
 
     if cascade_clicked:
@@ -1779,6 +1917,19 @@ def _render_pipelines_panel() -> None:
             "Failed to start cascade"
         )
         _list_workflow_executions.clear()
+    if feat_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["feature"])
+        st.success("Feature pipeline triggered") if name else st.error("Trigger failed")
+    if train_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["training"])
+        st.success("Training pipeline triggered") if name else st.error(
+            "Trigger failed"
+        )
+    if infer_clicked:
+        name = _trigger_cloud_run_job(_PIPELINE_JOB_NAMES["inference"])
+        st.success("Inference pipeline triggered") if name else st.error(
+            "Trigger failed"
+        )
 
     if not triggers_available:
         st.caption(
@@ -1911,6 +2062,12 @@ def _render_system_tab() -> None:
         unsafe_allow_html=True,
     )
     _render_drift_breakdown()
+    st.markdown(
+        '<hr style="border:none;border-top:1px solid rgba(7,37,42,0.10);'
+        'margin:18px 0">',
+        unsafe_allow_html=True,
+    )
+    _render_prediction_health()
 
 
 def main() -> None:
