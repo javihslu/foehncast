@@ -8,7 +8,11 @@ from typing import Any
 import pandas as pd
 
 from foehncast.config import get_inference_config, get_rider_config
-from foehncast.inference_pipeline.predict import list_available_spots, predict_spots
+from foehncast.inference_pipeline.predict import (
+    list_available_spots,
+    predict_spots,
+    read_latest_predictions,
+)
 from foehncast.inference_pipeline.rank import rank_spots
 
 _RIDEABLE_QUALITY_THRESHOLD = 2.0
@@ -113,11 +117,36 @@ def horizon_caption(hours: int) -> str:
 
 
 def load_dashboard_data(spot_ids: list[str] | None = None) -> dict[str, Any]:
-    """Load live predictions, rankings, and demo metadata for the Streamlit UI."""
+    """Load live predictions, rankings, and demo metadata for the Streamlit UI.
+
+    Prefers the pre-computed prediction snapshot written by the inference
+    pipeline.  Falls back to live inference only when the snapshot is
+    missing, stale, or doesn't cover the requested spots.
+    """
     resolved_spot_ids = spot_ids or None
     available_spots = list_dashboard_spots()
     rider_profile = get_rider_config()
-    predictions = predict_spots(resolved_spot_ids)
+
+    # Try cached snapshot first (sub-ms read vs multi-second live inference).
+    predictions = read_latest_predictions()
+    if predictions is not None and resolved_spot_ids is not None:
+        # Verify the snapshot covers all requested spots.
+        snapshot_spot_ids = {p["spot_id"] for p in predictions.get("predictions", [])}
+        if not set(resolved_spot_ids).issubset(snapshot_spot_ids):
+            predictions = None
+        else:
+            # Filter the snapshot to only the requested spots.
+            predictions = {
+                "model_version": predictions["model_version"],
+                "predictions": [
+                    p
+                    for p in predictions["predictions"]
+                    if p["spot_id"] in set(resolved_spot_ids)
+                ],
+            }
+    if predictions is None:
+        predictions = predict_spots(resolved_spot_ids)
+
     ranked_spots = rank_spots(predictions, rider_profile)
     prediction_by_spot_id = {
         prediction["spot_id"]: prediction for prediction in predictions["predictions"]

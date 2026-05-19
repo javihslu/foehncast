@@ -16,7 +16,10 @@ def run_inference_pipeline_step() -> dict[str, Any]:
     ``predict_spots()`` for every configured spot, appends the prediction
     log, and emits drift metrics.  Returns the prediction payload dict.
     """
-    from foehncast.inference_pipeline.predict import predict_spots
+    from foehncast.inference_pipeline.predict import (
+        predict_spots,
+        write_latest_predictions,
+    )
     from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
 
     log = logging.getLogger(__name__)
@@ -30,6 +33,9 @@ def run_inference_pipeline_step() -> dict[str, Any]:
         n_spots,
         model_version,
     )
+
+    # Persist snapshot for fast UI reads.
+    write_latest_predictions(prediction_payload)
 
     emit_prediction_drift_metrics(
         prediction_payload,

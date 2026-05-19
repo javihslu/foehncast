@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import time
+from pathlib import Path
 from typing import Any
 
 import mlflow
@@ -21,8 +25,18 @@ from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.monitoring.inference_prometheus import observe_model_confidence
 from foehncast.training_pipeline.register import get_model_by_alias
 
+logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVING_ALIAS = "champion"
+
+_LATEST_PREDICTIONS_DIR = (
+    Path(env_value("FOEHNCAST_STATE_DIR") or ".state") / "predictions"
+)
+_LATEST_PREDICTIONS_PATH = _LATEST_PREDICTIONS_DIR / "latest.json"
+# Maximum age (seconds) before the snapshot is considered stale and live
+# inference is triggered instead.  Default: 7 hours (one full pipeline cycle
+# plus buffer).
+_SNAPSHOT_MAX_AGE_S = int(env_value("FOEHNCAST_PREDICTION_SNAPSHOT_MAX_AGE") or 25200)
 
 
 def _spot_lookup() -> dict[str, dict[str, Any]]:
@@ -140,4 +154,67 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
     return {
         "model_version": get_serving_model_version(alias=serving_alias),
         "predictions": predictions,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Prediction snapshot: pre-computed predictions persisted to disk so the UI
+# can serve them instantly without re-running inference on every page load.
+# ---------------------------------------------------------------------------
+
+
+def write_latest_predictions(payload: dict[str, Any]) -> Path:
+    """Persist the prediction payload as the latest snapshot.
+
+    Called by the inference pipeline orchestrator after a successful run.
+    The snapshot is timestamped so consumers can evaluate freshness.
+    """
+    _LATEST_PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    snapshot = {
+        "written_at": time.time(),
+        "written_iso": pd.Timestamp.now(tz="UTC").isoformat(),
+        **payload,
+    }
+    _LATEST_PREDICTIONS_PATH.write_text(
+        json.dumps(snapshot, default=str), encoding="utf-8"
+    )
+    logger.info("Wrote prediction snapshot to %s", _LATEST_PREDICTIONS_PATH)
+    return _LATEST_PREDICTIONS_PATH
+
+
+def read_latest_predictions(
+    max_age_s: int | None = None,
+) -> dict[str, Any] | None:
+    """Read the latest prediction snapshot if it exists and is fresh.
+
+    Returns the prediction payload dict (same shape as ``predict_spots``
+    output) or *None* if the file is missing, corrupt, or older than
+    *max_age_s* seconds.
+    """
+    age_limit = max_age_s if max_age_s is not None else _SNAPSHOT_MAX_AGE_S
+    if not _LATEST_PREDICTIONS_PATH.is_file():
+        return None
+    try:
+        raw = _LATEST_PREDICTIONS_PATH.read_text(encoding="utf-8")
+        snapshot = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read prediction snapshot; falling back to live.")
+        return None
+
+    written_at = snapshot.get("written_at")
+    if written_at is None:
+        return None
+    age = time.time() - float(written_at)
+    if age > age_limit:
+        logger.info(
+            "Prediction snapshot is %.0f s old (limit %d s); treating as stale.",
+            age,
+            age_limit,
+        )
+        return None
+
+    # Return only the prediction payload fields (strip snapshot metadata).
+    return {
+        "model_version": snapshot.get("model_version", "unknown"),
+        "predictions": snapshot.get("predictions", []),
     }
