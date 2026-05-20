@@ -11,10 +11,10 @@ from foehncast.inference_pipeline.dashboard import (
     load_dashboard_data,
 )
 
-from ui._styles import inject_styles
-from ui._sidebar import render_freshness_bar, render_sidebar_ml_panels
-from ui._rider_console import profile_card, render_rider_console
-from ui._system_tab import render_system_tab
+from _styles import inject_styles
+from _sidebar import render_freshness_bar, render_sidebar_ml_panels
+from _rider_console import profile_card, render_rider_console
+from _system_tab import render_system_tab
 
 st.set_page_config(
     page_title="FoehnCast Rider Console",

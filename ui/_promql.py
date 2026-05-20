@@ -11,7 +11,7 @@ from urllib.parse import quote as urlquote
 
 import streamlit as st
 
-from ui._gcp import gcp_access_token
+from _gcp import gcp_access_token
 
 _PROMETHEUS_BASE_URL = os.getenv(
     "FOEHNCAST_PROMETHEUS_URL", "http://127.0.0.1:9090"

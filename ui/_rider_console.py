@@ -13,7 +13,7 @@ import streamlit as st
 from foehncast.config import get_rider_config, get_spots
 from foehncast.feature_pipeline.ingest import fetch_forecast
 
-from ui._sidebar import render_spot_map
+from _sidebar import render_spot_map
 
 
 def spot_label(spot_lookup: dict[str, dict[str, Any]], spot_id: str) -> str:

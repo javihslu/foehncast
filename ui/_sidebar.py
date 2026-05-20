@@ -11,7 +11,7 @@ import streamlit as st
 
 from foehncast.config import get_rider_config, get_spots
 
-from ui._promql import prom_query, prom_query_batch
+from _promql import prom_query, prom_query_batch
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
 

@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from ui._gcp import (
+from _gcp import (
     PIPELINE_JOB_NAMES,
     list_job_logs,
     list_workflow_executions,
@@ -17,8 +17,8 @@ from ui._gcp import (
     trigger_pipeline,
     triggers_available,
 )
-from ui._promql import prom_query_batch, prom_query_vector
-from ui._sidebar import fmt_delta
+from _promql import prom_query_batch, prom_query_vector
+from _sidebar import fmt_delta
 
 # ---------------------------------------------------------------------------
 # Pipeline rail configuration (PromQL-driven).
