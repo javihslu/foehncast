@@ -1,0 +1,78 @@
+groups:
+  - name: foehncast-service-health
+    interval: 30s
+    rules:
+      - alert: AppDown
+        expr: up{job="foehncast_app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FoehnCast app is down"
+          description: "The foehncast_app target has been unreachable for more than 2 minutes."
+
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, rate(foehncast_http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p95 request latency"
+          description: "95th percentile request latency exceeds 2 seconds for 5 minutes."
+
+      - alert: PredictionErrorRateHigh
+        expr: rate(foehncast_http_requests_total{endpoint="/predict",status=~"5.."}[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Elevated prediction error rate"
+          description: "Server errors on /predict are occurring at more than 0.1/s over the last 15 minutes."
+
+      - alert: StatsdExporterDown
+        expr: up{job="statsd_exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "StatsD exporter is down"
+          description: "The statsd_exporter target has been unreachable for more than 5 minutes."
+
+  - name: foehncast-domain-health
+    interval: 1m
+    rules:
+      - alert: PredictionMonitoringScheduleFailure
+        expr: sum by (endpoint) (increase(foehncast_prediction_monitoring_schedule_total{result="failed"}[15m])) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prediction monitoring schedule failures"
+          description: "Background prediction-monitoring scheduling failures detected for {{ $labels.endpoint }}."
+
+      - alert: PredictionMonitoringExecutionFailure
+        expr: sum by (endpoint) (increase(foehncast_prediction_monitoring_execution_total{result="failed"}[15m])) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prediction monitoring execution failures"
+          description: "Background prediction-monitoring execution failures detected for {{ $labels.endpoint }}."
+
+      - alert: FeaturePipelineStageFailure
+        expr: max by (dataset, storage_backend, stage) (foehncast_feature_pipeline_stage_failure_count) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature pipeline stage failure"
+          description: "Feature pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.storage_backend }}."
+
+      - alert: TrainingPipelineStageFailure
+        expr: max by (dataset, requested_stage, stage) (foehncast_training_pipeline_stage_failure_count) > 0
+        for: 0s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Training pipeline stage failure"
+          description: "Training pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.requested_stage }}."

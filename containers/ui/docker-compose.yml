@@ -1,0 +1,24 @@
+services:
+  ui:
+    container_name: ui
+    build:
+      context: ../..
+      dockerfile: containers/ui/Dockerfile
+    image: ${FOEHNCAST_UI_IMAGE:-foehncast-ui:local}
+    depends_on:
+      app:
+        condition: service_started
+    env_file:
+      - path: ../../.env.example
+        required: false
+      - path: ../../.env
+        required: false
+    environment:
+      MLFLOW_TRACKING_URI: http://model-registry:5001
+      FOEHNCAST_PROMETHEUS_URL: http://prometheus:9090
+    volumes:
+      - ../../.state:/workspace/.state
+    ports:
+      - ${UI_BIND_HOST:-127.0.0.1}:8501:8501
+    networks:
+      - production

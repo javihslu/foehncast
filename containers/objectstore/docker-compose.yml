@@ -1,0 +1,42 @@
+services:
+  objectstore:
+    container_name: objectstore
+    image: minio/minio
+    command: server --address "0.0.0.0:9000" --console-address "0.0.0.0:9001" /data
+    hostname: objectstore
+    ports:
+      - ${OBJECTSTORE_BIND_HOST:-127.0.0.1}:${OBJECTSTORE_PORT:-9000}:9000
+      - ${OBJECTSTORE_BIND_HOST:-127.0.0.1}:${OBJECTSTORE_CONSOLE_PORT:-9001}:9001
+    environment:
+      - MINIO_ROOT_USER=${OBJECTSTORE_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${OBJECTSTORE_SECRET_KEY:-minioadmin123}
+    volumes:
+      - objectstore_data:/data
+    networks:
+      - development
+      - production
+
+  objectstore-init:
+    container_name: objectstore-init
+    image: minio/mc
+    entrypoint:
+      - /bin/sh
+      - /bootstrap/init-objectstore.sh
+    depends_on:
+      - objectstore
+    environment:
+      - OBJECTSTORE_ACCESS_KEY=${OBJECTSTORE_ACCESS_KEY:-minioadmin}
+      - OBJECTSTORE_SECRET_KEY=${OBJECTSTORE_SECRET_KEY:-minioadmin123}
+      - OBJECTSTORE_BUCKET=${OBJECTSTORE_BUCKET:-foehncast-data}
+    volumes:
+      - ./init-objectstore.sh:/bootstrap/init-objectstore.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/objectstore-init-complete"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    networks:
+      - development
+
+volumes:
+  objectstore_data:

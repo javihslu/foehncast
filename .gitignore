@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Environment
+.env
+.venv/
+venv/
+.state/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (tracked via DVC, except committed CI smoke fixtures)
+data/*
+!data/unit_contract_eval/
+data/unit_contract_eval/*
+*.parquet
+*.csv
+!data/unit_contract_eval/*.parquet
+
+# DVC pipeline outputs
+reports/
+!reports/train_metrics.json
+!reports/feature_importance.png
+
+# Keys and secrets
+keys/
+*.pem
+*.key
+*.json
+!config.json
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/terraform.tfvars
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Airflow
+airflow/logs/
+airflow/airflow.db
+airflow/airflow.db-*
+airflow/.init-complete
+airflow/*.pid
+airflow/airflow.cfg
+airflow/webserver_config.py
+airflow/reports/
+airflow/standalone_admin_password.txt
+
+# Misc
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+/site/
+terraform/tfplan
+ui/_profile.py

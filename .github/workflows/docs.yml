@@ -1,0 +1,48 @@
+# Deploy Docs — builds MkDocs and publishes to GitHub Pages.
+# Triggers on push to main when docs source files change.
+name: Deploy Docs
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "docs/site/**"
+            - "docs/mkdocs.yml"
+            - "pyproject.toml"
+            - "uv.lock"
+            - ".github/workflows/docs.yml"
+    workflow_dispatch:
+
+concurrency:
+    group: pages
+    cancel-in-progress: false
+
+jobs:
+    build:
+        if: ${{ github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        steps:
+            - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+            - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+            - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6
+            - run: uv sync --frozen --only-group docs --no-default-groups
+            - run: uv run mkdocs build -f docs/mkdocs.yml --strict
+            - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5
+              with:
+                  path: site/
+
+    deploy:
+        needs: build
+        if: ${{ github.actor == github.repository_owner && github.triggering_actor == github.repository_owner }}
+        runs-on: ubuntu-latest
+        permissions:
+            pages: write
+            id-token: write
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - id: deployment
+              uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128  # v5

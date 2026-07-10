@@ -1,0 +1,58 @@
+# Cloud Build config for the FoehnCast MLflow image.
+#
+# Trigger: Cloud Build trigger fires on push to main when
+# containers/mlflow/ changes (via Developer Connect).
+# The build context is containers/mlflow/ because the MLflow Dockerfile
+# only needs files from that directory.
+#
+# Manual submission (for testing):
+#   gcloud builds submit containers/mlflow \
+#     --config=cloudbuild/mlflow.yaml \
+#     --substitutions=_IMAGE_REPOSITORY=REGION-docker.pkg.dev/PROJECT/REPO/foehncast-mlflow,_COMMIT_SHA=$(git rev-parse HEAD)
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        tags=(-t "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}")
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          tags+=(-t "${_FLOATING_TAG}")
+        fi
+
+        docker build \
+          --platform linux/amd64 \
+          -f containers/mlflow/Dockerfile \
+          "${tags[@]}" \
+          containers/mlflow
+
+        docker push "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          docker push "${_FLOATING_TAG}"
+        fi
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}
+      - --region=${_REGION}
+      - --quiet
+
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+substitutions:
+  _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker/foehncast-mlflow
+  _COMMIT_SHA: ${SHORT_SHA}
+  _FLOATING_TAG: ""
+  _REGION: europe-west6
+  _SERVICE_NAME: foehncast-mlflow

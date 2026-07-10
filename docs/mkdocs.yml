@@ -1,0 +1,87 @@
+site_name: FoehnCast Docs
+site_url: https://javihslu.github.io/foehncast/
+site_description: User guide and system overview for FoehnCast
+repo_url: https://github.com/javihslu/foehncast
+repo_name: javihslu/foehncast
+
+docs_dir: site
+site_dir: ../site
+
+theme:
+  name: material
+  custom_dir: overrides
+  palette:
+    - scheme: default
+      primary: teal
+      accent: deep orange
+  font:
+    text: Manrope
+    code: JetBrains Mono
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
+extra_javascript:
+  - assets/javascripts/mermaid.js
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - tables
+  - pymdownx.emoji:
+      # yaml-language-server-disable Unresolved tag
+      emoji_index:
+        !!python/name:material.extensions.emoji.twemoji # yaml-language-server-disable Unresolved tag
+
+
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Visual tour: tour.md
+  - Getting Started:
+      - Quick Start: getting-started.md
+      - Local Stack: system/local-evaluator.md
+  - System:
+      - Overview: overview.md
+      - Use Case and Data: system/use-case.md
+      - Architecture: system/architecture.md
+      - Repository: system/repository.md
+      - Configuration: system/configuration-and-contracts.md
+      - Interfaces: system/interfaces-and-surfaces.md
+  - Pipelines:
+      - Feature Pipeline: system/feature-pipeline.md
+      - Training Pipeline: system/training-pipeline.md
+      - Inference Pipeline: system/inference-pipeline.md
+  - Operations:
+      - Monitoring: system/monitoring.md
+      - CI/CD: system/ci-cd.md
+      - Operator Runbook: system/delivery-and-operator-workflow.md
+  - Cloud:
+      - Cloud Deployment: system/cloud-architecture.md
+  - For Reviewers:
+      - Grading Checklist: system/grading-checklist.md

@@ -1,0 +1,5 @@
+networks:
+  development:
+    name: development
+  production:
+    name: production

@@ -1,0 +1,172 @@
+"""Model training with scikit-learn."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import matplotlib.pyplot as plt
+import mlflow
+import mlflow.sklearn
+import pandas as pd
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.model_selection import train_test_split
+
+from foehncast.config import (
+    configure_mlflow_auth,
+    get_mlflow_config,
+    get_mlflow_tracking_uri,
+    get_model_config,
+    get_rider_config,
+    get_spots,
+)
+from foehncast.feature_pipeline.engineer import impute_model_features
+from foehncast.feature_pipeline.store import read_features
+from foehncast.training_pipeline.evaluate import compute_metrics
+from foehncast.training_pipeline.label import label_dataset
+from foehncast.training_pipeline.provenance import get_git_commit, hash_dataframe
+
+
+def load_training_data(dataset: str = "train") -> tuple[pd.DataFrame, pd.Series]:
+    """Load all available stored feature data and return model inputs and target."""
+    model_config = get_model_config()
+    rider_config = get_rider_config()
+    labeled_frames: list[pd.DataFrame] = []
+
+    for spot in get_spots():
+        spot_id = spot["id"]
+        try:
+            features_df = read_features(spot_id=spot_id, dataset=dataset)
+        except FileNotFoundError:
+            continue
+
+        if features_df.empty:
+            continue
+
+        labeled_frames.append(label_dataset(features_df, rider_config))
+
+    if not labeled_frames:
+        raise ValueError(f"No training data available for dataset '{dataset}'")
+
+    training_df = pd.concat(labeled_frames, ignore_index=True)
+    feature_columns = model_config["features"]
+    target_column = model_config["target"]
+    missing_columns = sorted(
+        set([*feature_columns, target_column]) - set(training_df.columns)
+    )
+    if missing_columns:
+        missing = ", ".join(missing_columns)
+        raise KeyError(f"Training data is missing required columns: {missing}")
+
+    features = impute_model_features(training_df[feature_columns].copy())
+    return features, training_df[target_column].copy()
+
+
+def _build_model(model_config: dict[str, Any]) -> Any:
+    algorithm = model_config["algorithm"]
+    random_state = model_config["random_state"]
+
+    if algorithm == "random_forest":
+        return RandomForestRegressor(n_estimators=200, random_state=random_state)
+    if algorithm == "gradient_boosting":
+        return GradientBoostingRegressor(random_state=random_state)
+
+    raise ValueError(f"Unsupported model algorithm: {algorithm}")
+
+
+def train_model(
+    features_df: pd.DataFrame, target_series: pd.Series, model_config: dict[str, Any]
+) -> Any:
+    """Fit the configured regression model and return the trained estimator."""
+    model = _build_model(model_config)
+    model.fit(features_df, target_series)
+    return model
+
+
+def _log_feature_importance_plot(model: Any, feature_columns: list[str]) -> None:
+    if not hasattr(model, "feature_importances_"):
+        return
+
+    importance_df = pd.DataFrame(
+        {"feature": feature_columns, "importance": model.feature_importances_}
+    ).sort_values("importance", ascending=True)
+
+    figure, axis = plt.subplots(figsize=(8, 4.5))
+    axis.barh(importance_df["feature"], importance_df["importance"])
+    axis.set_xlabel("Importance")
+    axis.set_ylabel("Feature")
+    axis.set_title("Feature importance")
+    figure.tight_layout()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        plot_path = Path(tmpdir) / "feature_importance.png"
+        figure.savefig(plot_path)
+        mlflow.log_artifact(str(plot_path), artifact_path="plots")
+
+    plt.close(figure)
+
+
+def _model_pip_requirements() -> list[str]:
+    return mlflow.sklearn.get_default_pip_requirements(include_cloudpickle=True)
+
+
+def run_training_pipeline(
+    model_config: dict[str, Any] | None = None, dataset: str = "train"
+) -> str:
+    """Train the configured model, log the run to MLflow, and return the run id."""
+    resolved_model_config = model_config or get_model_config()
+    mlflow_config = get_mlflow_config()
+    resolved_model_name = str(mlflow_config.get("model_name") or "foehncast")
+    mlflow.set_tracking_uri(get_mlflow_tracking_uri())
+    configure_mlflow_auth()
+    mlflow.set_experiment(mlflow_config["experiment_name"])
+
+    features_df, target_series = load_training_data(dataset=dataset)
+    data_hash = hash_dataframe(pd.concat([features_df, target_series], axis=1))
+    (
+        features_train,
+        features_test,
+        target_train,
+        target_test,
+    ) = train_test_split(
+        features_df,
+        target_series,
+        test_size=resolved_model_config["test_size"],
+        random_state=resolved_model_config["random_state"],
+    )
+    model = train_model(features_train, target_train, resolved_model_config)
+    target_pred = model.predict(features_test)
+    metrics = compute_metrics(target_test, target_pred)
+    metrics.update(
+        {
+            "training_input_row_count": float(len(features_df)),
+            "training_feature_count": float(len(features_df.columns)),
+            "training_train_row_count": float(len(features_train)),
+            "training_test_row_count": float(len(features_test)),
+        }
+    )
+
+    with mlflow.start_run(
+        run_name=f"{resolved_model_config['algorithm']}-train"
+    ) as run:
+        mlflow.log_params(
+            {
+                "dataset": dataset,
+                "model_name": resolved_model_name,
+                "algorithm": resolved_model_config["algorithm"],
+                "test_size": resolved_model_config["test_size"],
+                "random_state": resolved_model_config["random_state"],
+                "features": ",".join(resolved_model_config["features"]),
+                "git_commit": get_git_commit(),
+                "data_hash": data_hash,
+            }
+        )
+        mlflow.log_metrics(metrics)
+        mlflow.sklearn.log_model(
+            model,
+            name="model",
+            pip_requirements=_model_pip_requirements(),
+        )
+        _log_feature_importance_plot(model, resolved_model_config["features"])
+        return run.info.run_id

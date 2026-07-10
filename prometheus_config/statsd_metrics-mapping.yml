@@ -1,0 +1,10 @@
+mappings:
+  # Future drift metrics follow the planned issue #17 contract:
+  # drift_metrics.<dataset>.<version>.<column>.<metric>
+  - match: "drift_metrics.*.*.*.*"
+    name: "foehncast_drift_metric"
+    labels:
+      dataset_name: "$1"
+      dataset_version: "$2"
+      column_name: "$3"
+      metric_name: "$4"
