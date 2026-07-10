@@ -10,9 +10,15 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-from foehncast.config import get_labeling_config, get_rider_config, get_spots
+from foehncast.config import (
+    get_api_config,
+    get_labeling_config,
+    get_rider_config,
+    get_spots,
+)
 from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.inference_pipeline.dashboard import _RIDEABLE_QUALITY_THRESHOLD
+from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
 from _wind_map import render_wind_map
 
@@ -57,31 +63,30 @@ _DAY_AXIS = alt.Axis(
 )
 
 
-def _night_bands(t_min: pd.Timestamp, t_max: pd.Timestamp) -> pd.DataFrame:
-    """Night rectangles spanning 18:00 to 06:00.
-
-    Uses fixed 6 pm/6 am marks as a stand-in for sunset/sunrise so the chart
-    shades the dark hours without depending on a solar-position lookup.
-    """
-    start = t_min.normalize() - pd.Timedelta(days=1)
-    nights: list[dict[str, pd.Timestamp]] = []
-    day = start
-    while day <= t_max.normalize() + pd.Timedelta(days=1):
-        nights.append(
-            {
-                "x": day + pd.Timedelta(hours=18),
-                "x2": day + pd.Timedelta(days=1, hours=6),
-            }
-        )
-        day = day + pd.Timedelta(days=1)
-    return pd.DataFrame(nights)
+# One-hue ramp for the ordered elevation series; gusts differ by dash too.
+_ELEVATION_COLORS = {
+    "10m": "#5fa7a1",
+    "80m": "#20837c",
+    "120m": "#0b5e60",
+    "gusts": "#3b5a5a",
+}
 
 
-def _night_rect(t_min: pd.Timestamp, t_max: pd.Timestamp) -> alt.Chart:
-    """Altair layer shading night segments with a dark, low-opacity fill."""
+def _night_bands(
+    t_min: pd.Timestamp, t_max: pd.Timestamp, lat: float, lon: float
+) -> pd.DataFrame:
+    """Dusk-to-dawn rectangles for the spot, from real solar geometry."""
+    intervals = night_intervals(lat, lon, t_min, t_max)
+    return pd.DataFrame([{"x": lo, "x2": hi} for lo, hi in intervals])
+
+
+def _night_rect(
+    t_min: pd.Timestamp, t_max: pd.Timestamp, lat: float, lon: float
+) -> alt.Chart:
+    """Altair layer obscuring night hours with a dark wash."""
     return (
-        alt.Chart(_night_bands(t_min, t_max))
-        .mark_rect(color="#07252a", opacity=0.16)
+        alt.Chart(_night_bands(t_min, t_max, lat, lon))
+        .mark_rect(color="#07252a", opacity=0.28)
         .encode(x="x:T", x2="x2:T")
     )
 
@@ -254,12 +259,20 @@ def render_rider_console(
     focus_spot_id = st.session_state.get("rider_focus_spot") or default_focus
 
     if focus_spot_id is not None:
+        spot_cfg = next(s for s in get_spots() if s["id"] == focus_spot_id)
+        spot_lat, spot_lon = float(spot_cfg["lat"]), float(spot_cfg["lon"])
+        display_tz = get_api_config()["open_meteo"]["timezone"]
+
         # Quality index timeline
         predictions_list = dashboard_data.get("predictions", [])
         quality_frame = spot_quality_timeline(
             focus_spot_id, json.dumps(predictions_list, default=str)
         )
         if not quality_frame.empty:
+            quality_frame["time"] = quality_frame["time"].dt.tz_convert(display_tz)
+            quality_frame["is_day"] = is_daylight(
+                spot_lat, spot_lon, pd.DatetimeIndex(quality_frame["time"])
+            ).to_numpy()
             st.subheader(f"Ride quality — {spot_label(spot_lookup, focus_spot_id)}")
             q_tz = quality_frame["time"].dt.tz
             q_now = (
@@ -277,36 +290,50 @@ def render_rider_console(
                 for s in ["Predicted (past)", "Observed", "Forecast"]
                 if s in quality_frame["series"].unique()
             ]
-            q_lines = (
-                alt.Chart(quality_frame)
-                .mark_line(interpolate="monotone", strokeWidth=2.2, point=True)
-                .encode(
-                    x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
-                    y=alt.Y(
-                        "quality_index:Q",
-                        title="Quality index",
-                        scale=alt.Scale(domain=[0, 5]),
-                    ),
-                    color=alt.Color(
-                        "series:N",
-                        scale=alt.Scale(
-                            domain=series_present,
-                            range=[series_colors[s] for s in series_present],
+
+            def q_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
+                return (
+                    alt.Chart(data)
+                    .mark_line(
+                        interpolate="monotone",
+                        strokeWidth=1.6 if dim else 2.2,
+                        point=not dim,
+                        opacity=0.3 if dim else 1.0,
+                    )
+                    .encode(
+                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
+                        y=alt.Y(
+                            "quality_index:Q",
+                            title="Quality index",
+                            scale=alt.Scale(domain=[0, 5]),
                         ),
-                        legend=alt.Legend(title="Series", orient="top"),
-                    ),
-                    strokeDash=alt.StrokeDash(
-                        "series:N",
-                        scale=alt.Scale(
-                            domain=series_present,
-                            range=[
-                                [4, 4] if s == "Predicted (past)" else [1, 0]
-                                for s in series_present
-                            ],
+                        color=alt.Color(
+                            "series:N",
+                            scale=alt.Scale(
+                                domain=series_present,
+                                range=[series_colors[s] for s in series_present],
+                            ),
+                            legend=None
+                            if dim
+                            else alt.Legend(title="Series", orient="top"),
                         ),
-                        legend=None,
-                    ),
+                        strokeDash=alt.StrokeDash(
+                            "series:N",
+                            scale=alt.Scale(
+                                domain=series_present,
+                                range=[
+                                    [4, 4] if s == "Predicted (past)" else [1, 0]
+                                    for s in series_present
+                                ],
+                            ),
+                            legend=None,
+                        ),
+                    )
                 )
+
+            # Night hours render dimmed underneath; daylight at full strength.
+            q_lines = q_layer(quality_frame, dim=True) + q_layer(
+                quality_frame[quality_frame["is_day"]], dim=False
             )
             q_now_rule = (
                 alt.Chart(pd.DataFrame({"x": [q_now]}))
@@ -335,7 +362,10 @@ def render_rider_console(
                 .encode(y="y:Q", text="label:N")
             )
             q_night = _night_rect(
-                quality_frame["time"].min(), quality_frame["time"].max()
+                quality_frame["time"].min(),
+                quality_frame["time"].max(),
+                spot_lat,
+                spot_lon,
             )
             st.altair_chart(
                 (q_night + q_lines + q_threshold + q_threshold_label + q_now_rule)
@@ -378,31 +408,60 @@ def render_rider_console(
             elevations_present = [
                 e for e in elevation_order if e in timeline_frame["elevation"].unique()
             ]
+            timeline_frame["is_day"] = is_daylight(
+                spot_lat, spot_lon, pd.DatetimeIndex(timeline_frame["time"])
+            ).to_numpy()
 
             night_rect = _night_rect(
-                timeline_frame["time"].min(), timeline_frame["time"].max()
+                timeline_frame["time"].min(),
+                timeline_frame["time"].max(),
+                spot_lat,
+                spot_lon,
             )
 
-            lines = (
-                alt.Chart(timeline_frame)
-                .mark_line(interpolate="monotone", strokeWidth=2.2)
-                .encode(
-                    x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
-                    y=alt.Y(
-                        "wind_speed:Q",
-                        title="Wind speed (km/h)",
-                    ),
-                    color=alt.Color(
-                        "elevation:N",
-                        scale=alt.Scale(
-                            domain=elevations_present,
-                            range=["#3b5a5a", "#0e8a86", "#ff7a26", "#8e44ad"][
-                                : len(elevations_present)
-                            ],
+            def wind_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
+                return (
+                    alt.Chart(data)
+                    .mark_line(
+                        interpolate="monotone",
+                        strokeWidth=1.6 if dim else 2.2,
+                        opacity=0.3 if dim else 1.0,
+                    )
+                    .encode(
+                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
+                        y=alt.Y(
+                            "wind_speed:Q",
+                            title="Wind speed (km/h)",
                         ),
-                        legend=alt.Legend(title="Elevation", orient="top"),
-                    ),
+                        color=alt.Color(
+                            "elevation:N",
+                            scale=alt.Scale(
+                                domain=elevations_present,
+                                range=[
+                                    _ELEVATION_COLORS[e] for e in elevations_present
+                                ],
+                            ),
+                            legend=None
+                            if dim
+                            else alt.Legend(title="Elevation", orient="top"),
+                        ),
+                        strokeDash=alt.StrokeDash(
+                            "elevation:N",
+                            scale=alt.Scale(
+                                domain=elevations_present,
+                                range=[
+                                    [5, 4] if e == "gusts" else [1, 0]
+                                    for e in elevations_present
+                                ],
+                            ),
+                            legend=None,
+                        ),
+                    )
                 )
+
+            # Night hours render dimmed underneath; daylight at full strength.
+            lines = wind_layer(timeline_frame, dim=True) + wind_layer(
+                timeline_frame[timeline_frame["is_day"]], dim=False
             )
             threshold = (
                 alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
@@ -433,8 +492,44 @@ def render_rider_console(
                 .mark_rule(color="#ff7a26", strokeWidth=2)
                 .encode(x="x:T")
             )
+            # Solar-elevation curve along the chart bottom, pre-scaled into
+            # wind-speed units so it shares the axis without a second scale.
+            strip_times = pd.date_range(
+                timeline_frame["time"].min().floor("h"),
+                timeline_frame["time"].max().ceil("h"),
+                freq="30min",
+            )
+            elevation = solar_elevation_deg(spot_lat, spot_lon, strip_times).clip(
+                lower=0.0
+            )
+            peak = float(elevation.max()) or 1.0
+            band_kmh = 0.12 * max(
+                float(timeline_frame["wind_speed"].max()), threshold_kmh
+            )
+            solar_frame = pd.DataFrame(
+                {
+                    "time": strip_times,
+                    "solar": elevation.to_numpy() / peak * band_kmh,
+                }
+            )
+            solar_area = (
+                alt.Chart(solar_frame)
+                .mark_area(
+                    color="#1f5e44",
+                    opacity=0.22,
+                    line={"color": "#1f5e44", "strokeWidth": 1.0},
+                )
+                .encode(x="time:T", y="solar:Q")
+            )
             st.altair_chart(
-                (night_rect + lines + threshold + threshold_label + now_rule)
+                (
+                    night_rect
+                    + solar_area
+                    + lines
+                    + threshold
+                    + threshold_label
+                    + now_rule
+                )
                 .properties(height=300, background="transparent")
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
@@ -485,7 +580,7 @@ def render_rider_console(
                     [f"{float(s['quality_index']):.2f}" for s in ranked_spots],
                 ),
                 (
-                    "Rideable hrs",
+                    "Rideable hrs (day)",
                     [f"{int(s['rideable_hours'])}" for s in ranked_spots],
                 ),
                 (
