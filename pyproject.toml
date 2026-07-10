@@ -45,7 +45,7 @@ dev = [
     "pytest-cov>=6.0",
     "pytest-mock>=3.0",
     "ipykernel>=6.0",
-    "jupyterlab>=4.2.0",
+    "jupyterlab>=4.5.9",
     "dvc>=3.50",
     "dvc-s3>=3.0",
 ]
