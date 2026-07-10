@@ -125,8 +125,10 @@ def test_render_prediction_log_prometheus_metrics_reads_durable_history_by_defau
         lambda: predictions_log,
     )
 
-    payload = prediction_log_prometheus.render_prediction_log_prometheus_metrics().decode(
-        "utf-8"
+    payload = (
+        prediction_log_prometheus.render_prediction_log_prometheus_metrics().decode(
+            "utf-8"
+        )
     )
 
     assert "foehncast_prediction_log_total_row_count 1.0" in payload
