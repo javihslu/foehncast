@@ -1,0 +1,172 @@
+"""Compute derived forecast features for the model."""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+
+def _timestamp_index(df: pd.DataFrame) -> pd.DatetimeIndex:
+    if isinstance(df.index, pd.DatetimeIndex):
+        return df.index
+    if "time" in df.columns:
+        return pd.DatetimeIndex(pd.to_datetime(df["time"]))
+    raise KeyError("Feature engineering requires a DatetimeIndex or 'time' column")
+
+
+def hour_of_day_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the forecast hour."""
+    timestamps = _timestamp_index(df)
+    hour_of_day = (
+        timestamps.hour + timestamps.minute / 60.0 + timestamps.second / 3600.0
+    )
+    values = np.sin(2 * np.pi * hour_of_day / 24.0)
+    return pd.Series(values, index=df.index, name="hour_of_day_sin")
+
+
+def hour_of_day_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the forecast hour."""
+    timestamps = _timestamp_index(df)
+    hour_of_day = (
+        timestamps.hour + timestamps.minute / 60.0 + timestamps.second / 3600.0
+    )
+    values = np.cos(2 * np.pi * hour_of_day / 24.0)
+    return pd.Series(values, index=df.index, name="hour_of_day_cos")
+
+
+def day_of_year_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the day of year."""
+    timestamps = _timestamp_index(df)
+    day_of_year = timestamps.dayofyear - 1
+    days_in_year = np.where(timestamps.is_leap_year, 366.0, 365.0)
+    values = np.sin(2 * np.pi * day_of_year / days_in_year)
+    return pd.Series(values, index=df.index, name="day_of_year_sin")
+
+
+def day_of_year_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical encoding of the day of year."""
+    timestamps = _timestamp_index(df)
+    day_of_year = timestamps.dayofyear - 1
+    days_in_year = np.where(timestamps.is_leap_year, 366.0, 365.0)
+    values = np.cos(2 * np.pi * day_of_year / days_in_year)
+    return pd.Series(values, index=df.index, name="day_of_year_cos")
+
+
+def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add simple cyclical time features from each forecast timestamp."""
+    out = df.copy()
+    out["hour_of_day_sin"] = hour_of_day_sin(df)
+    out["hour_of_day_cos"] = hour_of_day_cos(df)
+    out["day_of_year_sin"] = day_of_year_sin(df)
+    out["day_of_year_cos"] = day_of_year_cos(df)
+    return out
+
+
+def wind_direction_10m_sin(df: pd.DataFrame) -> pd.Series:
+    """Cyclical sine encoding of 10m wind direction in degrees."""
+    values = np.sin(np.radians(df["wind_direction_10m"]))
+    return pd.Series(values, index=df.index, name="wind_direction_10m_sin")
+
+
+def wind_direction_10m_cos(df: pd.DataFrame) -> pd.Series:
+    """Cyclical cosine encoding of 10m wind direction in degrees."""
+    values = np.cos(np.radians(df["wind_direction_10m"]))
+    return pd.Series(values, index=df.index, name="wind_direction_10m_cos")
+
+
+def add_direction_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add cyclical encodings for raw direction features used by the model."""
+    out = df.copy()
+    out["wind_direction_10m_sin"] = wind_direction_10m_sin(df)
+    out["wind_direction_10m_cos"] = wind_direction_10m_cos(df)
+    return out
+
+
+def wind_steadiness(df: pd.DataFrame, window: int = 3) -> pd.Series:
+    """Coefficient of variation of 10m wind over a rolling window.
+
+    Low values indicate consistent, kiteable conditions.
+
+    Args:
+        df: DataFrame with ``wind_speed_10m`` column (hourly).
+        window: Rolling window size in hours.
+
+    Returns:
+        Series of CV values (std / mean). NaN where mean is zero.
+    """
+    rolling_mean = df["wind_speed_10m"].rolling(window, min_periods=1).mean()
+    rolling_std = df["wind_speed_10m"].rolling(window, min_periods=1).std(ddof=0)
+    return (rolling_std / rolling_mean).replace([np.inf, -np.inf], np.nan)
+
+
+def gust_excess_10m(df: pd.DataFrame) -> pd.Series:
+    """Absolute gust surplus above sustained 10m wind.
+
+    Unlike a ratio, this difference stays well-behaved at low wind speeds while
+    still capturing how far gusts exceed the sustained baseline.
+
+    Args:
+        df: DataFrame with ``wind_gusts_10m`` and ``wind_speed_10m``.
+
+    Returns:
+        Series of nonnegative gust-minus-sustained wind in km/h.
+    """
+    values = (df["wind_gusts_10m"] - df["wind_speed_10m"]).clip(lower=0.0)
+    return pd.Series(values, index=df.index, name="gust_excess_10m")
+
+
+def gust_factor(df: pd.DataFrame) -> pd.Series:
+    """Ratio of gust speed to sustained wind.
+
+    High values indicate dangerous, gusty conditions.
+
+    Args:
+        df: DataFrame with ``wind_gusts_10m`` and ``wind_speed_10m``.
+
+    Returns:
+        Series of gust-to-sustained ratios. NaN where sustained is zero.
+    """
+    return (df["wind_gusts_10m"] / df["wind_speed_10m"]).replace(
+        [np.inf, -np.inf], np.nan
+    )
+
+
+def add_gust_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add gustiness features used by labeling and the model."""
+    out = df.copy()
+    out["gust_excess_10m"] = gust_excess_10m(df)
+    out["gust_factor"] = gust_factor(df)
+    return out
+
+
+def shore_alignment(df: pd.DataFrame, shore_orientation_deg: float) -> pd.Series:
+    """Cosine alignment of the wind with the spot's ideal wind direction.
+
+    Wind blowing from the configured direction scores 1.0; the opposite
+    direction scores -1.0.
+    """
+    angle_diff = np.radians(df["wind_direction_10m"] - shore_orientation_deg)
+    return np.cos(angle_diff)
+
+
+def impute_model_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Fill missing feature values the same way for training and inference."""
+    return frame.ffill().bfill().fillna(0.0)
+
+
+def engineer_features(df: pd.DataFrame, shore_orientation_deg: float) -> pd.DataFrame:
+    """Add all engineered features to a spot forecast DataFrame.
+
+    Args:
+        df: Raw forecast DataFrame from ingest (must have
+            ``wind_speed_10m``, ``wind_gusts_10m``, ``wind_direction_10m``).
+        shore_orientation_deg: Shore orientation for the spot.
+
+    Returns:
+        DataFrame with added columns for cyclical time, wind steadiness,
+        wind direction, gustiness, and shore alignment.
+    """
+    out = add_gust_features(add_direction_features(add_time_features(df)))
+    out["wind_steadiness"] = wind_steadiness(df)
+    out["shore_alignment"] = shore_alignment(df, shore_orientation_deg)
+    return out

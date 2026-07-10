@@ -1,0 +1,31 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        tags=(-t "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}")
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          tags+=(-t "${_FLOATING_TAG}")
+        fi
+
+        docker build -f "${_DOCKERFILE}" "${tags[@]}" "${_BUILD_CONTEXT}"
+        docker push "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+        if [[ -n "${_FLOATING_TAG}" ]]; then
+          docker push "${_FLOATING_TAG}"
+        fi
+
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}"
+
+substitutions:
+  _BUILD_CONTEXT: .
+  _DOCKERFILE: containers/app/Dockerfile
+  _IMAGE_REPOSITORY: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker/foehncast-app
+  _COMMIT_SHA: ${SHORT_SHA}
+  _FLOATING_TAG: ""

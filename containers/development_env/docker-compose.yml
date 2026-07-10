@@ -1,0 +1,35 @@
+services:
+  development_env:
+    container_name: development_env
+    profiles:
+      - local-only
+    build:
+      context: ../..
+      dockerfile: containers/development_env/Dockerfile
+    working_dir: /workspace
+    depends_on:
+      - model-registry
+    env_file:
+      - path: ../../.env.example
+        required: false
+      - path: ../../.env
+        required: false
+    environment:
+      UV_PROJECT_ENVIRONMENT: /home/appuser/.venv
+      PATH: /home/appuser/.venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PYTHONPATH: /workspace/src
+      # Use the Compose service name inside the Docker network.
+      MLFLOW_TRACKING_URI: http://model-registry:5001
+      GOOGLE_CLOUD_PROJECT: ${GCP_PROJECT_ID:-}
+      GIT_PYTHON_REFRESH: quiet
+    volumes:
+      - ../../:/workspace
+      - development_env_workspace_venv:/workspace/.venv
+    ports:
+      - 127.0.0.1:8888:8888
+    networks:
+      - development
+      - production
+
+volumes:
+  development_env_workspace_venv:

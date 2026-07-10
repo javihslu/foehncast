@@ -1,0 +1,168 @@
+# CI — runs on every PR and push to main.
+# Gate job restricts execution to the repository owner and Dependabot.
+# Jobs run in parallel after the gate passes.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Single access-control check. All other jobs depend on this.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      compose: ${{ steps.filter.outputs.compose }}
+    steps:
+      - name: Verify owner
+        if: ${{ (github.actor != github.repository_owner && github.actor != 'dependabot[bot]') || (github.event_name == 'pull_request' && github.triggering_actor != github.repository_owner && github.triggering_actor != 'dependabot[bot]') }}
+        run: |
+          echo "::notice::Skipping CI — only the repository owner and Dependabot can trigger runs."
+          exit 1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+        id: filter
+        with:
+          filters: |
+            compose:
+              - 'src/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'docker-compose*.yml'
+              - 'docker_includes/**'
+              - 'containers/**'
+              - 'Dockerfile*'
+              - 'Makefile'
+              - 'scripts/bootstrap-local.sh'
+              - 'scripts/smoke-local-evaluator.sh'
+              - 'config.yaml'
+              - '.github/workflows/ci.yml'
+
+  # Validates Docker Compose configs and builds key images.
+  compose:
+    needs: gate
+    if: ${{ needs.gate.outputs.compose == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: docker compose -f docker-compose.yml config
+      - run: GCP_PROJECT_ID=ci-validate docker compose -f docker-compose.yml -f docker-compose.gcp.yml config
+      - run: docker compose -f docker-compose.yml build model-registry app airflow-webserver
+      - run: make smoke-local-evaluator
+
+  # Syntax-checks all bash scripts and validates --help output.
+  shell:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: bash -n scripts/*.sh
+      - run: bash scripts/terraform-remote.sh --help >/dev/null
+      - run: bash scripts/smoke-bootstrap-only.sh --repo example/foehncast --project-id fcast-smoke-ci --dry-run >/dev/null
+      - run: bash scripts/teardown-gcp.sh --help >/dev/null
+      - run: bash scripts/teardown-gcp.sh --plan-only >/dev/null
+
+  # Validates Terraform syntax and formatting (no remote state needed).
+  terraform:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+      - run: terraform -chdir=terraform init -backend=false
+      - run: terraform -chdir=terraform fmt -check
+      - run: terraform -chdir=terraform validate
+
+  # Ruff check + format verification.
+  lint:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  # Runs the full pytest suite.
+  test:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest tests/ -v
+
+  # Validates pipeline DAG, checks for parameter drift, verifies lockfile.
+  dvc:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Validate pipeline DAG
+        run: uv run dvc dag
+      - name: Check parameter drift
+        run: |
+          diff_output=$(uv run dvc params diff 2>&1) || true
+          echo "$diff_output"
+          if echo "$diff_output" | grep -q '"new"'; then
+            echo "::warning::DVC parameters have changed — run 'dvc repro' to update dvc.lock"
+          fi
+      - name: Verify lockfile is committed
+        run: |
+          if [ ! -f dvc.lock ]; then
+            echo "::error::dvc.lock is missing — run 'dvc repro' to generate it"
+            exit 1
+          fi
+          if ! git diff --quiet dvc.lock; then
+            echo "::error::dvc.lock has uncommitted changes"
+            exit 1
+          fi
+      - name: Check source dependencies exist
+        run: |
+          uv run python -c "
+          import yaml, sys
+          from pathlib import Path
+          dvc = yaml.safe_load(Path('dvc.yaml').read_text())
+          missing = []
+          for name, stage in dvc['stages'].items():
+              for dep in stage.get('deps', []):
+                  if dep.startswith('src/') and not Path(dep).exists():
+                      missing.append(f'{name}: {dep}')
+          if missing:
+              print('Missing source dependencies:', file=sys.stderr)
+              for m in missing:
+                  print(f'  {m}', file=sys.stderr)
+              sys.exit(1)
+          print('All source dependencies present')
+          "
+
+  # Builds MkDocs with --strict to catch broken links.
+  docs:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --only-group docs --no-default-groups
+      - run: uv run mkdocs build -f docs/mkdocs.yml --strict
