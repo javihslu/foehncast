@@ -1,0 +1,140 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+name: Load GCP Repository Config
+description: Load normalized GCP-related repository variables from toJson(vars)
+
+inputs:
+  repo-vars-json:
+    description: JSON-encoded repository variables from toJson(vars)
+    required: true
+
+outputs:
+  project_id:
+    description: GCP project ID repository variable
+    value: ${{ steps.repo_config.outputs.project_id }}
+  location:
+    description: GCP region repository variable
+    value: ${{ steps.repo_config.outputs.location }}
+  artifact_bucket_name:
+    description: Artifact bucket repository variable
+    value: ${{ steps.repo_config.outputs.artifact_bucket_name }}
+  artifact_repository:
+    description: Artifact Registry repository variable
+    value: ${{ steps.repo_config.outputs.artifact_repository }}
+  bigquery_dataset:
+    description: BigQuery dataset repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_dataset }}
+  bigquery_location:
+    description: BigQuery location repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_location }}
+  bigquery_table:
+    description: BigQuery table repository variable
+    value: ${{ steps.repo_config.outputs.bigquery_table }}
+  feast_online_store_location:
+    description: Feast online store location repository variable
+    value: ${{ steps.repo_config.outputs.feast_online_store_location }}
+  feast_online_store_database_name:
+    description: Feast online store database name repository variable
+    value: ${{ steps.repo_config.outputs.feast_online_store_database_name }}
+  provision_cloud_run_service:
+    description: Cloud Run provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_service }}
+  cloud_run_service_name:
+    description: Configured Cloud Run service name repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_service_name }}
+  cloud_run_container_port:
+    description: Configured Cloud Run container port repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_container_port }}
+  cloud_run_allow_unauthenticated:
+    description: Configured Cloud Run unauthenticated access repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_allow_unauthenticated }}
+  cloud_run_min_instance_count:
+    description: Configured Cloud Run minimum instance count repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_min_instance_count }}
+  cloud_run_max_instance_count:
+    description: Configured Cloud Run maximum instance count repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_max_instance_count }}
+  cloud_run_cpu:
+    description: Configured Cloud Run CPU limit repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_cpu }}
+  cloud_run_memory:
+    description: Configured Cloud Run memory limit repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_memory }}
+  mlflow_tracking_uri:
+    description: MLflow tracking URI repository variable
+    value: ${{ steps.repo_config.outputs.mlflow_tracking_uri }}
+  provision_cloud_run_mlflow:
+    description: Cloud Run MLflow provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_mlflow }}
+  provision_cloud_run_ui:
+    description: Cloud Run UI provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_run_ui }}
+  cloud_run_ui_prometheus_url:
+    description: UI Prometheus query URL repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_ui_prometheus_url }}
+  provision_cloud_workflows:
+    description: Cloud Workflows provisioning repository variable
+    value: ${{ steps.repo_config.outputs.provision_cloud_workflows }}
+  workload_identity_provider:
+    description: Workload Identity Provider repository variable
+    value: ${{ steps.repo_config.outputs.workload_identity_provider }}
+  service_account_email:
+    description: Service account email repository variable
+    value: ${{ steps.repo_config.outputs.service_account_email }}
+  state_bucket:
+    description: Terraform state bucket repository variable
+    value: ${{ steps.repo_config.outputs.state_bucket }}
+  state_prefix:
+    description: Terraform state prefix repository variable
+    value: ${{ steps.repo_config.outputs.state_prefix }}
+  cloud_run_image:
+    description: Cloud Run container image URI repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_image }}
+  cloud_run_service:
+    description: Cloud Run service repository variable
+    value: ${{ steps.repo_config.outputs.cloud_run_service }}
+
+runs:
+  using: composite
+  steps:
+    - id: repo_config
+      shell: bash
+      env:
+        REPO_VARS_JSON: ${{ inputs.repo-vars-json }}
+      run: |
+        set -euo pipefail
+
+        read_repo_var() {
+          local name="$1"
+          jq -r --arg name "$name" '.[ $name ] // ""' <<<"$REPO_VARS_JSON"
+        }
+
+        {
+          echo "project_id=$(read_repo_var GCP_PROJECT_ID)"
+          echo "location=$(read_repo_var GCP_LOCATION)"
+          echo "artifact_bucket_name=$(read_repo_var GCP_ARTIFACT_BUCKET_NAME)"
+          echo "artifact_repository=$(read_repo_var GCP_ARTIFACT_REPOSITORY)"
+          echo "bigquery_dataset=$(read_repo_var GCP_BIGQUERY_DATASET)"
+          echo "bigquery_location=$(read_repo_var GCP_BIGQUERY_LOCATION)"
+          echo "bigquery_table=$(read_repo_var GCP_BIGQUERY_TABLE)"
+          echo "feast_online_store_location=$(read_repo_var GCP_FEAST_ONLINE_STORE_LOCATION)"
+          echo "feast_online_store_database_name=$(read_repo_var GCP_FEAST_ONLINE_STORE_DATABASE_NAME)"
+          echo "provision_cloud_run_service=$(read_repo_var GCP_PROVISION_CLOUD_RUN_SERVICE)"
+          echo "cloud_run_service_name=$(read_repo_var GCP_CLOUD_RUN_SERVICE_NAME)"
+          echo "cloud_run_container_port=$(read_repo_var GCP_CLOUD_RUN_CONTAINER_PORT)"
+          echo "cloud_run_allow_unauthenticated=$(read_repo_var GCP_CLOUD_RUN_ALLOW_UNAUTHENTICATED)"
+          echo "cloud_run_min_instance_count=$(read_repo_var GCP_CLOUD_RUN_MIN_INSTANCE_COUNT)"
+          echo "cloud_run_max_instance_count=$(read_repo_var GCP_CLOUD_RUN_MAX_INSTANCE_COUNT)"
+          echo "cloud_run_cpu=$(read_repo_var GCP_CLOUD_RUN_CPU)"
+          echo "cloud_run_memory=$(read_repo_var GCP_CLOUD_RUN_MEMORY)"
+          echo "mlflow_tracking_uri=$(read_repo_var GCP_MLFLOW_TRACKING_URI)"
+          echo "provision_cloud_run_mlflow=$(read_repo_var GCP_PROVISION_CLOUD_RUN_MLFLOW)"
+          echo "provision_cloud_run_ui=$(read_repo_var GCP_PROVISION_CLOUD_RUN_UI)"
+          echo "cloud_run_ui_prometheus_url=$(read_repo_var GCP_CLOUD_RUN_UI_PROMETHEUS_URL)"
+          echo "provision_cloud_workflows=$(read_repo_var GCP_PROVISION_CLOUD_WORKFLOWS)"
+          echo "workload_identity_provider=$(read_repo_var GCP_WORKLOAD_IDENTITY_PROVIDER)"
+          echo "service_account_email=$(read_repo_var GCP_SERVICE_ACCOUNT_EMAIL)"
+          echo "state_bucket=$(read_repo_var GCP_TERRAFORM_STATE_BUCKET)"
+          echo "state_prefix=$(read_repo_var GCP_TERRAFORM_STATE_PREFIX)"
+          echo "cloud_run_image=$(read_repo_var GCP_CLOUD_RUN_IMAGE)"
+          echo "cloud_run_service=$(read_repo_var GCP_CLOUD_RUN_SERVICE)"
+        } >> "$GITHUB_OUTPUT"

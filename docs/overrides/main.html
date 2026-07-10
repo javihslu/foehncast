@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+{% set page_title = page.title if page and page.title else config.site_name %}
+{% set social_image = config.site_url ~ "assets/foehncast-rider-console.jpg" %}
+<meta property="og:type" content="website" />
+<meta property="og:title" content="{{ page_title }}" />
+<meta property="og:description" content="{{ config.site_description }}" />
+<meta property="og:image" content="{{ social_image }}" />
+<meta property="og:url" content="{{ page.canonical_url if page else config.site_url }}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{{ page_title }}" />
+<meta name="twitter:description" content="{{ config.site_description }}" />
+<meta name="twitter:image" content="{{ social_image }}" />
+{% endblock %}
