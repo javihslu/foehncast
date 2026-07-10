@@ -7,13 +7,14 @@ from typing import Any
 
 import pandas as pd
 
-from foehncast.config import get_inference_config, get_rider_config
+from foehncast.config import get_inference_config, get_rider_config, get_spots
 from foehncast.inference_pipeline.predict import (
     list_available_spots,
     predict_spots,
     read_latest_predictions,
 )
 from foehncast.inference_pipeline.rank import rank_spots
+from foehncast.solar import is_daylight
 
 _RIDEABLE_QUALITY_THRESHOLD = 2.0
 _QUALITY_LABELS = {
@@ -42,6 +43,16 @@ def quality_label(value: float) -> str:
     return _QUALITY_LABELS[quality_bucket(value)]
 
 
+def _daylight_flags(spot_id: str | None, times: pd.Series) -> pd.Series:
+    """Daylight flag per forecast row; all-day when the spot is unknown."""
+    spot = next((s for s in get_spots() if s["id"] == spot_id), None)
+    if spot is None:
+        return pd.Series(True, index=times.index)
+    aware = times if times.dt.tz is not None else times.dt.tz_localize("UTC")
+    flags = is_daylight(float(spot["lat"]), float(spot["lon"]), pd.DatetimeIndex(aware))
+    return pd.Series(flags.to_numpy(), index=times.index)
+
+
 def build_forecast_frame(prediction: dict[str, Any]) -> pd.DataFrame:
     """Convert a spot prediction payload into a chart-friendly dataframe."""
     forecast_rows = prediction.get("forecast", [])
@@ -53,6 +64,7 @@ def build_forecast_frame(prediction: dict[str, Any]) -> pd.DataFrame:
                 "quality_index",
                 "quality_label",
                 "rideable",
+                "daylight",
             ]
         )
 
@@ -62,6 +74,7 @@ def build_forecast_frame(prediction: dict[str, Any]) -> pd.DataFrame:
     frame = frame.sort_values("time").reset_index(drop=True)
     frame["quality_label"] = frame["quality_index"].map(quality_label)
     frame["rideable"] = frame["quality_index"] >= _RIDEABLE_QUALITY_THRESHOLD
+    frame["daylight"] = _daylight_flags(prediction.get("spot_id"), frame["time"])
     frame["display_time"] = frame["time"].dt.strftime("%a %d %b %H:%M")
     return frame
 
@@ -85,7 +98,7 @@ def summarize_forecast(prediction: dict[str, Any]) -> dict[str, Any]:
         "peak_label": str(peak_row["quality_label"]),
         "peak_time": peak_row["time"].isoformat(),
         "peak_time_label": str(peak_row["display_time"]),
-        "rideable_hours": int(frame["rideable"].sum()),
+        "rideable_hours": int((frame["rideable"] & frame["daylight"]).sum()),
         "forecast_rows": int(len(frame)),
     }
 
@@ -100,7 +113,7 @@ def build_ranking_frame(ranked_spots: list[dict[str, Any]]) -> pd.DataFrame:
                 "Spot": spot["spot_name"],
                 "Signal": spot["quality_label"],
                 "Peak quality": round(float(spot["quality_index"]), 2),
-                "Rideable hrs": int(spot["rideable_hours"]),
+                "Rideable hrs (day)": int(spot["rideable_hours"]),
                 "Drive min": round(float(spot["drive_minutes"]), 1),
                 "Session hrs": round(float(spot["session_hours"]), 1),
                 "Ride/drive": round(float(spot["ride_drive_ratio"]), 2),

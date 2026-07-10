@@ -30,6 +30,23 @@ def test_build_forecast_frame_sorts_rows_and_marks_rideable_windows() -> None:
     assert frame.iloc[0]["display_time"].endswith("01:00")
 
 
+def test_summarize_forecast_counts_only_daylight_rideable_hours() -> None:
+    summary = dashboard.summarize_forecast(
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                # Midday local time: daylight even in January.
+                {"time": "2025-01-01T11:00:00+00:00", "quality_index": 3.0},
+                # 23:00 local: rideable quality but dark.
+                {"time": "2025-01-01T22:00:00+00:00", "quality_index": 3.0},
+            ],
+        }
+    )
+
+    assert summary["rideable_hours"] == 1
+    assert summary["forecast_rows"] == 2
+
+
 def test_summarize_forecast_returns_defaults_for_empty_predictions() -> None:
     summary = dashboard.summarize_forecast({"forecast": []})
 
@@ -72,12 +89,13 @@ def test_load_dashboard_data_combines_predictions_rankings_and_metadata(
                     "spot_id": "silvaplana",
                     "spot_name": "Silvaplana",
                     "forecast": [
+                        # Daylight hours so the daylight-aware count stays 2.
                         {
-                            "time": "2025-01-01T00:00:00+00:00",
+                            "time": "2025-01-01T11:00:00+00:00",
                             "quality_index": 2.2,
                         },
                         {
-                            "time": "2025-01-01T01:00:00+00:00",
+                            "time": "2025-01-01T12:00:00+00:00",
                             "quality_index": 3.4,
                         },
                     ],
@@ -115,7 +133,7 @@ def test_load_dashboard_data_combines_predictions_rankings_and_metadata(
     assert payload["ranked_spots"][0]["spot_id"] == "silvaplana"
     assert payload["ranked_spots"][0]["quality_label"] == "Good Enough"
     assert payload["ranked_spots"][0]["rideable_hours"] == 2
-    assert payload["ranked_spots"][0]["peak_time_label"].endswith("01:00")
+    assert payload["ranked_spots"][0]["peak_time_label"].endswith("12:00")
 
     ranking_frame = dashboard.build_ranking_frame(payload["ranked_spots"])
     assert list(ranking_frame["Spot"]) == ["Silvaplana"]
