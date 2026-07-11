@@ -15,7 +15,6 @@ from _gcp import (
     PIPELINE_JOB_NAMES,
     list_job_logs,
     list_workflow_executions,
-    trigger_pipeline,
     triggers_available,
 )
 from _promql import prom_query_batch, prom_query_vector
@@ -24,8 +23,6 @@ from _sidebar import fmt_delta
 # Dataset the panels report on: forecast in the cloud, train locally.
 _DATASET = env_value("FOEHNCAST_UI_DATASET") or "forecast"
 _DRIFT_COMPARISON = env_value("FOEHNCAST_UI_DRIFT_COMPARISON") or "train-vs-forecast"
-# Token for the pipeline trigger; empty hides the trigger.
-_OPERATOR_TOKEN = env_value("FOEHNCAST_UI_OPERATOR_TOKEN") or ""
 
 _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
@@ -508,53 +505,12 @@ def _render_drift_breakdown() -> None:
 
 
 def _render_pipelines_panel() -> None:
-    """System tab body: cascade trigger, three pipeline rails, recent executions."""
+    """System tab body: three pipeline rails and recent executions."""
     _triggers_available = triggers_available()
 
-    if _OPERATOR_TOKEN and _triggers_available:
-        # Cascade trigger, only usable with the operator token. Scoped CSS
-        # keeps the red styling on this button only.
-        st.markdown(
-            """
-            <style>
-            .st-key-pipe_trigger_cascade button {
-              background: #c0392b !important;
-              color: #ffffff !important;
-              border-color: #a93226 !important;
-            }
-            .st-key-pipe_trigger_cascade button:hover {
-              background: #a93226 !important;
-              color: #ffffff !important;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        cascade_cols = st.columns([1, 3])
-        entered_token = cascade_cols[1].text_input(
-            "Operator token",
-            type="password",
-            key="pipe_trigger_token",
-            label_visibility="collapsed",
-            placeholder="Operator token",
-        )
-        cascade_clicked = cascade_cols[0].button(
-            "Do not click",
-            help="Runs the full Cloud Workflows cascade: feature → training → inference",
-            key="pipe_trigger_cascade",
-        )
-
-        if cascade_clicked:
-            if entered_token != _OPERATOR_TOKEN:
-                st.error("Wrong operator token")
-            else:
-                name = trigger_pipeline()
-                st.success(
-                    f"Cascade started: {name.rsplit('/', 1)[-1]}"
-                ) if name else st.error("Failed to start cascade")
-                list_workflow_executions.clear()
-    else:
-        st.caption("Pipeline trigger disabled.")
+    # The retired Cloud Workflows cascade trigger has moved to per-pipeline Run
+    # controls in the sidebar (local Airflow REST). GCP log views stay below.
+    st.caption("Per-pipeline Run controls live in the sidebar (local Airflow).")
 
     if not _triggers_available:
         st.caption(

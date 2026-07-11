@@ -6,6 +6,7 @@ import time as _time
 
 import streamlit as st
 
+from foehncast.airflow_api import airflow_triggers_available, trigger_dag
 
 from _promql import prom_query_batch
 
@@ -70,23 +71,44 @@ def _freshness_circle_html(
     </div>"""
 
 
-_FRESHNESS_SOURCES: list[tuple[str, str, bool]] = [
+_FRESHNESS_SOURCES: list[tuple[str, str, bool, str]] = [
     (
         "Features",
         "foehncast_feature_pipeline_summary_generated_timestamp_seconds",
         True,
+        "feature_pipeline",
     ),
     (
         "Training",
         "foehncast_training_pipeline_summary_generated_timestamp_seconds",
         True,
+        "training_pipeline",
     ),
     (
         "Inference",
         "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
         False,
+        "inference_pipeline",
     ),
 ]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _airflow_triggers_ready() -> bool:
+    """Cached Airflow reachability/auth probe; gates the Run controls."""
+    return airflow_triggers_available()
+
+
+def _render_run_control(label: str, dag_id: str) -> None:
+    """Compact popover with a single confirm button that triggers dag_id."""
+    with st.popover("Run", use_container_width=True):
+        st.caption(f"Trigger the {dag_id} DAG now.")
+        if st.button("Confirm run", key=f"run_{dag_id}", use_container_width=True):
+            result = trigger_dag(dag_id)
+            if result.ok:
+                st.toast(f"{label}: queued {result.dag_run_id}")
+            else:
+                st.toast(f"{label} trigger failed — {result.error}")
 
 
 @st.fragment(run_every=30)
@@ -96,7 +118,10 @@ def render_freshness_bar() -> None:
     now = _time.time()
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
     values = prom_query_batch(exprs)
-    for col, (label, _expr, scheduled), ts in zip(cols, _FRESHNESS_SOURCES, values):
+    triggers_ok = _airflow_triggers_ready()
+    for col, (label, _expr, scheduled, dag_id), ts in zip(
+        cols, _FRESHNESS_SOURCES, values
+    ):
         with col:
             if ts is None:
                 st.markdown(
@@ -109,6 +134,8 @@ def render_freshness_bar() -> None:
                     _freshness_circle_html(label, now - ts, scheduled=scheduled),
                     unsafe_allow_html=True,
                 )
+            if triggers_ok:
+                _render_run_control(label, dag_id)
 
 
 def render_sidebar_ml_panels() -> None:
