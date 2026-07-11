@@ -553,6 +553,10 @@ def render_rider_console(
                 use_container_width=True,
                 theme=None,
             )
+            st.caption(
+                "Green band along the chart bottom traces solar elevation "
+                "(daylight strength), scaled to the wind-speed axis."
+            )
 
         # Spot switcher buttons
         n = len(focus_spot_ids)

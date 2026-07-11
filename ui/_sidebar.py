@@ -82,7 +82,7 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool]] = [
         True,
     ),
     (
-        "Prediction",
+        "Inference",
         "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
         False,
     ),

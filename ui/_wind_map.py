@@ -22,6 +22,11 @@ _COLOR_LIGHT = [139, 163, 163]
 
 _COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
+
+def _rgb_to_hex(rgb: list[int]) -> str:
+    """Convert an [R, G, B] list to a "#rrggbb" string."""
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
 # Dial geometry: the radial scale maps 0-30 kn onto the ground radius, so
 # needle length reads as speed and rings sit at 10/20/30 kn. The ideal wedge
 # mirrors the labeling config: direction within +-45 deg of the shore
@@ -371,9 +376,9 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
         "(direction &plusmn;45&deg;, "
         f"{storm_band['min_kts']:.0f}&ndash;{storm_band['max_kts']:.0f} kn). "
         "Needles point downwind, length is speed, the short tick marks gusts."
-        + chip.format("#0aa392", f"Rideable (&ge; {min_kts:.0f} kn)")
-        + chip.format("#ff7a26", "Almost")
-        + chip.format("#8ba3a3", "Too light")
+        + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), f"Rideable (&ge; {min_kts:.0f} kn)")
+        + chip.format(_rgb_to_hex(_COLOR_NEAR), "Almost")
+        + chip.format(_rgb_to_hex(_COLOR_LIGHT), "Too light")
         + "</p>",
         unsafe_allow_html=True,
     )
