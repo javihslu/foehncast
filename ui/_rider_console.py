@@ -20,10 +20,18 @@ from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.inference_pipeline.dashboard import (
     _RIDEABLE_QUALITY_THRESHOLD,
     quality_bucket,
+    quality_label,
 )
 from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
-from _wind_map import render_wind_map
+from _dial_svg import wind_dial_svg
+from _dial_tokens import INK, rgb_to_hex
+from _wind_map import (
+    _KN_TO_KMH,
+    _compass,
+    _spot_wind_frame,
+    render_wind_map,
+)
 
 
 def spot_label(spot_lookup: dict[str, dict[str, Any]], spot_id: str) -> str:
@@ -318,6 +326,85 @@ def all_spots_quality_grid(
     grid["time"] = grid["time"].dt.tz_convert(display_tz)
     grid["time_end"] = grid["time"] + pd.Timedelta(hours=1)
     return grid
+
+
+def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
+    """Map a heatmap click back to its grid row.
+
+    Streamlit returns the projected ``time`` as epoch ms (UTC), so match on the
+    absolute instant (nearest hour in that spot), not an exact tz round-trip.
+    """
+    raw = getattr(event, "selection", None)
+    points = raw.get("cell", []) if hasattr(raw, "get") else []
+    if not points:
+        return None
+    spot_name = points[0].get("spot")
+    raw_time = points[0].get("time")
+    if spot_name is None or raw_time is None:
+        return None
+    sel_utc = (
+        pd.Timestamp(raw_time, unit="ms", tz="UTC")
+        if isinstance(raw_time, (int, float))
+        else pd.to_datetime(raw_time, utc=True)
+    )
+    rows = grid[grid["spot"] == spot_name]
+    if rows.empty:
+        return None
+    delta = (rows["time"].dt.tz_convert("UTC") - sel_utc).abs()
+    return rows.loc[delta.idxmin()]
+
+
+def _render_detail_panel(row: pd.Series, min_kts: float) -> None:
+    """Detail card below the heatmap for the selected spot and hour."""
+    spot_id = str(row["spot_id"])
+    spot_cfg = next((s for s in get_spots() if s["id"] == spot_id), None)
+    spot_name = spot_cfg["name"] if spot_cfg else str(row.get("spot", spot_id))
+    local_time = row["time"].strftime("%a %d %b %H:%M")
+    quality = int(row["quality"])
+
+    # Wind, gusts, and direction reuse the map's cached per-spot frame (no new
+    # fetch) so the dial matches the map; match the clicked hour in UTC (<=1 h).
+    frame = _spot_wind_frame(spot_id)
+    wind = gust = direction = None
+    if not frame.empty:
+        idx = frame.index
+        idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+        target = row["time"].tz_convert("UTC")
+        pos = int(idx.get_indexer(pd.DatetimeIndex([target]), method="nearest")[0])
+        if pos >= 0 and abs((idx[pos] - target).total_seconds()) <= 5400:
+            src = frame.iloc[pos]
+            wind, gust = float(src["wind_speed_10m"]), float(src["wind_gusts_10m"])
+            direction = float(src["wind_direction_10m"])
+
+    have_wind = wind is not None and not pd.isna(wind)
+    have_dir = direction is not None and not pd.isna(direction)
+
+    left, right = st.columns([3, 2])
+    with left:
+        st.markdown(f"**{spot_name}** — {local_time}")
+        st.markdown(f"Quality: **{quality}/5** ({quality_label(float(quality))})")
+        if have_wind:
+            st.markdown(f"Wind: **{wind:.0f} km/h**")
+        if gust is not None and not pd.isna(gust):
+            st.markdown(f"Gusts: **{gust:.0f} km/h**")
+        if have_dir:
+            st.markdown(f"Direction: **{_compass(direction)} ({direction:.0f}°)**")
+    with right:
+        if have_wind and have_dir:
+            shore = float(spot_cfg["shore_orientation_deg"]) if spot_cfg else 0.0
+            st.markdown(
+                wind_dial_svg(
+                    direction_deg=direction,
+                    speed_kn=wind / _KN_TO_KMH,
+                    gust_kn=(gust or 0.0) / _KN_TO_KMH,
+                    shore_orientation_deg=shore,
+                    min_kts=min_kts,
+                ),
+                unsafe_allow_html=True,
+            )
+            st.caption("Needle points downwind; length is speed (to 30 kn).")
+        else:
+            st.caption("Wind or direction unavailable for this hour — dial hidden.")
 
 
 @st.fragment
@@ -666,9 +753,12 @@ def render_rider_console(
                 )
 
             st.subheader("All spots — session quality")
+            cell_select = alt.selection_point(
+                name="cell", fields=["spot", "time"], on="click", empty=False
+            )
             heatmap = (
                 alt.Chart(heat_grid)
-                .mark_rect(stroke=_HEATMAP_GAP, strokeWidth=1)
+                .mark_rect()
                 .encode(
                     x=alt.X(
                         "time:T",
@@ -688,8 +778,17 @@ def render_rider_console(
                             symbolType="square",
                         ),
                     ),
+                    # Selected cell gets a full-opacity ink stroke; the rest keep
+                    # the hairline surface gap, so the pick is unmistakable.
+                    stroke=alt.condition(
+                        cell_select, alt.value(rgb_to_hex(INK)), alt.value(_HEATMAP_GAP)
+                    ),
+                    strokeWidth=alt.condition(
+                        cell_select, alt.value(2.5), alt.value(1.0)
+                    ),
                     tooltip=tooltip,
                 )
+                .add_params(cell_select)
                 .properties(
                     height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
                     background="transparent",
@@ -712,7 +811,18 @@ def render_rider_console(
                     symbolSize=200,
                 )
             )
-            st.altair_chart(heatmap, use_container_width=True, theme=None)
+            event = st.altair_chart(
+                heatmap,
+                use_container_width=True,
+                theme=None,
+                on_select="rerun",
+                key="quality_heatmap_select",
+            )
+            selected = _selected_heat_cell(event, heat_grid)
+            if selected is None:
+                st.caption("Click a heatmap cell to inspect that spot and hour.")
+            else:
+                _render_detail_panel(selected, _minimum_rideable_kts())
 
         # Spot switcher buttons
         n = len(focus_spot_ids)
