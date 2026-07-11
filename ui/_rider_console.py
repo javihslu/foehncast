@@ -17,7 +17,10 @@ from foehncast.config import (
     get_spots,
 )
 from foehncast.feature_pipeline.ingest import fetch_forecast
-from foehncast.inference_pipeline.dashboard import _RIDEABLE_QUALITY_THRESHOLD
+from foehncast.inference_pipeline.dashboard import (
+    _RIDEABLE_QUALITY_THRESHOLD,
+    quality_bucket,
+)
 from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
 from _wind_map import render_wind_map
@@ -70,6 +73,21 @@ _ELEVATION_COLORS = {
     "120m": "#0b5e60",
     "gusts": "#3b5a5a",
 }
+
+# Ordinal 5-step teal ramp for the all-spots session-quality heatmap, light
+# (quality 1) to dark (quality 5), anchored on the rideable teal (_dial_tokens
+# RIDEABLE #0aa392). Validated in --ordinal mode against the actual page
+# surface #eaf3ef: single hue, monotone lightness, visible step gaps, and a
+# light end that clears 2:1 so even a "1" cell reads as a mark.
+_QUALITY_RAMP = ["#45b0a2", "#1d9c8e", "#0f8478", "#0a6459", "#0a4a42"]
+
+# Hairline between heatmap cells in the page surface tone so neighbouring hours
+# never fuse into a stripe (the gap separates, not a data-coloured border).
+_HEATMAP_GAP = "#eaf3ef"
+
+# Row height per spot; the grid grows with the spot count and the container
+# takes the x-axis band, so the axis labels never get clipped.
+_HEATMAP_ROW_PX = 30
 
 
 def _night_bands(
@@ -238,6 +256,68 @@ def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
                 f.result()
             except Exception:
                 pass
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def all_spots_quality_grid(
+    spot_ids: tuple[str, ...], predictions_json: str, display_tz: str
+) -> pd.DataFrame:
+    """Hourly quality band (1-5) per spot over the forecast window.
+
+    Quality reuses the ranked predictions already in dashboard_data (the /rank
+    flow computed them), so nothing re-runs inference. Wind and gusts come from
+    the already-warmed focus_spot_timeline cache for the tooltip only — a cache
+    hit, never a new fetch. Each row is one cell: spot x hour.
+    """
+    predictions = json.loads(predictions_json)
+    pred_by_spot = {p["spot_id"]: p for p in predictions}
+
+    frames: list[pd.DataFrame] = []
+    for spot_id in spot_ids:
+        prediction = pred_by_spot.get(spot_id)
+        forecast_rows = prediction.get("forecast", []) if prediction else []
+        if not forecast_rows:
+            continue
+        frame = pd.DataFrame(
+            {
+                "time": pd.to_datetime([r["time"] for r in forecast_rows], utc=True),
+                "quality": [
+                    max(1, quality_bucket(r["quality_index"])) for r in forecast_rows
+                ],
+            }
+        )
+        frame["spot_id"] = spot_id
+
+        # Merge 10 m wind and gusts from the warmed focus timeline (long form),
+        # joined on the UTC hour so tz differences never misalign. Missing wind
+        # just leaves the tooltip fields blank; the quality cell still renders.
+        wind = focus_spot_timeline(spot_id)
+        picked = (
+            wind[wind["elevation"].isin(["10m", "gusts"])].copy()
+            if not wind.empty
+            else wind
+        )
+        if not picked.empty:
+            picked["hour"] = pd.to_datetime(picked["time"], utc=True).dt.floor("h")
+            wide = (
+                picked.pivot_table(
+                    index="hour", columns="elevation", values="wind_speed"
+                )
+                .reindex(columns=["10m", "gusts"])
+                .rename(columns={"10m": "wind", "gusts": "gust"})
+            )
+            frame["hour"] = frame["time"].dt.floor("h")
+            frame = frame.merge(wide, left_on="hour", right_index=True, how="left")
+            frame = frame.drop(columns="hour")
+        frames.append(frame)
+
+    if not frames:
+        return pd.DataFrame(columns=["time", "quality", "spot_id"])
+
+    grid = pd.concat(frames, ignore_index=True)
+    grid["time"] = grid["time"].dt.tz_convert(display_tz)
+    grid["time_end"] = grid["time"] + pd.Timedelta(hours=1)
+    return grid
 
 
 @st.fragment
@@ -556,6 +636,84 @@ def render_rider_console(
                 "(daylight strength), scaled to the wind-speed axis."
             )
 
+        # All-spots session-quality heatmap: every ranked spot on one grid so
+        # they compare at a glance, best spot on the top row. No night shading
+        # here - daylight is already baked into the score.
+        heat_grid = all_spots_quality_grid(
+            tuple(spot["spot_id"] for spot in ranked_spots),
+            json.dumps(predictions_list, default=str),
+            display_tz,
+        )
+        if not heat_grid.empty:
+            heat_grid = heat_grid.assign(
+                spot=heat_grid["spot_id"].map(lambda sid: spot_lookup[sid]["name"])
+            )
+            rank_order = [
+                spot_lookup[s["spot_id"]]["name"]
+                for s in ranked_spots
+                if s["spot_id"] in spot_lookup
+            ]
+            tooltip = [
+                alt.Tooltip("spot:N", title="Spot"),
+                alt.Tooltip("time:T", title="Time", format="%a %d %H:%M"),
+                alt.Tooltip("quality:O", title="Quality (1-5)"),
+            ]
+            if "wind" in heat_grid.columns:
+                tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
+            if "gust" in heat_grid.columns:
+                tooltip.append(
+                    alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f")
+                )
+
+            st.subheader("All spots — session quality")
+            heatmap = (
+                alt.Chart(heat_grid)
+                .mark_rect(stroke=_HEATMAP_GAP, strokeWidth=1)
+                .encode(
+                    x=alt.X(
+                        "time:T",
+                        title="Day",
+                        axis=_DAY_AXIS,
+                        scale=alt.Scale(nice=False),
+                    ),
+                    x2="time_end:T",
+                    y=alt.Y("spot:N", title=None, sort=rank_order),
+                    color=alt.Color(
+                        "quality:O",
+                        scale=alt.Scale(domain=[1, 2, 3, 4, 5], range=_QUALITY_RAMP),
+                        legend=alt.Legend(
+                            title="Session quality (1-5)",
+                            orient="top",
+                            direction="horizontal",
+                            symbolType="square",
+                        ),
+                    ),
+                    tooltip=tooltip,
+                )
+                .properties(
+                    height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
+                    background="transparent",
+                )
+                .configure_view(strokeWidth=0, fill=None)
+                .configure_axis(
+                    domainColor="#3b5a5a",
+                    labelColor="#07252a",
+                    titleColor="#07252a",
+                )
+                .configure_legend(
+                    labelColor="#07252a",
+                    titleColor="#07252a",
+                    labelFont="Manrope",
+                    titleFont="Manrope",
+                    labelFontSize=13,
+                    titleFontSize=12,
+                    labelFontWeight=600,
+                    titleFontWeight=700,
+                    symbolSize=200,
+                )
+            )
+            st.altair_chart(heatmap, use_container_width=True, theme=None)
+
         # Spot switcher buttons
         n = len(focus_spot_ids)
         if n:
@@ -613,13 +771,16 @@ def render_rider_console(
                 spot_cols_html.append(
                     f'<div class="col spot{active_cls}">{cells}</div>'
                 )
-            st.markdown(
-                f'<div class="ranked-stack" style="grid-template-columns:{grid_cols}">'
-                f'<div class="col lead">{lead_cells}</div>'
-                + "".join(spot_cols_html)
-                + "</div>",
-                unsafe_allow_html=True,
-            )
+            # Per-spot detail table, demoted below the heatmap: the grid is the
+            # table view, kept for exact values but out of the way by default.
+            with st.expander("Spot metrics", expanded=False):
+                st.markdown(
+                    f'<div class="ranked-stack" style="grid-template-columns:{grid_cols}">'
+                    f'<div class="col lead">{lead_cells}</div>'
+                    + "".join(spot_cols_html)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
 
     st.divider()
 
