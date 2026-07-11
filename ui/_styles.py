@@ -247,6 +247,13 @@ _CSS = """
     color: #ffffff !important;
   }
 
+  section[data-testid="stSidebar"] button[data-testid="stPopoverButton"] p {
+    white-space: nowrap;
+  }
+  section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
+    padding-bottom: 1.5rem;
+  }
+
   div[data-testid="stMetric"] {
     background: var(--panel);
     border: 1px solid var(--line);
@@ -349,7 +356,7 @@ _CSS = """
   }
   div[data-testid="stExpander"] summary,
   div[data-testid="stExpander"] summary p,
-  div[data-testid="stExpander"] summary span {
+  div[data-testid="stExpander"] summary span:not([data-testid="stIconMaterial"]) {
     color: var(--ink) !important;
     font-family: 'Manrope', sans-serif !important;
     font-weight: 700 !important;

@@ -186,6 +186,8 @@ def render_sidebar_ml_panels() -> None:
 
     def _stat(label: str, value: float | None, fmt: str = ".2f") -> str:
         display = f"{value:{fmt}}" if value is not None else "—"
+        if display.startswith("-") and not display.strip("-0.%"):
+            display = display[1:]
         return (
             '<div style="display:flex;align-items:baseline;'
             "justify-content:space-between;gap:8px;padding:4px 0;"
