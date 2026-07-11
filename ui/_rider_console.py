@@ -354,6 +354,59 @@ def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
     return rows.loc[delta.idxmin()]
 
 
+def _slider_hour_options(spot_ids: list[str]) -> list[pd.Timestamp]:
+    """Hourly forecast timestamps the wind-map slider offers, for clamping."""
+    for spot_id in spot_ids:
+        frame = _spot_wind_frame(spot_id)
+        if not frame.empty:
+            return list(frame.index)
+    return []
+
+
+def _clamp_to_slider_option(
+    hour: pd.Timestamp, options: list[pd.Timestamp]
+) -> pd.Timestamp | None:
+    """Nearest slider option to hour, comparing in UTC so tz objects need not match.
+
+    The heatmap grid and the map's hourly options both come from Open-Meteo
+    forecasts but can diverge at fetch-window edges, so clamp instead of
+    exact-matching -- select_slider raises if a written value is not one of
+    its options.
+    """
+    if not options:
+        return None
+
+    def _utc(ts: pd.Timestamp) -> pd.Timestamp:
+        return ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
+
+    target = _utc(hour)
+    return min(options, key=lambda opt: abs((_utc(opt) - target).total_seconds()))
+
+
+def _sync_slider_to_heatmap_click(
+    clicked_time: pd.Timestamp, spot_ids: list[str]
+) -> None:
+    """Push a heatmap click's hour onto the shared wind-map slider key.
+
+    Writing "wind_map_hour" here is legal: the console renders before the
+    slider is instantiated later in this same script run. But a fragment
+    rerun of the console does not re-run the map fragment, so an actual
+    change also needs an explicit app-scope rerun. Guarded by
+    heat_hour_applied -- a run that already applied this exact click does
+    not write or rerun again, which is what keeps this from looping.
+    """
+    clamped = _clamp_to_slider_option(clicked_time, _slider_hour_options(spot_ids))
+    if clamped is None or st.session_state.get("heat_hour_applied") == clamped:
+        return
+    st.session_state["wind_map_hour"] = clamped
+    st.session_state["heat_hour_applied"] = clamped
+    # Pre-sync the map's own mirror so its guard is already quiet once the
+    # forced rerun below reaches it -- otherwise it would fire a second,
+    # redundant app rerun for the same change.
+    st.session_state["wind_map_hour_seen"] = clamped
+    st.rerun(scope="app")
+
+
 def _render_detail_panel(row: pd.Series, min_kts: float) -> None:
     """Detail card below the heatmap for the selected spot and hour."""
     spot_id = str(row["spot_id"])
@@ -756,7 +809,7 @@ def render_rider_console(
             cell_select = alt.selection_point(
                 name="cell", fields=["spot", "time"], on="click", empty=False
             )
-            heatmap = (
+            heatmap_layer = (
                 alt.Chart(heat_grid)
                 .mark_rect()
                 .encode(
@@ -789,7 +842,28 @@ def render_rider_console(
                     tooltip=tooltip,
                 )
                 .add_params(cell_select)
-                .properties(
+            )
+            # Direction (b) of the link: a rule at the map's current hour. A
+            # slider drag only reruns the map fragment, but that fragment
+            # forces an app-scope rerun on a real change (see
+            # _wind_map._render_map_fragment), so this fragment redraws too.
+            map_hour = st.session_state.get("wind_map_hour")
+            heatmap = heatmap_layer
+            if map_hour is not None:
+                grid_tz = heat_grid["time"].dt.tz
+                rule_x = (
+                    map_hour.tz_convert(grid_tz)
+                    if grid_tz is not None and map_hour.tzinfo is not None
+                    else map_hour
+                )
+                highlight = (
+                    alt.Chart(pd.DataFrame({"x": [rule_x]}))
+                    .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
+                    .encode(x="x:T")
+                )
+                heatmap = heatmap_layer + highlight
+            heatmap = (
+                heatmap.properties(
                     height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
                     background="transparent",
                 )
@@ -819,6 +893,8 @@ def render_rider_console(
                 key="quality_heatmap_select",
             )
             selected = _selected_heat_cell(event, heat_grid)
+            if selected is not None:
+                _sync_slider_to_heatmap_click(selected["time"], focus_spot_ids)
             if selected is None:
                 st.caption("Click a heatmap cell to inspect that spot and hour.")
             else:

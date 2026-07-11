@@ -230,6 +230,16 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
         key="wind_map_hour",
     )
 
+    # Mirror of the last hour this fragment has broadcast. A drag only
+    # reruns this fragment, so an actual change forces an app-scope rerun --
+    # that is how the heatmap (in the console fragment) redraws its
+    # highlight. setdefault avoids a spurious rerun on first load; the
+    # comparison keeps this quiet once both sides agree on the hour.
+    st.session_state.setdefault("wind_map_hour_seen", hour)
+    if st.session_state["wind_map_hour_seen"] != hour:
+        st.session_state["wind_map_hour_seen"] = hour
+        st.rerun(scope="app")
+
     spots_cfg = {s["id"]: s for s in get_spots()}
     storm_band = get_labeling_config()["bands"]["perfect_storm"]
     base = _dial_base_records(
