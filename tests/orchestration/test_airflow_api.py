@@ -212,3 +212,73 @@ def test_trigger_dag_returns_clean_error_when_unreachable(
 
     assert result.ok is False
     assert "auth failed" in result.error
+
+
+# Read client (mocked transport, no network)
+
+
+def test_build_list_dag_runs_request_sets_bearer_and_query_params() -> None:
+    request = airflow_api.build_list_dag_runs_request(
+        "http://airflow:8080", "feature_pipeline", "tok-xyz", limit=5
+    )
+
+    assert request.get_method() == "GET"
+    assert request.full_url.startswith(
+        "http://airflow:8080/api/v2/dags/feature_pipeline/dagRuns?"
+    )
+    assert "limit=5" in request.full_url
+    assert "order_by=-run_after" in request.full_url
+    assert request.get_header("Authorization") == "Bearer tok-xyz"
+
+
+def test_list_dag_runs_returns_typed_runs_with_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list = []
+    run_payload = {
+        "dag_runs": [
+            {
+                "dag_run_id": "scheduled__1",
+                "state": "SUCCESS",
+                "run_type": "scheduled",
+                "logical_date": "2026-07-11T18:00:00Z",
+                "run_after": "2026-07-11T18:00:00Z",
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        airflow_api.urllib.request,
+        "urlopen",
+        _transport({"access_token": "tok-123"}, run_payload, captured),
+    )
+
+    result = airflow_api.list_dag_runs(
+        "feature_pipeline", base_url="http://airflow:8080"
+    )
+
+    assert result.error == ""
+    assert len(result.runs) == 1
+    run = result.runs[0]
+    assert run.dag_run_id == "scheduled__1"
+    assert run.state == "success"  # normalized to lower-case
+    assert run.run_type == "scheduled"
+    # Second request is the dagRuns GET; it must carry the minted bearer token.
+    assert captured[1].get_method() == "GET"
+    assert captured[1].get_header("Authorization") == "Bearer tok-123"
+    assert "order_by=-run_after" in captured[1].full_url
+
+
+def test_list_dag_runs_returns_empty_list_when_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(request, timeout=None):
+        raise airflow_api.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(airflow_api.urllib.request, "urlopen", _boom)
+
+    result = airflow_api.list_dag_runs(
+        "feature_pipeline", base_url="http://airflow:8080"
+    )
+
+    assert result.runs == []
+    assert "auth failed" in result.error
