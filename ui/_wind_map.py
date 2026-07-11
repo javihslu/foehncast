@@ -27,6 +27,7 @@ def _rgb_to_hex(rgb: list[int]) -> str:
     """Convert an [R, G, B] list to a "#rrggbb" string."""
     return "#{:02x}{:02x}{:02x}".format(*rgb)
 
+
 # Dial geometry: the radial scale maps 0-30 kn onto the ground radius, so
 # needle length reads as speed and rings sit at 10/20/30 kn. The ideal wedge
 # mirrors the labeling config: direction within +-45 deg of the shore
