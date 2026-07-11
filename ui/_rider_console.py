@@ -907,7 +907,8 @@ def render_rider_console(
             button_cols = st.columns([lead_weight] + [1] * n)
             for index, spot_id in enumerate(focus_spot_ids):
                 spot = spot_lookup[spot_id]
-                button_label = spot["name"]
+                # equal-width columns clip long names; the lake prefix is redundant here
+                button_label = spot["name"].removeprefix("Lac de ")
                 is_active = spot_id == focus_spot_id
                 if button_cols[index + 1].button(
                     button_label,
