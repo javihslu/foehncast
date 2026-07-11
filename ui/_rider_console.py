@@ -313,9 +313,9 @@ def render_rider_console(
                                 domain=series_present,
                                 range=[series_colors[s] for s in series_present],
                             ),
-                            legend=None
-                            if dim
-                            else alt.Legend(title="Series", orient="top"),
+                            # Same legend on both layers: the shared color scale
+                            # renders it once; None here would suppress it entirely.
+                            legend=alt.Legend(title="Series", orient="top"),
                         ),
                         strokeDash=alt.StrokeDash(
                             "series:N",
@@ -441,9 +441,7 @@ def render_rider_console(
                                     _ELEVATION_COLORS[e] for e in elevations_present
                                 ],
                             ),
-                            legend=None
-                            if dim
-                            else alt.Legend(title="Elevation", orient="top"),
+                            legend=alt.Legend(title="Elevation", orient="top"),
                         ),
                         strokeDash=alt.StrokeDash(
                             "elevation:N",
