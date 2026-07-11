@@ -4,21 +4,16 @@ from __future__ import annotations
 
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Any
 
-import pandas as pd
 import streamlit as st
 
+from foehncast.airflow_api import AirflowDagRun, AirflowDagRunsResult, list_dag_runs
 from foehncast.env import env_value
 
-from _gcp import (
-    PIPELINE_JOB_NAMES,
-    list_job_logs,
-    list_workflow_executions,
-    triggers_available,
-)
 from _promql import prom_query_batch, prom_query_vector
-from _sidebar import fmt_delta
+from _sidebar import airflow_triggers_ready, fmt_delta
 
 # Dataset the panels report on: forecast in the cloud, train locally.
 _DATASET = env_value("FOEHNCAST_UI_DATASET") or "forecast"
@@ -28,7 +23,7 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "feature",
         "title": "Feature pipeline",
-        "job_name_key": "feature",
+        "dag_id": "feature_pipeline",
         "success_metric": "foehncast_feature_pipeline_run_success",
         "summary_ts_metric": "foehncast_feature_pipeline_summary_generated_timestamp_seconds",
         "stages_query": (
@@ -53,7 +48,7 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "training",
         "title": "Training pipeline",
-        "job_name_key": "training",
+        "dag_id": "training_pipeline",
         "success_metric": "foehncast_training_pipeline_run_success",
         "summary_ts_metric": "foehncast_training_pipeline_summary_generated_timestamp_seconds",
         "stages_query": (
@@ -82,7 +77,7 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "inference",
         "title": "Inference pipeline",
-        "job_name_key": "inference",
+        "dag_id": "inference_pipeline",
         "success_metric": None,
         "summary_ts_metric": (
             "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)"
@@ -194,50 +189,64 @@ def _status_pill_html(success: float | None, summary_ts: float | None) -> str:
     )
 
 
-def _render_log_entries(logs: list[dict[str, str]]) -> None:
-    """Render pre-fetched log entries."""
-    if not logs:
-        st.markdown(
-            '<div style="font-family:Manrope,sans-serif;font-size:0.72rem;'
-            "color:#5f6f7f;padding:8px 12px;background:rgba(7,37,42,0.04);"
-            'border-radius:8px">no recent log entries</div>',
-            unsafe_allow_html=True,
-        )
+# State colors match the app's status usage: teal for success, muted grey for
+# in-flight (queued/running), red for failure.
+_RUN_STATE_COLOR = {
+    "success": "#0aa392",
+    "queued": "#5f6f7f",
+    "running": "#5f6f7f",
+    "failed": "#ff6e6e",
+}
+
+
+def _run_age(run: AirflowDagRun) -> str:
+    """Relative age of a run from its run_after (or logical) date."""
+    stamp = run.run_after or run.logical_date
+    if not stamp:
+        return "—"
+    try:
+        started = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return "—"
+    return f"{fmt_delta(_time.time() - started)} ago"
+
+
+def _run_row_html(run: AirflowDagRun) -> str:
+    color = _RUN_STATE_COLOR.get(run.state, "#5f6f7f")
+    state = run.state or "unknown"
+    rid = run.dag_run_id.replace("<", "&lt;").replace(">", "&gt;") or "—"
+    return (
+        '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+        f'<span style="display:inline-flex;align-items:center;gap:5px;'
+        f"padding:2px 9px;border-radius:999px;background:{color}1a;color:{color};"
+        f'font-family:Manrope,sans-serif;font-size:0.63rem;font-weight:700;min-width:62px">'
+        f'<span style="width:6px;height:6px;border-radius:50%;background:{color}"></span>'
+        f"{state}</span>"
+        f'<span style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
+        f"font-size:0.66rem;color:#07252a;overflow:hidden;text-overflow:ellipsis;"
+        f'white-space:nowrap">{rid}</span>'
+        f'<span style="font-family:Manrope,sans-serif;font-size:0.66rem;color:#5f6f7f;'
+        f'white-space:nowrap">{_run_age(run)}</span>'
+        "</div>"
+    )
+
+
+def _render_recent_runs(result: AirflowDagRunsResult | None) -> None:
+    """Render recent DAG runs, or one short caption when unavailable."""
+    if result is None:
+        st.caption("Airflow unreachable — run history unavailable.")
         return
-    sev_color = {
-        "DEFAULT": "#5f6f7f",
-        "DEBUG": "#5f6f7f",
-        "INFO": "#0e8a86",
-        "NOTICE": "#0e8a86",
-        "WARNING": "#ff7a26",
-        "ERROR": "#c0392b",
-        "CRITICAL": "#c0392b",
-        "ALERT": "#c0392b",
-        "EMERGENCY": "#c0392b",
-    }
-    lines_html: list[str] = []
-    for entry in logs:
-        ts = (
-            entry["timestamp"][11:19]
-            if len(entry["timestamp"]) >= 19
-            else entry["timestamp"]
-        )
-        color = sev_color.get(entry["severity"], "#5f6f7f")
-        msg = entry["message"]
-        if len(msg) > 160:
-            msg = msg[:157] + "…"
-        msg_safe = msg.replace("<", "&lt;").replace(">", "&gt;")
-        lines_html.append(
-            f'<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">'
-            f'<span style="color:#5f6f7f;font-size:0.66rem;min-width:54px">{ts}</span>'
-            f'<span style="color:{color};font-size:0.62rem;font-weight:700;min-width:54px">{entry["severity"]}</span>'
-            f'<span style="color:#07252a;font-size:0.72rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">{msg_safe}</span>'
-            "</div>"
-        )
+    if result.error:
+        st.caption(f"Run history unavailable — {result.error}.")
+        return
+    if not result.runs:
+        st.caption("No recent runs recorded.")
+        return
+    rows_html = "".join(_run_row_html(run) for run in result.runs)
     st.markdown(
         '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
         "background:rgba(7,37,42,0.03);border-radius:8px;"
-        'border:1px solid rgba(7,37,42,0.08)">' + "".join(lines_html) + "</div>",
+        'border:1px solid rgba(7,37,42,0.08)">' + rows_html + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -274,11 +283,11 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
         else:
             st.markdown(
                 '<div style="font-family:Manrope,sans-serif;font-size:0.78rem;'
-                'color:#5f6f7f;padding:6px 0">no stage metrics — see logs →</div>',
+                'color:#5f6f7f;padding:6px 0">no stage metrics — see runs →</div>',
                 unsafe_allow_html=True,
             )
     with body_cols[1]:
-        _render_log_entries(prefetched["logs"])
+        _render_recent_runs(prefetched["runs"])
 
     chip_parts: list[str] = []
     for (label, _expr, kind), value in zip(
@@ -505,18 +514,12 @@ def _render_drift_breakdown() -> None:
 
 
 def _render_pipelines_panel() -> None:
-    """System tab body: three pipeline rails and recent executions."""
-    _triggers_available = triggers_available()
-
-    # The retired Cloud Workflows cascade trigger has moved to per-pipeline Run
-    # controls in the sidebar (local Airflow REST). GCP log views stay below.
+    """System tab body: three pipeline rails with recent Airflow run history."""
+    # Per-pipeline Run controls live in the sidebar (local Airflow REST). Gate
+    # the run-history fetches on the same cached probe so a down server costs
+    # one short caption per rail, not three blocked auth round-trips.
+    airflow_ok = airflow_triggers_ready()
     st.caption("Per-pipeline Run controls live in the sidebar (local Airflow).")
-
-    if not _triggers_available:
-        st.caption(
-            "Logs require GCP_PROJECT_ID / GCP_LOCATION — available "
-            "on the Cloud Run UI service."
-        )
 
     # Pre-fetch ALL scalar metrics for all rails in one parallel batch.
     all_scalar_exprs: list[str] = []
@@ -532,9 +535,6 @@ def _render_pipelines_panel() -> None:
             all_scalar_exprs.append(expr)
             expr_map.append((rail_idx, f"chip_{chip_idx}"))
 
-    def _fetch_logs(job_key: str) -> list[dict[str, str]]:
-        return list_job_logs(PIPELINE_JOB_NAMES[job_key], limit=6)
-
     with ThreadPoolExecutor(max_workers=12) as pool:
         scalar_future = pool.submit(prom_query_batch, all_scalar_exprs)
         stage_futures = {
@@ -542,10 +542,14 @@ def _render_pipelines_panel() -> None:
             for idx, rail in enumerate(_PIPELINE_RAILS)
             if rail["stage_order"]
         }
-        log_futures = {
-            idx: pool.submit(_fetch_logs, rail["job_name_key"])
-            for idx, rail in enumerate(_PIPELINE_RAILS)
-        }
+        run_futures = (
+            {
+                idx: pool.submit(list_dag_runs, rail["dag_id"], limit=5)
+                for idx, rail in enumerate(_PIPELINE_RAILS)
+            }
+            if airflow_ok
+            else {}
+        )
         batch_results = scalar_future.result() if all_scalar_exprs else []
 
     rail_data: list[dict[str, Any]] = [
@@ -554,7 +558,7 @@ def _render_pipelines_panel() -> None:
             "summary_ts": None,
             "chip_values": [],
             "stages": None,
-            "logs": None,
+            "runs": None,
         }
         for _ in _PIPELINE_RAILS
     ]
@@ -567,8 +571,8 @@ def _render_pipelines_panel() -> None:
             rail_data[rail_idx]["chip_values"].append(value)
     for idx, future in stage_futures.items():
         rail_data[idx]["stages"] = future.result()
-    for idx, future in log_futures.items():
-        rail_data[idx]["logs"] = future.result()
+    for idx, future in run_futures.items():
+        rail_data[idx]["runs"] = future.result()
 
     for index, rail in enumerate(_PIPELINE_RAILS):
         if index > 0:
@@ -578,31 +582,6 @@ def _render_pipelines_panel() -> None:
                 unsafe_allow_html=True,
             )
         _render_pipeline_rail(rail, rail_data[index])
-
-    # Recent cascade executions
-    st.markdown(
-        '<div style="font-family:Manrope,sans-serif;font-weight:700;'
-        "font-size:0.78rem;letter-spacing:0.04em;text-transform:uppercase;"
-        'color:#5f6f7f;padding:18px 0 6px 0">Recent cascade executions</div>',
-        unsafe_allow_html=True,
-    )
-    executions = list_workflow_executions(limit=5) if _triggers_available else []
-    if executions:
-        rows = []
-        now = _time.time()
-        for ex in executions:
-            name = ex.get("name", "").rsplit("/", 1)[-1]
-            state = ex.get("state", "—")
-            start_iso = ex.get("startTime", "")
-            try:
-                started = pd.to_datetime(start_iso, utc=True).timestamp()
-                age = fmt_delta(now - started)
-            except Exception:
-                age = "—"
-            rows.append({"Execution": name, "State": state, "Started": age})
-        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
-    else:
-        st.caption("No cascade executions visible yet.")
 
 
 @st.fragment

@@ -94,8 +94,8 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool, str]] = [
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def _airflow_triggers_ready() -> bool:
-    """Cached Airflow reachability/auth probe; gates the Run controls."""
+def airflow_triggers_ready() -> bool:
+    """Cached Airflow reachability/auth probe, shared by the sidebar and System tab."""
     return airflow_triggers_available()
 
 
@@ -118,7 +118,7 @@ def render_freshness_bar() -> None:
     now = _time.time()
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
     values = prom_query_batch(exprs)
-    triggers_ok = _airflow_triggers_ready()
+    triggers_ok = airflow_triggers_ready()
     for col, (label, _expr, scheduled, dag_id), ts in zip(
         cols, _FRESHNESS_SOURCES, values
     ):

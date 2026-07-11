@@ -8,6 +8,7 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -99,6 +100,8 @@ _AUTH_TIMEOUT_SECONDS = 5
 # The dagRuns POST serializes the DAG and schedules the run, so it runs a few
 # seconds (matches the retired _gcp trigger timeout); auth is much quicker.
 _TRIGGER_TIMEOUT_SECONDS = 15
+# Listing runs is a plain read, so a shorter timeout keeps the UI responsive.
+_READ_TIMEOUT_SECONDS = 8
 
 
 @dataclass(frozen=True)
@@ -222,6 +225,75 @@ def trigger_dag(
             ok=False, error="trigger response missing dag_run_id"
         )
     return AirflowTriggerResult(ok=True, dag_run_id=run_id)
+
+
+# Read client for recent DAG-run history. Same bearer-token flow as trigger_dag,
+# but a GET against the dagRuns collection ordered newest-first. All failures
+# return a typed result with an empty run list; nothing raises to the UI.
+
+
+@dataclass(frozen=True)
+class AirflowDagRun:
+    """One Airflow DAG run, trimmed to what the System tab renders."""
+
+    dag_run_id: str
+    state: str
+    logical_date: str
+    run_type: str
+    run_after: str = ""
+
+
+@dataclass(frozen=True)
+class AirflowDagRunsResult:
+    """Recent DAG runs plus an error string; error is empty only on success."""
+
+    runs: list[AirflowDagRun]
+    error: str = ""
+
+
+def build_list_dag_runs_request(
+    base_url: str, dag_id: str, token: str, *, limit: int = 5
+) -> urllib.request.Request:
+    """Build the GET /api/v2/dags/{dag_id}/dagRuns request, newest run first."""
+    query = urllib.parse.urlencode({"limit": limit, "order_by": "-run_after"})
+    return urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/v2/dags/{dag_id}/dagRuns?{query}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+
+
+def _parse_dag_run(run: Mapping[str, Any]) -> AirflowDagRun:
+    return AirflowDagRun(
+        dag_run_id=str(run.get("dag_run_id") or ""),
+        state=str(run.get("state") or "").lower(),
+        logical_date=str(run.get("logical_date") or ""),
+        run_type=str(run.get("run_type") or ""),
+        run_after=str(run.get("run_after") or ""),
+    )
+
+
+def list_dag_runs(
+    dag_id: str, limit: int = 5, base_url: str | None = None
+) -> AirflowDagRunsResult:
+    """Fetch the most recent runs of dag_id, newest first. Never raises to callers."""
+    url = base_url or airflow_base_url()
+    username, password = _airflow_credentials()
+    try:
+        token = _fetch_token(url, username, password)
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return AirflowDagRunsResult(
+            runs=[], error=f"auth failed ({_error_reason(exc)})"
+        )
+    try:
+        payload = _read_json(
+            build_list_dag_runs_request(url, dag_id, token, limit=limit),
+            _READ_TIMEOUT_SECONDS,
+        )
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return AirflowDagRunsResult(runs=[], error=_error_reason(exc))
+    runs = [_parse_dag_run(run) for run in (payload.get("dag_runs") or [])]
+    return AirflowDagRunsResult(runs=runs)
 
 
 def _build_parser() -> argparse.ArgumentParser:
