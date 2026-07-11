@@ -12,20 +12,21 @@ import streamlit as st
 from foehncast.config import get_labeling_config, get_rider_config, get_spots
 from foehncast.feature_pipeline.ingest import fetch_forecast
 
+from _dial_tokens import (
+    HALO,
+    INK as _INK,
+    LIGHT_WIND as _COLOR_LIGHT,
+    NEAR as _COLOR_NEAR,
+    RIDEABLE as _COLOR_RIDEABLE,
+    WEDGE_FILL_ALPHA,
+    WEDGE_OUTLINE_ALPHA,
+    rgb_to_hex as _rgb_to_hex,
+)
+
 _KN_TO_KMH = 1.852
 _FORECAST_HOURS = 48
 
-_INK = [7, 37, 42]
-_COLOR_RIDEABLE = [10, 163, 146]
-_COLOR_NEAR = [255, 122, 38]
-_COLOR_LIGHT = [139, 163, 163]
-
 _COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-
-
-def _rgb_to_hex(rgb: list[int]) -> str:
-    """Convert an [R, G, B] list to a "#rrggbb" string."""
-    return "#{:02x}{:02x}{:02x}".format(*rgb)
 
 
 # Dial geometry: the radial scale maps 0-30 kn onto the ground radius, so
@@ -252,35 +253,56 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
     lats = [a["lat"] for a in anchors] + [home[0]["lat"]]
     lons = [a["lon"] for a in anchors] + [home[0]["lon"]]
 
-    halo = [
-        {**s, "color": [7, 37, 42, 60], "width": s["width"] + 2.5} for s in segments
-    ]
+    # Light casing under every needle so it reads on the muted basemap and where
+    # needles cross rings or each other; the status-colored needle draws on top.
+    halo = [{**s, "color": [*HALO, 215], "width": s["width"] + 3.0} for s in segments]
     layers = [
+        # Rings: recessive reference chrome. A faint light halo lifts them off
+        # the muted basemap without letting the grid compete with the needles.
         pdk.Layer(
             "PathLayer",
             data=base["rings"],
             get_path="path",
-            get_color=[*_INK, 36],
-            get_width=60,
-            width_min_pixels=1,
+            get_color=[*HALO, 110],
+            get_width=90,
+            width_min_pixels=2.5,
         ),
+        pdk.Layer(
+            "PathLayer",
+            data=base["rings"],
+            get_path="path",
+            get_color=[*_INK, 55],
+            get_width=60,
+            width_min_pixels=1.3,
+        ),
+        # Ideal wedge: a readable teal wash plus a full-opacity teal edge so the
+        # ideal window is obvious at a glance.
         pdk.Layer(
             "PolygonLayer",
             data=base["wedges"],
             get_polygon="polygon",
-            get_fill_color=[*_COLOR_RIDEABLE, 46],
+            get_fill_color=[*_COLOR_RIDEABLE, WEDGE_FILL_ALPHA],
             stroked=True,
-            get_line_color=[*_COLOR_RIDEABLE, 150],
+            get_line_color=[*_COLOR_RIDEABLE, WEDGE_OUTLINE_ALPHA],
             get_line_width=80,
-            line_width_min_pixels=1,
+            line_width_min_pixels=2,
+        ),
+        # Cardinal ticks: light halo under a recessive ink tick.
+        pdk.Layer(
+            "LineLayer",
+            data=base["ticks"],
+            get_source_position="[from_lon, from_lat]",
+            get_target_position="[to_lon, to_lat]",
+            get_color=[*HALO, 150],
+            get_width=3.5,
         ),
         pdk.Layer(
             "LineLayer",
             data=base["ticks"],
             get_source_position="[from_lon, from_lat]",
             get_target_position="[to_lon, to_lat]",
-            get_color=[*_INK, 110],
-            get_width=1.5,
+            get_color=[*_INK, 140],
+            get_width=2.0,
         ),
     ]
     layers += [
@@ -337,8 +359,14 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
             data=base["norths"],
             get_position="[lon, lat]",
             get_text="label",
-            get_size=10,
-            get_color=[*_INK, 170],
+            get_size=13,
+            get_color=[*_INK, 255],
+            font_weight="bold",
+            # pydeck 0.9.2 forwards these deck.gl TextLayer props: a light
+            # background pill keeps the cardinal "N" legible over any tone.
+            background=True,
+            get_background_color=[*HALO, 205],
+            background_padding=[3, 2],
         )
     )
     layers.append(
