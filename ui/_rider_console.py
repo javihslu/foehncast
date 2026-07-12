@@ -74,6 +74,22 @@ _DAY_AXIS = alt.Axis(
     grid=False,
 )
 
+# Heatmap x-axis: a tick every 6 h (48 h / 6 h = 9 ticks). Midnight ticks
+# render the weekday + day-of-month, the rest just the hour, so the day
+# boundary still reads without a second axis row.
+_HEATMAP_X_AXIS = alt.Axis(
+    tickCount=9,
+    labelExpr=(
+        "timeFormat(datum.value, '%H') == '00' "
+        "? timeFormat(datum.value, '%a %d') "
+        ": timeFormat(datum.value, '%H')"
+    ),
+    labelAngle=0,
+    grid=False,
+    labelFontSize=13,
+    title=None,
+)
+
 
 # One-hue ramp for the ordered elevation series; gusts differ by dash too.
 _ELEVATION_COLORS = {
@@ -83,16 +99,49 @@ _ELEVATION_COLORS = {
     "gusts": "#3b5a5a",
 }
 
-# Ordinal 5-step teal ramp for the all-spots session-quality heatmap, light
-# (quality 1) to dark (quality 5), anchored on the rideable teal (_dial_tokens
-# RIDEABLE #0aa392). Validated in --ordinal mode against the actual page
-# surface #eaf3ef: single hue, monotone lightness, visible step gaps, and a
-# light end that clears 2:1 so even a "1" cell reads as a mark.
-_QUALITY_RAMP = ["#45b0a2", "#1d9c8e", "#0f8478", "#0a6459", "#0a4a42"]
+# Ordinal 4-step teal ramp for the all-spots session-quality heatmap, covering
+# levels 2-5 (light to dark). Level 1 gets no ramp color at all: the dataviz
+# validator (--ordinal mode, page surface #eaf3ef) proved a background-
+# matching FILL cannot clear the 2:1 light-end floor, so a "1" cell maps to
+# "transparent" in the color scale (in-domain, so it still renders its stroke
+# and hit-tests). This four-step range passes: monotone lightness, visible
+# step gaps, 2.18:1 light end, 2 deg hue spread.
+_QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
 
-# Hairline between heatmap cells in the page surface tone so neighbouring hours
-# never fuse into a stripe (the gap separates, not a data-coloured border).
-_HEATMAP_GAP = "#eaf3ef"
+# Hairline between heatmap cells. Faint ink rather than the page surface tone:
+# level-1 cells are fill-free, and a surface-toned stroke would vanish on the
+# surface -- this keeps the flat-week "outline board" visible while reading as
+# normal gridwork between filled cells.
+_HEATMAP_GAP = "rgba(7, 37, 42, 0.16)"
+
+_LEGEND_CHIP = (
+    '<span style="display:inline-block;width:0.7rem;height:0.7rem;'
+    "border-radius:2px;{swatch};margin:0 0.3rem 0 0.9rem;"
+    'vertical-align:-0.05rem"></span>{level}'
+)
+
+
+def _quality_legend_html() -> str:
+    """Manual chip row for the heatmap legend, level 1 through 5.
+
+    The Vega legend would render level 1 as a transparent (invisible) swatch,
+    since the color scale maps it to "transparent". Built by hand instead,
+    mirroring the wind map's chip row (_wind_map.render_wind_map): chip 1 is
+    an outline-only swatch, chips 2-5 use the validated ramp.
+    """
+    swatches = ["border:1px solid rgba(7, 37, 42, 0.4)"] + [
+        f"background:{color}" for color in _QUALITY_RAMP
+    ]
+    chips = "".join(
+        _LEGEND_CHIP.format(swatch=swatch, level=level)
+        for level, swatch in zip((1, 2, 3, 4, 5), swatches, strict=True)
+    )
+    return (
+        "<p style=\"color:#07252a;font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
+        f"Session quality (1-5){chips}</p>"
+    )
+
 
 # Row height per spot; the grid grows with the spot count and the container
 # takes the x-axis band, so the axis labels never get clipped.
@@ -645,35 +694,44 @@ def render_rider_console(
             ]
 
             st.subheader("All spots — session quality")
+            st.markdown(_quality_legend_html(), unsafe_allow_html=True)
             cell_select = alt.selection_point(
                 name="cell", fields=["spot", "time"], on="click", empty=False
             )
+            # Pin the x domain to the grid's own extent so no layered mark (the
+            # map-hour rule below) can ever stretch the band width -- this was
+            # the bug: an out-of-window slider hour widened the implicit
+            # domain and compressed every cell.
+            domain_start = heat_grid["time"].min()
+            domain_end = heat_grid["time_end"].max()
             heatmap_layer = (
                 alt.Chart(heat_grid)
                 .mark_rect()
                 .encode(
                     x=alt.X(
                         "time:T",
-                        title="Day",
-                        axis=_DAY_AXIS,
-                        scale=alt.Scale(nice=False),
+                        axis=_HEATMAP_X_AXIS,
+                        scale=alt.Scale(domain=[domain_start, domain_end], nice=False),
                     ),
                     x2="time_end:T",
                     y=alt.Y(
                         "spot:N",
                         title=None,
                         sort=rank_order,
-                        axis=alt.Axis(orient="right"),
+                        axis=alt.Axis(orient="right", labelFontSize=13),
                     ),
+                    # Level 1 must stay INSIDE the scale domain: an out-of-domain
+                    # value gives Vega an undefined fill and the mark neither
+                    # renders nor hit-tests (a flat week then draws nothing at
+                    # all). "transparent" is a defined fill, so the cell keeps
+                    # its stroke and stays hover- and clickable.
                     color=alt.Color(
                         "quality:O",
-                        scale=alt.Scale(domain=[1, 2, 3, 4, 5], range=_QUALITY_RAMP),
-                        legend=alt.Legend(
-                            title="Session quality (1-5)",
-                            orient="top",
-                            direction="horizontal",
-                            symbolType="square",
+                        scale=alt.Scale(
+                            domain=[1, 2, 3, 4, 5],
+                            range=["transparent", *_QUALITY_RAMP],
                         ),
+                        legend=None,
                     ),
                     # Selected cell gets a full-opacity ink stroke; the rest keep
                     # the hairline surface gap, so the pick is unmistakable.
@@ -691,6 +749,9 @@ def render_rider_console(
             # slider drag only reruns the map fragment, but that fragment
             # forces an app-scope rerun on a real change (see
             # _wind_map._render_map_fragment), so this fragment redraws too.
+            # The rule only layers when the hour falls inside the pinned x
+            # domain -- outside it, the domain stays fixed and the rule is
+            # just skipped rather than stretching the band (R6/J1).
             map_hour = st.session_state.get("wind_map_hour")
             heatmap = heatmap_layer
             if map_hour is not None:
@@ -700,12 +761,13 @@ def render_rider_console(
                     if grid_tz is not None and map_hour.tzinfo is not None
                     else map_hour
                 )
-                highlight = (
-                    alt.Chart(pd.DataFrame({"x": [rule_x]}))
-                    .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
-                    .encode(x="x:T")
-                )
-                heatmap = heatmap_layer + highlight
+                if domain_start <= rule_x <= domain_end:
+                    highlight = (
+                        alt.Chart(pd.DataFrame({"x": [rule_x]}))
+                        .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
+                        .encode(x="x:T")
+                    )
+                    heatmap = heatmap_layer + highlight
             heatmap = (
                 heatmap.properties(
                     height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
@@ -716,17 +778,6 @@ def render_rider_console(
                     domainColor="#3b5a5a",
                     labelColor="#07252a",
                     titleColor="#07252a",
-                )
-                .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFont="Manrope",
-                    titleFont="Manrope",
-                    labelFontSize=13,
-                    titleFontSize=12,
-                    labelFontWeight=600,
-                    titleFontWeight=700,
-                    symbolSize=200,
                 )
             )
             event = st.altair_chart(
@@ -858,6 +909,7 @@ def render_rider_console(
                     gridColor="rgba(7, 37, 42, 0.10)",
                     labelColor="#07252a",
                     titleColor="#07252a",
+                    labelFontSize=13,
                 )
                 .configure_legend(
                     labelColor="#07252a",
@@ -1017,6 +1069,7 @@ def render_rider_console(
                     gridColor="rgba(7, 37, 42, 0.10)",
                     labelColor="#07252a",
                     titleColor="#07252a",
+                    labelFontSize=13,
                 )
                 .configure_legend(
                     labelColor="#07252a",
