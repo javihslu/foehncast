@@ -210,22 +210,61 @@ def _hourly_map_records(
     return out
 
 
+def _clamp_to_slider_option(
+    hour: pd.Timestamp, options: list[pd.Timestamp]
+) -> pd.Timestamp | None:
+    """Nearest slider option to hour, comparing in UTC so tz objects need not match.
+
+    The heatmap grid and the map's hourly options both come from Open-Meteo
+    forecasts but can diverge at fetch-window edges, so clamp instead of
+    exact-matching -- select_slider raises if a written value is not one of
+    its options.
+    """
+    if not options:
+        return None
+
+    def _utc(ts: pd.Timestamp) -> pd.Timestamp:
+        return ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
+
+    target = _utc(hour)
+    return min(options, key=lambda opt: abs((_utc(opt) - target).total_seconds()))
+
+
 @st.fragment
-def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
+def _render_map_fragment(
+    spot_ids: list[str],
+    min_kts: float,
+    prediction_hours: list[pd.Timestamp] | None = None,
+) -> None:
     """Slider plus deck; a fragment so hour changes re-render only the map."""
     import pydeck as pdk
 
     frames = {sid: _spot_wind_frame(sid) for sid in spot_ids}
-    times = next((f.index for f in frames.values() if not f.empty), None)
-    if times is None:
+    wind_times = next((f.index for f in frames.values() if not f.empty), None)
+    if wind_times is None:
         st.info("No forecast data available for the wind map right now.")
         return
+
+    # Slider offers the heatmap's prediction-window hours (local, hourly) so
+    # both pickers address one canonical hour set (R6). The map frames still
+    # come from the wind fetch; only the option list narrows. Empty prediction
+    # list -> fall back to the wind-frame hours so the map never breaks.
+    options = list(prediction_hours) if prediction_hours else list(wind_times)
+
+    # A data refresh can strand a stale wind_map_hour that is no longer one of
+    # the options; select_slider raises on an unknown value, so snap it to the
+    # nearest current option first (clamp, keep the user's intended hour).
+    stored = st.session_state.get("wind_map_hour")
+    if stored is not None and stored not in options:
+        snapped = _clamp_to_slider_option(stored, options)
+        if snapped is not None:
+            st.session_state["wind_map_hour"] = snapped
 
     st.subheader("Regional wind — direction and strength")
     hour = st.select_slider(
         "Forecast hour",
-        options=list(times),
-        value=times[0],
+        options=options,
+        value=_clamp_to_slider_option(wind_times[0], options) or options[0],
         format_func=lambda t: t.strftime("%a %H:%M"),
         key="wind_map_hour",
     )
@@ -247,7 +286,10 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
         (float(storm_band["min_kts"]), float(storm_band["max_kts"])),
     )
     hourly = _hourly_map_records(tuple(spot_ids), min_kts)
-    records = hourly.get(hour.isoformat(), {"anchors": [], "segments": []})
+    # Records are keyed by the wind frame's UTC isoformat, but the slider hour
+    # is now a local prediction-window timestamp; match on the shared instant.
+    lookup = hour.tz_convert("UTC") if hour.tzinfo is not None else hour
+    records = hourly.get(lookup.isoformat(), {"anchors": [], "segments": []})
     anchors, segments = records["anchors"], records["segments"]
 
     rider = get_rider_config()
@@ -423,7 +465,11 @@ def _render_map_fragment(spot_ids: list[str], min_kts: float) -> None:
     )
 
 
-def render_wind_map(ranked_spots: list[dict[str, Any]], min_kts: float) -> None:
+def render_wind_map(
+    ranked_spots: list[dict[str, Any]],
+    min_kts: float,
+    prediction_hours: list[pd.Timestamp] | None = None,
+) -> None:
     """Render the regional wind map for the ranked spots."""
     try:
         import pydeck  # noqa: F401
@@ -436,4 +482,4 @@ def render_wind_map(ranked_spots: list[dict[str, Any]], min_kts: float) -> None:
     if not spot_ids:
         return
     _warm_wind_frames(spot_ids)
-    _render_map_fragment(spot_ids, min_kts)
+    _render_map_fragment(spot_ids, min_kts, prediction_hours)
