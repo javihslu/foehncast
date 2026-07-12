@@ -192,7 +192,9 @@ def test_prepare_feature_store_skips_export_for_bigquery_source(
     monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
 
     def _unexpected_export(*args: object, **kwargs: object) -> Path:
-        raise AssertionError("export_offline_store must not run for the BigQuery source")
+        raise AssertionError(
+            "export_offline_store must not run for the BigQuery source"
+        )
 
     monkeypatch.setattr(feast, "export_offline_store", _unexpected_export)
     monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
