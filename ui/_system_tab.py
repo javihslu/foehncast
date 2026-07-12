@@ -170,8 +170,17 @@ def _format_chip(value: float | None, kind: str) -> str:
     return text
 
 
-def _status_pill_html(success: float | None, summary_ts: float | None) -> str:
-    if success is None and summary_ts is None:
+def _stage_is_running(state: float) -> bool:
+    """A stage metric between failed (<=-0.5) and done (>=0.999) is in flight."""
+    return state == state and -0.5 < state < 0.999
+
+
+def _status_pill_html(
+    success: float | None, summary_ts: float | None, *, running: bool = False
+) -> str:
+    if running:
+        bg, fg, text = "rgba(255, 122, 38, 0.14)", "#7a3f10", "running"
+    elif success is None and summary_ts is None:
         bg, fg, text = "#eef3ee", "#3b5a5a", "no data"
     elif success is None:
         bg, fg, text = "rgba(14, 138, 134, 0.14)", "#07252a", "live"
@@ -307,6 +316,8 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
     """Render one pipeline as a horizontal rail."""
     success = prefetched["success"]
     summary_ts = prefetched["summary_ts"]
+    stages = prefetched.get("stages") or {}
+    running = any(_stage_is_running(stage["state"]) for stage in stages.values())
 
     header_cols = st.columns([0.55, 0.45])
     with header_cols[0]:
@@ -316,7 +327,10 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
             unsafe_allow_html=True,
         )
     with header_cols[1]:
-        st.markdown(_status_pill_html(success, summary_ts), unsafe_allow_html=True)
+        st.markdown(
+            _status_pill_html(success, summary_ts, running=running),
+            unsafe_allow_html=True,
+        )
 
     body_cols = st.columns([0.55, 0.45], gap="medium")
     with body_cols[0]:
