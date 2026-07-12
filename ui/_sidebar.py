@@ -151,6 +151,11 @@ def render_freshness_bar() -> None:
             if triggers_ok:
                 _render_run_control(label, dag_id)
     if cloud:
+        st.markdown(
+            "<div style='margin-top:14px;padding-top:11px;"
+            "border-top:1px solid rgba(7,37,42,0.08)'></div>",
+            unsafe_allow_html=True,
+        )
         _render_cloud_run_control()
 
 
