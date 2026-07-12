@@ -82,11 +82,9 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     times = pd.date_range("2026-07-12T09:00:00Z", periods=2, freq="h")
-
-    def fake_wind_frame(spot_id: str) -> pd.DataFrame:
-        return pd.DataFrame({"wind_direction_10m": [200.0, 210.0]}, index=times)
-
-    monkeypatch.setattr(rc, "_spot_wind_frame", fake_wind_frame)
+    # The click handler now clamps against the slider's prediction-window
+    # option list (passed in), so the click's hour is always a valid option.
+    options = list(times)
 
     rerun_calls: list[dict[str, object]] = []
     monkeypatch.setattr(rc.st, "rerun", lambda **kw: rerun_calls.append(kw))
@@ -99,16 +97,51 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     ):
         rc.st.session_state.pop(key, None)
 
-    rc._sync_slider_to_heatmap_click(times[0], "silvaplana", ["silvaplana"])
+    rc._sync_slider_to_heatmap_click(times[0], "silvaplana", options)
     assert rc.st.session_state["rider_focus_spot"] == "silvaplana"
     assert rc.st.session_state["wind_map_hour"] == times[0]
     assert len(rerun_calls) == 1
 
     # Same cell clicked again: the guard must skip the write and the rerun.
-    rc._sync_slider_to_heatmap_click(times[0], "silvaplana", ["silvaplana"])
+    rc._sync_slider_to_heatmap_click(times[0], "silvaplana", options)
     assert len(rerun_calls) == 1
 
     # A different spot at the same hour is a real change and applies again.
-    rc._sync_slider_to_heatmap_click(times[0], "sils", ["silvaplana"])
+    rc._sync_slider_to_heatmap_click(times[0], "sils", options)
     assert rc.st.session_state["rider_focus_spot"] == "sils"
     assert len(rerun_calls) == 2
+
+
+def test_timeseries_x_domain_shared_endpoints() -> None:
+    # Given a heat grid, both time-series charts pin one shared domain running
+    # from 24 h before now to the grid's last hour (the heatmap's own right
+    # edge), so all three axes read one clock (R5).
+    times = pd.date_range("2026-07-12T07:00:00Z", periods=14, freq="h")
+    grid = pd.DataFrame({"time": times, "time_end": times + pd.Timedelta(hours=1)})
+    now = pd.Timestamp("2026-07-12T12:00:00Z")
+
+    prediction_end = grid["time_end"].max()
+    domain = rc._timeseries_x_domain(prediction_end, now)
+
+    assert domain == [now - pd.Timedelta(hours=24), prediction_end]
+    # Right edge equals the grid's last hour: the same value the heatmap's
+    # pinned domain uses, so the charts and heatmap cannot diverge.
+    assert domain[1] == grid["time_end"].max()
+    # No grid -> no pinned domain; the charts fall back to their own extent.
+    assert rc._timeseries_x_domain(None, now) is None
+
+
+def test_clamp_to_slider_option_snaps_stale_hour() -> None:
+    # A stale session hour dropped by a data refresh must snap to a real option
+    # so the wind-map select_slider never raises on an unknown value.
+    options = list(pd.date_range("2026-07-12T07:00:00Z", periods=14, freq="h"))
+    stale = pd.Timestamp("2026-07-11T23:00:00Z")  # before the current window
+
+    snapped = rc._clamp_to_slider_option(stale, options)
+    assert snapped in options
+    assert snapped == options[0]  # nearest surviving option
+
+    # An hour already in the options is returned unchanged (no drift).
+    assert rc._clamp_to_slider_option(options[5], options) == options[5]
+    # Empty options -> None (caller falls back to the wind-frame hours).
+    assert rc._clamp_to_slider_option(stale, []) is None

@@ -29,6 +29,7 @@ from _dial_svg import wind_dial_svg
 from _dial_tokens import INK, rgb_to_hex
 from _wind_map import (
     _KN_TO_KMH,
+    _clamp_to_slider_option,
     _compass,
     _spot_wind_frame,
     render_wind_map,
@@ -171,13 +172,21 @@ def _night_bands(
 
 
 def _night_rect(
-    t_min: pd.Timestamp, t_max: pd.Timestamp, lat: float, lon: float
+    t_min: pd.Timestamp,
+    t_max: pd.Timestamp,
+    lat: float,
+    lon: float,
+    x_scale: Any = alt.Undefined,
 ) -> alt.Chart:
-    """Altair layer obscuring night hours with a dark wash."""
+    """Altair layer obscuring night hours with a dark wash.
+
+    Clipped and sharing the caller's pinned x scale so a night band reaching
+    past the shared domain neither draws outside the plot nor stretches it.
+    """
     return (
         alt.Chart(_night_bands(t_min, t_max, lat, lon))
-        .mark_rect(color="#07252a", opacity=0.28)
-        .encode(x="x:T", x2="x2:T")
+        .mark_rect(color="#07252a", opacity=0.28, clip=True)
+        .encode(x=alt.X("x:T", scale=x_scale), x2="x2:T")
     )
 
 
@@ -498,37 +507,23 @@ def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
     return rows.loc[delta.idxmin()]
 
 
-def _slider_hour_options(spot_ids: list[str]) -> list[pd.Timestamp]:
-    """Hourly forecast timestamps the wind-map slider offers, for clamping."""
-    for spot_id in spot_ids:
-        frame = _spot_wind_frame(spot_id)
-        if not frame.empty:
-            return list(frame.index)
-    return []
+def _timeseries_x_domain(
+    prediction_end: pd.Timestamp | None, now: pd.Timestamp
+) -> list[pd.Timestamp] | None:
+    """Shared x domain for the two time-series charts: [now - 24h, prediction end].
 
-
-def _clamp_to_slider_option(
-    hour: pd.Timestamp, options: list[pd.Timestamp]
-) -> pd.Timestamp | None:
-    """Nearest slider option to hour, comparing in UTC so tz objects need not match.
-
-    The heatmap grid and the map's hourly options both come from Open-Meteo
-    forecasts but can diverge at fetch-window edges, so clamp instead of
-    exact-matching -- select_slider raises if a written value is not one of
-    its options.
+    The right edge is the heatmap grid's last hour (its pinned domain's right
+    edge), so the two charts and the heatmap all read one clock (R5); the
+    quality chart's older history clips out of frame. None when there is no
+    prediction window to bound the axis.
     """
-    if not options:
+    if prediction_end is None:
         return None
-
-    def _utc(ts: pd.Timestamp) -> pd.Timestamp:
-        return ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
-
-    target = _utc(hour)
-    return min(options, key=lambda opt: abs((_utc(opt) - target).total_seconds()))
+    return [now - pd.Timedelta(hours=24), prediction_end]
 
 
 def _sync_slider_to_heatmap_click(
-    clicked_time: pd.Timestamp, clicked_spot_id: str, spot_ids: list[str]
+    clicked_time: pd.Timestamp, clicked_spot_id: str, options: list[pd.Timestamp]
 ) -> None:
     """Push a heatmap click's hour and spot onto shared session-state keys.
 
@@ -538,9 +533,10 @@ def _sync_slider_to_heatmap_click(
     re-run the map fragment, so an actual change also needs an explicit
     app-scope rerun. Guarded by heat_hour_applied and heat_spot_applied -- a
     run that already applied this exact click does not write or rerun
-    again, which is what keeps this from looping.
+    again, which is what keeps this from looping. ``options`` is the slider's
+    prediction-window hour list, so the clamped hour is always a valid option.
     """
-    clamped = _clamp_to_slider_option(clicked_time, _slider_hour_options(spot_ids))
+    clamped = _clamp_to_slider_option(clicked_time, options)
     hour_changed = (
         clamped is not None and st.session_state.get("heat_hour_applied") != clamped
     )
@@ -630,6 +626,11 @@ def render_rider_console(
 
     focus_spot_id = st.session_state.get("rider_focus_spot") or default_focus
 
+    # Prediction-window hours shared with the wind-map slider (R6): the heat
+    # grid's hour list, filled once the grid is built below. Empty when there
+    # is no focus spot / grid, so the slider falls back to the wind-frame hours.
+    pred_hours: list[pd.Timestamp] = []
+
     if focus_spot_id is not None:
         spot_cfg = next(s for s in get_spots() if s["id"] == focus_spot_id)
         spot_lat, spot_lon = float(spot_cfg["lat"]), float(spot_cfg["lon"])
@@ -657,6 +658,19 @@ def render_rider_console(
             json.dumps(predictions_list, default=str),
             display_tz,
             json.dumps(ranked_meta),
+        )
+        # ONE CLOCK: derive the prediction window once from the grid so the
+        # heatmap's pinned x domain, both time-series domains (R5), and the
+        # wind-map slider options (R6) all read the same hours. Empty grid ->
+        # no window; the charts and slider fall back to their own extents.
+        if not heat_grid.empty:
+            pred_hours = sorted(heat_grid["time"].drop_duplicates())
+        prediction_end = heat_grid["time_end"].max() if not heat_grid.empty else None
+        ts_domain = _timeseries_x_domain(prediction_end, pd.Timestamp.now(tz="UTC"))
+        x_scale = (
+            alt.Scale(domain=ts_domain, nice=False)
+            if ts_domain is not None
+            else alt.Undefined
         )
         if not heat_grid.empty:
             heat_grid = heat_grid.assign(
@@ -703,7 +717,7 @@ def render_rider_console(
             # the bug: an out-of-window slider hour widened the implicit
             # domain and compressed every cell.
             domain_start = heat_grid["time"].min()
-            domain_end = heat_grid["time_end"].max()
+            domain_end = prediction_end
             heatmap_layer = (
                 alt.Chart(heat_grid)
                 .mark_rect()
@@ -790,7 +804,7 @@ def render_rider_console(
             selected = _selected_heat_cell(event, heat_grid)
             if selected is not None:
                 _sync_slider_to_heatmap_click(
-                    selected["time"], str(selected["spot_id"]), focus_spot_ids
+                    selected["time"], str(selected["spot_id"]), pred_hours
                 )
             if selected is None:
                 st.caption("Click a heatmap cell to inspect that spot and hour.")
@@ -832,9 +846,10 @@ def render_rider_console(
                         strokeWidth=1.6 if dim else 2.2,
                         point=not dim,
                         opacity=0.3 if dim else 1.0,
+                        clip=True,
                     )
                     .encode(
-                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
+                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS, scale=x_scale),
                         y=alt.Y(
                             "quality_index:Q",
                             title="Quality index",
@@ -870,8 +885,8 @@ def render_rider_console(
             )
             q_now_rule = (
                 alt.Chart(pd.DataFrame({"x": [q_now]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2)
-                .encode(x="x:T")
+                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
+                .encode(x=alt.X("x:T", scale=x_scale))
             )
             q_threshold = (
                 alt.Chart(pd.DataFrame({"y": [_RIDEABLE_QUALITY_THRESHOLD]}))
@@ -899,6 +914,7 @@ def render_rider_console(
                 quality_frame["time"].max(),
                 spot_lat,
                 spot_lon,
+                x_scale,
             )
             st.altair_chart(
                 (q_night + q_lines + q_threshold + q_threshold_label + q_now_rule)
@@ -951,6 +967,7 @@ def render_rider_console(
                 timeline_frame["time"].max(),
                 spot_lat,
                 spot_lon,
+                x_scale,
             )
 
             def wind_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
@@ -960,9 +977,10 @@ def render_rider_console(
                         interpolate="monotone",
                         strokeWidth=1.6 if dim else 2.2,
                         opacity=0.3 if dim else 1.0,
+                        clip=True,
                     )
                     .encode(
-                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS),
+                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS, scale=x_scale),
                         y=alt.Y(
                             "wind_speed:Q",
                             title="Wind speed (km/h)",
@@ -1021,8 +1039,8 @@ def render_rider_console(
             )
             now_rule = (
                 alt.Chart(pd.DataFrame({"x": [now_ts]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2)
-                .encode(x="x:T")
+                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
+                .encode(x=alt.X("x:T", scale=x_scale))
             )
             # Solar-elevation curve along the chart bottom, pre-scaled into
             # wind-speed units so it shares the axis without a second scale.
@@ -1050,8 +1068,9 @@ def render_rider_console(
                     color="#1f5e44",
                     opacity=0.22,
                     line={"color": "#1f5e44", "strokeWidth": 1.0},
+                    clip=True,
                 )
-                .encode(x="time:T", y="solar:Q")
+                .encode(x=alt.X("time:T", scale=x_scale), y="solar:Q")
             )
             st.altair_chart(
                 (
@@ -1093,4 +1112,4 @@ def render_rider_console(
 
     st.divider()
 
-    render_wind_map(ranked_spots, _minimum_rideable_kts())
+    render_wind_map(ranked_spots, _minimum_rideable_kts(), pred_hours)
