@@ -18,6 +18,12 @@ if str(_UI) not in sys.path:
 import _rider_console as rc  # noqa: E402
 
 
+def test_quality_ramp_matches_validated_hexes() -> None:
+    # Levels 2-5 only: level 1 is fill-free (see _quality_legend_html), not
+    # part of the color scale's range at all.
+    assert rc._QUALITY_RAMP == ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
+
+
 def test_all_spots_quality_grid_adds_tooltip_columns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
