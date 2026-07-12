@@ -64,26 +64,32 @@ def wind_dial_svg(
     shore_orientation_deg: float,
     min_kts: float,
     size_px: int = 160,
+    detail: str = "full",
 ) -> str:
     """Return an inline SVG dial for one spot at one hour.
 
     direction_deg is where the wind comes from; the needle is drawn downwind.
+    detail="compact" drops the tick marks, cardinal label, and all but one
+    reference ring so the dial is small enough to embed per heatmap cell.
     """
+    compact = detail == "compact"
     flow = (direction_deg + 180.0) % 360.0
     ideal_center = (shore_orientation_deg + 180.0) % 360.0
     color, status_label = _status(speed_kn, min_kts)
     needle_hex = rgb_to_hex(color)
     ink, halo, teal = rgb_to_hex(INK), rgb_to_hex(HALO), rgb_to_hex(RIDEABLE)
 
-    # Light casing lifts the outer ring off the panel; three rings mark 10/20/30.
+    # Light casing lifts the outer ring off the panel. Full detail marks
+    # 10/20/30 kn; compact keeps a single mid-scale (20 kn) reference ring.
     casing = (
         f'<circle cx="{_CX}" cy="{_CY}" r="{_R:.2f}" fill="none" '
         f'stroke="{halo}" stroke-opacity="0.7" stroke-width="5"/>'
     )
+    ring_ks = (20.0,) if compact else (10.0, 20.0, 30.0)
     rings = "".join(
         f'<circle cx="{_CX}" cy="{_CY}" r="{_R * k / _MAX_KN:.2f}" fill="none" '
         f'stroke="{ink}" stroke-opacity="0.22" stroke-width="1"/>'
-        for k in (10.0, 20.0, 30.0)
+        for k in ring_ks
     )
     wedge = (
         f'<path d="{_sector(_R, ideal_center - _HALF_ANGLE_DEG, ideal_center + _HALF_ANGLE_DEG)}" '
@@ -91,20 +97,21 @@ def wind_dial_svg(
         f'stroke="{teal}" stroke-opacity="{WEDGE_OUTLINE_ALPHA / 255:.3f}" '
         f'stroke-width="1.5" stroke-linejoin="round" data-role="wedge"/>'
     )
-    ticks = ""
-    for bearing in (0.0, 90.0, 180.0, 270.0):
-        x0, y0 = _pt(_R, bearing)
-        x1, y1 = _pt(_R + 5, bearing)
-        ticks += (
-            f'<line x1="{x0:.2f}" y1="{y0:.2f}" x2="{x1:.2f}" y2="{y1:.2f}" '
-            f'stroke="{ink}" stroke-opacity="0.5" stroke-width="1.5"/>'
+    ticks = label = ""
+    if not compact:
+        for bearing in (0.0, 90.0, 180.0, 270.0):
+            x0, y0 = _pt(_R, bearing)
+            x1, y1 = _pt(_R + 5, bearing)
+            ticks += (
+                f'<line x1="{x0:.2f}" y1="{y0:.2f}" x2="{x1:.2f}" y2="{y1:.2f}" '
+                f'stroke="{ink}" stroke-opacity="0.5" stroke-width="1.5"/>'
+            )
+        nx, ny = _pt(_R + 13, 0.0)
+        label = (
+            f'<text x="{nx:.2f}" y="{ny:.2f}" text-anchor="middle" '
+            f'dominant-baseline="middle" font-family="Manrope, sans-serif" '
+            f'font-size="11" font-weight="700" fill="{ink}">N</text>'
         )
-    nx, ny = _pt(_R + 13, 0.0)
-    label = (
-        f'<text x="{nx:.2f}" y="{ny:.2f}" text-anchor="middle" '
-        f'dominant-baseline="middle" font-family="Manrope, sans-serif" '
-        f'font-size="11" font-weight="700" fill="{ink}">N</text>'
-    )
 
     # Gust tick: a short cross-arc at the gust radius, in the needle's status hue.
     gr = min(max(gust_kn, 0.0), _MAX_KN) / _MAX_KN * _R
@@ -117,16 +124,24 @@ def wind_dial_svg(
     )
 
     # Needle: surface-tone halo casing under a status-colored shaft, arrowhead,
-    # and an ink hub, so it reads over the wedge and rings.
+    # and an ink hub, so it reads over the wedge and rings. Compact drops the
+    # halo underlay (fewer rings beneath it to fight through).
     length = _needle_len(speed_kn)
     tipx, tipy = _pt(length, flow)
     head = min(max(0.25 * length, 6.0), 10.0)
     hx1, hy1 = _offset(tipx, tipy, flow + 150.0, head)
     hx2, hy2 = _offset(tipx, tipy, flow - 150.0, head)
+    needle_halo = (
+        ""
+        if compact
+        else (
+            f'<line x1="{_CX}" y1="{_CY}" x2="{tipx:.2f}" y2="{tipy:.2f}" '
+            f'stroke="{halo}" stroke-opacity="0.85" stroke-width="5" '
+            f'stroke-linecap="round" data-role="needle-halo"/>'
+        )
+    )
     needle = (
-        f'<line x1="{_CX}" y1="{_CY}" x2="{tipx:.2f}" y2="{tipy:.2f}" '
-        f'stroke="{halo}" stroke-opacity="0.85" stroke-width="5" '
-        f'stroke-linecap="round" data-role="needle-halo"/>'
+        f"{needle_halo}"
         f'<line x1="{_CX}" y1="{_CY}" x2="{tipx:.2f}" y2="{tipy:.2f}" '
         f'stroke="{needle_hex}" stroke-width="3" stroke-linecap="round" '
         f'data-role="needle"/>'
