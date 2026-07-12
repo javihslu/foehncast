@@ -22,6 +22,7 @@ from foehncast.config import (
     get_storage_config,
 )
 from foehncast.feature_pipeline.engineer import engineer_features
+from foehncast.feature_pipeline.feast import prepare_feature_store
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation, validation_snapshot
@@ -804,10 +805,13 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
 
 
 def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
-    """Run the feature pipeline and optionally log a refresh run to MLflow."""
+    """Run the feature pipeline, sync the Feast repo (apply + materialize the online
+    store), and optionally log a refresh run to MLflow."""
     tracking_uri = scheduled_mlflow_tracking_uri()
     if tracking_uri is None:
-        return run_feature_pipeline(dataset=dataset)
+        stored_spots = run_feature_pipeline(dataset=dataset)
+        prepare_feature_store(dataset=dataset, materialize=True)
+        return stored_spots
 
     mlflow.set_tracking_uri(tracking_uri)
     configure_mlflow_auth()
@@ -815,6 +819,7 @@ def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
 
     with mlflow.start_run(run_name=f"feature-{dataset}-refresh"):
         stored_spots = run_feature_pipeline(dataset=dataset)
+        prepare_feature_store(dataset=dataset, materialize=True)
         mlflow.log_params(
             {
                 "dataset": dataset,

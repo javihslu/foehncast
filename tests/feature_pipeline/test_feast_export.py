@@ -183,6 +183,39 @@ def test_prepare_feature_store_applies_repo_and_materializes(
     }
 
 
+def test_prepare_feature_store_skips_export_for_bigquery_source(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / ".state" / "feast" / "feature_store.runtime.yaml"
+    repo_path = tmp_path / "feature_repo"
+    repo_path.mkdir()
+    monkeypatch.setenv("FOEHNCAST_FEAST_SOURCE", "bigquery")
+
+    def _unexpected_export(*args: object, **kwargs: object) -> Path:
+        raise AssertionError(
+            "export_offline_store must not run for the BigQuery source"
+        )
+
+    monkeypatch.setattr(feast, "export_offline_store", _unexpected_export)
+    monkeypatch.setattr(feast, "render_runtime_config", lambda: config_path)
+    monkeypatch.setattr(feast, "require_existing_feast_repo_path", lambda: repo_path)
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        feast,
+        "_run_feast_cli",
+        lambda args, *, cwd, env: commands.append(args),
+    )
+
+    result = feast.prepare_feature_store(
+        dataset="forecast", materialize_timestamp="2026-05-12T13:00:00+00:00"
+    )
+
+    assert [command[0] for command in commands] == ["apply", "materialize-incremental"]
+    assert result["output_path"] is None
+    assert result["materialized"] is True
+
+
 def test_prepare_feature_store_can_skip_materialize(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

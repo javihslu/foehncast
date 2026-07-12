@@ -476,6 +476,7 @@ def test_run_feature_pipeline_job_without_mlflow_env_delegates(
         "run_feature_pipeline",
         fake_run_feature_pipeline,
     )
+    monkeypatch.setattr(_orch_feature, "prepare_feature_store", lambda *a, **k: None)
 
     stored_spots = orchestration.run_feature_pipeline_job(dataset="validation")
 
@@ -506,6 +507,7 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
         "run_feature_pipeline",
         lambda dataset="train": ["silvaplana", "urnersee"],
     )
+    monkeypatch.setattr(_orch_feature, "prepare_feature_store", lambda *a, **k: None)
 
     stored_spots = orchestration.run_feature_pipeline_job(dataset="train")
 
