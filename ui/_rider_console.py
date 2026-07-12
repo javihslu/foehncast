@@ -585,9 +585,168 @@ def render_rider_console(
         spot_cfg = next(s for s in get_spots() if s["id"] == focus_spot_id)
         spot_lat, spot_lon = float(spot_cfg["lat"]), float(spot_cfg["lon"])
         display_tz = get_api_config()["open_meteo"]["timezone"]
+        predictions_list = dashboard_data.get("predictions", [])
+
+        # All-spots session-quality heatmap: every ranked spot on one grid so
+        # they compare at a glance, best spot on the top row. No night shading
+        # here - daylight is already baked into the score.
+        ranked_meta = [
+            {
+                "spot_id": s["spot_id"],
+                "quality_label": s["quality_label"],
+                "quality_index": round(float(s["quality_index"]), 2),
+                "rideable_hours": int(s["rideable_hours"]),
+                "drive_minutes": round(float(s["drive_minutes"]), 1),
+                "session_hours": round(float(s["session_hours"]), 1),
+                "ride_drive_ratio": round(float(s["ride_drive_ratio"]), 2),
+                "score": round(float(s["score"]), 3),
+            }
+            for s in ranked_spots
+        ]
+        heat_grid = all_spots_quality_grid(
+            tuple(spot["spot_id"] for spot in ranked_spots),
+            json.dumps(predictions_list, default=str),
+            display_tz,
+            json.dumps(ranked_meta),
+        )
+        if not heat_grid.empty:
+            heat_grid = heat_grid.assign(
+                spot=heat_grid["spot_id"].map(lambda sid: spot_lookup[sid]["name"])
+            )
+            rank_order = [
+                spot_lookup[s["spot_id"]]["name"]
+                for s in ranked_spots
+                if s["spot_id"] in spot_lookup
+            ]
+            # The deployed vega-tooltip renders the field titled "title" as the
+            # bubble header and the one titled "image" as an <img>; in vega-lite
+            # the tooltip datum key is the field title, so those titles are load
+            # bearing. The rest are label:value rows in this order.
+            tooltip = [
+                alt.Tooltip("header:N", title="title"),
+                alt.Tooltip("dial:N", title="image"),
+                alt.Tooltip("quality:O", title="Quality (1-5)"),
+            ]
+            if "wind" in heat_grid.columns:
+                tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
+            if "gust" in heat_grid.columns:
+                tooltip.append(
+                    alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f")
+                )
+            tooltip += [
+                alt.Tooltip("direction:N", title="Direction"),
+                alt.Tooltip("quality_label:N", title="Signal"),
+                alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
+                alt.Tooltip("rideable_hours:Q", title="Rideable hrs", format=".0f"),
+                alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
+                alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
+                alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
+                alt.Tooltip("score:Q", title="Score", format=".3f"),
+            ]
+
+            st.subheader("All spots — session quality")
+            cell_select = alt.selection_point(
+                name="cell", fields=["spot", "time"], on="click", empty=False
+            )
+            heatmap_layer = (
+                alt.Chart(heat_grid)
+                .mark_rect()
+                .encode(
+                    x=alt.X(
+                        "time:T",
+                        title="Day",
+                        axis=_DAY_AXIS,
+                        scale=alt.Scale(nice=False),
+                    ),
+                    x2="time_end:T",
+                    y=alt.Y(
+                        "spot:N",
+                        title=None,
+                        sort=rank_order,
+                        axis=alt.Axis(orient="right"),
+                    ),
+                    color=alt.Color(
+                        "quality:O",
+                        scale=alt.Scale(domain=[1, 2, 3, 4, 5], range=_QUALITY_RAMP),
+                        legend=alt.Legend(
+                            title="Session quality (1-5)",
+                            orient="top",
+                            direction="horizontal",
+                            symbolType="square",
+                        ),
+                    ),
+                    # Selected cell gets a full-opacity ink stroke; the rest keep
+                    # the hairline surface gap, so the pick is unmistakable.
+                    stroke=alt.condition(
+                        cell_select, alt.value(rgb_to_hex(INK)), alt.value(_HEATMAP_GAP)
+                    ),
+                    strokeWidth=alt.condition(
+                        cell_select, alt.value(2.5), alt.value(1.0)
+                    ),
+                    tooltip=tooltip,
+                )
+                .add_params(cell_select)
+            )
+            # Direction (b) of the link: a rule at the map's current hour. A
+            # slider drag only reruns the map fragment, but that fragment
+            # forces an app-scope rerun on a real change (see
+            # _wind_map._render_map_fragment), so this fragment redraws too.
+            map_hour = st.session_state.get("wind_map_hour")
+            heatmap = heatmap_layer
+            if map_hour is not None:
+                grid_tz = heat_grid["time"].dt.tz
+                rule_x = (
+                    map_hour.tz_convert(grid_tz)
+                    if grid_tz is not None and map_hour.tzinfo is not None
+                    else map_hour
+                )
+                highlight = (
+                    alt.Chart(pd.DataFrame({"x": [rule_x]}))
+                    .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
+                    .encode(x="x:T")
+                )
+                heatmap = heatmap_layer + highlight
+            heatmap = (
+                heatmap.properties(
+                    height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
+                    background="transparent",
+                )
+                .configure_view(strokeWidth=0, fill=None)
+                .configure_axis(
+                    domainColor="#3b5a5a",
+                    labelColor="#07252a",
+                    titleColor="#07252a",
+                )
+                .configure_legend(
+                    labelColor="#07252a",
+                    titleColor="#07252a",
+                    labelFont="Manrope",
+                    titleFont="Manrope",
+                    labelFontSize=13,
+                    titleFontSize=12,
+                    labelFontWeight=600,
+                    titleFontWeight=700,
+                    symbolSize=200,
+                )
+            )
+            event = st.altair_chart(
+                heatmap,
+                use_container_width=True,
+                theme=None,
+                on_select="rerun",
+                key="quality_heatmap_select",
+            )
+            selected = _selected_heat_cell(event, heat_grid)
+            if selected is not None:
+                _sync_slider_to_heatmap_click(
+                    selected["time"], str(selected["spot_id"]), focus_spot_ids
+                )
+            if selected is None:
+                st.caption("Click a heatmap cell to inspect that spot and hour.")
+            else:
+                _render_detail_panel(selected, _minimum_rideable_kts())
 
         # Quality index timeline
-        predictions_list = dashboard_data.get("predictions", [])
         quality_frame = spot_quality_timeline(
             focus_spot_id, json.dumps(predictions_list, default=str)
         )
@@ -878,229 +1037,6 @@ def render_rider_console(
                 "Green band along the chart bottom traces solar elevation "
                 "(daylight strength), scaled to the wind-speed axis."
             )
-
-        # All-spots session-quality heatmap: every ranked spot on one grid so
-        # they compare at a glance, best spot on the top row. No night shading
-        # here - daylight is already baked into the score.
-        ranked_meta = [
-            {
-                "spot_id": s["spot_id"],
-                "quality_label": s["quality_label"],
-                "quality_index": round(float(s["quality_index"]), 2),
-                "rideable_hours": int(s["rideable_hours"]),
-                "drive_minutes": round(float(s["drive_minutes"]), 1),
-                "session_hours": round(float(s["session_hours"]), 1),
-                "ride_drive_ratio": round(float(s["ride_drive_ratio"]), 2),
-                "score": round(float(s["score"]), 3),
-            }
-            for s in ranked_spots
-        ]
-        heat_grid = all_spots_quality_grid(
-            tuple(spot["spot_id"] for spot in ranked_spots),
-            json.dumps(predictions_list, default=str),
-            display_tz,
-            json.dumps(ranked_meta),
-        )
-        if not heat_grid.empty:
-            heat_grid = heat_grid.assign(
-                spot=heat_grid["spot_id"].map(lambda sid: spot_lookup[sid]["name"])
-            )
-            rank_order = [
-                spot_lookup[s["spot_id"]]["name"]
-                for s in ranked_spots
-                if s["spot_id"] in spot_lookup
-            ]
-            # The deployed vega-tooltip renders the field titled "title" as the
-            # bubble header and the one titled "image" as an <img>; in vega-lite
-            # the tooltip datum key is the field title, so those titles are load
-            # bearing. The rest are label:value rows in this order.
-            tooltip = [
-                alt.Tooltip("header:N", title="title"),
-                alt.Tooltip("dial:N", title="image"),
-                alt.Tooltip("quality:O", title="Quality (1-5)"),
-            ]
-            if "wind" in heat_grid.columns:
-                tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
-            if "gust" in heat_grid.columns:
-                tooltip.append(
-                    alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f")
-                )
-            tooltip += [
-                alt.Tooltip("direction:N", title="Direction"),
-                alt.Tooltip("quality_label:N", title="Signal"),
-                alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
-                alt.Tooltip("rideable_hours:Q", title="Rideable hrs", format=".0f"),
-                alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
-                alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
-                alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
-                alt.Tooltip("score:Q", title="Score", format=".3f"),
-            ]
-
-            st.subheader("All spots — session quality")
-            cell_select = alt.selection_point(
-                name="cell", fields=["spot", "time"], on="click", empty=False
-            )
-            heatmap_layer = (
-                alt.Chart(heat_grid)
-                .mark_rect()
-                .encode(
-                    x=alt.X(
-                        "time:T",
-                        title="Day",
-                        axis=_DAY_AXIS,
-                        scale=alt.Scale(nice=False),
-                    ),
-                    x2="time_end:T",
-                    y=alt.Y("spot:N", title=None, sort=rank_order),
-                    color=alt.Color(
-                        "quality:O",
-                        scale=alt.Scale(domain=[1, 2, 3, 4, 5], range=_QUALITY_RAMP),
-                        legend=alt.Legend(
-                            title="Session quality (1-5)",
-                            orient="top",
-                            direction="horizontal",
-                            symbolType="square",
-                        ),
-                    ),
-                    # Selected cell gets a full-opacity ink stroke; the rest keep
-                    # the hairline surface gap, so the pick is unmistakable.
-                    stroke=alt.condition(
-                        cell_select, alt.value(rgb_to_hex(INK)), alt.value(_HEATMAP_GAP)
-                    ),
-                    strokeWidth=alt.condition(
-                        cell_select, alt.value(2.5), alt.value(1.0)
-                    ),
-                    tooltip=tooltip,
-                )
-                .add_params(cell_select)
-            )
-            # Direction (b) of the link: a rule at the map's current hour. A
-            # slider drag only reruns the map fragment, but that fragment
-            # forces an app-scope rerun on a real change (see
-            # _wind_map._render_map_fragment), so this fragment redraws too.
-            map_hour = st.session_state.get("wind_map_hour")
-            heatmap = heatmap_layer
-            if map_hour is not None:
-                grid_tz = heat_grid["time"].dt.tz
-                rule_x = (
-                    map_hour.tz_convert(grid_tz)
-                    if grid_tz is not None and map_hour.tzinfo is not None
-                    else map_hour
-                )
-                highlight = (
-                    alt.Chart(pd.DataFrame({"x": [rule_x]}))
-                    .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
-                    .encode(x="x:T")
-                )
-                heatmap = heatmap_layer + highlight
-            heatmap = (
-                heatmap.properties(
-                    height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
-                    background="transparent",
-                )
-                .configure_view(strokeWidth=0, fill=None)
-                .configure_axis(
-                    domainColor="#3b5a5a",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                )
-                .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFont="Manrope",
-                    titleFont="Manrope",
-                    labelFontSize=13,
-                    titleFontSize=12,
-                    labelFontWeight=600,
-                    titleFontWeight=700,
-                    symbolSize=200,
-                )
-            )
-            event = st.altair_chart(
-                heatmap,
-                use_container_width=True,
-                theme=None,
-                on_select="rerun",
-                key="quality_heatmap_select",
-            )
-            selected = _selected_heat_cell(event, heat_grid)
-            if selected is not None:
-                _sync_slider_to_heatmap_click(
-                    selected["time"], str(selected["spot_id"]), focus_spot_ids
-                )
-            if selected is None:
-                st.caption("Click a heatmap cell to inspect that spot and hour.")
-            else:
-                _render_detail_panel(selected, _minimum_rideable_kts())
-
-        # Spot switcher buttons
-        n = len(focus_spot_ids)
-        if n:
-            lead_weight = 0.9
-            button_cols = st.columns([lead_weight] + [1] * n)
-            for index, spot_id in enumerate(focus_spot_ids):
-                spot = spot_lookup[spot_id]
-                # equal-width columns clip long names; the lake prefix is redundant here
-                button_label = spot["name"].removeprefix("Lac de ")
-                is_active = spot_id == focus_spot_id
-                if button_cols[index + 1].button(
-                    button_label,
-                    key=f"focus_spot_{spot_id}",
-                    use_container_width=True,
-                    type="primary" if is_active else "secondary",
-                ):
-                    st.session_state["rider_focus_spot"] = spot_id
-                    st.rerun(scope="fragment")
-
-            # Transposed metrics grid
-            metric_rows: list[tuple[str, list[str]]] = [
-                ("Signal", [s["quality_label"] for s in ranked_spots]),
-                (
-                    "Peak quality",
-                    [f"{float(s['quality_index']):.2f}" for s in ranked_spots],
-                ),
-                (
-                    "Rideable hrs (day)",
-                    [f"{int(s['rideable_hours'])}" for s in ranked_spots],
-                ),
-                (
-                    "Drive min",
-                    [f"{float(s['drive_minutes']):.1f}" for s in ranked_spots],
-                ),
-                (
-                    "Session hrs",
-                    [f"{float(s['session_hours']):.1f}" for s in ranked_spots],
-                ),
-                (
-                    "Ride/drive",
-                    [f"{float(s['ride_drive_ratio']):.2f}" for s in ranked_spots],
-                ),
-                ("Score", [f"{float(s['score']):.3f}" for s in ranked_spots]),
-            ]
-            grid_cols = f"{lead_weight}fr " + " ".join(["1fr"] * n)
-            lead_cells = "".join(
-                f'<div class="cell">{label}</div>' for label, _ in metric_rows
-            )
-            spot_cols_html: list[str] = []
-            for col_idx, spot in enumerate(ranked_spots):
-                active_cls = " active" if spot["spot_id"] == focus_spot_id else ""
-                cells = "".join(
-                    f'<div class="cell">{values[col_idx]}</div>'
-                    for _, values in metric_rows
-                )
-                spot_cols_html.append(
-                    f'<div class="col spot{active_cls}">{cells}</div>'
-                )
-            # Per-spot detail table, demoted below the heatmap: the grid is the
-            # table view, kept for exact values but out of the way by default.
-            with st.expander("Spot metrics", expanded=False):
-                st.markdown(
-                    f'<div class="ranked-stack" style="grid-template-columns:{grid_cols}">'
-                    f'<div class="col lead">{lead_cells}</div>'
-                    + "".join(spot_cols_html)
-                    + "</div>",
-                    unsafe_allow_html=True,
-                )
 
     st.divider()
 
