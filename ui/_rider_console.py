@@ -384,26 +384,34 @@ def _clamp_to_slider_option(
 
 
 def _sync_slider_to_heatmap_click(
-    clicked_time: pd.Timestamp, spot_ids: list[str]
+    clicked_time: pd.Timestamp, clicked_spot_id: str, spot_ids: list[str]
 ) -> None:
-    """Push a heatmap click's hour onto the shared wind-map slider key.
+    """Push a heatmap click's hour and spot onto shared session-state keys.
 
-    Writing "wind_map_hour" here is legal: the console renders before the
-    slider is instantiated later in this same script run. But a fragment
-    rerun of the console does not re-run the map fragment, so an actual
-    change also needs an explicit app-scope rerun. Guarded by
-    heat_hour_applied -- a run that already applied this exact click does
-    not write or rerun again, which is what keeps this from looping.
+    Writing "wind_map_hour" and "rider_focus_spot" here is legal: the console
+    renders before the slider and switcher buttons are instantiated later in
+    this same script run. But a fragment rerun of the console does not
+    re-run the map fragment, so an actual change also needs an explicit
+    app-scope rerun. Guarded by heat_hour_applied and heat_spot_applied -- a
+    run that already applied this exact click does not write or rerun
+    again, which is what keeps this from looping.
     """
     clamped = _clamp_to_slider_option(clicked_time, _slider_hour_options(spot_ids))
-    if clamped is None or st.session_state.get("heat_hour_applied") == clamped:
+    hour_changed = (
+        clamped is not None and st.session_state.get("heat_hour_applied") != clamped
+    )
+    spot_changed = st.session_state.get("heat_spot_applied") != clicked_spot_id
+    if not hour_changed and not spot_changed:
         return
-    st.session_state["wind_map_hour"] = clamped
-    st.session_state["heat_hour_applied"] = clamped
-    # Pre-sync the map's own mirror so its guard is already quiet once the
-    # forced rerun below reaches it -- otherwise it would fire a second,
-    # redundant app rerun for the same change.
-    st.session_state["wind_map_hour_seen"] = clamped
+    if hour_changed:
+        st.session_state["wind_map_hour"] = clamped
+        st.session_state["heat_hour_applied"] = clamped
+        # Pre-sync the map's own mirror so its guard is already quiet once the
+        # forced rerun below reaches it -- otherwise it would fire a second,
+        # redundant app rerun for the same change.
+        st.session_state["wind_map_hour_seen"] = clamped
+    st.session_state["rider_focus_spot"] = clicked_spot_id
+    st.session_state["heat_spot_applied"] = clicked_spot_id
     st.rerun(scope="app")
 
 
@@ -894,7 +902,9 @@ def render_rider_console(
             )
             selected = _selected_heat_cell(event, heat_grid)
             if selected is not None:
-                _sync_slider_to_heatmap_click(selected["time"], focus_spot_ids)
+                _sync_slider_to_heatmap_click(
+                    selected["time"], str(selected["spot_id"]), focus_spot_ids
+                )
             if selected is None:
                 st.caption("Click a heatmap cell to inspect that spot and hour.")
             else:
