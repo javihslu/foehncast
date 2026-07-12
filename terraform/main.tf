@@ -512,6 +512,8 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/artifactregistry.admin",
     "roles/bigquery.admin",
     "roles/cloudbuild.builds.editor",
+    "roles/cloudscheduler.admin",
+    "roles/cloudsql.admin",
     "roles/compute.admin",
     "roles/datastore.owner",
     "roles/iam.serviceAccountAdmin",
@@ -519,6 +521,7 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/resourcemanager.projectIamAdmin",
     "roles/serviceusage.serviceUsageAdmin",
     "roles/storage.admin",
+    "roles/workflows.admin",
   ])
 
   project = var.project_id
