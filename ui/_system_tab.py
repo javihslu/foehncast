@@ -13,6 +13,7 @@ from foehncast.airflow_api import AirflowDagRun, AirflowDagRunsResult, list_dag_
 from foehncast.env import env_value
 
 from _promql import prom_query_batch, prom_query_vector
+from _gcp import in_cloud_runtime, list_workflow_executions
 from _sidebar import airflow_triggers_ready, fmt_delta
 
 # Dataset the panels report on: forecast in the cloud, train locally.
@@ -237,6 +238,8 @@ def _run_row_html(run: AirflowDagRun) -> str:
 
 def _render_recent_runs(result: AirflowDagRunsResult | None) -> None:
     """Render recent DAG runs, or one short caption when unavailable."""
+    if in_cloud_runtime():
+        return  # cloud shows the cascade run history once at the panel top
     if result is None:
         st.caption("Airflow unreachable — run history unavailable.")
         return
@@ -247,6 +250,51 @@ def _render_recent_runs(result: AirflowDagRunsResult | None) -> None:
         st.caption("No recent runs recorded.")
         return
     rows_html = "".join(_run_row_html(run) for run in result.runs)
+    st.markdown(
+        '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
+        "background:rgba(7,37,42,0.03);border-radius:8px;"
+        'border:1px solid rgba(7,37,42,0.08)">' + rows_html + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+_WORKFLOW_STATE_COLORS = {
+    "SUCCEEDED": "#0e8a86",
+    "FAILED": "#c0392b",
+    "ACTIVE": "#c08a2b",
+    "CANCELLED": "#5f6f7f",
+}
+
+
+def _workflow_run_row_html(execution: dict[str, Any]) -> str:
+    """One recent Cloud Workflows execution as a compact row."""
+    state = execution.get("state", "UNKNOWN")
+    color = _WORKFLOW_STATE_COLORS.get(state, "#5f6f7f")
+    rid = execution.get("name", "").rsplit("/", 1)[-1][:14]
+    started = execution.get("startTime", "")[:19].replace("T", " ")
+    return (
+        '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+        f'<span style="display:inline-flex;align-items:center;gap:5px;'
+        f"padding:2px 9px;border-radius:999px;background:{color}1a;color:{color};"
+        f'font-family:Manrope,sans-serif;font-size:0.63rem;font-weight:700;min-width:74px">'
+        f'<span style="width:6px;height:6px;border-radius:50%;background:{color}"></span>'
+        f"{state}</span>"
+        f'<span style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
+        f"font-size:0.66rem;color:#07252a;overflow:hidden;text-overflow:ellipsis;"
+        f'white-space:nowrap">{rid}</span>'
+        f'<span style="font-family:Manrope,sans-serif;font-size:0.66rem;color:#5f6f7f;'
+        f'white-space:nowrap">{started}</span>'
+        "</div>"
+    )
+
+
+def _render_cloud_cascade_runs() -> None:
+    """Recent Cloud Workflows cascade executions — the cloud run history."""
+    executions = list_workflow_executions(limit=5)
+    if not executions:
+        st.caption("No cascade runs yet.")
+        return
+    rows_html = "".join(_workflow_run_row_html(e) for e in executions)
     st.markdown(
         '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
         "background:rgba(7,37,42,0.03);border-radius:8px;"
@@ -518,12 +566,20 @@ def _render_drift_breakdown() -> None:
 
 
 def _render_pipelines_panel() -> None:
-    """System tab body: three pipeline rails with recent Airflow run history."""
-    # Per-pipeline Run controls live in the sidebar (local Airflow REST). Gate
-    # the run-history fetches on the same cached probe so a down server costs
-    # one short caption per rail, not three blocked auth round-trips.
-    airflow_ok = airflow_triggers_ready()
-    st.caption("Per-pipeline Run controls live in the sidebar (local Airflow).")
+    """System tab body: three pipeline rails with recent run history."""
+    # Run controls live in the sidebar. In cloud the pipeline is one Cloud
+    # Workflows cascade (shown once below); locally it is three Airflow DAGs,
+    # gated on a cached probe so a down server costs one caption, not three.
+    cloud = in_cloud_runtime()
+    if cloud:
+        st.caption(
+            "Pipeline runs as one Cloud Workflows cascade — trigger it from the sidebar."
+        )
+        _render_cloud_cascade_runs()
+        airflow_ok = False
+    else:
+        st.caption("Per-pipeline Run controls live in the sidebar (local Airflow).")
+        airflow_ok = airflow_triggers_ready()
 
     # Pre-fetch ALL scalar metrics for all rails in one parallel batch.
     all_scalar_exprs: list[str] = []
