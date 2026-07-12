@@ -396,9 +396,9 @@ def all_spots_quality_grid(
     )
     grid["header"] = spot_names + " - " + grid["time"].dt.strftime("%a %H:00")
     shore = grid["spot_id"].map(
-        lambda sid: float(spots_cfg[sid]["shore_orientation_deg"])
-        if sid in spots_cfg
-        else 0.0
+        lambda sid: (
+            float(spots_cfg[sid]["shore_orientation_deg"]) if sid in spots_cfg else 0.0
+        )
     )
     n = len(grid)
     wind_vals = grid["wind"].to_numpy() if "wind" in grid.columns else [None] * n
