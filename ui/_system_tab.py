@@ -153,16 +153,20 @@ def _format_chip(value: float | None, kind: str) -> str:
     if kind == "int":
         return f"{int(value)}"
     if kind == "f2":
-        return f"{value:.2f}"
-    if kind == "f3":
-        return f"{value:.3f}"
-    if kind == "pct":
-        return f"{value * 100:.0f} %"
-    if kind == "version":
+        text = f"{value:.2f}"
+    elif kind == "f3":
+        text = f"{value:.3f}"
+    elif kind == "pct":
+        text = f"{value * 100:.0f} %"
+    elif kind == "version":
         return f"v{int(value)}"
-    if kind == "bool":
+    elif kind == "bool":
         return "drift" if value >= 0.5 else "clean"
-    return f"{value:g}"
+    else:
+        text = f"{value:g}"
+    if text.startswith("-") and not text.strip("-0. %"):
+        text = text[1:]
+    return text
 
 
 def _status_pill_html(success: float | None, summary_ts: float | None) -> str:

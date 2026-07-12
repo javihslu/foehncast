@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -96,6 +97,20 @@ _HEATMAP_GAP = "#eaf3ef"
 # Row height per spot; the grid grows with the spot count and the container
 # takes the x-axis band, so the axis labels never get clipped.
 _HEATMAP_ROW_PX = 30
+
+# Compact wind dial embedded per heatmap cell as a base64 data URI; small since
+# it renders inside a hover bubble. Spot-level metric columns the tooltip pulls
+# from ranked_spots, constant per spot but carried on every cell row.
+_TOOLTIP_DIAL_PX = 120
+_SPOT_METRIC_KEYS = (
+    "quality_label",
+    "quality_index",
+    "rideable_hours",
+    "drive_minutes",
+    "session_hours",
+    "ride_drive_ratio",
+    "score",
+)
 
 
 def _night_bands(
@@ -266,19 +281,55 @@ def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
                 pass
 
 
+def _compact_dial_uri(
+    direction: float | None,
+    wind_kmh: float | None,
+    gust_kmh: float | None,
+    shore_deg: float,
+    min_kts: float,
+) -> str:
+    """Base64 SVG data URI of the compact wind dial for one cell, or "".
+
+    Empty when wind or direction is missing so the tooltip just drops the image.
+    The base64 alphabet has no raw ``&`` or ``<``, so the URI is tooltip-safe.
+    """
+    if direction is None or wind_kmh is None or pd.isna(direction) or pd.isna(wind_kmh):
+        return ""
+    gust = 0.0 if gust_kmh is None or pd.isna(gust_kmh) else float(gust_kmh)
+    svg = wind_dial_svg(
+        direction_deg=float(direction),
+        speed_kn=float(wind_kmh) / _KN_TO_KMH,
+        gust_kn=gust / _KN_TO_KMH,
+        shore_orientation_deg=shore_deg,
+        min_kts=min_kts,
+        size_px=_TOOLTIP_DIAL_PX,
+        detail="compact",
+    )
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{b64}"
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def all_spots_quality_grid(
-    spot_ids: tuple[str, ...], predictions_json: str, display_tz: str
+    spot_ids: tuple[str, ...],
+    predictions_json: str,
+    display_tz: str,
+    ranked_json: str,
 ) -> pd.DataFrame:
-    """Hourly quality band (1-5) per spot over the forecast window.
+    """Hourly quality band (1-5) per spot over the forecast window, with tooltip payload.
 
     Quality reuses the ranked predictions already in dashboard_data (the /rank
     flow computed them), so nothing re-runs inference. Wind and gusts come from
-    the already-warmed focus_spot_timeline cache for the tooltip only — a cache
-    hit, never a new fetch. Each row is one cell: spot x hour.
+    the warmed focus_spot_timeline cache and direction from the map's
+    _spot_wind_frame cache — both cache hits, never new fetches. Each row is one
+    cell (spot x hour) carrying the tooltip header, a compact base64 dial, and
+    the spot-level ranked metrics, all built once inside this cached frame.
     """
     predictions = json.loads(predictions_json)
     pred_by_spot = {p["spot_id"]: p for p in predictions}
+    meta_by_spot = {m["spot_id"]: m for m in json.loads(ranked_json)}
+    spots_cfg = {s["id"]: s for s in get_spots()}
+    min_kts = _minimum_rideable_kts()
 
     frames: list[pd.DataFrame] = []
     for spot_id in spot_ids:
@@ -295,6 +346,7 @@ def all_spots_quality_grid(
             }
         )
         frame["spot_id"] = spot_id
+        frame["hour"] = frame["time"].dt.floor("h")
 
         # Merge 10 m wind and gusts from the warmed focus timeline (long form),
         # joined on the UTC hour so tz differences never misalign. Missing wind
@@ -314,10 +366,18 @@ def all_spots_quality_grid(
                 .reindex(columns=["10m", "gusts"])
                 .rename(columns={"10m": "wind", "gusts": "gust"})
             )
-            frame["hour"] = frame["time"].dt.floor("h")
             frame = frame.merge(wide, left_on="hour", right_index=True, how="left")
-            frame = frame.drop(columns="hour")
-        frames.append(frame)
+
+        # Direction reuses the map's per-spot frame (the same source the detail
+        # panel and map dials read), merged on the UTC hour so the dials agree.
+        wind_frame = _spot_wind_frame(spot_id)
+        if not wind_frame.empty and "wind_direction_10m" in wind_frame.columns:
+            idx = pd.to_datetime(wind_frame.index, utc=True).floor("h")
+            by_hour = pd.Series(wind_frame["wind_direction_10m"].to_numpy(), index=idx)
+            by_hour = by_hour[~by_hour.index.duplicated()]
+            frame["direction"] = frame["hour"].map(by_hour)
+
+        frames.append(frame.drop(columns="hour"))
 
     if not frames:
         return pd.DataFrame(columns=["time", "quality", "spot_id"])
@@ -325,6 +385,41 @@ def all_spots_quality_grid(
     grid = pd.concat(frames, ignore_index=True)
     grid["time"] = grid["time"].dt.tz_convert(display_tz)
     grid["time_end"] = grid["time"] + pd.Timedelta(hours=1)
+    if "direction" not in grid.columns:
+        grid["direction"] = pd.NA
+
+    # Tooltip payload, built once here so the fragment's reruns only serialize.
+    # Header is "SpotName - Ddd HH:00" in local time; the dial is a compact
+    # base64 SVG; metrics come straight from the ranked cards (constant per spot).
+    spot_names = grid["spot_id"].map(
+        lambda sid: spots_cfg[sid]["name"] if sid in spots_cfg else sid
+    )
+    grid["header"] = spot_names + " - " + grid["time"].dt.strftime("%a %H:00")
+    shore = grid["spot_id"].map(
+        lambda sid: float(spots_cfg[sid]["shore_orientation_deg"])
+        if sid in spots_cfg
+        else 0.0
+    )
+    n = len(grid)
+    wind_vals = grid["wind"].to_numpy() if "wind" in grid.columns else [None] * n
+    gust_vals = grid["gust"].to_numpy() if "gust" in grid.columns else [None] * n
+    grid["dial"] = [
+        _compact_dial_uri(d, w, g, s, min_kts)
+        for d, w, g, s in zip(
+            grid["direction"].to_numpy(),
+            wind_vals,
+            gust_vals,
+            shore.to_numpy(),
+            strict=True,
+        )
+    ]
+    grid["direction"] = grid["direction"].map(
+        lambda d: "" if pd.isna(d) else f"{_compass(float(d))} ({float(d):.0f}°)"
+    )
+    for key in _SPOT_METRIC_KEYS:
+        grid[key] = grid["spot_id"].map(
+            lambda sid, k=key: meta_by_spot.get(sid, {}).get(k)
+        )
     return grid
 
 
@@ -787,10 +882,24 @@ def render_rider_console(
         # All-spots session-quality heatmap: every ranked spot on one grid so
         # they compare at a glance, best spot on the top row. No night shading
         # here - daylight is already baked into the score.
+        ranked_meta = [
+            {
+                "spot_id": s["spot_id"],
+                "quality_label": s["quality_label"],
+                "quality_index": round(float(s["quality_index"]), 2),
+                "rideable_hours": int(s["rideable_hours"]),
+                "drive_minutes": round(float(s["drive_minutes"]), 1),
+                "session_hours": round(float(s["session_hours"]), 1),
+                "ride_drive_ratio": round(float(s["ride_drive_ratio"]), 2),
+                "score": round(float(s["score"]), 3),
+            }
+            for s in ranked_spots
+        ]
         heat_grid = all_spots_quality_grid(
             tuple(spot["spot_id"] for spot in ranked_spots),
             json.dumps(predictions_list, default=str),
             display_tz,
+            json.dumps(ranked_meta),
         )
         if not heat_grid.empty:
             heat_grid = heat_grid.assign(
@@ -801,9 +910,13 @@ def render_rider_console(
                 for s in ranked_spots
                 if s["spot_id"] in spot_lookup
             ]
+            # The deployed vega-tooltip renders the field titled "title" as the
+            # bubble header and the one titled "image" as an <img>; in vega-lite
+            # the tooltip datum key is the field title, so those titles are load
+            # bearing. The rest are label:value rows in this order.
             tooltip = [
-                alt.Tooltip("spot:N", title="Spot"),
-                alt.Tooltip("time:T", title="Time", format="%a %d %H:%M"),
+                alt.Tooltip("header:N", title="title"),
+                alt.Tooltip("dial:N", title="image"),
                 alt.Tooltip("quality:O", title="Quality (1-5)"),
             ]
             if "wind" in heat_grid.columns:
@@ -812,6 +925,16 @@ def render_rider_console(
                 tooltip.append(
                     alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f")
                 )
+            tooltip += [
+                alt.Tooltip("direction:N", title="Direction"),
+                alt.Tooltip("quality_label:N", title="Signal"),
+                alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
+                alt.Tooltip("rideable_hours:Q", title="Rideable hrs", format=".0f"),
+                alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
+                alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
+                alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
+                alt.Tooltip("score:Q", title="Score", format=".3f"),
+            ]
 
             st.subheader("All spots — session quality")
             cell_select = alt.selection_point(
@@ -917,7 +1040,8 @@ def render_rider_console(
             button_cols = st.columns([lead_weight] + [1] * n)
             for index, spot_id in enumerate(focus_spot_ids):
                 spot = spot_lookup[spot_id]
-                button_label = spot["name"]
+                # equal-width columns clip long names; the lake prefix is redundant here
+                button_label = spot["name"].removeprefix("Lac de ")
                 is_active = spot_id == focus_spot_id
                 if button_cols[index + 1].button(
                     button_label,
