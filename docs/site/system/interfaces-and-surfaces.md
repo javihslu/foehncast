@@ -33,7 +33,7 @@ flowchart TD
 ## Key Rules
 
 - `/metrics` is **not** user-facing — it's an operator endpoint
-- Streamlit is a demo, not a deployment control panel
+- Streamlit is rider-facing; its System tab adds light run controls (trigger the pipeline, view run history — Airflow DAGs locally, the Cloud Workflows cascade in cloud), but it is not a deployment or infra console
 - GitHub Actions handles delivery, not runtime scheduling
 - Public docs use screenshots or rendered data, never live embeds of Airflow/MLflow/Prometheus
 
