@@ -8,6 +8,7 @@ import streamlit as st
 
 from foehncast.airflow_api import airflow_triggers_available, trigger_dag
 
+from _gcp import in_cloud_runtime, trigger_pipeline
 from _promql import prom_query_batch
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
@@ -111,6 +112,18 @@ def _render_run_control(label: str, dag_id: str) -> None:
                 st.toast(f"{label} trigger failed — {result.error}")
 
 
+def _render_cloud_run_control() -> None:
+    """Trigger the Cloud Workflows cascade (feature -> training -> inference)."""
+    with st.popover("Run pipeline", use_container_width=True):
+        st.caption("Trigger the Cloud Workflows cascade now.")
+        if st.button("Confirm run", key="run_cascade", use_container_width=True):
+            execution = trigger_pipeline()
+            if execution:
+                st.toast(f"Cascade queued — {execution.rsplit('/', 1)[-1]}")
+            else:
+                st.toast("Cascade trigger failed")
+
+
 @st.fragment(run_every=30)
 def render_freshness_bar() -> None:
     """Source-by-source circular indicators, auto-refreshed every 30 s."""
@@ -118,7 +131,8 @@ def render_freshness_bar() -> None:
     now = _time.time()
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
     values = prom_query_batch(exprs)
-    triggers_ok = airflow_triggers_ready()
+    cloud = in_cloud_runtime()
+    triggers_ok = False if cloud else airflow_triggers_ready()
     for col, (label, _expr, scheduled, dag_id), ts in zip(
         cols, _FRESHNESS_SOURCES, values
     ):
@@ -136,6 +150,13 @@ def render_freshness_bar() -> None:
                 )
             if triggers_ok:
                 _render_run_control(label, dag_id)
+    if cloud:
+        st.markdown(
+            "<div style='margin-top:14px;padding-top:11px;"
+            "border-top:1px solid rgba(7,37,42,0.08)'></div>",
+            unsafe_allow_html=True,
+        )
+        _render_cloud_run_control()
 
 
 def render_sidebar_ml_panels() -> None:

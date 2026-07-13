@@ -38,6 +38,11 @@ def triggers_available() -> bool:
     return bool(_WORKFLOWS_PROJECT and _WORKFLOWS_REGION)
 
 
+def in_cloud_runtime() -> bool:
+    """True on Cloud Run (K_SERVICE is set) — use Cloud Workflows instead of Airflow."""
+    return bool(env_value("K_SERVICE"))
+
+
 def trigger_pipeline() -> str | None:
     """Trigger the Cloud Workflows pipeline cascade."""
     if not triggers_available():
