@@ -756,6 +756,16 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   member   = "allUsers"
 }
 
+# IAM grants propagate asynchronously, so a freshly granted roles/cloudsql.admin
+# binding can still 403 the Cloud SQL create on the first apply. Wait out the
+# propagation before creating the instance.
+resource "time_sleep" "wait_for_sql_admin_iam" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  depends_on      = [google_project_iam_member.github_project_admin]
+  create_duration = "30s"
+}
+
 resource "google_sql_database_instance" "mlflow" {
   count = var.provision_cloud_run_mlflow ? 1 : 0
 
@@ -793,7 +803,10 @@ resource "google_sql_database_instance" "mlflow" {
     }
   }
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    time_sleep.wait_for_sql_admin_iam,
+  ]
 }
 
 resource "google_sql_database" "mlflow" {
