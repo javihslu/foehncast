@@ -172,9 +172,14 @@ variable "cloud_run_ui_image" {
 }
 
 variable "cloud_run_ui_prometheus_url" {
-  description = "Prometheus-compatible query URL for server-side metric lookups from the Streamlit UI."
+  description = "Prometheus-compatible query URL for server-side metric lookups from the Streamlit UI. Leave empty to default to the serve service URI."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.cloud_run_ui_prometheus_url == "" || can(regex("^https?://", var.cloud_run_ui_prometheus_url))
+    error_message = "cloud_run_ui_prometheus_url must be an http(s) URL; storage paths such as gs:// are not metrics endpoints."
+  }
 }
 
 # ---------------------------------------------------------------------------
