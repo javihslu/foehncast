@@ -9,12 +9,11 @@ from typing import Any
 
 import streamlit as st
 
-from foehncast.airflow_api import AirflowDagRun, AirflowDagRunsResult, list_dag_runs
 from foehncast.env import env_value
 
 from _promql import prom_query_batch, prom_query_vector
-from _gcp import in_cloud_runtime, list_workflow_executions
-from _sidebar import airflow_triggers_ready, fmt_delta
+from _control import control_runs
+from _sidebar import fmt_delta
 
 # Dataset the panels report on: forecast in the cloud, train locally.
 _DATASET = env_value("FOEHNCAST_UI_DATASET") or "forecast"
@@ -24,7 +23,6 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "feature",
         "title": "Feature pipeline",
-        "dag_id": "feature_pipeline",
         "success_metric": "foehncast_feature_pipeline_run_success",
         "summary_ts_metric": "foehncast_feature_pipeline_summary_generated_timestamp_seconds",
         "stages_query": (
@@ -49,7 +47,6 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "training",
         "title": "Training pipeline",
-        "dag_id": "training_pipeline",
         "success_metric": "foehncast_training_pipeline_run_success",
         "summary_ts_metric": "foehncast_training_pipeline_summary_generated_timestamp_seconds",
         "stages_query": (
@@ -78,7 +75,6 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
     {
         "key": "inference",
         "title": "Inference pipeline",
-        "dag_id": "inference_pipeline",
         "success_metric": None,
         "summary_ts_metric": (
             "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)"
@@ -204,18 +200,23 @@ def _status_pill_html(
 
 
 # State colors match the app's status usage: teal for success, muted grey for
-# in-flight (queued/running), red for failure.
+# in-flight or neutral-terminal states, red for failure. Keys cover both
+# Airflow (queued/running/success/failed) and Workflows (active/succeeded/
+# cancelled) vocabularies.
 _RUN_STATE_COLOR = {
     "success": "#0aa392",
+    "succeeded": "#0aa392",
     "queued": "#5f6f7f",
     "running": "#5f6f7f",
+    "active": "#c08a2b",
+    "cancelled": "#5f6f7f",
     "failed": "#ff6e6e",
 }
 
 
-def _run_age(run: AirflowDagRun) -> str:
-    """Relative age of a run from its run_after (or logical) date."""
-    stamp = run.run_after or run.logical_date
+def _run_age(run: dict[str, Any]) -> str:
+    """Relative age of a run from its start timestamp."""
+    stamp = str(run.get("started_at") or "")
     if not stamp:
         return "—"
     try:
@@ -225,10 +226,11 @@ def _run_age(run: AirflowDagRun) -> str:
     return f"{fmt_delta(_time.time() - started)} ago"
 
 
-def _run_row_html(run: AirflowDagRun) -> str:
-    color = _RUN_STATE_COLOR.get(run.state, "#5f6f7f")
-    state = run.state or "unknown"
-    rid = run.dag_run_id.replace("<", "&lt;").replace(">", "&gt;") or "—"
+def _run_row_html(run: dict[str, Any]) -> str:
+    state = str(run.get("state") or "unknown")
+    color = _RUN_STATE_COLOR.get(state, "#5f6f7f")
+    rid = str(run.get("run_id") or "").rsplit("/", 1)[-1]
+    rid = rid.replace("<", "&lt;").replace(">", "&gt;") or "—"
     return (
         '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
         f'<span style="display:inline-flex;align-items:center;gap:5px;'
@@ -245,20 +247,14 @@ def _run_row_html(run: AirflowDagRun) -> str:
     )
 
 
-def _render_recent_runs(result: AirflowDagRunsResult | None) -> None:
-    """Render recent DAG runs, or one short caption when unavailable."""
-    if in_cloud_runtime():
-        return  # cloud shows the cascade run history once at the panel top
-    if result is None:
-        st.caption("Airflow unreachable — run history unavailable.")
-        return
-    if result.error:
-        st.caption(f"Run history unavailable — {result.error}.")
-        return
-    if not result.runs:
+def _render_recent_runs(runs: list[dict[str, Any]] | None) -> None:
+    """Render recent runs for one pipeline, or a short caption when empty."""
+    if runs is None:
+        return  # history unavailable; the panel already showed one caption
+    if not runs:
         st.caption("No recent runs recorded.")
         return
-    rows_html = "".join(_run_row_html(run) for run in result.runs)
+    rows_html = "".join(_run_row_html(run) for run in runs)
     st.markdown(
         '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
         "background:rgba(7,37,42,0.03);border-radius:8px;"
@@ -267,49 +263,12 @@ def _render_recent_runs(result: AirflowDagRunsResult | None) -> None:
     )
 
 
-_WORKFLOW_STATE_COLORS = {
-    "SUCCEEDED": "#0e8a86",
-    "FAILED": "#c0392b",
-    "ACTIVE": "#c08a2b",
-    "CANCELLED": "#5f6f7f",
-}
-
-
-def _workflow_run_row_html(execution: dict[str, Any]) -> str:
-    """One recent Cloud Workflows execution as a compact row."""
-    state = execution.get("state", "UNKNOWN")
-    color = _WORKFLOW_STATE_COLORS.get(state, "#5f6f7f")
-    rid = execution.get("name", "").rsplit("/", 1)[-1][:14]
-    started = execution.get("startTime", "")[:19].replace("T", " ")
-    return (
-        '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
-        f'<span style="display:inline-flex;align-items:center;gap:5px;'
-        f"padding:2px 9px;border-radius:999px;background:{color}1a;color:{color};"
-        f'font-family:Manrope,sans-serif;font-size:0.63rem;font-weight:700;min-width:74px">'
-        f'<span style="width:6px;height:6px;border-radius:50%;background:{color}"></span>'
-        f"{state}</span>"
-        f'<span style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
-        f"font-size:0.66rem;color:#07252a;overflow:hidden;text-overflow:ellipsis;"
-        f'white-space:nowrap">{rid}</span>'
-        f'<span style="font-family:Manrope,sans-serif;font-size:0.66rem;color:#5f6f7f;'
-        f'white-space:nowrap">{started}</span>'
-        "</div>"
-    )
-
-
-def _render_cloud_cascade_runs() -> None:
-    """Recent Cloud Workflows cascade executions — the cloud run history."""
-    executions = list_workflow_executions(limit=5)
-    if not executions:
-        st.caption("No cascade runs yet.")
-        return
-    rows_html = "".join(_workflow_run_row_html(e) for e in executions)
-    st.markdown(
-        '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
-        "background:rgba(7,37,42,0.03);border-radius:8px;"
-        'border:1px solid rgba(7,37,42,0.08)">' + rows_html + "</div>",
-        unsafe_allow_html=True,
-    )
+def _group_runs(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Group control-plane runs by pipeline name, order preserved."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        grouped.setdefault(str(run.get("pipeline") or ""), []).append(run)
+    return grouped
 
 
 def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> None:
@@ -581,19 +540,9 @@ def _render_drift_breakdown() -> None:
 
 def _render_pipelines_panel() -> None:
     """System tab body: three pipeline rails with recent run history."""
-    # Run controls live in the sidebar. In cloud the pipeline is one Cloud
-    # Workflows cascade (shown once below); locally it is three Airflow DAGs,
-    # gated on a cached probe so a down server costs one caption, not three.
-    cloud = in_cloud_runtime()
-    if cloud:
-        st.caption(
-            "Pipeline runs as one Cloud Workflows cascade — trigger it from the sidebar."
-        )
-        _render_cloud_cascade_runs()
-        airflow_ok = False
-    else:
-        st.caption("Per-pipeline Run controls live in the sidebar (local Airflow).")
-        airflow_ok = airflow_triggers_ready()
+    # Run controls live in the sidebar; run history comes from the serving
+    # API's control plane, one fetch for all rails.
+    st.caption("Run controls live in the sidebar.")
 
     # Pre-fetch ALL scalar metrics for all rails in one parallel batch.
     all_scalar_exprs: list[str] = []
@@ -616,15 +565,13 @@ def _render_pipelines_panel() -> None:
             for idx, rail in enumerate(_PIPELINE_RAILS)
             if rail["stage_order"]
         }
-        run_futures = (
-            {
-                idx: pool.submit(list_dag_runs, rail["dag_id"], limit=5)
-                for idx, rail in enumerate(_PIPELINE_RAILS)
-            }
-            if airflow_ok
-            else {}
-        )
+        runs_future = pool.submit(control_runs, 15)
         batch_results = scalar_future.result() if all_scalar_exprs else []
+
+    history = runs_future.result()
+    if history.error:
+        st.caption(f"Run history unavailable — {history.error}.")
+    grouped = _group_runs(history.runs)
 
     rail_data: list[dict[str, Any]] = [
         {
@@ -645,8 +592,13 @@ def _render_pipelines_panel() -> None:
             rail_data[rail_idx]["chip_values"].append(value)
     for idx, future in stage_futures.items():
         rail_data[idx]["stages"] = future.result()
-    for idx, future in run_futures.items():
-        rail_data[idx]["runs"] = future.result()
+    for idx, rail in enumerate(_PIPELINE_RAILS):
+        rail_data[idx]["runs"] = None if history.error else grouped.get(rail["key"], [])
+
+    rail_keys = {rail["key"] for rail in _PIPELINE_RAILS}
+    for pipeline in grouped:
+        if pipeline not in rail_keys:
+            _render_recent_runs(grouped[pipeline])
 
     for index, rail in enumerate(_PIPELINE_RAILS):
         if index > 0:

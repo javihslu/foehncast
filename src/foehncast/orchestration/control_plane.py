@@ -108,7 +108,7 @@ def _workflow_run(execution: Mapping[str, Any]) -> PipelineRun:
 
 
 class WorkflowsOrchestrator:
-    """Port of the ui/_gcp Cloud Workflows trigger/list logic; one cascade."""
+    """Cloud Workflows adapter: trigger and list the one cascade workflow."""
 
     def __init__(
         self, *, project: str, region: str, workflow_name: str | None = None
