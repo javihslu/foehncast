@@ -193,21 +193,48 @@ def _needle_records(
     return anchor, segments
 
 
+def _to_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """UTC-normalized timestamp: localize naive values, convert aware ones."""
+    return ts.tz_convert("UTC") if ts.tzinfo is not None else ts.tz_localize("UTC")
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def _hourly_map_records(
     spot_ids: tuple[str, ...], min_kts: float
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    """Needle and anchor records for every forecast hour, keyed by ISO time."""
+    """Needle and anchor records for every forecast hour, keyed by UTC ISO time."""
     spots_cfg = {s["id"]: s for s in get_spots()}
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for sid in spot_ids:
         frame = _spot_wind_frame(sid)
         for ts, row in frame.iterrows():
-            bucket = out.setdefault(ts.isoformat(), {"anchors": [], "segments": []})
+            key = _to_utc(ts).isoformat()
+            bucket = out.setdefault(key, {"anchors": [], "segments": []})
             anchor, segments = _needle_records(spots_cfg[sid], row, min_kts)
             bucket["anchors"].append(anchor)
             bucket["segments"].extend(segments)
     return out
+
+
+def _lookup_hourly_records(
+    hourly: dict[str, dict[str, list[dict[str, Any]]]], hour: pd.Timestamp
+) -> dict[str, list[dict[str, Any]]]:
+    """Records for hour, matched on the shared UTC instant.
+
+    Records are keyed by the wind frame's UTC isoformat while the slider hour is
+    a local prediction-window timestamp; convert to UTC and, when the exact
+    instant is absent, clamp to the nearest available key (the map and heatmap
+    hour sets can diverge at fetch-window edges).
+    """
+    empty: dict[str, list[dict[str, Any]]] = {"anchors": [], "segments": []}
+    if not hourly:
+        return empty
+    target = _to_utc(hour)
+    key = target.isoformat()
+    if key in hourly:
+        return hourly[key]
+    nearest = min(hourly, key=lambda k: abs((pd.Timestamp(k) - target).total_seconds()))
+    return hourly[nearest]
 
 
 def _clamp_to_slider_option(
@@ -286,10 +313,7 @@ def _render_map_fragment(
         (float(storm_band["min_kts"]), float(storm_band["max_kts"])),
     )
     hourly = _hourly_map_records(tuple(spot_ids), min_kts)
-    # Records are keyed by the wind frame's UTC isoformat, but the slider hour
-    # is now a local prediction-window timestamp; match on the shared instant.
-    lookup = hour.tz_convert("UTC") if hour.tzinfo is not None else hour
-    records = hourly.get(lookup.isoformat(), {"anchors": [], "segments": []})
+    records = _lookup_hourly_records(hourly, hour)
     anchors, segments = records["anchors"], records["segments"]
 
     rider = get_rider_config()
