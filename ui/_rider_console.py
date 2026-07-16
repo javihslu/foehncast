@@ -319,8 +319,9 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
 def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
     """Pre-warm timeline caches for all spots in parallel.
 
-    Calls focus_spot_timeline and spot_quality_timeline for each spot
-    concurrently so that switching spots via buttons is instant.
+    Calls focus_spot_timeline, spot_quality_timeline, and _spot_wind_frame for
+    each spot concurrently so that switching spots is instant and the all-spots
+    quality grid finds every per-spot wind frame already cached.
     """
     # Warm the shared prediction history cache first (single BigQuery read)
     # before spawning per-spot threads.
@@ -329,6 +330,7 @@ def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
     def _warm(spot_id: str) -> None:
         focus_spot_timeline(spot_id)
         spot_quality_timeline(spot_id, predictions_json)
+        _spot_wind_frame(spot_id)
 
     with ThreadPoolExecutor(max_workers=min(len(spot_ids), 6)) as pool:
         futures = [pool.submit(_warm, sid) for sid in spot_ids]
