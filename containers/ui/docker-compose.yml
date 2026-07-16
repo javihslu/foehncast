@@ -16,9 +16,8 @@ services:
     environment:
       MLFLOW_TRACKING_URI: http://model-registry:5001
       FOEHNCAST_PROMETHEUS_URL: http://prometheus:9090
-      # The Airflow stack lives on the development network; reach its
-      # host-published port through the Docker Desktop host gateway.
-      FOEHNCAST_AIRFLOW_API_URL: http://host.docker.internal:8080
+      FOEHNCAST_SERVE_URL: http://app:8000
+      FOEHNCAST_CONTROL_TOKEN: ${FOEHNCAST_CONTROL_TOKEN:-foehncast-local-control}
     volumes:
       - ../../.state:/workspace/.state
     ports:

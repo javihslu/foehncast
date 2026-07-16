@@ -6,9 +6,7 @@ import time as _time
 
 import streamlit as st
 
-from foehncast.airflow_api import airflow_triggers_available, trigger_dag
-
-from _gcp import in_cloud_runtime, trigger_pipeline
+from _control import control_capabilities, trigger_pipeline_run
 from _promql import prom_query_batch
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
@@ -77,51 +75,51 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool, str]] = [
         "Features",
         "foehncast_feature_pipeline_summary_generated_timestamp_seconds",
         True,
-        "feature_pipeline",
+        "feature",
     ),
     (
         "Training",
         "foehncast_training_pipeline_summary_generated_timestamp_seconds",
         True,
-        "training_pipeline",
+        "training",
     ),
     (
         "Inference",
         "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
         False,
-        "inference_pipeline",
+        "inference",
     ),
 ]
 
 
 @st.cache_data(ttl=30, show_spinner=False)
-def airflow_triggers_ready() -> bool:
-    """Cached Airflow reachability/auth probe, shared by the sidebar and System tab."""
-    return airflow_triggers_available()
+def pipeline_capabilities() -> list[str]:
+    """Cached control-plane capabilities probe, shared across reruns."""
+    return control_capabilities() or []
 
 
-def _render_run_control(label: str, dag_id: str) -> None:
-    """Compact popover with a single confirm button that triggers dag_id."""
+def _render_run_control(label: str, pipeline: str) -> None:
+    """Compact popover with a single confirm button that triggers pipeline."""
     with st.popover("Run", use_container_width=True):
-        st.caption(f"Trigger the {dag_id} DAG now.")
-        if st.button("Confirm run", key=f"run_{dag_id}", use_container_width=True):
-            result = trigger_dag(dag_id)
-            if result.ok:
-                st.toast(f"{label}: queued {result.dag_run_id}")
+        st.caption(f"Trigger the {pipeline} pipeline now.")
+        if st.button("Confirm run", key=f"run_{pipeline}", use_container_width=True):
+            run_id, error = trigger_pipeline_run(pipeline)
+            if run_id:
+                st.toast(f"{label}: queued {run_id}")
             else:
-                st.toast(f"{label} trigger failed — {result.error}")
+                st.toast(f"{label} trigger failed — {error}")
 
 
-def _render_cloud_run_control() -> None:
-    """Trigger the Cloud Workflows cascade (feature -> training -> inference)."""
+def _render_cascade_run_control() -> None:
+    """Trigger the orchestrator's full cascade (feature -> training -> inference)."""
     with st.popover("Run pipeline", use_container_width=True):
-        st.caption("Trigger the Cloud Workflows cascade now.")
+        st.caption("Trigger the full pipeline cascade now.")
         if st.button("Confirm run", key="run_cascade", use_container_width=True):
-            execution = trigger_pipeline()
-            if execution:
-                st.toast(f"Cascade queued — {execution.rsplit('/', 1)[-1]}")
+            run_id, error = trigger_pipeline_run("cascade")
+            if run_id:
+                st.toast(f"Cascade queued — {run_id.rsplit('/', 1)[-1]}")
             else:
-                st.toast("Cascade trigger failed")
+                st.toast(f"Cascade trigger failed — {error}")
 
 
 @st.fragment(run_every=30)
@@ -131,9 +129,8 @@ def render_freshness_bar() -> None:
     now = _time.time()
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
     values = prom_query_batch(exprs)
-    cloud = in_cloud_runtime()
-    triggers_ok = False if cloud else airflow_triggers_ready()
-    for col, (label, _expr, scheduled, dag_id), ts in zip(
+    capabilities = pipeline_capabilities()
+    for col, (label, _expr, scheduled, pipeline), ts in zip(
         cols, _FRESHNESS_SOURCES, values
     ):
         with col:
@@ -148,15 +145,15 @@ def render_freshness_bar() -> None:
                     _freshness_circle_html(label, now - ts, scheduled=scheduled),
                     unsafe_allow_html=True,
                 )
-            if triggers_ok:
-                _render_run_control(label, dag_id)
-    if cloud:
+            if pipeline in capabilities:
+                _render_run_control(label, pipeline)
+    if "cascade" in capabilities:
         st.markdown(
             "<div style='margin-top:14px;padding-top:11px;"
             "border-top:1px solid rgba(7,37,42,0.08)'></div>",
             unsafe_allow_html=True,
         )
-        _render_cloud_run_control()
+        _render_cascade_run_control()
 
 
 def render_sidebar_ml_panels() -> None:

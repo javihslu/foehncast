@@ -22,6 +22,10 @@ services:
       FOEHNCAST_STATSD_PREFIX: ${FOEHNCAST_STATSD_PREFIX:-drift_metrics}
       UVICORN_HOST: 0.0.0.0
       UVICORN_PORT: 8000
+      # The Airflow stack lives on the development network; reach its
+      # host-published port through the Docker Desktop host gateway.
+      FOEHNCAST_AIRFLOW_API_URL: http://host.docker.internal:8080
+      FOEHNCAST_CONTROL_TOKEN: ${FOEHNCAST_CONTROL_TOKEN:-foehncast-local-control}
     volumes:
       - ../../airflow/reports:/workspace/airflow/reports
       - ../../data:/workspace/data
