@@ -666,7 +666,14 @@ def render_rider_console(
         if not heat_grid.empty:
             pred_hours = sorted(heat_grid["time"].drop_duplicates())
         prediction_end = heat_grid["time_end"].max() if not heat_grid.empty else None
-        ts_domain = _timeseries_x_domain(prediction_end, pd.Timestamp.now(tz="UTC"))
+        # Evaluate "now" in the display timezone (prediction_end's tz) so the
+        # shared domain's left edge matches the Europe/Zurich data on the right.
+        now = (
+            pd.Timestamp.now(tz=prediction_end.tz)
+            if prediction_end is not None
+            else pd.Timestamp.now(tz="UTC")
+        )
+        ts_domain = _timeseries_x_domain(prediction_end, now)
         x_scale = (
             alt.Scale(domain=ts_domain, nice=False)
             if ts_domain is not None

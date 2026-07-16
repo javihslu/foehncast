@@ -131,6 +131,20 @@ def test_timeseries_x_domain_shared_endpoints() -> None:
     assert rc._timeseries_x_domain(None, now) is None
 
 
+def test_timeseries_x_domain_edges_share_end_tz() -> None:
+    # One clock: both domain edges must carry the prediction end's display
+    # timezone, never a stray UTC left edge mixed with Europe/Zurich data (#51).
+    tz = "Europe/Zurich"
+    prediction_end = pd.Timestamp("2026-07-12T20:00:00", tz=tz)
+    now = pd.Timestamp.now(tz=prediction_end.tz)
+
+    domain = rc._timeseries_x_domain(prediction_end, now)
+
+    assert domain is not None
+    assert str(domain[0].tz) == tz
+    assert str(domain[1].tz) == tz
+
+
 def test_clamp_to_slider_option_snaps_stale_hour() -> None:
     # A stale session hour dropped by a data refresh must snap to a real option
     # so the wind-map select_slider never raises on an unknown value.
