@@ -970,8 +970,9 @@ resource "google_cloud_run_v2_service" "ui" {
       }
 
       env {
-        name  = "FOEHNCAST_PROMETHEUS_URL"
-        value = var.cloud_run_ui_prometheus_url
+        name = "FOEHNCAST_PROMETHEUS_URL"
+        # Empty override falls back to serve's own PromQL facade.
+        value = var.cloud_run_ui_prometheus_url != "" ? var.cloud_run_ui_prometheus_url : (var.provision_cloud_run_service ? google_cloud_run_v2_service.app[0].uri : "")
       }
 
       env {
