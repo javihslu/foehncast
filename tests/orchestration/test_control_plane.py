@@ -78,6 +78,29 @@ def test_airflow_list_runs_merges_sorts_and_errors(
         cp.AirflowOrchestrator().list_runs()
 
 
+def test_airflow_list_runs_limit_applies_per_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy feature DAG must not crowd training/inference out of the list."""
+
+    def _list_dag_runs(dag_id: str, limit: int = 5, **_: Any) -> AirflowDagRunsResult:
+        if dag_id == "feature_pipeline":
+            runs = [
+                AirflowDagRun(f"f{i}", "success", "", "manual", f"T{90 - i}")
+                for i in range(limit)
+            ]
+        elif dag_id == "training_pipeline":
+            runs = [AirflowDagRun("t1", "success", "", "manual", "T05")]
+        else:
+            runs = [AirflowDagRun("i1", "success", "", "manual", "T04")]
+        return AirflowDagRunsResult(runs=runs)
+
+    monkeypatch.setattr(cp, "list_dag_runs", _list_dag_runs)
+    runs = cp.AirflowOrchestrator().list_runs(limit=3)
+    assert {r.pipeline for r in runs} == {"feature", "training", "inference"}
+    assert len(runs) == 5  # 3 feature + 1 training + 1 inference, untruncated
+
+
 def test_workflows_trigger_list_and_capabilities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
