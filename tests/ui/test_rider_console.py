@@ -288,6 +288,43 @@ def test_flat_week_chip_names_the_quiet_state() -> None:
     assert "Quiet week" in rc._FLAT_WEEK_CHIP
 
 
+def test_selection_wind_matches_nearest_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    times = pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h")
+    frame = pd.DataFrame(
+        {
+            "wind_speed_10m": [10.0, 20.0, 30.0],
+            "wind_gusts_10m": [15.0, 25.0, 35.0],
+            "wind_direction_10m": [180.0, 200.0, 220.0],
+        },
+        index=times,
+    )
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda sid: frame)
+
+    near = pd.Series(
+        {"spot_id": "silvaplana", "time": times[1] + pd.Timedelta(minutes=10)}
+    )
+    assert rc._selection_wind(near) == (20.0, 25.0, 200.0)
+
+    # A pick more than 90 minutes from any frame hour yields no data.
+    far = pd.Series(
+        {"spot_id": "silvaplana", "time": times[-1] + pd.Timedelta(hours=4)}
+    )
+    assert rc._selection_wind(far) == (None, None, None)
+
+
+def test_selection_bubble_html_carries_panel_fields() -> None:
+    html = rc._selection_bubble_html(
+        "Silvaplana", "Fri 17 Jul 09:00", 4, 22.0, 30.0, 200.0
+    )
+    assert "Silvaplana" in html and "Fri 17 Jul 09:00" in html
+    assert "4/5" in html and "22 km/h" in html and "30 km/h" in html
+    assert "border-radius:14px" in html
+
+    # Missing wind drops those rows but keeps the card and quality line.
+    bare = rc._selection_bubble_html("Sils", "Fri 17 Jul 09:00", 1, None, None, None)
+    assert "Wind" not in bare and "1/5" in bare
+
+
 def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
     html = rc._quality_legend_html()
 
