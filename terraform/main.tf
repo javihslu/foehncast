@@ -707,6 +707,11 @@ resource "google_cloud_run_v2_service" "app" {
         }
       }
 
+      env {
+        name  = "FOEHNCAST_CONTROL_TOKEN"
+        value = var.control_token
+      }
+
       startup_probe {
         http_get {
           path = "/health"
@@ -999,8 +1004,14 @@ resource "google_cloud_run_v2_service" "ui" {
       }
 
       env {
-        name  = "FOEHNCAST_UI_OPERATOR_TOKEN"
-        value = var.ui_operator_token
+        name = "FOEHNCAST_SERVE_URL"
+        # The UI's control plane and PromQL facade both live on serve.
+        value = var.provision_cloud_run_service ? google_cloud_run_v2_service.app[0].uri : ""
+      }
+
+      env {
+        name  = "FOEHNCAST_CONTROL_TOKEN"
+        value = var.control_token
       }
 
       startup_probe {
