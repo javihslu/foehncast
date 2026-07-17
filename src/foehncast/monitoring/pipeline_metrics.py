@@ -133,6 +133,29 @@ def read_all_feature_pipeline_run_summaries() -> list[dict[str, Any]]:
     return [_read_summary_json(path) for path in feature_pipeline_summary_paths()]
 
 
+def record_feast_materialization(
+    dataset: str,
+    materialize_timestamp: str | None,
+) -> ReportLocation | None:
+    """Record the Feast materialize timestamp on the latest persisted summary.
+
+    The feast prepare stage runs after the store stage has already written the
+    summary, so the newest timestamp is patched onto that latest file here for
+    the feature-freshness gauge. No-op when there is no timestamp or no summary
+    has been persisted yet; only the latest file is rewritten, not the history.
+    """
+    if not materialize_timestamp:
+        return None
+    summary_path = feature_pipeline_summary_path(dataset)
+    try:
+        summary = _read_summary_json(summary_path)
+    except FileNotFoundError:
+        return None
+    summary["feast_materialize_timestamp"] = str(materialize_timestamp)
+    _write_summary_json(summary_path, summary)
+    return summary_path
+
+
 def read_feature_pipeline_run_summary_history(
     dataset: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -358,6 +381,7 @@ __all__ = [
     "feature_pipeline_stage_overview",
     "feature_pipeline_summary_path",
     "feature_pipeline_summary_metrics",
+    "record_feast_materialization",
     "read_all_feature_pipeline_run_summaries",
     "read_feature_pipeline_run_summary_history",
     "read_all_training_pipeline_run_summaries",

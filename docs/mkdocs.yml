@@ -76,6 +76,7 @@ nav:
   - Pipelines:
       - Feature Pipeline: system/feature-pipeline.md
       - Training Pipeline: system/training-pipeline.md
+      - Model Card: system/model-card.md
       - Inference Pipeline: system/inference-pipeline.md
   - Operations:
       - Monitoring: system/monitoring.md
@@ -85,3 +86,4 @@ nav:
       - Cloud Deployment: system/cloud-architecture.md
   - For Reviewers:
       - Grading Checklist: system/grading-checklist.md
+      - Media Kit: media-kit.md

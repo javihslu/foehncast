@@ -22,6 +22,7 @@ from foehncast.config import (
     get_storage_config,
 )
 from foehncast.feature_pipeline.engineer import engineer_features
+from foehncast.feature_pipeline.feast import prepare_feature_store
 from foehncast.feature_pipeline.ingest import fetch_all_spots
 from foehncast.feature_pipeline.store import read_features, write_features
 from foehncast.feature_pipeline.validate import run_validation, validation_snapshot
@@ -31,6 +32,7 @@ from foehncast.monitoring.pipeline_metrics import (
     build_feature_pipeline_run_summary,
     build_feature_pipeline_spot_summary,
     emit_feature_pipeline_run_summary,
+    record_feast_materialization,
 )
 from foehncast.orchestration._helpers import (
     resolve_auto_retraining_mode,
@@ -803,11 +805,37 @@ def run_feature_pipeline(dataset: str = "train") -> list[str]:
     return list(_run_feature_pipeline_result(dataset=dataset)["stored_spots"])
 
 
+def prepare_feast_feature_store(
+    dataset: str = "train",
+    *,
+    materialize: bool = True,
+    materialize_timestamp: str | None = None,
+    output_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Sync the Feast store and record the materialize timestamp on the summary.
+
+    The feast prepare stage runs after the store stage has persisted the run
+    summary, so the freshest materialize timestamp is patched onto that summary
+    here for the feature-freshness gauge to read at render time.
+    """
+    result = prepare_feature_store(
+        dataset=dataset,
+        materialize=materialize,
+        materialize_timestamp=materialize_timestamp,
+        output_path=output_path,
+    )
+    record_feast_materialization(dataset, (result or {}).get("materialize_timestamp"))
+    return result
+
+
 def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
-    """Run the feature pipeline and optionally log a refresh run to MLflow."""
+    """Run the feature pipeline, sync the Feast repo (apply + materialize the online
+    store), and optionally log a refresh run to MLflow."""
     tracking_uri = scheduled_mlflow_tracking_uri()
     if tracking_uri is None:
-        return run_feature_pipeline(dataset=dataset)
+        stored_spots = run_feature_pipeline(dataset=dataset)
+        prepare_feast_feature_store(dataset=dataset, materialize=True)
+        return stored_spots
 
     mlflow.set_tracking_uri(tracking_uri)
     configure_mlflow_auth()
@@ -815,6 +843,7 @@ def run_feature_pipeline_job(dataset: str = "train") -> list[str]:
 
     with mlflow.start_run(run_name=f"feature-{dataset}-refresh"):
         stored_spots = run_feature_pipeline(dataset=dataset)
+        prepare_feast_feature_store(dataset=dataset, materialize=True)
         mlflow.log_params(
             {
                 "dataset": dataset,

@@ -10,11 +10,13 @@ from foehncast.orchestration._helpers import (
 )
 from foehncast.orchestration.drift import (
     run_feature_drift_detection_step,
+    run_forecast_feature_drift_detection_step,
     run_prediction_drift_detection_step,
 )
 from foehncast.orchestration.feature import (
     engineer_feature_pipeline_context,
     fetch_feature_pipeline_context,
+    prepare_feast_feature_store,
     run_feature_pipeline,
     run_feature_pipeline_job,
     run_feature_pipeline_job_context,
@@ -37,6 +39,7 @@ __all__ = [
     # Feature pipeline
     "engineer_feature_pipeline_context",
     "fetch_feature_pipeline_context",
+    "prepare_feast_feature_store",
     "run_feature_pipeline",
     "run_feature_pipeline_job",
     "run_feature_pipeline_job_context",
@@ -51,5 +54,6 @@ __all__ = [
     "run_inference_pipeline_step",
     # Drift
     "run_feature_drift_detection_step",
+    "run_forecast_feature_drift_detection_step",
     "run_prediction_drift_detection_step",
 ]

@@ -53,6 +53,15 @@ After bootstrap, everything goes through GitHub Actions:
 
 Repository variables store project IDs, bucket names, and Cloud Run settings. No secrets in repo vars — those stay in runtime env or Secret Manager.
 
+## Historical Data Backfill (One-Time)
+
+After Terraform has created the BigQuery dataset and table, load one year of history with `make cloud-data`. The target forces `STORAGE_BACKEND=bigquery` and reads these `.env` values (see the BigQuery block in `.env.example`):
+
+- `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` — curated feature destination
+- `GCP_PROJECT_ID`, `GCP_LOCATION` — project and region for gcloud ADC
+
+Run it once from a shell with `gcloud` application-default credentials.
+
 ## Orchestration
 
 Airflow (local Docker Compose) handles:

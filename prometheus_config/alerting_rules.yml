@@ -76,3 +76,12 @@ groups:
         annotations:
           summary: "Training pipeline stage failure"
           description: "Training pipeline stage {{ $labels.stage }} failed for {{ $labels.dataset }}/{{ $labels.requested_stage }}."
+
+      - alert: FeatureDataStale
+        expr: max by (dataset) (foehncast_feast_max_feature_age_seconds) > 28800
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feature data is stale"
+          description: "Feast features for {{ $labels.dataset }} have not been materialized in over 8 hours (age exceeds the 28800s threshold)."

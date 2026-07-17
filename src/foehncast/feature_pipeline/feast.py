@@ -138,9 +138,18 @@ def prepare_feature_store(
     materialize: bool = True,
     materialize_timestamp: str | None = None,
 ) -> dict[str, Any]:
-    """Export curated rows and sync the local Feast repo for Airflow-managed runs."""
+    """Sync the Feast repo: apply definitions and materialize the online store.
+
+    A local parquet is exported only for the file-based offline store; BigQuery-source
+    runs (the cloud pipeline) read the offline store straight from BigQuery.
+    """
     repo_path = require_existing_feast_repo_path()
-    destination = export_offline_store(dataset=dataset, output_path=output_path)
+    source_mode = (env_value("FOEHNCAST_FEAST_SOURCE") or "local").strip().lower()
+    destination = (
+        None
+        if source_mode == "bigquery"
+        else export_offline_store(dataset=dataset, output_path=output_path)
+    )
     config_path = render_runtime_config()
     env = feast_runtime_env(config_path)
 
@@ -160,7 +169,7 @@ def prepare_feature_store(
 
     return {
         "dataset": dataset,
-        "output_path": str(destination),
+        "output_path": str(destination) if destination else None,
         "config_path": str(config_path),
         "repo_path": str(repo_path),
         "materialized": materialize,

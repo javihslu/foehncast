@@ -7,14 +7,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 import logging
-from typing import Any
+import secrets
+from typing import Any, Literal
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from foehncast import __version__
 from foehncast.config import get_hindcast_interval_seconds, get_rider_config
+from foehncast.env import env_value
 from foehncast.inference_pipeline.demo import render_online_features_demo
 from foehncast.inference_pipeline.online_features import get_online_spot_features
 from foehncast.inference_pipeline.predict import (
@@ -25,6 +27,11 @@ from foehncast.inference_pipeline.predict import (
     run_inference,
 )
 from foehncast.inference_pipeline.rank import rank_spots
+from foehncast.orchestration.control_plane import (
+    Orchestrator,
+    OrchestratorError,
+    build_orchestrator,
+)
 from foehncast.monitoring.prediction_log import emit_prediction_drift_metrics
 from foehncast.monitoring.drift_prometheus import (
     render_drift_prometheus_metrics,
@@ -50,6 +57,9 @@ from foehncast.monitoring.hindcast import run_hindcast_validation
 from foehncast.monitoring.hindcast_prometheus import (
     render_hindcast_prometheus_metrics,
 )
+from foehncast.monitoring.shadow_prometheus import (
+    render_shadow_prometheus_metrics,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -64,9 +74,32 @@ class OnlineFeaturesRequest(BaseModel):
     feature_names: list[str] | None = None
 
 
+class PipelineRunRequest(BaseModel):
+    pipeline: Literal["feature", "training", "inference", "cascade"]
+
+
 def _not_found(exc: KeyError) -> HTTPException:
     message = exc.args[0] if exc.args else "Requested resource not found"
     return HTTPException(status_code=404, detail=message)
+
+
+def _orchestrator_or_503() -> Orchestrator:
+    orchestrator = build_orchestrator()
+    if orchestrator is None:
+        raise HTTPException(
+            status_code=503, detail="No pipeline orchestrator is configured"
+        )
+    return orchestrator
+
+
+def _require_control_token(provided: str | None) -> None:
+    expected = env_value("FOEHNCAST_CONTROL_TOKEN")
+    if (
+        not expected
+        or provided is None
+        or not secrets.compare_digest(provided, expected)
+    ):
+        raise HTTPException(status_code=401, detail="Missing or invalid control token")
 
 
 def _emit_prediction_monitoring(
@@ -139,6 +172,7 @@ def _metrics_payload() -> bytes:
         + render_prediction_log_prometheus_metrics()
         + render_hindcast_prometheus_metrics()
         + render_drift_prometheus_metrics()
+        + render_shadow_prometheus_metrics()
         # Ephemeral metrics: rendered from in-memory counters and reset on restart.
         + render_prediction_counters_prometheus_metrics()
         + render_inference_prometheus_metrics()
@@ -281,6 +315,44 @@ def create_app() -> FastAPI:
                 "result": _eval_instant_query(query),
             },
         }
+
+    # Pipeline control plane: trigger and run history via the configured
+    # orchestrator, so the UI never talks to an orchestrator directly.
+
+    @app.get("/pipeline/capabilities")
+    def pipeline_capabilities() -> dict[str, list[str]]:
+        return {"pipelines": _orchestrator_or_503().capabilities()}
+
+    @app.get("/pipeline/runs")
+    def pipeline_runs(limit: int = Query(default=5, ge=1, le=50)) -> dict[str, Any]:
+        """List recent runs; limit applies per pipeline for orchestrators with
+        multiple pipelines, not to the merged total.
+        """
+        orchestrator = _orchestrator_or_503()
+        try:
+            runs = orchestrator.list_runs(limit=limit)
+        except OrchestratorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"runs": [asdict(run) for run in runs]}
+
+    @app.post("/pipeline/run", status_code=202)
+    def pipeline_run(
+        request: PipelineRunRequest,
+        x_foehncast_control_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _require_control_token(x_foehncast_control_token)
+        orchestrator = _orchestrator_or_503()
+        if request.pipeline not in orchestrator.capabilities():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pipeline {request.pipeline!r} is not supported "
+                "by the active orchestrator",
+            )
+        try:
+            run = orchestrator.trigger(request.pipeline)
+        except OrchestratorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return asdict(run)
 
     return app
 

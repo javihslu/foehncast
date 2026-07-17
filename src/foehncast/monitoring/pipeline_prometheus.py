@@ -40,6 +40,31 @@ def _stage_state_value(stage: str, summary: dict[str, Any]) -> float:
     return _STAGE_STATE_VALUES["not_run"]
 
 
+def _feast_materialize_age_seconds(
+    materialize_timestamp: Any,
+    *,
+    now: pd.Timestamp | None = None,
+) -> float | None:
+    """Return seconds elapsed since an ISO-8601 Feast materialize timestamp.
+
+    Returns None when the field is missing or unparseable, so summaries without
+    a recorded materialization render no freshness gauge. Naive timestamps are
+    read as UTC and negative ages (clock skew) are clamped to zero.
+    """
+    if not materialize_timestamp:
+        return None
+    try:
+        materialized_at = pd.Timestamp(materialize_timestamp)
+    except (ValueError, TypeError):
+        return None
+    if pd.isna(materialized_at):
+        return None
+    if materialized_at.tzinfo is None:
+        materialized_at = materialized_at.tz_localize("UTC")
+    current = now if now is not None else pd.Timestamp.now(tz="UTC")
+    return max(0.0, (current - materialized_at).total_seconds())
+
+
 def build_feature_pipeline_prometheus_registry(
     summaries: list[dict[str, Any]] | None = None,
 ) -> CollectorRegistry:
@@ -150,6 +175,12 @@ def build_feature_pipeline_prometheus_registry(
         "foehncast_feature_pipeline_failed_spot_count",
         "Failed spot count for the latest feature-pipeline summary.",
         labelnames=("dataset", "storage_backend"),
+        registry=registry,
+    )
+    feast_feature_age = Gauge(
+        "foehncast_feast_max_feature_age_seconds",
+        "Seconds since the newest recorded Feast materialization for the dataset.",
+        labelnames=("dataset",),
         registry=registry,
     )
 
@@ -275,6 +306,12 @@ def build_feature_pipeline_prometheus_registry(
             float(summary.get("skipped_spot_count", 0))
         )
         failed_spots.labels(*run_labels).set(float(summary.get("failed_spot_count", 0)))
+
+        feature_age = _feast_materialize_age_seconds(
+            summary.get("feast_materialize_timestamp")
+        )
+        if feature_age is not None:
+            feast_feature_age.labels(dataset).set(feature_age)
 
         for spot_summary in summary.get("spots", []):
             spot_labels = (
