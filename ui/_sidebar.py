@@ -6,10 +6,22 @@ import time as _time
 
 import streamlit as st
 
-from _control import control_capabilities, trigger_pipeline_run
+from _control import (
+    ControlRuns,
+    control_capabilities,
+    control_runs,
+    trigger_pipeline_run,
+)
 from _promql import prom_query_batch
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
+
+# A pipeline reads busy while its most recent run is queued or running; a fresh
+# trigger also flags it in session state for up to this long, bridging the gap
+# before Airflow materializes the run.
+_BUSY_STATES = frozenset({"queued", "running"})
+_QUEUED_KEY = "fc_queued"
+_QUEUED_FLAG_TTL = 120.0
 
 # Ring status colors, validated by the dataviz palette script (--pairs all,
 # surface #eaf3ef): chroma floor, CVD and normal-vision separation all pass.
@@ -60,6 +72,7 @@ def _freshness_circle_html(
     *,
     scheduled: bool,
     interactive: bool = False,
+    busy: str | None = None,
 ) -> str:
     # One semantic everywhere: the center is the data's age. Cycle position
     # and health move to the ring sweep/color; the countdown to the subtitle.
@@ -80,6 +93,10 @@ def _freshness_circle_html(
         # "unscheduled"); no dashes, so the ring matches the scheduled dials.
         ring = _ring_svg(_RING_IDLE, 1.0)
         subtitle = "on demand"
+    # A busy pipeline reads inactive: the subtitle reports the run state and the
+    # wrapper dims via CSS, while the center still shows the data's age.
+    if busy:
+        subtitle = busy
     center_text = fmt_delta(elapsed)
     # Interactive dials double as buttons: the age swaps to a Run label on hover
     # (CSS, scoped to the .st-key-dialwrap_ wrapper), so stack both spans.
@@ -90,8 +107,9 @@ def _freshness_circle_html(
     else:
         center = center_text
 
+    wrap = ' class="fc-busy"' if busy else ""
     return f"""
-    <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+    <div{wrap} style="display:flex;flex-direction:column;align-items:center;gap:2px">
       <div style="
         position:relative;width:68px;height:68px;
         display:flex;align-items:center;justify-content:center;
@@ -140,22 +158,85 @@ def pipeline_capabilities() -> list[str]:
     return control_capabilities() or []
 
 
-def _render_dial_button(label: str, pipeline: str) -> None:
+def _latest_states(result: ControlRuns) -> dict[str, str]:
+    """Most-recent run state per pipeline from newest-first runs; {} on error."""
+    if result.error:
+        return {}
+    states: dict[str, str] = {}
+    for run in result.runs:
+        pipeline = run.get("pipeline")
+        if pipeline and pipeline not in states:
+            states[pipeline] = str(run.get("state", ""))
+    return states
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def pipeline_run_states() -> dict[str, str]:
+    """Cached most-recent run state per pipeline, polled at the fragment cadence."""
+    return _latest_states(control_runs())
+
+
+def _queued_flags() -> dict[str, float]:
+    """Session-persisted pipeline -> trigger-time map, created on first use."""
+    flags = st.session_state.get(_QUEUED_KEY)
+    if flags is None:
+        flags = {}
+        st.session_state[_QUEUED_KEY] = flags
+    return flags
+
+
+def _mark_queued(*pipelines: str) -> None:
+    """Flag pipelines busy after a successful trigger and force a prompt re-poll."""
+    flags = _queued_flags()
+    stamp = _time.time()
+    for pipeline in pipelines:
+        flags[pipeline] = stamp
+    pipeline_run_states.clear()
+
+
+def _dial_busy(pipeline: str, run_states: dict[str, str], now: float) -> str | None:
+    """Busy subtitle ('queued'/'running') for a dial, or None when idle.
+
+    The poll wins: a most-recent run that is queued or running reports its own
+    state and retires the session flag. Otherwise a fresh trigger flag reads
+    'queued' until its TTL lapses, covering the gap before Airflow materializes
+    the run.
+    """
+    flags = _queued_flags()
+    poll_state = run_states.get(pipeline)
+    if poll_state in _BUSY_STATES:
+        flags.pop(pipeline, None)
+        return poll_state
+    flagged_at = flags.get(pipeline)
+    if flagged_at is not None:
+        if now - flagged_at < _QUEUED_FLAG_TTL:
+            return "queued"
+        del flags[pipeline]
+    return None
+
+
+def _render_dial_button(label: str, pipeline: str, *, busy: bool = False) -> None:
     """Transparent circular button overlaid on the dial; triggers on click."""
-    if st.button(f"Run {label}", key=f"run_{pipeline}"):
+    if st.button(f"Run {label}", key=f"run_{pipeline}", disabled=busy):
         run_id, error = trigger_pipeline_run(pipeline)
         if run_id:
+            _mark_queued(pipeline)
             st.toast(f"{label}: queued {run_id}")
+            st.rerun(scope="fragment")
         else:
             st.toast(f"{label} trigger failed — {error}")
 
 
-def _render_cascade_button() -> None:
+def _render_cascade_button(*, disabled: bool = False) -> None:
     """Full-width button that triggers the orchestrator's full cascade."""
-    if st.button("Run pipeline", key="run_cascade", use_container_width=True):
+    if st.button(
+        "Run pipeline", key="run_cascade", use_container_width=True, disabled=disabled
+    ):
         run_id, error = trigger_pipeline_run("cascade")
         if run_id:
+            _mark_queued("feature", "training", "inference")
             st.toast(f"Cascade queued — {run_id.rsplit('/', 1)[-1]}")
+            st.rerun(scope="fragment")
         else:
             st.toast(f"Cascade trigger failed — {error}")
 
@@ -167,6 +248,13 @@ def _render_freshness_bar() -> None:
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
     values = prom_query_batch(exprs)
     capabilities = pipeline_capabilities()
+    # No capable pipelines means no interactive dial, so skip the run-state poll.
+    run_states = pipeline_run_states() if capabilities else {}
+    busy = {
+        pipeline: _dial_busy(pipeline, run_states, now)
+        for _label, _expr, _scheduled, pipeline in _FRESHNESS_SOURCES
+        if pipeline in capabilities
+    }
     for col, (label, _expr, scheduled, pipeline), ts in zip(
         cols, _FRESHNESS_SOURCES, values
     ):
@@ -179,13 +267,18 @@ def _render_freshness_bar() -> None:
                 )
                 continue
             interactive = pipeline in capabilities
+            busy_state = busy.get(pipeline)
             html = _freshness_circle_html(
-                label, now - ts, scheduled=scheduled, interactive=interactive
+                label,
+                now - ts,
+                scheduled=scheduled,
+                interactive=interactive,
+                busy=busy_state,
             )
             if interactive:
                 with st.container(key=f"dialwrap_{pipeline}"):
                     st.markdown(html, unsafe_allow_html=True)
-                    _render_dial_button(label, pipeline)
+                    _render_dial_button(label, pipeline, busy=bool(busy_state))
             else:
                 st.markdown(html, unsafe_allow_html=True)
     if "cascade" in capabilities:
@@ -194,7 +287,7 @@ def _render_freshness_bar() -> None:
             "border-top:1px solid rgba(7,37,42,0.08)'></div>",
             unsafe_allow_html=True,
         )
-        _render_cascade_button()
+        _render_cascade_button(disabled=any(busy.values()))
 
 
 @st.fragment(run_every=30)

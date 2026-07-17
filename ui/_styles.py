@@ -326,24 +326,35 @@ _CSS = """
     color: var(--warm) !important;
   }
   section[data-testid="stSidebar"]
-    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-age {
+    div[class*="st-key-dialwrap_"]:has(button:enabled:hover) .fc-age {
     opacity: 0;
   }
   section[data-testid="stSidebar"]
-    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-run {
+    div[class*="st-key-dialwrap_"]:has(button:enabled:hover) .fc-run {
     opacity: 1;
   }
   section[data-testid="stSidebar"]
-    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-disc {
+    div[class*="st-key-dialwrap_"]:has(button:enabled:hover) .fc-disc {
     background: #fdf2e6 !important;
   }
   section[data-testid="stSidebar"]
-    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-ring {
+    div[class*="st-key-dialwrap_"]:has(button:enabled:hover) .fc-ring {
     filter: brightness(1.08);
   }
   section[data-testid="stSidebar"]
-    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-ring-arc {
+    div[class*="st-key-dialwrap_"]:has(button:enabled:hover) .fc-ring-arc {
     stroke-width: 8.5;
+  }
+
+  /* A queued or running pipeline greys its dial and disables the overlay
+     button, so no fresh trigger can collide with the live run. */
+  section[data-testid="stSidebar"] .fc-busy {
+    opacity: 0.45;
+    filter: grayscale(0.6);
+  }
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] button:disabled {
+    cursor: default !important;
   }
 
   div[data-testid="stMetric"] {
