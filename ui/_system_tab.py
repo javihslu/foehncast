@@ -92,7 +92,7 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
             ),
             (
                 "confidence",
-                'clamp_max(1 - max(foehncast_drift_metric{metric_name="share_of_drifted_columns"}), 1)',
+                'clamp_max(1 - max(foehncast_drift_metric{metric_name="share_of_drifted_columns",dataset_version="train"}), 1)',
                 "pct",
             ),
         ],
