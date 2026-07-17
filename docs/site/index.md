@@ -62,4 +62,4 @@ Pick the path that matches what you came for:
 
 - **Reviewers** — start at the [Grading Checklist](system/grading-checklist.md). Each criterion links onward to the code, docs, and live services behind it.
 - **Reproducing the project** — [Quick Start](getting-started.md) → [Local Stack](system/local-evaluator.md) → [Repository](system/repository.md).
-- **Understanding the system** — [Use Case and Data](system/use-case.md) → [Architecture](system/architecture.md) → the [Feature](system/feature-pipeline.md), [Training](system/training-pipeline.md), and [Inference](system/inference-pipeline.md) pipelines → [Monitoring](system/monitoring.md) → [Cloud Deployment](system/cloud-architecture.md).
+- **Understanding the system** — [Use Case and Data](system/use-case.md) → [Architecture](system/architecture.md) → the [Feature](system/feature-pipeline.md), [Training](system/training-pipeline.md), and [Inference](system/inference-pipeline.md) pipelines → [Model Card](system/model-card.md) → [Monitoring](system/monitoring.md) → [Cloud Deployment](system/cloud-architecture.md).

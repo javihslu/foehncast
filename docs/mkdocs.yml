@@ -76,6 +76,7 @@ nav:
   - Pipelines:
       - Feature Pipeline: system/feature-pipeline.md
       - Training Pipeline: system/training-pipeline.md
+      - Model Card: system/model-card.md
       - Inference Pipeline: system/inference-pipeline.md
   - Operations:
       - Monitoring: system/monitoring.md
