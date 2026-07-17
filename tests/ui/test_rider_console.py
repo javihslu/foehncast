@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import types
 
 import pandas as pd
 import pytest
@@ -159,3 +160,114 @@ def test_clamp_to_slider_option_snaps_stale_hour() -> None:
     assert rc._clamp_to_slider_option(options[5], options) == options[5]
     # Empty options -> None (caller falls back to the wind-frame hours).
     assert rc._clamp_to_slider_option(stale, []) is None
+
+
+def test_selected_heat_cell_resolves_nearest_row_for_clicked_spot() -> None:
+    # Grid columns mirror what all_spots_quality_grid produces after the
+    # console assigns the display-name "spot" column (spot, time).
+    times = pd.date_range(
+        "2026-07-12T09:00:00", periods=3, freq="h", tz="Europe/Zurich"
+    )
+    grid = pd.DataFrame(
+        {
+            "spot": ["Silvaplana"] * 3 + ["Sils"] * 3,
+            "time": list(times) + list(times),
+        }
+    )
+    # Streamlit projects the click as epoch ms; ten minutes off still resolves
+    # to the nearest row, not its hourly neighbors.
+    click_ms = int(times[1].tz_convert("UTC").timestamp() * 1000) + 10 * 60 * 1000
+    event = types.SimpleNamespace(
+        selection={"cell": [{"spot": "Silvaplana", "time": click_ms}]}
+    )
+
+    row = rc._selected_heat_cell(event, grid)
+
+    assert row is not None
+    assert row["spot"] == "Silvaplana"
+    assert row["time"] == times[1]
+
+
+def test_selected_heat_cell_unknown_spot_returns_none() -> None:
+    times = pd.date_range(
+        "2026-07-12T09:00:00", periods=2, freq="h", tz="Europe/Zurich"
+    )
+    grid = pd.DataFrame({"spot": ["Silvaplana"] * 2, "time": list(times)})
+    click_ms = int(times[0].tz_convert("UTC").timestamp() * 1000)
+    event = types.SimpleNamespace(
+        selection={"cell": [{"spot": "not-a-spot", "time": click_ms}]}
+    )
+
+    assert rc._selected_heat_cell(event, grid) is None
+
+
+def test_selected_heat_cell_empty_selection_returns_none() -> None:
+    times = pd.date_range(
+        "2026-07-12T09:00:00", periods=2, freq="h", tz="Europe/Zurich"
+    )
+    grid = pd.DataFrame({"spot": ["Silvaplana"] * 2, "time": list(times)})
+
+    assert rc._selected_heat_cell(types.SimpleNamespace(selection={}), grid) is None
+    assert (
+        rc._selected_heat_cell(types.SimpleNamespace(selection={"cell": []}), grid)
+        is None
+    )
+    # No "selection" attribute at all -> getattr falls back to None.
+    assert rc._selected_heat_cell(types.SimpleNamespace(), grid) is None
+
+
+def test_minimum_rideable_kts_uses_light_threshold_below_weight_cutoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = {
+        "minimum_wind_speed_10m": {
+            "light_rider_max_weight_kg": 65.0,
+            "light_rider_min_kts": 12.0,
+            "default_min_kts": 16.0,
+        }
+    }
+    monkeypatch.setattr(rc, "get_labeling_config", lambda: cfg)
+
+    monkeypatch.setattr(rc, "get_rider_config", lambda: {"weight_kg": 60.0})
+    assert rc._minimum_rideable_kts() == 12.0
+
+    # At the weight cutoff itself the light threshold still applies (<=).
+    monkeypatch.setattr(rc, "get_rider_config", lambda: {"weight_kg": 65.0})
+    assert rc._minimum_rideable_kts() == 12.0
+
+    monkeypatch.setattr(rc, "get_rider_config", lambda: {"weight_kg": 90.0})
+    assert rc._minimum_rideable_kts() == 16.0
+
+
+def test_night_bands_wraps_night_intervals_as_dataframe() -> None:
+    lat, lon = 46.45, 9.79
+    t_min = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
+    t_max = t_min + pd.Timedelta(hours=48)
+
+    bands = rc._night_bands(t_min, t_max, lat, lon)
+    expected = rc.night_intervals(lat, lon, t_min, t_max)
+
+    assert list(bands.columns) == ["x", "x2"]
+    assert len(bands) == len(expected)
+    assert len(bands) >= 1
+    for (_, row), (lo, hi) in zip(bands.iterrows(), expected, strict=True):
+        assert row["x"] == lo
+        assert row["x2"] == hi
+        assert row["x"] < row["x2"]
+
+
+def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
+    html = rc._quality_legend_html()
+
+    assert "Session quality (1-5)" in html
+    # Level 1 is the outline-only swatch (no ramp fill).
+    assert (
+        "border:1px solid rgba(7, 37, 42, 0.4);margin:0 0.3rem 0 0.9rem;"
+        'vertical-align:-0.05rem"></span>1' in html
+    )
+    # Levels 2-5 each carry their ramp color as the chip background.
+    for level, color in zip((2, 3, 4, 5), rc._QUALITY_RAMP, strict=True):
+        assert (
+            f"background:{color};margin:0 0.3rem 0 0.9rem;"
+            f'vertical-align:-0.05rem"></span>{level}'
+        ) in html
