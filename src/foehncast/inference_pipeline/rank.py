@@ -81,7 +81,7 @@ def rank_spots(
         candidate_rows.append(
             {
                 "spot_id": prediction["spot_id"],
-                "spot_name": prediction["spot_name"],
+                "spot_name": prediction.get("spot_name", spot["name"]),
                 "quality_index": quality_index,
                 "drive_minutes": drive_minutes,
                 "session_hours": session_hours,

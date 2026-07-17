@@ -211,8 +211,7 @@ def test_training_dag_is_asset_scheduled_and_active_by_default(
     )
     expected_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else ('Production' if dag_run and "
-        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+        "dag_run.conf.get('stage') else 'Candidate' }}"
     )
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": expected_dataset_template,
@@ -264,8 +263,7 @@ def test_training_dag_supports_dataset_override(
     )
     expected_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else ('Production' if dag_run and "
-        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+        "dag_run.conf.get('stage') else 'Candidate' }}"
     )
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": expected_dataset_template,
@@ -309,6 +307,7 @@ def test_drift_dag_defaults_to_twelve_hour_schedule(
     assert module.dag.kwargs["tags"] == ["foehncast", "monitoring"]
     assert [operator.kwargs["task_id"] for operator in operators] == [
         "detect_feature_drift",
+        "detect_dataset_drift",
         "detect_prediction_drift",
     ]
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
@@ -316,6 +315,9 @@ def test_drift_dag_defaults_to_twelve_hour_schedule(
         drift_report_asset_uri("train"),
     ]
     assert [asset.uri for asset in operators[1].kwargs["outlets"]] == [
+        drift_report_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[2].kwargs["outlets"]] == [
         drift_report_asset_uri("train"),
     ]
 

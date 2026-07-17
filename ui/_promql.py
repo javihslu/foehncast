@@ -12,8 +12,6 @@ import streamlit as st
 
 from foehncast.env import env_value
 
-from _gcp import gcp_access_token
-
 _PROMETHEUS_BASE_URL = (
     env_value("FOEHNCAST_PROMETHEUS_URL") or "http://127.0.0.1:9090"
 ).rstrip("/")
@@ -22,12 +20,7 @@ _PROMETHEUS_BASE_URL = (
 def _query_prometheus(expr: str) -> dict[str, Any]:
     """Run an instant PromQL query and return the parsed JSON response."""
     url = f"{_PROMETHEUS_BASE_URL}/api/v1/query?query={urlquote(expr)}"
-    headers: dict[str, str] = {}
-    if "monitoring.googleapis.com" in _PROMETHEUS_BASE_URL:
-        token = gcp_access_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url)
     with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
         return json.load(resp)
 

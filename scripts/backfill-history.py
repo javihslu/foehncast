@@ -246,12 +246,12 @@ def _generate_prediction_events(
 
     events = []
     for ts in timestamps:
-        # Find the nearest row in the feature data.
-        idx = feature_df.index.get_indexer([ts], method="nearest")[0]
-        if idx < 0 or idx >= len(feature_df):
+        # quality drops NaN rows, so index against its own index to stay aligned.
+        idx = quality.index.get_indexer([ts], method="nearest")[0]
+        if idx < 0 or idx >= len(quality):
             continue
 
-        forecast_time = feature_df.index[idx]
+        forecast_time = quality.index[idx]
         qi = int(quality.iloc[idx])
 
         events.append(

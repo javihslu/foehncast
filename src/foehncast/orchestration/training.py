@@ -29,7 +29,11 @@ from foehncast.pipeline_stage_tracking import (
 )
 from foehncast.pipeline_state import TrainingPipelineState
 from foehncast.training_pipeline.evaluate import generate_evaluation_report
-from foehncast.training_pipeline.register import promote_model, register_model
+from foehncast.training_pipeline.register import (
+    ensure_champion_alias,
+    promote_model,
+    register_model,
+)
 from foehncast.training_pipeline.train import run_training_pipeline
 
 logger = logging.getLogger(__name__)
@@ -236,6 +240,7 @@ def register_training_run(
     def _run() -> str:
         model_version = register_model(training_run_id)
         promote_model(None, model_version.version, stage=stage)
+        ensure_champion_alias(model_version.version)
         training_state.training_run_id = training_run_id
         training_state.registered_model_name = get_mlflow_config()["model_name"]
         training_state.registered_model_version = str(model_version.version)

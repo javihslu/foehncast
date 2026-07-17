@@ -173,3 +173,44 @@ def test_rank_spots_handles_empty_forecasts(monkeypatch: pytest.MonkeyPatch) -> 
     assert ranked_spots[0].quality_index == 0.0
     assert ranked_spots[0].session_hours == 0.0
     assert ranked_spots[0].ride_drive_ratio == 0.0
+
+
+def test_rank_spots_tolerates_missing_spot_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A legacy prediction record can lack spot_name (issue #34). rank_spots must
+    # fall back to the spot registry name instead of raising KeyError.
+    monkeypatch.setattr(
+        rank,
+        "get_inference_config",
+        lambda: {
+            "ranking_weights": {
+                "quality_index": 0.6,
+                "ride_drive_ratio": 0.3,
+                "duration_forecast": 0.1,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        rank,
+        "get_spots",
+        lambda: [{"id": "silvaplana", "name": "Silvaplana", "lat": 0.0, "lon": 0.0}],
+    )
+    monkeypatch.setattr(
+        rank, "get_drive_minutes_to_spot", lambda spot, rider_config: 45.0
+    )
+
+    ranked_spots = rank.rank_spots(
+        {
+            "predictions": [
+                {
+                    "spot_id": "silvaplana",
+                    "forecast": [{"time": "2025-01-01T00:00:00", "quality_index": 3.0}],
+                }
+            ]
+        },
+        rider_config={"home_lat": 47.02, "home_lon": 8.65},
+    )
+
+    assert len(ranked_spots) == 1
+    assert ranked_spots[0].spot_name == "Silvaplana"

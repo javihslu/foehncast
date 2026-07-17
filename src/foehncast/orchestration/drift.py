@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from foehncast.config import get_spots
-from foehncast.monitoring.drift import push_drift_metrics
+import pandas as pd
+
+from foehncast.config import get_model_config, get_spots
+from foehncast.monitoring.drift import detect_model_feature_drift, push_drift_metrics
 from foehncast.orchestration.feature import (
     _emit_feature_drift_metrics,
     _read_optional_feature_slice,
@@ -86,6 +88,69 @@ def run_feature_drift_detection_step(
         "drifted_spots": drifted_spots,
         "errors": errors,
     }
+
+
+def _read_all_spot_features(dataset: str) -> pd.DataFrame:
+    """Concatenate stored features for one dataset across all configured spots."""
+    frames: list[pd.DataFrame] = []
+    for spot in get_spots():
+        features_df = _read_optional_feature_slice(spot["id"], dataset)
+        if not features_df.empty:
+            frames.append(features_df)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def run_forecast_feature_drift_detection_step(
+    dataset: str = "forecast",
+    reference_dataset: str = "train",
+) -> dict[str, Any]:
+    """Detect dataset-level drift between the training reference and forecast.
+
+    Compares the two datasets as a whole, scoped to the configured model feature
+    set (``config.yaml`` model.features), so ``share_of_drifted_columns`` (and
+    the UI Confidence chip that reads it) is resolved over the full feature set
+    rather than a narrow overlap. This is distinct from the per-spot feature
+    drift check. Columns are intersected with what each dataset carries, so a
+    narrow reference does not crash the comparison.
+    """
+    try:
+        feature_columns = list(get_model_config().get("features", []))
+        reference_df = _read_all_spot_features(reference_dataset)
+        current_df = _read_all_spot_features(dataset)
+        report = detect_model_feature_drift(
+            reference_df,
+            current_df,
+            feature_columns,
+            dataset_name="forecast features",
+            dataset_version="v1",
+        )
+        if report is None:
+            logger.info(
+                "Forecast feature drift check: nothing comparable "
+                "(reference=%d rows, forecast=%d rows)",
+                len(reference_df),
+                len(current_df),
+            )
+            return {"forecast_feature_drift": None, "reason": "no_comparable_columns"}
+
+        push_drift_metrics(report)
+        logger.info(
+            "Forecast feature drift check: drift=%s, drifted_columns=%d/%d",
+            report.dataset_drift,
+            report.drifted_column_count,
+            report.column_count,
+        )
+        return {
+            "forecast_feature_drift": report.dataset_drift,
+            "compared_column_count": report.column_count,
+            "drifted_column_count": report.drifted_column_count,
+            "share_of_drifted_columns": report.share_of_drifted_columns,
+        }
+    except Exception as exc:
+        logger.exception("Forecast feature drift check failed")
+        return {"forecast_feature_drift": None, "error": str(exc)}
 
 
 def run_prediction_drift_detection_step() -> dict[str, Any]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import mlflow
+from mlflow.exceptions import MlflowException
 
 from foehncast.config import (
     configure_mlflow_auth,
@@ -109,6 +110,24 @@ def assign_model_alias(
         normalized_alias,
         normalized_version,
     )
+
+
+def ensure_champion_alias(version: str | int, model_name: str | None = None) -> bool:
+    """Bootstrap the champion alias onto this version when none exists yet."""
+    mlflow_config = get_mlflow_config()
+    resolved_model_name = _resolved_model_name(model_name, mlflow_config)
+    champion = mlflow_config.get("champion_alias", "champion")
+    client = _configured_mlflow_client(mlflow, get_mlflow_tracking_uri())
+    try:
+        client.get_model_version_by_alias(resolved_model_name, champion)
+        return False
+    except MlflowException:
+        client.set_registered_model_alias(
+            resolved_model_name,
+            champion,
+            _normalized_version(version),
+        )
+        return True
 
 
 def get_production_model(model_name: str | None = None) -> Any:

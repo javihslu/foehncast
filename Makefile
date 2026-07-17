@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -45,6 +45,10 @@ dvc-validate:  ## Validate DVC pipeline DAG, params, and lockfile
 	cd $(ROOT_DIR) && uv run dvc dag
 	cd $(ROOT_DIR) && uv run dvc params diff
 	@test -f $(ROOT_DIR)/dvc.lock || (echo "dvc.lock missing" && exit 1)
+
+alerts-check:  ## Validate Prometheus alerting rules and run their promtool unit tests
+	cd $(ROOT_DIR) && promtool check rules prometheus_config/alerting_rules.yml
+	cd $(ROOT_DIR) && promtool test rules prometheus_config/alerting_rules_test.yml
 
 docs-build:  ## Build the documentation site
 	cd $(ROOT_DIR) && uv sync --group docs && uv run mkdocs build -f docs/mkdocs.yml --strict

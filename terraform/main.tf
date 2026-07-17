@@ -512,6 +512,8 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/artifactregistry.admin",
     "roles/bigquery.admin",
     "roles/cloudbuild.builds.editor",
+    "roles/cloudscheduler.admin",
+    "roles/cloudsql.admin",
     "roles/compute.admin",
     "roles/datastore.owner",
     "roles/iam.serviceAccountAdmin",
@@ -519,6 +521,7 @@ resource "google_project_iam_member" "github_project_admin" {
     "roles/resourcemanager.projectIamAdmin",
     "roles/serviceusage.serviceUsageAdmin",
     "roles/storage.admin",
+    "roles/workflows.admin",
   ])
 
   project = var.project_id
@@ -704,6 +707,11 @@ resource "google_cloud_run_v2_service" "app" {
         }
       }
 
+      env {
+        name  = "FOEHNCAST_CONTROL_TOKEN"
+        value = var.control_token
+      }
+
       startup_probe {
         http_get {
           path = "/health"
@@ -753,6 +761,16 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   member   = "allUsers"
 }
 
+# IAM grants propagate asynchronously, so a freshly granted roles/cloudsql.admin
+# binding can still 403 the Cloud SQL create on the first apply. Wait out the
+# propagation before creating the instance.
+resource "time_sleep" "wait_for_sql_admin_iam" {
+  count = var.provision_cloud_run_mlflow ? 1 : 0
+
+  depends_on      = [google_project_iam_member.github_project_admin]
+  create_duration = "30s"
+}
+
 resource "google_sql_database_instance" "mlflow" {
   count = var.provision_cloud_run_mlflow ? 1 : 0
 
@@ -790,7 +808,10 @@ resource "google_sql_database_instance" "mlflow" {
     }
   }
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    time_sleep.wait_for_sql_admin_iam,
+  ]
 }
 
 resource "google_sql_database" "mlflow" {
@@ -967,8 +988,9 @@ resource "google_cloud_run_v2_service" "ui" {
       }
 
       env {
-        name  = "FOEHNCAST_PROMETHEUS_URL"
-        value = var.cloud_run_ui_prometheus_url
+        name = "FOEHNCAST_PROMETHEUS_URL"
+        # Empty override falls back to serve's own PromQL facade.
+        value = var.cloud_run_ui_prometheus_url != "" ? var.cloud_run_ui_prometheus_url : (var.provision_cloud_run_service ? google_cloud_run_v2_service.app[0].uri : "")
       }
 
       env {
@@ -982,8 +1004,14 @@ resource "google_cloud_run_v2_service" "ui" {
       }
 
       env {
-        name  = "FOEHNCAST_UI_OPERATOR_TOKEN"
-        value = var.ui_operator_token
+        name = "FOEHNCAST_SERVE_URL"
+        # The UI's control plane and PromQL facade both live on serve.
+        value = var.provision_cloud_run_service ? google_cloud_run_v2_service.app[0].uri : ""
+      }
+
+      env {
+        name  = "FOEHNCAST_CONTROL_TOKEN"
+        value = var.control_token
       }
 
       startup_probe {

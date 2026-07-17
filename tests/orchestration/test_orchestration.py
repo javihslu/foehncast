@@ -10,6 +10,8 @@ import pandas as pd
 import pytest
 
 from foehncast import orchestration
+from foehncast.monitoring import drift as _monitoring_drift
+from foehncast.monitoring import pipeline_metrics
 from foehncast.orchestration import drift as _orch_drift
 from foehncast.orchestration import feature as _orch_feature
 from foehncast.orchestration import training as _orch_training
@@ -476,6 +478,7 @@ def test_run_feature_pipeline_job_without_mlflow_env_delegates(
         "run_feature_pipeline",
         fake_run_feature_pipeline,
     )
+    monkeypatch.setattr(_orch_feature, "prepare_feature_store", lambda *a, **k: None)
 
     stored_spots = orchestration.run_feature_pipeline_job(dataset="validation")
 
@@ -506,6 +509,7 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
         "run_feature_pipeline",
         lambda dataset="train": ["silvaplana", "urnersee"],
     )
+    monkeypatch.setattr(_orch_feature, "prepare_feature_store", lambda *a, **k: None)
 
     stored_spots = orchestration.run_feature_pipeline_job(dataset="train")
 
@@ -519,6 +523,37 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
         "stored_spots": "silvaplana,urnersee",
     }
     assert logged["metrics"] == {"stored_spot_count": 2}
+
+
+def test_prepare_feast_feature_store_records_materialize_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+    pipeline_metrics.write_feature_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T12:00:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "storage_backend": "s3",
+        }
+    )
+    monkeypatch.setattr(
+        _orch_feature,
+        "prepare_feature_store",
+        lambda **kwargs: {
+            "dataset": kwargs["dataset"],
+            "materialized": True,
+            "materialize_timestamp": "2026-05-12T13:00:00+00:00",
+        },
+    )
+
+    result = _orch_feature.prepare_feast_feature_store(dataset="train")
+
+    assert result["materialize_timestamp"] == "2026-05-12T13:00:00+00:00"
+    summary = pipeline_metrics.read_feature_pipeline_run_summary("train")
+    assert summary["feast_materialize_timestamp"] == "2026-05-12T13:00:00+00:00"
 
 
 def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(
@@ -863,6 +898,11 @@ def test_register_training_run_registers_and_promotes(
             {"promotion": (model_name, version, stage)}
         ),
     )
+    monkeypatch.setattr(
+        _orch_training,
+        "ensure_champion_alias",
+        lambda version: logged.update({"champion_bootstrap": version}) or False,
+    )
     _capture_emitted_summary(
         monkeypatch,
         "emit_training_pipeline_run_summary",
@@ -874,6 +914,7 @@ def test_register_training_run_registers_and_promotes(
 
     assert version == "7"
     assert logged["promotion"] == (None, "7", "Candidate")
+    assert logged["champion_bootstrap"] == "7"
     assert emitted["summary"]["run_status"] == "succeeded"
     assert emitted["summary"]["registered_model_version"] == "7"
 
@@ -1201,3 +1242,80 @@ def test_run_inference_pipeline_step_calls_predict_and_emit(
     assert result == fake_payload
     assert called["emit"]["endpoint"] == "scheduled"
     assert called["emit"]["payload"] is fake_payload
+
+
+def test_run_forecast_feature_drift_detection_step_uses_configured_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = {
+        "train": pd.DataFrame(
+            {
+                "wind_speed_10m": [1.0, 2.0],
+                "temperature_2m": [5.0, 6.0],
+                "spot_id": ["a", "b"],
+            }
+        ),
+        "forecast": pd.DataFrame(
+            {
+                "wind_speed_10m": [8.0, 9.0],
+                "temperature_2m": [7.0, 8.0],
+                "spot_id": ["a", "b"],
+            }
+        ),
+    }
+    monkeypatch.setattr(
+        _orch_drift, "_read_all_spot_features", lambda dataset: frames[dataset]
+    )
+    monkeypatch.setattr(
+        _orch_drift,
+        "get_model_config",
+        # "cape" is configured but absent; "spot_id" is present but not a feature.
+        lambda: {"features": ["wind_speed_10m", "temperature_2m", "cape"]},
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        _orch_drift, "push_drift_metrics", lambda report: captured.update(report=report)
+    )
+
+    def fake_run(
+        reference_frame: pd.DataFrame,
+        current_frame: pd.DataFrame,
+        threshold: float,
+    ) -> list[dict[str, object]]:
+        captured["compared_columns"] = list(reference_frame.columns)
+        return [
+            {
+                "config": {
+                    "type": "evidently:metric_v2:ValueDrift",
+                    "column": "wind_speed_10m",
+                    "method": "ks p_value",
+                    "threshold": 0.05,
+                },
+                "value": 0.01,
+            },
+            {
+                "config": {
+                    "type": "evidently:metric_v2:ValueDrift",
+                    "column": "temperature_2m",
+                    "method": "ks p_value",
+                    "threshold": 0.05,
+                },
+                "value": 0.6,
+            },
+        ]
+
+    monkeypatch.setattr(_monitoring_drift, "_run_evidently_data_drift", fake_run)
+    monkeypatch.setattr(
+        _monitoring_drift,
+        "get_monitoring_config",
+        lambda: {"drift_threshold": 0.15, "evaluation_window_days": 30},
+    )
+
+    result = orchestration.run_forecast_feature_drift_detection_step()
+
+    assert captured["compared_columns"] == ["wind_speed_10m", "temperature_2m"]
+    assert captured["report"].dataset_name == "forecast features"
+    assert captured["report"].dataset_version == "v1"
+    assert result["compared_column_count"] == 2
+    assert result["drifted_column_count"] == 1
+    assert result["share_of_drifted_columns"] == pytest.approx(0.5)

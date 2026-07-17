@@ -20,10 +20,10 @@ else:
         training_request_asset_uri,
     )
     from foehncast.env import env_value
-    from foehncast.feature_pipeline.feast import prepare_feature_store
     from foehncast.orchestration import (
         engineer_feature_pipeline_context,
         fetch_feature_pipeline_context,
+        prepare_feast_feature_store,
         resolve_auto_retraining_mode,
         resolve_airflow_schedule,
         store_feature_pipeline_job_context,
@@ -98,9 +98,9 @@ else:
             },
         )
 
-        prepare_feast_feature_store = PythonOperator(
+        prepare_feast_stage = PythonOperator(
             task_id="prepare_feast_feature_store",
-            python_callable=prepare_feature_store,
+            python_callable=prepare_feast_feature_store,
             op_kwargs={"dataset": feature_dataset},
             outlets=[curated_feature_store_asset, feast_feature_store_asset],
         )
@@ -125,7 +125,7 @@ else:
                 >> engineer_feature_set
                 >> validate_feature_set
                 >> store_feature_set
-                >> prepare_feast_feature_store
+                >> prepare_feast_stage
                 >> retraining_gate
                 >> publish_training_request
             )
@@ -136,5 +136,5 @@ else:
                 >> engineer_feature_set
                 >> validate_feature_set
                 >> store_feature_set
-                >> prepare_feast_feature_store
+                >> prepare_feast_stage
             )

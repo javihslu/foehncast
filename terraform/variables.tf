@@ -172,9 +172,14 @@ variable "cloud_run_ui_image" {
 }
 
 variable "cloud_run_ui_prometheus_url" {
-  description = "Prometheus-compatible query URL for server-side metric lookups from the Streamlit UI."
+  description = "Prometheus-compatible query URL for server-side metric lookups from the Streamlit UI. Leave empty to default to the serve service URI."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.cloud_run_ui_prometheus_url == "" || can(regex("^https?://", var.cloud_run_ui_prometheus_url))
+    error_message = "cloud_run_ui_prometheus_url must be an http(s) URL; storage paths such as gs:// are not metrics endpoints."
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -241,8 +246,8 @@ variable "github_app_installation_id" {
   default     = ""
 }
 
-variable "ui_operator_token" {
-  description = "Shared secret gating the pipeline trigger in the public UI. Empty disables the trigger."
+variable "control_token" {
+  description = "Shared secret for the serve control plane; set on serve and the UI. Empty disables pipeline triggers."
   type        = string
   default     = ""
   sensitive   = true
