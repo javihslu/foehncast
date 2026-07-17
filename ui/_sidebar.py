@@ -308,7 +308,11 @@ def render_sidebar_ml_panels() -> None:
         "foehncast_training_pipeline_row_count",
         "foehncast_hindcast_accuracy",
         "foehncast_hindcast_validated_count",
-        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns"})',
+        # Scoped to the per-spot vs-train comparisons: confidence means "how
+        # much do current conditions resemble the training data". Prediction
+        # drift legitimately spikes on promotion and must not zero this.
+        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns",'
+        'dataset_version="train"})',
     ]
     (
         model_ver,
