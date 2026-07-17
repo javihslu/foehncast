@@ -35,8 +35,7 @@ else:
     )
     registration_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else ('Production' if dag_run and "
-        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+        "dag_run.conf.get('stage') else 'Candidate' }}"
     )
     curated_feature_store_asset = Asset(
         name=f"{training_dataset}_curated_feature_store",

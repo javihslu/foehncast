@@ -50,10 +50,10 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
         "success_metric": "foehncast_training_pipeline_run_success",
         "summary_ts_metric": "foehncast_training_pipeline_summary_generated_timestamp_seconds",
         "stages_query": (
-            'foehncast_training_pipeline_stage_state{requested_stage="Production"}'
+            'foehncast_training_pipeline_stage_state{requested_stage="Candidate"}'
         ),
         "stage_duration_query": (
-            'foehncast_training_pipeline_stage_duration_seconds{requested_stage="Production"}'
+            'foehncast_training_pipeline_stage_duration_seconds{requested_stage="Candidate"}'
         ),
         "stage_order": ["train", "evaluate", "register"],
         "metric_chips": [

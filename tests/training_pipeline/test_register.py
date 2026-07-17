@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from mlflow.exceptions import MlflowException
 
 from foehncast.training_pipeline import register
 
@@ -272,3 +273,47 @@ def test_assign_model_alias_requires_non_empty_alias_and_version() -> None:
 
     with pytest.raises(ValueError, match="Model version must be non-empty"):
         register.assign_model_alias("champion", "   ")
+
+
+class _ChampionAwareClient(_AliasSettingClient):
+    def __init__(self, logged: dict[str, object], *, has_champion: bool) -> None:
+        super().__init__(logged)
+        self._has_champion = has_champion
+
+    def get_model_version_by_alias(self, model_name: str, alias: str) -> object:
+        if not self._has_champion:
+            raise MlflowException(f"alias {alias} not found")
+        return SimpleNamespace(version="1")
+
+
+class _ChampionAwareMlflow(_AliasSettingMlflow):
+    def __init__(self, logged: dict[str, object], *, has_champion: bool) -> None:
+        super().__init__(logged)
+        self._has_champion = has_champion
+
+    def MlflowClient(self) -> _ChampionAwareClient:
+        return _ChampionAwareClient(self._logged, has_champion=self._has_champion)
+
+
+def test_ensure_champion_alias_bootstraps_when_missing(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, object] = {}
+    _patch_registry_mlflow(
+        monkeypatch, mlflow_config, _ChampionAwareMlflow(logged, has_champion=False)
+    )
+
+    assert register.ensure_champion_alias("7") is True
+    assert logged["alias"] == ("foehncast-quality", "champion", "7")
+
+
+def test_ensure_champion_alias_keeps_existing_champion(
+    monkeypatch: pytest.MonkeyPatch, mlflow_config: dict[str, str]
+) -> None:
+    logged: dict[str, object] = {}
+    _patch_registry_mlflow(
+        monkeypatch, mlflow_config, _ChampionAwareMlflow(logged, has_champion=True)
+    )
+
+    assert register.ensure_champion_alias("7") is False
+    assert "alias" not in logged

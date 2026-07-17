@@ -19,7 +19,7 @@ flowchart TD
 | Train | Fits a tree-based model (random forest or gradient boosting) |
 | Evaluate | Logs MAE, RMSE, R², bucket accuracy to MLflow |
 | Register | Creates versioned model in MLflow registry |
-| Alias | Assigns `candidate` or `champion` alias |
+| Alias | Assigns `candidate`; the first version ever also bootstraps `champion` |
 
 ## Labeling
 
@@ -46,9 +46,9 @@ This bridges DVC → MLflow: DVC versions the parquet, MLflow versions the model
 ## Model Registry
 
 - Model name: `foehncast-quality`
-- Pre-live alias: `candidate`
+- Pre-live alias: `candidate` (every run registers here, scheduled or manual)
 - Live alias: `champion`
-- Promotion/rollback: separate operator controls, not automatic
+- Promotion/rollback: separate operator controls, not automatic; only the very first registered version claims `champion` directly so serving can start
 
 The [Model Card](model-card.md) documents the model's intended use, evaluation, and limitations.
 
