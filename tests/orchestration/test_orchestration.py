@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from foehncast import orchestration
+from foehncast.monitoring import drift as _monitoring_drift
 from foehncast.monitoring import pipeline_metrics
 from foehncast.orchestration import drift as _orch_drift
 from foehncast.orchestration import feature as _orch_feature
@@ -1241,3 +1242,80 @@ def test_run_inference_pipeline_step_calls_predict_and_emit(
     assert result == fake_payload
     assert called["emit"]["endpoint"] == "scheduled"
     assert called["emit"]["payload"] is fake_payload
+
+
+def test_run_forecast_feature_drift_detection_step_uses_configured_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frames = {
+        "train": pd.DataFrame(
+            {
+                "wind_speed_10m": [1.0, 2.0],
+                "temperature_2m": [5.0, 6.0],
+                "spot_id": ["a", "b"],
+            }
+        ),
+        "forecast": pd.DataFrame(
+            {
+                "wind_speed_10m": [8.0, 9.0],
+                "temperature_2m": [7.0, 8.0],
+                "spot_id": ["a", "b"],
+            }
+        ),
+    }
+    monkeypatch.setattr(
+        _orch_drift, "_read_all_spot_features", lambda dataset: frames[dataset]
+    )
+    monkeypatch.setattr(
+        _orch_drift,
+        "get_model_config",
+        # "cape" is configured but absent; "spot_id" is present but not a feature.
+        lambda: {"features": ["wind_speed_10m", "temperature_2m", "cape"]},
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        _orch_drift, "push_drift_metrics", lambda report: captured.update(report=report)
+    )
+
+    def fake_run(
+        reference_frame: pd.DataFrame,
+        current_frame: pd.DataFrame,
+        threshold: float,
+    ) -> list[dict[str, object]]:
+        captured["compared_columns"] = list(reference_frame.columns)
+        return [
+            {
+                "config": {
+                    "type": "evidently:metric_v2:ValueDrift",
+                    "column": "wind_speed_10m",
+                    "method": "ks p_value",
+                    "threshold": 0.05,
+                },
+                "value": 0.01,
+            },
+            {
+                "config": {
+                    "type": "evidently:metric_v2:ValueDrift",
+                    "column": "temperature_2m",
+                    "method": "ks p_value",
+                    "threshold": 0.05,
+                },
+                "value": 0.6,
+            },
+        ]
+
+    monkeypatch.setattr(_monitoring_drift, "_run_evidently_data_drift", fake_run)
+    monkeypatch.setattr(
+        _monitoring_drift,
+        "get_monitoring_config",
+        lambda: {"drift_threshold": 0.15, "evaluation_window_days": 30},
+    )
+
+    result = orchestration.run_forecast_feature_drift_detection_step()
+
+    assert captured["compared_columns"] == ["wind_speed_10m", "temperature_2m"]
+    assert captured["report"].dataset_name == "forecast features"
+    assert captured["report"].dataset_version == "v1"
+    assert result["compared_column_count"] == 2
+    assert result["drifted_column_count"] == 1
+    assert result["share_of_drifted_columns"] == pytest.approx(0.5)

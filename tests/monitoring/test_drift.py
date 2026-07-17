@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import socket
 
 import pandas as pd
@@ -143,7 +144,12 @@ def test_detect_prediction_drift_uses_recent_window_and_prediction_columns(
 
 def test_push_drift_metrics_sends_statsd_gauges(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    # Isolate the persisted-report side effect so the fixture does not leak into
+    # the shared airflow/reports store (where the Prometheus exporter would then
+    # render it forever).
+    monkeypatch.setenv("FOEHNCAST_PIPELINE_REPORT_DIR", str(tmp_path))
     sent: list[tuple[str, tuple[str, int]]] = []
 
     class FakeSocket:
@@ -206,3 +212,143 @@ def test_detect_data_drift_rejects_disjoint_columns() -> None:
             pd.DataFrame({"temperature_2m": [3.0, 4.0]}),
             threshold=0.15,
         )
+
+
+def test_detect_model_feature_drift_restricts_to_configured_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        reference_frame: pd.DataFrame,
+        current_frame: pd.DataFrame,
+        threshold: float,
+    ) -> list[dict[str, object]]:
+        captured["reference_columns"] = list(reference_frame.columns)
+        return _sample_evidently_metrics()
+
+    monkeypatch.setattr(drift, "_run_evidently_data_drift", fake_run)
+    monkeypatch.setattr(
+        drift,
+        "get_monitoring_config",
+        lambda: {"drift_threshold": 0.15, "evaluation_window_days": 30},
+    )
+
+    # "cape" is configured but absent from the data; "spot_id" is present but not
+    # a model feature. Only the shared model features should be compared.
+    reference_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [1.0, 2.0],
+            "temperature_2m": [5.0, 6.0],
+            "spot_id": ["a", "b"],
+        }
+    )
+    current_df = pd.DataFrame(
+        {
+            "wind_speed_10m": [8.0, 9.0],
+            "temperature_2m": [7.0, 8.0],
+            "spot_id": ["a", "b"],
+        }
+    )
+
+    report = drift.detect_model_feature_drift(
+        reference_df,
+        current_df,
+        ["wind_speed_10m", "temperature_2m", "cape"],
+        dataset_name="forecast features",
+        dataset_version="v1",
+    )
+
+    assert report is not None
+    assert captured["reference_columns"] == ["wind_speed_10m", "temperature_2m"]
+    assert report.dataset_name == "forecast features"
+    assert report.dataset_version == "v1"
+    assert report.column_count == 2
+
+
+def test_detect_model_feature_drift_backward_compatible_with_narrow_frames() -> None:
+    # No configured feature is present in the frames -> nothing comparable.
+    assert (
+        drift.detect_model_feature_drift(
+            pd.DataFrame({"legacy_only": [1.0, 2.0]}),
+            pd.DataFrame({"legacy_only": [3.0, 4.0]}),
+            ["wind_speed_10m", "temperature_2m"],
+            dataset_name="forecast features",
+            dataset_version="v1",
+        )
+        is None
+    )
+    # An empty frame is skipped rather than raising.
+    assert (
+        drift.detect_model_feature_drift(
+            pd.DataFrame(),
+            pd.DataFrame({"wind_speed_10m": [3.0, 4.0]}),
+            ["wind_speed_10m"],
+            dataset_name="forecast features",
+            dataset_version="v1",
+        )
+        is None
+    )
+
+
+def test_detect_model_feature_drift_share_over_widened_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    feature_columns = [
+        "wind_speed_10m",
+        "wind_speed_80m",
+        "wind_gusts_10m",
+        "temperature_2m",
+        "relative_humidity_2m",
+        "hour_of_day_sin",
+        "hour_of_day_cos",
+        "day_of_year_sin",
+        "day_of_year_cos",
+        "wind_direction_10m_sin",
+        "wind_direction_10m_cos",
+        "wind_steadiness",
+        "gust_excess_10m",
+        "shore_alignment",
+    ]
+
+    def fake_run(
+        reference_frame: pd.DataFrame,
+        current_frame: pd.DataFrame,
+        threshold: float,
+    ) -> list[dict[str, object]]:
+        # One column drifts (p_value below threshold); no DriftedColumnsCount, so
+        # the share is computed as drifted / widened column count.
+        return [
+            {
+                "config": {
+                    "type": "evidently:metric_v2:ValueDrift",
+                    "column": column,
+                    "method": "ks p_value",
+                    "threshold": 0.05,
+                },
+                "value": 0.01 if index == 0 else 0.6,
+            }
+            for index, column in enumerate(feature_columns)
+        ]
+
+    monkeypatch.setattr(drift, "_run_evidently_data_drift", fake_run)
+    monkeypatch.setattr(
+        drift,
+        "get_monitoring_config",
+        lambda: {"drift_threshold": 0.15, "evaluation_window_days": 30},
+    )
+
+    values = {column: [1.0, 2.0] for column in feature_columns}
+    report = drift.detect_model_feature_drift(
+        pd.DataFrame(values),
+        pd.DataFrame(values),
+        feature_columns,
+        dataset_name="forecast features",
+        dataset_version="v1",
+    )
+
+    assert report is not None
+    assert report.column_count == 14
+    assert report.drifted_column_count == 1
+    assert report.share_of_drifted_columns == pytest.approx(1 / 14, abs=1e-4)
+    assert report.dataset_drift is False
