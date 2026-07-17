@@ -290,6 +290,67 @@ def test_busy_css_dims_dial_and_resets_cursor() -> None:
     assert "button:disabled" in css
 
 
+def test_ml_panel_serving_drives_header_registered_in_sublabel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    htmls: list[str] = []
+    monkeypatch.setattr(
+        sb.st, "markdown", lambda *a, **k: htmls.append(a[0] if a else "")
+    )
+    monkeypatch.setattr(
+        sb,
+        "prom_query_batch",
+        _ml_batch(
+            {
+                "serving_model_version": 7.0,
+                "registered_model_version": 11.0,
+                'metric_name="r2"': 0.82,
+                'metric_name="rmse"': 1.5,
+                "feature_count": 42.0,
+                "row_count": 5000.0,
+                "hindcast_accuracy": 0.75,
+                "hindcast_validated_count": 12.0,
+            }
+        ),
+    )
+
+    sb.render_sidebar_ml_panels()
+    card = "".join(htmls)
+
+    # The serving gauge (v7) drives the header; the newer registered v11 shows
+    # only in the "Latest training" sub-label, never in the header.
+    assert '">v7</span>' in card
+    assert "Latest training v11" in card
+    assert "v11" not in card.split("Latest training")[0]
+    assert "Confidence" not in card
+
+
+def test_ml_panel_badge_reflects_serving_gauge_presence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    present: list[str] = []
+    monkeypatch.setattr(
+        sb.st, "markdown", lambda *a, **k: present.append(a[0] if a else "")
+    )
+    monkeypatch.setattr(
+        sb, "prom_query_batch", _ml_batch({"serving_model_version": 5.0})
+    )
+    sb.render_sidebar_ml_panels()
+    present_card = "".join(present)
+    assert "Serving" in present_card
+    assert "No model" not in present_card
+
+    absent: list[str] = []
+    monkeypatch.setattr(
+        sb.st, "markdown", lambda *a, **k: absent.append(a[0] if a else "")
+    )
+    monkeypatch.setattr(sb, "prom_query_batch", _ml_batch({}))
+    sb.render_sidebar_ml_panels()
+    absent_card = "".join(absent)
+    assert "No model" in absent_card
+    assert "Serving" not in absent_card
+
+
 def _recording_button(keys: list, *, clicked: bool, calls: list | None = None):
     def button(label: str, **kw: object) -> bool:
         keys.append(kw.get("key"))
@@ -341,3 +402,21 @@ def _patch_bar(
     monkeypatch.setattr(sb, "prom_query_batch", lambda exprs: [1000.0, 1000.0, 1000.0])
     monkeypatch.setattr(sb, "pipeline_capabilities", lambda: capabilities)
     monkeypatch.setattr(sb, "pipeline_run_states", _run_states_stub(run_states))
+
+
+def _ml_batch(values: dict[str, float | None]):
+    """Stand in for prom_query_batch: map each champion-card expression to a
+    value by a substring unique to it; unmatched expressions read None."""
+
+    def batch(exprs: list[str]) -> list[float | None]:
+        out: list[float | None] = []
+        for expr in exprs:
+            match: float | None = None
+            for needle, value in values.items():
+                if needle in expr:
+                    match = value
+                    break
+            out.append(match)
+        return out
+
+    return batch

@@ -1,9 +1,11 @@
-"""Prometheus export helpers for shadow (A/B) inference divergence.
+"""Prometheus export helpers for serving version and shadow (A/B) divergence.
 
-Reads the shadow section from the latest prediction snapshot. Shadow scoring
-runs the candidate against the champion on the same feature batch during
-inference; here we just render the persisted divergence stats. Only the latest
-snapshot is rendered, so the champion/candidate label cardinality stays bounded.
+Reads the latest prediction snapshot. The serving model version (the version
+that answered the batch) is emitted whenever it is numeric, independently of
+the optional shadow section. Shadow scoring runs the candidate against the
+champion on the same feature batch during inference; here we just render the
+persisted divergence stats. Only the latest snapshot is rendered, so the
+champion/candidate label cardinality stays bounded.
 """
 
 from __future__ import annotations
@@ -13,17 +15,32 @@ from typing import Any
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
 from foehncast.inference_pipeline.predict import read_latest_predictions
-from foehncast.monitoring._common import safe_float
+from foehncast.monitoring._common import (
+    registered_model_version_metric_value,
+    safe_float,
+)
 
 
 def build_shadow_prometheus_registry(
     snapshot: dict[str, Any] | None = None,
 ) -> CollectorRegistry:
-    """Render the latest snapshot's shadow divergence into a scrapeable registry."""
+    """Render the latest snapshot's serving version and shadow divergence."""
     resolved = read_latest_predictions() if snapshot is None else snapshot
+    resolved = resolved or {}
     registry = CollectorRegistry()
 
-    shadow = (resolved or {}).get("shadow")
+    serving_version = registered_model_version_metric_value(
+        resolved.get("model_version")
+    )
+    if serving_version is not None:
+        serving_model_version = Gauge(
+            "foehncast_serving_model_version",
+            "Registered model version that served the latest inference batch.",
+            registry=registry,
+        )
+        serving_model_version.set(serving_version)
+
+    shadow = resolved.get("shadow")
     if not shadow:
         return registry
 

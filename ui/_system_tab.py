@@ -90,8 +90,10 @@ _PIPELINE_RAILS: list[dict[str, Any]] = [
                 "foehncast_hindcast_accuracy",
                 "pct",
             ),
+            # Data-similarity proxy: how much current conditions resemble the
+            # training data, not model confidence.
             (
-                "confidence",
+                "data match",
                 'clamp_max(1 - max(foehncast_drift_metric{metric_name="share_of_drifted_columns",dataset_version="train"}), 1)',
                 "pct",
             ),
