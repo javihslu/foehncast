@@ -256,6 +256,38 @@ def test_night_bands_wraps_night_intervals_as_dataframe() -> None:
         assert row["x"] < row["x2"]
 
 
+def test_heatmap_tick_count_scales_with_window() -> None:
+    start = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
+    # The live ~14 h serving horizon reads on a 2 h rhythm; the old constant 9
+    # was one density for every window.
+    assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=14)) == 8
+    # A 48 h window keeps the original 6 h rhythm (9 ticks).
+    assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=48)) == 9
+    # Multi-day boards thin out to 12 h spacing.
+    assert rc._heatmap_tick_count(start, start + pd.Timedelta(days=7)) == 15
+    # Degenerate windows still hint at least two ticks.
+    assert rc._heatmap_tick_count(start, start + pd.Timedelta(minutes=30)) == 2
+
+
+def test_heatmap_x_axis_uses_numeric_tick_count() -> None:
+    # The {"interval": ...} tickCount form crashes the bundled Vega on the
+    # layered, domain-pinned heatmap, so the hint must stay a plain number.
+    start = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
+    axis = rc._heatmap_x_axis(start, start + pd.Timedelta(days=7))
+    assert isinstance(axis.tickCount, int)
+
+
+def test_flat_week_detects_all_level_one_grid() -> None:
+    assert rc._flat_week(pd.DataFrame({"quality": [1, 1, 1]}))
+    assert not rc._flat_week(pd.DataFrame({"quality": [1, 3, 1]}))
+    # An empty grid is "no data", not a quiet week: the chip must not show.
+    assert not rc._flat_week(pd.DataFrame({"quality": []}))
+
+
+def test_flat_week_chip_names_the_quiet_state() -> None:
+    assert "Quiet week" in rc._FLAT_WEEK_CHIP
+
+
 def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
     html = rc._quality_legend_html()
 
