@@ -596,42 +596,85 @@ def _sync_slider_to_heatmap_click(
     st.rerun(scope="app")
 
 
-def _render_detail_panel(row: pd.Series, min_kts: float) -> None:
-    """Detail card below the heatmap for the selected spot and hour."""
+def _selection_wind(
+    row: pd.Series,
+) -> tuple[float | None, float | None, float | None]:
+    """Numeric wind, gust, and direction for the picked cell.
+
+    Reuses the map's cached per-spot frame (no new fetch) so the dial matches
+    the map; the grid's own direction column is display text. Nearest hour in
+    UTC, within 90 minutes.
+    """
+    frame = _spot_wind_frame(str(row["spot_id"]))
+    if frame.empty:
+        return None, None, None
+    idx = frame.index
+    idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+    target = row["time"].tz_convert("UTC")
+    pos = int(idx.get_indexer(pd.DatetimeIndex([target]), method="nearest")[0])
+    if pos < 0 or abs((idx[pos] - target).total_seconds()) > 5400:
+        return None, None, None
+    src = frame.iloc[pos]
+    return (
+        float(src["wind_speed_10m"]),
+        float(src["wind_gusts_10m"]),
+        float(src["wind_direction_10m"]),
+    )
+
+
+_BUBBLE_ROW = (
+    '<div style="display:flex;justify-content:space-between;gap:1rem">'
+    '<span style="color:#5f6f7f">{label}</span><strong>{value}</strong></div>'
+)
+
+
+def _selection_bubble_html(
+    spot_name: str,
+    local_time: str,
+    quality: int,
+    wind: float | None,
+    gust: float | None,
+    direction: float | None,
+) -> str:
+    """Rounded metrics bubble for the selection row."""
+    rows = [
+        _BUBBLE_ROW.format(
+            label="Quality", value=f"{quality}/5 ({quality_label(float(quality))})"
+        )
+    ]
+    if wind is not None and not pd.isna(wind):
+        rows.append(_BUBBLE_ROW.format(label="Wind", value=f"{wind:.0f} km/h"))
+    if gust is not None and not pd.isna(gust):
+        rows.append(_BUBBLE_ROW.format(label="Gusts", value=f"{gust:.0f} km/h"))
+    if direction is not None and not pd.isna(direction):
+        rows.append(
+            _BUBBLE_ROW.format(
+                label="Direction", value=f"{_compass(direction)} ({direction:.0f}°)"
+            )
+        )
+    return (
+        '<div style="background:rgba(255, 255, 255, 0.55);'
+        "border:1px solid rgba(7, 37, 42, 0.12);border-radius:14px;"
+        "padding:0.7rem 0.9rem;font-family:Manrope,sans-serif;"
+        'font-size:0.85rem;color:#07252a">'
+        f'<div style="font-weight:700">{spot_name}</div>'
+        f'<div style="color:#5f6f7f;font-size:0.75rem;margin-bottom:0.45rem">'
+        f"{local_time}</div>" + "".join(rows) + "</div>"
+    )
+
+
+def _render_selection_row(row: pd.Series, min_kts: float) -> None:
+    """Compact wind dial plus metrics bubble beside the heatmap."""
     spot_id = str(row["spot_id"])
     spot_cfg = next((s for s in get_spots() if s["id"] == spot_id), None)
     spot_name = spot_cfg["name"] if spot_cfg else str(row.get("spot", spot_id))
     local_time = row["time"].strftime("%a %d %b %H:%M")
-    quality = int(row["quality"])
-
-    # Wind, gusts, and direction reuse the map's cached per-spot frame (no new
-    # fetch) so the dial matches the map; match the clicked hour in UTC (<=1 h).
-    frame = _spot_wind_frame(spot_id)
-    wind = gust = direction = None
-    if not frame.empty:
-        idx = frame.index
-        idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
-        target = row["time"].tz_convert("UTC")
-        pos = int(idx.get_indexer(pd.DatetimeIndex([target]), method="nearest")[0])
-        if pos >= 0 and abs((idx[pos] - target).total_seconds()) <= 5400:
-            src = frame.iloc[pos]
-            wind, gust = float(src["wind_speed_10m"]), float(src["wind_gusts_10m"])
-            direction = float(src["wind_direction_10m"])
+    wind, gust, direction = _selection_wind(row)
 
     have_wind = wind is not None and not pd.isna(wind)
     have_dir = direction is not None and not pd.isna(direction)
-
-    left, right = st.columns([3, 2])
-    with left:
-        st.markdown(f"**{spot_name}** — {local_time}")
-        st.markdown(f"Quality: **{quality}/5** ({quality_label(float(quality))})")
-        if have_wind:
-            st.markdown(f"Wind: **{wind:.0f} km/h**")
-        if gust is not None and not pd.isna(gust):
-            st.markdown(f"Gusts: **{gust:.0f} km/h**")
-        if have_dir:
-            st.markdown(f"Direction: **{_compass(direction)} ({direction:.0f}°)**")
-    with right:
+    dial_col, bubble_col = st.columns([2, 3])
+    with dial_col:
         if have_wind and have_dir:
             shore = float(spot_cfg["shore_orientation_deg"]) if spot_cfg else 0.0
             st.markdown(
@@ -647,6 +690,13 @@ def _render_detail_panel(row: pd.Series, min_kts: float) -> None:
             st.caption("Needle points downwind; length is speed (to 30 kn).")
         else:
             st.caption("Wind or direction unavailable for this hour — dial hidden.")
+    with bubble_col:
+        st.markdown(
+            _selection_bubble_html(
+                spot_name, local_time, int(row["quality"]), wind, gust, direction
+            ),
+            unsafe_allow_html=True,
+        )
 
 
 @st.fragment
@@ -850,22 +900,27 @@ def render_rider_console(
                     titleColor="#07252a",
                 )
             )
-            event = st.altair_chart(
-                heatmap,
-                use_container_width=True,
-                theme=None,
-                on_select="rerun",
-                key="quality_heatmap_select",
-            )
+            # Selection row (#37): board left, dial + bubble to its right, so
+            # the first-sight section carries the picked cell's context inline.
+            board_col, side_col = st.columns([7, 5], gap="medium")
+            with board_col:
+                event = st.altair_chart(
+                    heatmap,
+                    use_container_width=True,
+                    theme=None,
+                    on_select="rerun",
+                    key="quality_heatmap_select",
+                )
             selected = _selected_heat_cell(event, heat_grid)
             if selected is not None:
                 _sync_slider_to_heatmap_click(
                     selected["time"], str(selected["spot_id"]), pred_hours
                 )
-            if selected is None:
-                st.caption("Click a heatmap cell to inspect that spot and hour.")
-            else:
-                _render_detail_panel(selected, _minimum_rideable_kts())
+            with side_col:
+                if selected is None:
+                    st.caption("Click a heatmap cell to inspect that spot and hour.")
+                else:
+                    _render_selection_row(selected, _minimum_rideable_kts())
 
         # Quality index timeline
         quality_frame = spot_quality_timeline(
