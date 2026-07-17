@@ -94,6 +94,10 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - name: Validate Prometheus alerting rules
+        run: |
+          docker run --rm -v "$PWD/prometheus_config:/cfg" --entrypoint promtool prom/prometheus:latest check rules /cfg/alerting_rules.yml
+          docker run --rm -v "$PWD/prometheus_config:/cfg" --entrypoint promtool prom/prometheus:latest test rules /cfg/alerting_rules_test.yml
 
   # Runs the full pytest suite.
   test:

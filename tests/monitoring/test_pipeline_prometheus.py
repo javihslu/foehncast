@@ -5,9 +5,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
+
 import foehncast._report_store as report_store
 from foehncast.monitoring import pipeline_metrics, pipeline_prometheus
 from tests.gcs_fakes import FakeStorageClient
+
+
+def _metric_value(payload: str, line_prefix: str) -> float:
+    for line in payload.splitlines():
+        if line.startswith(line_prefix):
+            return float(line.rsplit(" ", 1)[1])
+    raise AssertionError(f"metric line not found: {line_prefix}")
 
 
 def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
@@ -110,6 +119,66 @@ def test_render_feature_pipeline_prometheus_metrics_uses_labelled_gauges(
         'foehncast_feature_pipeline_training_handoff_ready{dataset="train",storage_backend="s3"} 1.0'
         in payload
     )
+    # A summary without a recorded materialization renders no freshness sample.
+    assert 'foehncast_feast_max_feature_age_seconds{dataset="train"}' not in payload
+
+
+def test_feast_materialize_age_seconds_parses_clamps_and_guards() -> None:
+    now = pd.Timestamp("2026-05-12T16:00:00+00:00")
+
+    assert (
+        pipeline_prometheus._feast_materialize_age_seconds(
+            "2026-05-12T13:00:00+00:00", now=now
+        )
+        == 10800.0
+    )
+    # A naive timestamp is read as UTC.
+    assert (
+        pipeline_prometheus._feast_materialize_age_seconds(
+            "2026-05-12T13:00:00", now=now
+        )
+        == 10800.0
+    )
+    # A future timestamp (clock skew) clamps to zero.
+    assert (
+        pipeline_prometheus._feast_materialize_age_seconds(
+            "2026-05-12T17:00:00+00:00", now=now
+        )
+        == 0.0
+    )
+    # Missing or unparseable values render no gauge.
+    assert pipeline_prometheus._feast_materialize_age_seconds(None, now=now) is None
+    assert pipeline_prometheus._feast_materialize_age_seconds("", now=now) is None
+    assert (
+        pipeline_prometheus._feast_materialize_age_seconds("not-a-date", now=now)
+        is None
+    )
+
+
+def test_render_feature_pipeline_prometheus_metrics_emits_feast_feature_age(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+    materialized_at = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=3)
+    pipeline_metrics.write_feature_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T12:00:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "storage_backend": "s3",
+            "feast_materialize_timestamp": materialized_at.isoformat(),
+        }
+    )
+
+    payload = pipeline_prometheus.render_feature_pipeline_prometheus_metrics().decode(
+        "utf-8"
+    )
+
+    prefix = 'foehncast_feast_max_feature_age_seconds{dataset="train"} '
+    assert prefix in payload
+    assert abs(_metric_value(payload, prefix) - 10800.0) < 120.0
 
 
 def test_render_training_pipeline_prometheus_metrics_uses_labelled_gauges(

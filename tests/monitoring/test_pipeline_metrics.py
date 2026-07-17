@@ -405,6 +405,60 @@ def test_emit_training_pipeline_run_summary_writes_json_and_logs_mlflow(
     assert _read_json(history_paths[0])["training_run_id"] == "run-123"
 
 
+def test_record_feast_materialization_patches_latest_summary(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+    pipeline_metrics.write_feature_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T12:00:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "storage_backend": "s3",
+        }
+    )
+
+    recorded_path = pipeline_metrics.record_feast_materialization(
+        "train", "2026-05-12T13:00:00+00:00"
+    )
+
+    assert recorded_path is not None
+    summary = pipeline_metrics.read_feature_pipeline_run_summary("train")
+    assert summary["feast_materialize_timestamp"] == "2026-05-12T13:00:00+00:00"
+
+
+def test_record_feast_materialization_no_ops_without_timestamp_or_summary(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+
+    # No persisted summary yet: nothing to patch.
+    assert (
+        pipeline_metrics.record_feast_materialization(
+            "train", "2026-05-12T13:00:00+00:00"
+        )
+        is None
+    )
+
+    pipeline_metrics.write_feature_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T12:00:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "storage_backend": "s3",
+        }
+    )
+
+    # A falsy timestamp leaves the summary untouched.
+    assert pipeline_metrics.record_feast_materialization("train", None) is None
+    summary = pipeline_metrics.read_feature_pipeline_run_summary("train")
+    assert "feast_materialize_timestamp" not in summary
+
+
 def test_feature_pipeline_summary_history_preserves_latest_contract(
     monkeypatch,
     tmp_path: Path,

@@ -1,0 +1,33 @@
+# promtool unit tests for the alerting rules.
+# Run with: promtool test rules prometheus_config/alerting_rules_test.yml
+rule_files:
+  - alerting_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Feature age rises past the 8h threshold and stays there long enough to fire.
+  - interval: 1m
+    input_series:
+      - series: 'foehncast_feast_max_feature_age_seconds{dataset="train"}'
+        values: "3600 3600 32400x18"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: FeatureDataStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              dataset: train
+            exp_annotations:
+              summary: "Feature data is stale"
+              description: "Feast features for train have not been materialized in over 8 hours (age exceeds the 28800s threshold)."
+
+  # Fresh feature age stays well under the threshold: no alert.
+  - interval: 1m
+    input_series:
+      - series: 'foehncast_feast_max_feature_age_seconds{dataset="train"}'
+        values: "3600x20"
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: FeatureDataStale
+        exp_alerts: []
