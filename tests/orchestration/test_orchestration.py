@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from foehncast import orchestration
+from foehncast.monitoring import pipeline_metrics
 from foehncast.orchestration import drift as _orch_drift
 from foehncast.orchestration import feature as _orch_feature
 from foehncast.orchestration import training as _orch_training
@@ -521,6 +522,37 @@ def test_run_feature_pipeline_job_logs_to_mlflow_when_env_present(
         "stored_spots": "silvaplana,urnersee",
     }
     assert logged["metrics"] == {"stored_spot_count": 2}
+
+
+def test_prepare_feast_feature_store_records_materialize_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(pipeline_metrics, "_default_report_dir", lambda: tmp_path)
+    pipeline_metrics.write_feature_pipeline_run_summary(
+        {
+            "contract_version": 1,
+            "generated_at": "2026-05-12T12:00:00+00:00",
+            "run_status": "succeeded",
+            "dataset": "train",
+            "storage_backend": "s3",
+        }
+    )
+    monkeypatch.setattr(
+        _orch_feature,
+        "prepare_feature_store",
+        lambda **kwargs: {
+            "dataset": kwargs["dataset"],
+            "materialized": True,
+            "materialize_timestamp": "2026-05-12T13:00:00+00:00",
+        },
+    )
+
+    result = _orch_feature.prepare_feast_feature_store(dataset="train")
+
+    assert result["materialize_timestamp"] == "2026-05-12T13:00:00+00:00"
+    summary = pipeline_metrics.read_feature_pipeline_run_summary("train")
+    assert summary["feast_materialize_timestamp"] == "2026-05-12T13:00:00+00:00"
 
 
 def test_run_feature_pipeline_job_context_reports_drift_and_logs_mlflow(

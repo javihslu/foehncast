@@ -15,6 +15,7 @@ from foehncast.orchestration.drift import (
 from foehncast.orchestration.feature import (
     engineer_feature_pipeline_context,
     fetch_feature_pipeline_context,
+    prepare_feast_feature_store,
     run_feature_pipeline,
     run_feature_pipeline_job,
     run_feature_pipeline_job_context,
@@ -37,6 +38,7 @@ __all__ = [
     # Feature pipeline
     "engineer_feature_pipeline_context",
     "fetch_feature_pipeline_context",
+    "prepare_feast_feature_store",
     "run_feature_pipeline",
     "run_feature_pipeline_job",
     "run_feature_pipeline_job_context",
