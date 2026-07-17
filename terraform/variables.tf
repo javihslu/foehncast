@@ -246,8 +246,8 @@ variable "github_app_installation_id" {
   default     = ""
 }
 
-variable "ui_operator_token" {
-  description = "Shared secret gating the pipeline trigger in the public UI. Empty disables the trigger."
+variable "control_token" {
+  description = "Shared secret for the serve control plane; set on serve and the UI. Empty disables pipeline triggers."
   type        = string
   default     = ""
   sensitive   = true
