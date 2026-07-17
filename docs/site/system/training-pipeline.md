@@ -50,6 +50,8 @@ This bridges DVC → MLflow: DVC versions the parquet, MLflow versions the model
 - Live alias: `champion`
 - Promotion/rollback: separate operator controls, not automatic
 
+The [Model Card](model-card.md) documents the model's intended use, evaluation, and limitations.
+
 ## DVC Mapping
 
 ```yaml
