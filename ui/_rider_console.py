@@ -75,21 +75,44 @@ _DAY_AXIS = alt.Axis(
     grid=False,
 )
 
-# Heatmap x-axis: a tick every 6 h (48 h / 6 h = 9 ticks). Midnight ticks
-# render the weekday + day-of-month, the rest just the hour, so the day
-# boundary still reads without a second axis row.
-_HEATMAP_X_AXIS = alt.Axis(
-    tickCount=9,
-    labelExpr=(
-        "timeFormat(datum.value, '%H') == '00' "
-        "? timeFormat(datum.value, '%a %d') "
-        ": timeFormat(datum.value, '%H')"
-    ),
-    labelAngle=0,
-    grid=False,
-    labelFontSize=13,
-    title=None,
-)
+
+def _heatmap_tick_count(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> int:
+    """Tick-count hint scaled to the pinned window, at least 2.
+
+    2 h rhythm up to a day (the serving horizon is ~14 h), 6 h up to three
+    days, 12 h beyond, so hourly cells stay mappable on short windows and a
+    multi-day board is not flooded with hour labels.
+    """
+    hours = (domain_end - domain_start).total_seconds() / 3600
+    if hours <= 24:
+        spacing = 2
+    elif hours <= 72:
+        spacing = 6
+    else:
+        spacing = 12
+    return max(2, round(hours / spacing) + 1)
+
+
+def _heatmap_x_axis(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> alt.Axis:
+    """Heatmap x-axis derived from the pinned window: 12 h tick spacing.
+
+    Midnight ticks render the weekday + day-of-month, the rest just the hour,
+    so the day boundary still reads without a second axis row. The tickCount
+    must stay numeric: the {"interval": ...} form crashes the bundled Vega on
+    this layered, domain-pinned chart (verified live on Streamlit 1.57).
+    """
+    return alt.Axis(
+        tickCount=_heatmap_tick_count(domain_start, domain_end),
+        labelExpr=(
+            "timeFormat(datum.value, '%H') == '00' "
+            "? timeFormat(datum.value, '%a %d') "
+            ": timeFormat(datum.value, '%H')"
+        ),
+        labelAngle=0,
+        grid=False,
+        labelFontSize=13,
+        title=None,
+    )
 
 
 # One-hue ramp for the ordered elevation series; gusts differ by dash too.
@@ -114,6 +137,22 @@ _QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
 # surface -- this keeps the flat-week "outline board" visible while reading as
 # normal gridwork between filled cells.
 _HEATMAP_GAP = "rgba(7, 37, 42, 0.16)"
+
+# Notice chip shown when the whole window is level 1: the outline board is
+# real data (a quiet week), not a render failure, and the chip says so.
+_FLAT_WEEK_CHIP = (
+    '<span style="display:inline-block;font-family:Manrope,sans-serif;'
+    "font-size:0.72rem;color:#39544f;background:rgba(210, 226, 220, 0.6);"
+    "border:1px solid rgba(7, 37, 42, 0.18);border-radius:999px;"
+    'padding:0.1rem 0.6rem;margin:0.15rem 0 0.35rem">'
+    "Quiet week — no spot rises above level 1 in this window</span>"
+)
+
+
+def _flat_week(heat_grid: pd.DataFrame) -> bool:
+    """True when the window has data but no cell rises above quality level 1."""
+    return (not heat_grid.empty) and int(heat_grid["quality"].max()) <= 1
+
 
 _LEGEND_CHIP = (
     '<span style="display:inline-block;width:0.7rem;height:0.7rem;'
@@ -718,6 +757,8 @@ def render_rider_console(
 
             st.subheader("All spots — session quality")
             st.markdown(_quality_legend_html(), unsafe_allow_html=True)
+            if _flat_week(heat_grid):
+                st.markdown(_FLAT_WEEK_CHIP, unsafe_allow_html=True)
             cell_select = alt.selection_point(
                 name="cell", fields=["spot", "time"], on="click", empty=False
             )
@@ -733,7 +774,7 @@ def render_rider_console(
                 .encode(
                     x=alt.X(
                         "time:T",
-                        axis=_HEATMAP_X_AXIS,
+                        axis=_heatmap_x_axis(domain_start, domain_end),
                         scale=alt.Scale(domain=[domain_start, domain_end], nice=False),
                     ),
                     x2="time_end:T",
@@ -795,6 +836,12 @@ def render_rider_console(
                 heatmap.properties(
                     height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
                     background="transparent",
+                    # The y axis sits on the right, so the plot's left edge has
+                    # no gutter: a midnight "%a %d" label near that edge
+                    # center-anchors past it and clips. The left padding buys
+                    # the half-label of room (a padding OBJECT zeroes any side
+                    # left unspecified, hence all four).
+                    padding={"left": 26, "top": 5, "right": 5, "bottom": 5},
                 )
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(

@@ -11,6 +11,18 @@ from _promql import prom_query_batch
 
 _PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
 
+# Ring status colors, validated by the dataviz palette script (--pairs all,
+# surface #eaf3ef): chroma floor, CVD and normal-vision separation all pass.
+# The sub-3:1 contrast WARN is carried by the visible age + state labels.
+_RING_FRESH = "#0aa38d"
+_RING_AGING = "#d1861f"
+_RING_OVERDUE = "#a93226"
+_RING_IDLE = "#5f6f7f"
+_RING_TRACK = "#e0ddd4"
+
+_RING_RADIUS = 30
+_RING_CIRCUMFERENCE = 2 * 3.14159265 * _RING_RADIUS
+
 
 def fmt_delta(seconds: float) -> str:
     """Format a duration in seconds to a short human-readable string."""
@@ -23,41 +35,62 @@ def fmt_delta(seconds: float) -> str:
     return f"{h}h {m // 60}m"
 
 
+def _ring_svg(color: str, sweep: float, *, dashed: bool = False) -> str:
+    """68 px ring as an SVG arc; rounded caps avoid the conic-gradient notch."""
+    if dashed:
+        dash = 'stroke-dasharray="2 7" '
+    elif sweep < 0.995:
+        arc_len = _RING_CIRCUMFERENCE * max(0.0, sweep)
+        dash = f'stroke-dasharray="{arc_len:.1f} {_RING_CIRCUMFERENCE:.1f}" '
+    else:
+        dash = ""  # a full ring is an unbroken circle: no seam, no notch
+    return (
+        '<svg width="68" height="68" viewBox="0 0 68 68" '
+        'style="position:absolute;left:0;top:0">'
+        f'<circle cx="34" cy="34" r="{_RING_RADIUS}" fill="none" '
+        f'stroke="{_RING_TRACK}" stroke-width="7"/>'
+        f'<circle cx="34" cy="34" r="{_RING_RADIUS}" fill="none" '
+        f'stroke="{color}" stroke-width="7" stroke-linecap="round" '
+        f'{dash}transform="rotate(-90 34 34)"/>'
+        "</svg>"
+    )
+
+
 def _freshness_circle_html(
     label: str,
     elapsed: float,
     *,
     scheduled: bool,
 ) -> str:
+    # One semantic everywhere: the center is the data's age. Cycle position
+    # and health move to the ring sweep/color; the countdown to the subtitle.
     if scheduled:
         remaining = max(0.0, _PREDICTION_CYCLE_SECONDS - elapsed)
         pct = min(1.0, elapsed / _PREDICTION_CYCLE_SECONDS)
         overdue = elapsed > _PREDICTION_CYCLE_SECONDS
 
         if overdue:
-            ring_color, center_text = "#ff6e6e", "overdue"
+            ring_color, subtitle = _RING_OVERDUE, "overdue"
         elif pct > 0.75:
-            ring_color, center_text = "#d1833d", fmt_delta(remaining)
+            ring_color, subtitle = _RING_AGING, f"next in {fmt_delta(remaining)}"
         else:
-            ring_color, center_text = "#0e6d6e", fmt_delta(remaining)
-        degrees = pct * 360
-        subtitle = f"{fmt_delta(elapsed)} ago"
+            ring_color, subtitle = _RING_FRESH, f"next in {fmt_delta(remaining)}"
+        ring = _ring_svg(ring_color, 1.0 if overdue else pct)
     else:
-        degrees = 360
-        ring_color = "#5f6f7f"
-        center_text = fmt_delta(elapsed)
+        ring = _ring_svg(_RING_IDLE, 1.0, dashed=True)
         subtitle = "on demand"
+    center_text = fmt_delta(elapsed)
 
     return f"""
     <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
       <div style="
-        width:68px;height:68px;border-radius:50%;
-        background:conic-gradient({ring_color} {degrees}deg, #e0ddd4 {degrees}deg);
+        position:relative;width:68px;height:68px;
         display:flex;align-items:center;justify-content:center;
       ">
+        {ring}
         <div style="
           width:52px;height:52px;border-radius:50%;
-          background:#faf6ee;
+          background:#faf6ee;position:relative;
           display:flex;align-items:center;justify-content:center;
           font-family:Manrope,sans-serif;font-weight:700;
           font-size:0.72rem;color:#17324d;
