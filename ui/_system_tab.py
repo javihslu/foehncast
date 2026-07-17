@@ -349,6 +349,25 @@ def _top_model_versions(
     return ranked[:limit], len(rest), int(sum(e["value"] for e in rest))
 
 
+def _shadow_chip(
+    shadow_mean: float | None,
+    shadow_info: list[dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Build the optional (label, value) shadow chip.
+
+    Shadow scoring is an optional capability, so the chip renders only when
+    both the divergence value and the candidate version label are present.
+    Returns *None* to omit the chip entirely rather than show an em-dash.
+    """
+    if shadow_mean is None or not shadow_info:
+        return None
+    candidate_version = shadow_info[0]["labels"].get("candidate_version")
+    if not candidate_version:
+        return None
+    # Two significant figures: small divergences must not collapse to 0.000.
+    return ("Shadow", f"{shadow_mean:.2g} vs v{candidate_version}")
+
+
 def _render_prediction_health() -> None:
     st.markdown(
         '<div style="font-family:Manrope,sans-serif;font-weight:800;'
@@ -365,16 +384,27 @@ def _render_prediction_health() -> None:
         "foehncast_hindcast_accuracy",
         "foehncast_hindcast_validated_count",
     ]
+    health_exprs.append("foehncast_shadow_mean_abs_divergence")
     per_model_query = "foehncast_prediction_log_row_count"
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         scalars_future = pool.submit(prom_query_batch, health_exprs)
         models_future = pool.submit(prom_query_vector, per_model_query)
+        shadow_info_future = pool.submit(
+            prom_query_vector, "foehncast_shadow_model_info"
+        )
 
-    total_rows, model_count, last_pred_ts, exec_total, hindcast_acc, hindcast_n = (
-        scalars_future.result()
-    )
+    (
+        total_rows,
+        model_count,
+        last_pred_ts,
+        exec_total,
+        hindcast_acc,
+        hindcast_n,
+        shadow_mean,
+    ) = scalars_future.result()
     model_results = models_future.result()
+    shadow_info = shadow_info_future.result()
 
     now = _time.time()
     pred_age = (
@@ -411,6 +441,9 @@ def _render_prediction_health() -> None:
             ),
         ),
     ]
+    shadow_chip = _shadow_chip(shadow_mean, shadow_info)
+    if shadow_chip is not None:
+        chips.append(shadow_chip)
     chips_html = "".join(
         f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
         "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
