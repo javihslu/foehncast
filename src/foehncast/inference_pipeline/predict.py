@@ -10,6 +10,7 @@ from typing import Any
 
 import mlflow
 import pandas as pd
+from mlflow.exceptions import MlflowException
 
 from foehncast.config import (
     configure_mlflow_auth,
@@ -28,6 +29,7 @@ from foehncast.training_pipeline.register import get_model_by_alias
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVING_ALIAS = "champion"
+_DEFAULT_CANDIDATE_ALIAS = "candidate"
 
 _STATE_DIR = env_value("FOEHNCAST_STATE_DIR") or ".state"
 _SNAPSHOT_LOCATION = f"{_STATE_DIR.rstrip('/')}/predictions/latest.json"
@@ -70,6 +72,13 @@ def get_serving_model_alias() -> str:
     return configured_alias or _DEFAULT_SERVING_ALIAS
 
 
+def get_candidate_model_alias() -> str:
+    """Return the registry alias for the shadow candidate model."""
+    mlflow_config = get_mlflow_config()
+    configured_alias = str(mlflow_config.get("candidate_alias", "")).strip()
+    return configured_alias or _DEFAULT_CANDIDATE_ALIAS
+
+
 def get_serving_model_version(
     model_name: str | None = None, alias: str | None = None
 ) -> str:
@@ -93,6 +102,54 @@ def _prepare_feature_frame(
     engineered_df = engineer_features(forecast_df, spot["shore_orientation_deg"])
     feature_frame = impute_model_features(engineered_df[feature_columns].copy())
     return engineered_df, feature_frame
+
+
+def _compute_shadow_divergence(
+    scored_frames: list[tuple[pd.DataFrame, Any]],
+    serving_version: str,
+) -> dict[str, Any] | None:
+    """Score the same feature frames with the candidate model and summarise
+    how far its predictions diverge from the champion.
+
+    Returns *None* (and never raises) when there is no distinct candidate to
+    compare against, or when anything in the shadow path fails. The champion
+    run must never fail or change because of shadow scoring.
+    """
+    if not scored_frames:
+        return None
+    try:
+        candidate_alias = get_candidate_model_alias()
+        try:
+            candidate_version = get_serving_model_version(alias=candidate_alias)
+        except MlflowException:
+            return None  # no candidate registered yet
+        if candidate_version == serving_version:
+            return None  # candidate is the current champion; nothing to compare
+
+        candidate_model = get_model_by_alias(candidate_alias)
+        abs_diffs: list[float] = []
+        for feature_frame, champion_preds in scored_frames:
+            candidate_preds = candidate_model.predict(feature_frame)
+            for champion_value, candidate_value in zip(
+                champion_preds, candidate_preds, strict=False
+            ):
+                abs_diffs.append(abs(float(candidate_value) - float(champion_value)))
+
+        if not abs_diffs:
+            return None
+        return {
+            "champion_version": serving_version,
+            "candidate_version": candidate_version,
+            "mean_abs_divergence": sum(abs_diffs) / len(abs_diffs),
+            "max_abs_divergence": max(abs_diffs),
+            "compared_rows": len(abs_diffs),
+        }
+    except Exception:
+        logger.warning(
+            "Shadow scoring failed; serving the champion without a shadow section.",
+            exc_info=True,
+        )
+        return None
 
 
 def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
@@ -135,6 +192,7 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
 
     # Run model prediction sequentially (CPU-bound, fast).
     predictions: list[dict[str, Any]] = []
+    scored_frames: list[tuple[pd.DataFrame, Any]] = []
     for spot in requested_spots:
         forecast_df = forecast_map.get(spot["id"], pd.DataFrame())
         if forecast_df.empty:
@@ -151,6 +209,7 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
             forecast_df, spot, feature_columns
         )
         model_predictions = model.predict(feature_frame)
+        scored_frames.append((feature_frame, model_predictions))
         forecast_rows = []
 
         for timestamp, quality_index in zip(
@@ -177,10 +236,21 @@ def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
             }
         )
 
-    return {
+    prediction_payload: dict[str, Any] = {
         "model_version": serving_version,
         "predictions": predictions,
     }
+
+    # Shadow scoring rides along only on full batches (the payload that gets
+    # snapshotted and surfaced), reusing the feature frames already prepared
+    # for the champion. Subset requests stay byte-identical and skip the
+    # candidate model load.
+    if spot_ids is None:
+        shadow = _compute_shadow_divergence(scored_frames, serving_version)
+        if shadow is not None:
+            prediction_payload["shadow"] = shadow
+
+    return prediction_payload
 
 
 # Prediction snapshot: stored predictions (local or GCS) so the UI does
@@ -264,10 +334,15 @@ def read_latest_predictions(
         return None
 
     # Return only the prediction payload fields (strip snapshot metadata).
-    return {
+    payload: dict[str, Any] = {
         "model_version": snapshot.get("model_version", "unknown"),
         "predictions": snapshot.get("predictions", []),
     }
+    # Carry the optional shadow section through so metrics can render from it.
+    shadow = snapshot.get("shadow")
+    if shadow is not None:
+        payload["shadow"] = shadow
+    return payload
 
 
 # Full inference run used by Airflow, Cloud Run jobs and the serve API.

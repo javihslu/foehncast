@@ -45,6 +45,8 @@ Each training run holds out 20% of the data (`test_size: 0.2`, fixed random seed
 
 For current numbers, check the run behind the `champion` alias in MLflow rather than any single snapshot. Because labels are rule-based, a training window with little wind variation produces near-constant labels and trivially good metrics; judging model quality requires looking at the data window a run was trained on.
 
+Beyond held-out metrics, a registered `candidate` is shadow-scored against the `champion` on live inference batches, so its divergence from the served model is visible before any promotion.
+
 ## Versioning and Lineage
 
 Every MLflow run logs `dataset`, `data_hash` (SHA-256 of the training DataFrame), and `git_commit`. DVC versions the data, MLflow versions the model, and the shared hash links the two. New versions register as `candidate`; the first version ever also bootstraps `champion` so serving can start. After that, promotion from `candidate` to `champion` is a manual operator action, described in the [Training Pipeline](training-pipeline.md) and the [Operator Runbook](delivery-and-operator-workflow.md).

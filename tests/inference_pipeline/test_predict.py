@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from fastapi import BackgroundTasks
 from fastapi.testclient import TestClient
+from mlflow.exceptions import MlflowException
 from prometheus_client import CONTENT_TYPE_LATEST
 
 from foehncast.inference_pipeline import predict, serve
@@ -184,6 +185,192 @@ def test_predict_spots_rejects_unknown_spots(
 
     with pytest.raises(KeyError, match="Unknown spot requested"):
         predict.predict_spots(["unknown-spot"])
+
+
+class _ListModel:
+    def __init__(self, predictions: list[float]) -> None:
+        self._predictions = predictions
+
+    def predict(self, features_df: pd.DataFrame) -> list[float]:
+        return list(self._predictions)
+
+
+def _stub_full_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+    *,
+    champion: object,
+    candidate: object,
+    versions: dict[str, object],
+) -> None:
+    """Stub predict_spots' dependencies for a full-batch (spot_ids=None) run."""
+    monkeypatch.setattr(predict, "get_serving_model_alias", lambda: "champion")
+    monkeypatch.setattr(predict, "get_candidate_model_alias", lambda: "candidate")
+    monkeypatch.setattr(predict, "get_model_config", lambda: model_config)
+    monkeypatch.setattr(
+        predict, "get_inference_config", lambda: {"max_horizon_hours": 2}
+    )
+    monkeypatch.setattr(predict, "get_spots", lambda: [spot])
+    monkeypatch.setattr(
+        predict, "fetch_forecast", lambda lat, lon, **kwargs: forecast_df
+    )
+
+    def fake_version(model_name: object = None, alias: object = None) -> str:
+        value = versions[str(alias)]
+        if isinstance(value, Exception):
+            raise value
+        return str(value)
+
+    monkeypatch.setattr(predict, "get_serving_model_version", fake_version)
+
+    def fake_model(alias: str) -> object:
+        model = champion if alias == "champion" else candidate
+        if isinstance(model, Exception):
+            raise model
+        return model
+
+    monkeypatch.setattr(predict, "get_model_by_alias", fake_model)
+
+
+def test_predict_spots_attaches_shadow_when_candidate_differs(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=_ListModel([2.0, 3.0]),
+        candidate=_ListModel([2.5, 3.0]),
+        versions={"champion": "7", "candidate": "11"},
+    )
+
+    result = predict.predict_spots()
+
+    assert result["shadow"] == {
+        "champion_version": "7",
+        "candidate_version": "11",
+        "mean_abs_divergence": 0.25,
+        "max_abs_divergence": 0.5,
+        "compared_rows": 2,
+    }
+
+
+def test_shadow_leaves_champion_payload_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    champion = _ListModel([2.0, 3.0])
+    # Baseline: candidate version equals champion, so no shadow is computed.
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=champion,
+        candidate=_ListModel([9.9, 9.9]),
+        versions={"champion": "7", "candidate": "7"},
+    )
+    baseline = predict.predict_spots()
+    assert "shadow" not in baseline
+
+    # Distinct candidate: shadow attaches, champion fields stay byte-identical.
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=champion,
+        candidate=_ListModel([2.5, 3.0]),
+        versions={"champion": "7", "candidate": "11"},
+    )
+    with_shadow = predict.predict_spots()
+
+    assert "shadow" in with_shadow
+    assert {k: v for k, v in with_shadow.items() if k != "shadow"} == baseline
+
+
+def test_shadow_skipped_when_candidate_alias_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=_ListModel([2.0, 3.0]),
+        candidate=_ListModel([2.5, 3.0]),
+        versions={"champion": "7", "candidate": MlflowException("no candidate alias")},
+    )
+
+    assert "shadow" not in predict.predict_spots()
+
+
+def test_shadow_skipped_when_candidate_equals_champion_version(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=_ListModel([2.0, 3.0]),
+        candidate=_ListModel([2.5, 3.0]),
+        versions={"champion": "7", "candidate": "7"},
+    )
+
+    assert "shadow" not in predict.predict_spots()
+
+
+def test_shadow_skipped_when_candidate_load_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=_ListModel([2.0, 3.0]),
+        candidate=RuntimeError("candidate model artifact unavailable"),
+        versions={"champion": "7", "candidate": "11"},
+    )
+
+    assert "shadow" not in predict.predict_spots()
+
+
+def test_predict_spots_subset_skips_shadow(
+    monkeypatch: pytest.MonkeyPatch,
+    model_config: dict[str, object],
+    spot: dict[str, object],
+    forecast_df: pd.DataFrame,
+) -> None:
+    _stub_full_batch(
+        monkeypatch,
+        model_config,
+        spot,
+        forecast_df,
+        champion=_ListModel([2.0, 3.0]),
+        candidate=_ListModel([2.5, 3.0]),
+        versions={"champion": "7", "candidate": "11"},
+    )
+
+    assert "shadow" not in predict.predict_spots(["silvaplana"])
 
 
 def test_health_endpoint_reports_model_version(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -563,6 +750,15 @@ def test_metrics_endpoint_returns_prometheus_payload(
         "render_drift_prometheus_metrics",
         lambda: drift_payload,
     )
+    shadow_payload = (
+        b"# HELP foehncast_shadow_mean_abs_divergence example\n"
+        b"foehncast_shadow_mean_abs_divergence 0.031\n"
+    )
+    monkeypatch.setattr(
+        serve,
+        "render_shadow_prometheus_metrics",
+        lambda: shadow_payload,
+    )
     monkeypatch.setattr(
         serve,
         "render_inference_prometheus_metrics",
@@ -580,6 +776,7 @@ def test_metrics_endpoint_returns_prometheus_payload(
         + prediction_payload
         + hindcast_payload
         + drift_payload
+        + shadow_payload
         + monitoring_payload
     )
     assert response.headers["content-type"] == CONTENT_TYPE_LATEST
