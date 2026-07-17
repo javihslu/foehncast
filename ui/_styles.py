@@ -247,11 +247,103 @@ _CSS = """
     color: #ffffff !important;
   }
 
-  section[data-testid="stSidebar"] button[data-testid="stPopoverButton"] p {
-    white-space: nowrap;
-  }
   section[data-testid="stSidebar"] div[data-testid="stSidebarContent"] {
     padding-bottom: 1.5rem;
+  }
+
+  /* Dial-as-button: each freshness dial doubles as its pipeline trigger. A
+     transparent circular st.button is overlaid on the ring (real button, so
+     keyboard focus and Enter work); the dial markdown shows through it. On
+     hover the center age swaps to a Run label and the ring lifts. Idle
+     rendering is unchanged. Selectors are sidebar-scoped so they outrank the
+     generic button styling above. */
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"] {
+    position: relative;
+  }
+  /* The st-key-<key> class sits on the button's element container, so pull the
+     container itself out of flow to overlay the ring (a 68 px circular hit
+     area, centered over the dial). */
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: 68px;
+    height: 68px;
+    z-index: 5;
+  }
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] div[data-testid="stButton"] {
+    width: 68px;
+    margin: 0 !important;
+  }
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] button {
+    width: 68px !important;
+    height: 68px !important;
+    min-height: 68px !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    cursor: pointer;
+  }
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] button p {
+    color: transparent !important;
+  }
+  section[data-testid="stSidebar"] div[class*="st-key-dialwrap_"]
+    div[class*="st-key-run_"] button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .fc-ring,
+  .fc-ring-arc,
+  .fc-disc,
+  .fc-disc .fc-age,
+  .fc-disc .fc-run {
+    transition: filter 0.15s ease, stroke-width 0.15s ease,
+      background 0.15s ease, opacity 0.15s ease;
+  }
+  .fc-disc .fc-age,
+  .fc-disc .fc-run {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  section[data-testid="stSidebar"] .fc-disc .fc-age {
+    color: #17324d !important;
+  }
+  section[data-testid="stSidebar"] .fc-disc .fc-run {
+    opacity: 0;
+    color: var(--warm) !important;
+  }
+  section[data-testid="stSidebar"]
+    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-age {
+    opacity: 0;
+  }
+  section[data-testid="stSidebar"]
+    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-run {
+    opacity: 1;
+  }
+  section[data-testid="stSidebar"]
+    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-disc {
+    background: #fdf2e6 !important;
+  }
+  section[data-testid="stSidebar"]
+    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-ring {
+    filter: brightness(1.08);
+  }
+  section[data-testid="stSidebar"]
+    div[class*="st-key-dialwrap_"]:has(button:hover) .fc-ring-arc {
+    stroke-width: 8.5;
   }
 
   div[data-testid="stMetric"] {

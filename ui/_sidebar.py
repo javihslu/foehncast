@@ -35,22 +35,20 @@ def fmt_delta(seconds: float) -> str:
     return f"{h}h {m // 60}m"
 
 
-def _ring_svg(color: str, sweep: float, *, dashed: bool = False) -> str:
+def _ring_svg(color: str, sweep: float) -> str:
     """68 px ring as an SVG arc; rounded caps avoid the conic-gradient notch."""
-    if dashed:
-        dash = 'stroke-dasharray="2 7" '
-    elif sweep < 0.995:
+    if sweep < 0.995:
         arc_len = _RING_CIRCUMFERENCE * max(0.0, sweep)
         dash = f'stroke-dasharray="{arc_len:.1f} {_RING_CIRCUMFERENCE:.1f}" '
     else:
         dash = ""  # a full ring is an unbroken circle: no seam, no notch
     return (
-        '<svg width="68" height="68" viewBox="0 0 68 68" '
+        '<svg class="fc-ring" width="68" height="68" viewBox="0 0 68 68" '
         'style="position:absolute;left:0;top:0">'
         f'<circle cx="34" cy="34" r="{_RING_RADIUS}" fill="none" '
         f'stroke="{_RING_TRACK}" stroke-width="7"/>'
-        f'<circle cx="34" cy="34" r="{_RING_RADIUS}" fill="none" '
-        f'stroke="{color}" stroke-width="7" stroke-linecap="round" '
+        f'<circle class="fc-ring-arc" cx="34" cy="34" r="{_RING_RADIUS}" '
+        f'fill="none" stroke="{color}" stroke-width="7" stroke-linecap="round" '
         f'{dash}transform="rotate(-90 34 34)"/>'
         "</svg>"
     )
@@ -61,6 +59,7 @@ def _freshness_circle_html(
     elapsed: float,
     *,
     scheduled: bool,
+    interactive: bool = False,
 ) -> str:
     # One semantic everywhere: the center is the data's age. Cycle position
     # and health move to the ring sweep/color; the countdown to the subtitle.
@@ -77,9 +76,19 @@ def _freshness_circle_html(
             ring_color, subtitle = _RING_FRESH, f"next in {fmt_delta(remaining)}"
         ring = _ring_svg(ring_color, 1.0 if overdue else pct)
     else:
-        ring = _ring_svg(_RING_IDLE, 1.0, dashed=True)
+        # On demand: a continuous idle-colored ring (distinct color still reads
+        # "unscheduled"); no dashes, so the ring matches the scheduled dials.
+        ring = _ring_svg(_RING_IDLE, 1.0)
         subtitle = "on demand"
     center_text = fmt_delta(elapsed)
+    # Interactive dials double as buttons: the age swaps to a Run label on hover
+    # (CSS, scoped to the .st-key-dialwrap_ wrapper), so stack both spans.
+    if interactive:
+        center = (
+            f'<span class="fc-age">{center_text}</span><span class="fc-run">Run</span>'
+        )
+    else:
+        center = center_text
 
     return f"""
     <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -88,13 +97,13 @@ def _freshness_circle_html(
         display:flex;align-items:center;justify-content:center;
       ">
         {ring}
-        <div style="
+        <div class="fc-disc" style="
           width:52px;height:52px;border-radius:50%;
           background:#faf6ee;position:relative;
           display:flex;align-items:center;justify-content:center;
           font-family:Manrope,sans-serif;font-weight:700;
           font-size:0.72rem;color:#17324d;
-        ">{center_text}</div>
+        ">{center}</div>
       </div>
       <span style="font-family:Manrope,sans-serif;font-size:0.65rem;
         color:#5f6f7f;text-align:center;line-height:1.1">
@@ -131,33 +140,28 @@ def pipeline_capabilities() -> list[str]:
     return control_capabilities() or []
 
 
-def _render_run_control(label: str, pipeline: str) -> None:
-    """Compact popover with a single confirm button that triggers pipeline."""
-    with st.popover("Run", use_container_width=True):
-        st.caption(f"Trigger the {pipeline} pipeline now.")
-        if st.button("Confirm run", key=f"run_{pipeline}", use_container_width=True):
-            run_id, error = trigger_pipeline_run(pipeline)
-            if run_id:
-                st.toast(f"{label}: queued {run_id}")
-            else:
-                st.toast(f"{label} trigger failed — {error}")
+def _render_dial_button(label: str, pipeline: str) -> None:
+    """Transparent circular button overlaid on the dial; triggers on click."""
+    if st.button(f"Run {label}", key=f"run_{pipeline}"):
+        run_id, error = trigger_pipeline_run(pipeline)
+        if run_id:
+            st.toast(f"{label}: queued {run_id}")
+        else:
+            st.toast(f"{label} trigger failed — {error}")
 
 
-def _render_cascade_run_control() -> None:
-    """Trigger the orchestrator's full cascade (feature -> training -> inference)."""
-    with st.popover("Run pipeline", use_container_width=True):
-        st.caption("Trigger the full pipeline cascade now.")
-        if st.button("Confirm run", key="run_cascade", use_container_width=True):
-            run_id, error = trigger_pipeline_run("cascade")
-            if run_id:
-                st.toast(f"Cascade queued — {run_id.rsplit('/', 1)[-1]}")
-            else:
-                st.toast(f"Cascade trigger failed — {error}")
+def _render_cascade_button() -> None:
+    """Full-width button that triggers the orchestrator's full cascade."""
+    if st.button("Run pipeline", key="run_cascade", use_container_width=True):
+        run_id, error = trigger_pipeline_run("cascade")
+        if run_id:
+            st.toast(f"Cascade queued — {run_id.rsplit('/', 1)[-1]}")
+        else:
+            st.toast(f"Cascade trigger failed — {error}")
 
 
-@st.fragment(run_every=30)
-def render_freshness_bar() -> None:
-    """Source-by-source circular indicators, auto-refreshed every 30 s."""
+def _render_freshness_bar() -> None:
+    """Freshness dials; each capable pipeline's dial is a clickable button."""
     cols = st.columns(len(_FRESHNESS_SOURCES))
     now = _time.time()
     exprs = [src[1] for src in _FRESHNESS_SOURCES]
@@ -173,20 +177,30 @@ def render_freshness_bar() -> None:
                     f'font-size:0.75rem">{label}<br/>unavailable</div>',
                     unsafe_allow_html=True,
                 )
+                continue
+            interactive = pipeline in capabilities
+            html = _freshness_circle_html(
+                label, now - ts, scheduled=scheduled, interactive=interactive
+            )
+            if interactive:
+                with st.container(key=f"dialwrap_{pipeline}"):
+                    st.markdown(html, unsafe_allow_html=True)
+                    _render_dial_button(label, pipeline)
             else:
-                st.markdown(
-                    _freshness_circle_html(label, now - ts, scheduled=scheduled),
-                    unsafe_allow_html=True,
-                )
-            if pipeline in capabilities:
-                _render_run_control(label, pipeline)
+                st.markdown(html, unsafe_allow_html=True)
     if "cascade" in capabilities:
         st.markdown(
             "<div style='margin-top:14px;padding-top:11px;"
             "border-top:1px solid rgba(7,37,42,0.08)'></div>",
             unsafe_allow_html=True,
         )
-        _render_cascade_run_control()
+        _render_cascade_button()
+
+
+@st.fragment(run_every=30)
+def render_freshness_bar() -> None:
+    """Source-by-source circular indicators, auto-refreshed every 30 s."""
+    _render_freshness_bar()
 
 
 def render_sidebar_ml_panels() -> None:
