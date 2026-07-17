@@ -321,6 +321,9 @@ def create_app() -> FastAPI:
 
     @app.get("/pipeline/runs")
     def pipeline_runs(limit: int = Query(default=5, ge=1, le=50)) -> dict[str, Any]:
+        """List recent runs; limit applies per pipeline for orchestrators with
+        multiple pipelines, not to the merged total.
+        """
         orchestrator = _orchestrator_or_503()
         try:
             runs = orchestrator.list_runs(limit=limit)

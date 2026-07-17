@@ -78,6 +78,7 @@ class AirflowOrchestrator:
         )
 
     def list_runs(self, limit: int = 5) -> list[PipelineRun]:
+        """Merge each pipeline's runs, newest first; limit applies per pipeline."""
         runs: list[PipelineRun] = []
         for pipeline, dag_id in _AIRFLOW_DAGS.items():
             result = list_dag_runs(dag_id, limit=limit, base_url=self._base_url)
@@ -85,7 +86,7 @@ class AirflowOrchestrator:
                 raise OrchestratorError(result.error)
             runs.extend(_airflow_run(pipeline, run) for run in result.runs)
         runs.sort(key=lambda run: run.started_at, reverse=True)
-        return runs[:limit]
+        return runs
 
 
 # Workflows adapter: raw REST plus metadata-server token (no Google client libs).

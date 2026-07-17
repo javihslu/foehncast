@@ -119,6 +119,16 @@ def test_run_triggers_with_valid_token(
     assert response.json() == asdict(RUN)
 
 
+def test_run_502_on_trigger_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use(monkeypatch, FakeOrchestrator(error=OrchestratorError("airflow down")))
+    response = client.post(
+        "/pipeline/run", json={"pipeline": "feature"}, headers=TOKEN_HEADER
+    )
+    assert response.status_code == 502
+
+
 def test_run_400_unsupported_and_422_unknown_pipeline(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -14,7 +14,7 @@ _SERVE_BASE_URL = (env_value("FOEHNCAST_SERVE_URL") or "http://127.0.0.1:8000").
     "/"
 )
 _GET_TIMEOUT = 10
-_TRIGGER_TIMEOUT = 20  # Airflow's dagRuns POST can take well over 10 s.
+_TRIGGER_TIMEOUT = 30  # serve's worst case: 5 s auth + 15 s trigger, plus margin.
 
 
 @dataclass(frozen=True)
