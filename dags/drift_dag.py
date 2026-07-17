@@ -15,6 +15,7 @@ else:
     from foehncast.orchestration import (
         resolve_airflow_schedule,
         run_feature_drift_detection_step,
+        run_forecast_feature_drift_detection_step,
         run_prediction_drift_detection_step,
     )
 
@@ -48,10 +49,16 @@ else:
             op_kwargs={"dataset": drift_dataset},
         )
 
+        detect_dataset_drift = PythonOperator(
+            task_id="detect_dataset_drift",
+            python_callable=run_forecast_feature_drift_detection_step,
+            outlets=[drift_report_asset],
+        )
+
         detect_prediction_drift = PythonOperator(
             task_id="detect_prediction_drift",
             python_callable=run_prediction_drift_detection_step,
             outlets=[drift_report_asset],
         )
 
-        detect_feature_drift >> detect_prediction_drift
+        detect_feature_drift >> detect_dataset_drift >> detect_prediction_drift

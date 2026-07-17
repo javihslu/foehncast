@@ -51,8 +51,11 @@ Uses Evidently to compare feature distributions:
 
 | Type | Reference | Current | Method |
 |------|-----------|---------|--------|
-| Feature drift | Stored reference dataset | Latest curated features | Column-level statistical tests |
+| Feature drift | Stored reference dataset | Latest curated features | Per-spot, column-level statistical tests |
+| Model feature drift | Training dataset | Recent forecast features | Dataset-level over the configured model feature set |
 | Prediction drift | Historical predictions | Recent prediction window | Distribution comparison |
+
+The model feature drift check compares the two datasets as a whole over the configured model features (intersecting with the columns each dataset carries), so the `share_of_drifted_columns` gauge is resolved over the full feature set rather than a narrow overlap.
 
 Results go through StatsD → Prometheus as `foehncast_drift_metric`.
 

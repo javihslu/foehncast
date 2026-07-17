@@ -136,6 +136,43 @@ def detect_prediction_drift(predictions_log: pd.DataFrame) -> DriftReport:
     )
 
 
+def detect_model_feature_drift(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    feature_columns: list[str],
+    *,
+    dataset_name: str,
+    dataset_version: str,
+    threshold: float | None = None,
+) -> DriftReport | None:
+    """Detect data drift over the configured model feature set.
+
+    Both frames are restricted to the model features they actually share, so a
+    narrow reference or older rows that predate some columns are compared on the
+    intersection instead of crashing. ``share_of_drifted_columns`` is then
+    resolved over that widened set. Returns ``None`` when nothing is comparable.
+    """
+    if reference_df.empty or current_df.empty:
+        return None
+
+    compared_columns = [
+        column
+        for column in feature_columns
+        if column in reference_df.columns and column in current_df.columns
+    ]
+    if not compared_columns:
+        return None
+
+    reference_frame = reference_df.loc[:, compared_columns].copy()
+    current_frame = current_df.loc[:, compared_columns].copy()
+    current_frame.attrs = {
+        **getattr(current_frame, "attrs", {}),
+        "dataset_name": dataset_name,
+        "dataset_version": dataset_version,
+    }
+    return detect_data_drift(reference_frame, current_frame, threshold)
+
+
 def push_drift_metrics(report: DriftReport) -> None:
     """Push drift metrics to StatsD and persist for Prometheus scraping."""
     _persist_drift_report(report)
@@ -528,6 +565,7 @@ __all__ = [
     "DriftMetric",
     "DriftReport",
     "detect_data_drift",
+    "detect_model_feature_drift",
     "detect_prediction_drift",
     "push_drift_metrics",
     "read_all_drift_reports",

@@ -10,6 +10,7 @@ from foehncast.orchestration._helpers import (
 )
 from foehncast.orchestration.drift import (
     run_feature_drift_detection_step,
+    run_forecast_feature_drift_detection_step,
     run_prediction_drift_detection_step,
 )
 from foehncast.orchestration.feature import (
@@ -53,5 +54,6 @@ __all__ = [
     "run_inference_pipeline_step",
     # Drift
     "run_feature_drift_detection_step",
+    "run_forecast_feature_drift_detection_step",
     "run_prediction_drift_detection_step",
 ]

@@ -307,6 +307,7 @@ def test_drift_dag_defaults_to_twelve_hour_schedule(
     assert module.dag.kwargs["tags"] == ["foehncast", "monitoring"]
     assert [operator.kwargs["task_id"] for operator in operators] == [
         "detect_feature_drift",
+        "detect_dataset_drift",
         "detect_prediction_drift",
     ]
     assert operators[0].kwargs["op_kwargs"] == {"dataset": "train"}
@@ -314,6 +315,9 @@ def test_drift_dag_defaults_to_twelve_hour_schedule(
         drift_report_asset_uri("train"),
     ]
     assert [asset.uri for asset in operators[1].kwargs["outlets"]] == [
+        drift_report_asset_uri("train"),
+    ]
+    assert [asset.uri for asset in operators[2].kwargs["outlets"]] == [
         drift_report_asset_uri("train"),
     ]
 
