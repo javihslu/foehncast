@@ -2,6 +2,8 @@
 
 # FoehnCast
 
+![Rider console: session-quality heatmap with cell selection](docs/site/assets/kit/console-hero.gif)
+
 [![CI](https://github.com/javihslu/foehncast/actions/workflows/ci.yml/badge.svg)](https://github.com/javihslu/foehncast/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -42,12 +44,13 @@ cd foehncast
 ./scripts/bootstrap-local.sh
 ```
 
-The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, and the app) and runs a smoke test. No cloud credentials are needed.
+The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, the app, and the rider console) and runs a smoke test. No cloud credentials are needed.
 
 After bootstrap, you get:
 
 | Service | URL |
 |---------|-----|
+| Rider console (Streamlit) | `http://127.0.0.1:8501` |
 | App (FastAPI) | `http://127.0.0.1:8000` |
 | Airflow | `http://127.0.0.1:8080` |
 | MLflow | `http://127.0.0.1:5001` |
@@ -61,15 +64,15 @@ curl -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-### The cloud deployment (retired)
+### The rider console
 
 <p align="center">
-  <img src="docs/site/assets/foehncast-rider-console.jpg" alt="FoehnCast Rider Console" width="100%" />
+  <img src="docs/site/assets/kit/02-rider-console.png" alt="FoehnCast Rider Console" width="100%" />
   <br />
-  <em>The Rider Console as served from Cloud Run — ranked Swiss kiteboarding spots.</em>
+  <em>Session-quality heatmap across six spots; a selected cell drives the wind dial and metrics, with the serving champion model in the sidebar.</em>
 </p>
 
-During the course the full stack ran on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)). It was taken down after grading to stop incurring cost; everything it ran reproduces locally with the bootstrap script above.
+During the course the full stack also ran on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. The cloud deployment was taken down after grading to stop incurring cost; everything reproduces locally with the bootstrap script above.
 
 ### Reproducible pipelines (DVC)
 
