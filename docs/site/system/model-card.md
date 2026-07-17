@@ -47,7 +47,7 @@ For current numbers, check the run behind the `champion` alias in MLflow rather 
 
 ## Versioning and Lineage
 
-Every MLflow run logs `dataset`, `data_hash` (SHA-256 of the training DataFrame), and `git_commit`. DVC versions the data, MLflow versions the model, and the shared hash links the two. Promotion from `candidate` to `champion` is a manual operator action, described in the [Training Pipeline](training-pipeline.md) and the [Operator Runbook](delivery-and-operator-workflow.md).
+Every MLflow run logs `dataset`, `data_hash` (SHA-256 of the training DataFrame), and `git_commit`. DVC versions the data, MLflow versions the model, and the shared hash links the two. New versions register as `candidate`; the first version ever also bootstraps `champion` so serving can start. After that, promotion from `candidate` to `champion` is a manual operator action, described in the [Training Pipeline](training-pipeline.md) and the [Operator Runbook](delivery-and-operator-workflow.md).
 
 ## Limitations
 

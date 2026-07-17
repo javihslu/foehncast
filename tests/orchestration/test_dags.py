@@ -211,8 +211,7 @@ def test_training_dag_is_asset_scheduled_and_active_by_default(
     )
     expected_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else ('Production' if dag_run and "
-        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+        "dag_run.conf.get('stage') else 'Candidate' }}"
     )
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": expected_dataset_template,
@@ -264,8 +263,7 @@ def test_training_dag_supports_dataset_override(
     )
     expected_stage_template = (
         "{{ dag_run.conf.get('stage') if dag_run and dag_run.conf and "
-        "dag_run.conf.get('stage') else ('Production' if dag_run and "
-        "dag_run.run_type == 'asset_triggered' else 'Candidate') }}"
+        "dag_run.conf.get('stage') else 'Candidate' }}"
     )
     assert operators[0].kwargs["op_kwargs"] == {
         "dataset": expected_dataset_template,

@@ -865,6 +865,11 @@ def test_register_training_run_registers_and_promotes(
             {"promotion": (model_name, version, stage)}
         ),
     )
+    monkeypatch.setattr(
+        _orch_training,
+        "ensure_champion_alias",
+        lambda version: logged.update({"champion_bootstrap": version}) or False,
+    )
     _capture_emitted_summary(
         monkeypatch,
         "emit_training_pipeline_run_summary",
@@ -876,6 +881,7 @@ def test_register_training_run_registers_and_promotes(
 
     assert version == "7"
     assert logged["promotion"] == (None, "7", "Candidate")
+    assert logged["champion_bootstrap"] == "7"
     assert emitted["summary"]["run_status"] == "succeeded"
     assert emitted["summary"]["registered_model_version"] == "7"
 
