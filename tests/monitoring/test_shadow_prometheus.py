@@ -36,6 +36,9 @@ def test_render_shadow_prometheus_metrics_emits_gauges_from_snapshot() -> None:
     assert metric_value(payload, "foehncast_shadow_compared_rows") == pytest.approx(
         28.0
     )
+    assert metric_value(payload, "foehncast_serving_model_version") == pytest.approx(
+        7.0
+    )
 
     info_line = next(
         line
@@ -47,15 +50,19 @@ def test_render_shadow_prometheus_metrics_emits_gauges_from_snapshot() -> None:
     assert info_line.rstrip().endswith(" 1.0")
 
 
-def test_render_shadow_prometheus_metrics_empty_without_shadow_section() -> None:
+def test_render_shadow_prometheus_metrics_no_shadow_gauges_without_section() -> None:
     payload = shadow_prometheus.render_shadow_prometheus_metrics(
         snapshot={"model_version": "7", "predictions": []},
     ).decode("utf-8")
 
-    metric_lines = [
-        line for line in payload.splitlines() if line and not line.startswith("#")
+    shadow_lines = [
+        line for line in payload.splitlines() if line.startswith("foehncast_shadow_")
     ]
-    assert metric_lines == []
+    assert shadow_lines == []
+    # The serving gauge renders independently of the optional shadow section.
+    assert metric_value(payload, "foehncast_serving_model_version") == pytest.approx(
+        7.0
+    )
 
 
 def test_render_shadow_prometheus_metrics_empty_without_snapshot(
@@ -82,3 +89,25 @@ def test_render_shadow_prometheus_metrics_reads_latest_snapshot_by_default(
     assert metric_value(
         payload, "foehncast_shadow_mean_abs_divergence"
     ) == pytest.approx(0.031)
+
+
+def test_serving_model_version_gauge_present_from_snapshot() -> None:
+    payload = shadow_prometheus.render_shadow_prometheus_metrics(
+        snapshot={"model_version": "11", "predictions": []},
+    ).decode("utf-8")
+
+    assert metric_value(payload, "foehncast_serving_model_version") == pytest.approx(
+        11.0
+    )
+
+
+def test_serving_model_version_gauge_absent_for_missing_or_unknown() -> None:
+    for snapshot in (
+        {"predictions": []},
+        {"model_version": "unknown", "predictions": []},
+    ):
+        payload = shadow_prometheus.render_shadow_prometheus_metrics(
+            snapshot=snapshot,
+        ).decode("utf-8")
+
+        assert "foehncast_serving_model_version" not in payload

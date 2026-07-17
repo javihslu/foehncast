@@ -299,52 +299,41 @@ def render_freshness_bar() -> None:
 def render_sidebar_ml_panels() -> None:
     """Champion model status card with PromQL metrics."""
     _sidebar_exprs = [
+        "foehncast_serving_model_version",
         "foehncast_training_pipeline_registered_model_version",
-        "foehncast_training_pipeline_evaluation_report_exists",
-        "foehncast_training_pipeline_model_registered",
         'foehncast_training_pipeline_run_metric{metric_name="r2"}',
         'foehncast_training_pipeline_run_metric{metric_name="rmse"}',
         "foehncast_training_pipeline_feature_count",
         "foehncast_training_pipeline_row_count",
         "foehncast_hindcast_accuracy",
         "foehncast_hindcast_validated_count",
-        # Scoped to the per-spot vs-train comparisons: confidence means "how
-        # much do current conditions resemble the training data". Prediction
-        # drift legitimately spikes on promotion and must not zero this.
-        'max(foehncast_drift_metric{metric_name="share_of_drifted_columns",'
-        'dataset_version="train"})',
     ]
     (
-        model_ver,
-        eval_ok,
-        reg_ok,
+        serving_ver,
+        registered_ver,
         r2_val,
         rmse_val,
         feat_count,
         train_rows,
         hindcast_acc,
         hindcast_n,
-        drift_share,
     ) = prom_query_batch(_sidebar_exprs)
 
-    verified = (eval_ok is not None and eval_ok >= 1) and (
-        reg_ok is not None and reg_ok >= 1
-    )
-    ver_label = f"v{int(model_ver)}" if model_ver is not None else "—"
+    # The header + badge read the serving gauge (the version actually
+    # answering predictions); its presence alone is the health signal.
+    ver_label = f"v{int(serving_ver)}" if serving_ver is not None else "—"
+    train_ver_label = f"v{int(registered_ver)}" if registered_ver is not None else "—"
     if hindcast_n is not None and hindcast_n < 1:
         hindcast_acc = None
-    confidence = (
-        max(0.0, min(1.0, 1.0 - drift_share)) if drift_share is not None else None
-    )
 
-    if verified:
+    if serving_ver is not None:
         badge_color = "var(--accent)"
         badge_bg = "var(--accent-soft)"
-        badge_text = "Verified ✓"
+        badge_text = "Serving"
     else:
         badge_color = "#c0392b"
         badge_bg = "rgba(192, 57, 43, 0.10)"
-        badge_text = "Unverified ✗"
+        badge_text = "No model"
 
     def _stat(label: str, value: float | None, fmt: str = ".2f") -> str:
         display = f"{value:{fmt}}" if value is not None else "—"
@@ -361,13 +350,21 @@ def render_sidebar_ml_panels() -> None:
             f'font-size:0.95rem;color:var(--ink)">{display}</strong></div>'
         )
 
+    def _sub_label(label: str) -> str:
+        return (
+            '<div style="padding:10px 0 2px">'
+            f'<span style="font-family:Manrope,sans-serif;'
+            "font-size:0.62rem;font-weight:700;letter-spacing:0.04em;"
+            f'text-transform:uppercase;color:var(--muted)">{label}</span></div>'
+        )
+
     stats_html = (
         '<div style="margin-top:10px;padding-top:8px;'
         'border-top:1px solid rgba(23,50,77,0.08)">'
-        + _stat("Confidence", confidence, ".0%")
+        + _stat("Hindcast", hindcast_acc, ".0%")
+        + _sub_label(f"Latest training {train_ver_label}")
         + _stat("R²", r2_val)
         + _stat("RMSE", rmse_val)
-        + _stat("Hindcast", hindcast_acc, ".0%")
         + _stat("Features", feat_count, ".0f")
         + _stat("Rows", train_rows, ".0f")
         + "</div>"
