@@ -337,6 +337,18 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
     )
 
 
+_MODEL_VERSION_LIMIT = 8
+
+
+def _top_model_versions(
+    results: list[dict[str, Any]], limit: int = _MODEL_VERSION_LIMIT
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Top results ranked by prediction count; the rest collapse to a summary."""
+    ranked = sorted(results, key=lambda x: x["value"], reverse=True)
+    rest = ranked[limit:]
+    return ranked[:limit], len(rest), int(sum(e["value"] for e in rest))
+
+
 def _render_prediction_health() -> None:
     st.markdown(
         '<div style="font-family:Manrope,sans-serif;font-weight:800;'
@@ -418,7 +430,7 @@ def _render_prediction_health() -> None:
     )
 
     if model_results:
-        models_sorted = sorted(model_results, key=lambda x: x["value"], reverse=True)
+        models_sorted, hidden_count, hidden_total = _top_model_versions(model_results)
         max_count = max(e["value"] for e in models_sorted) if models_sorted else 1
         bars_html: list[str] = []
         for entry in models_sorted:
@@ -436,6 +448,12 @@ def _render_prediction_health() -> None:
                 f'<span style="font-family:Manrope,sans-serif;font-size:0.68rem;'
                 f'font-weight:700;min-width:40px;text-align:right;color:#07252a">'
                 f"{count}</span></div>"
+            )
+        if hidden_count:
+            bars_html.append(
+                f'<div style="font-family:Manrope,sans-serif;font-size:0.68rem;'
+                f'color:#5f6f7f;padding:3px 0">+{hidden_count} more versions · '
+                f"{hidden_total} predictions</div>"
             )
         st.markdown(
             '<div style="padding:4px 0">'

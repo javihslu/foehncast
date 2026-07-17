@@ -12,7 +12,12 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _system_tab  # noqa: E402
-from _system_tab import _group_runs, _run_age, _run_row_html  # noqa: E402
+from _system_tab import (  # noqa: E402
+    _group_runs,
+    _run_age,
+    _run_row_html,
+    _top_model_versions,
+)
 
 
 def test_run_age_parses_iso_and_handles_missing() -> None:
@@ -61,3 +66,22 @@ def test_render_recent_runs_distinguishes_unavailable_from_empty(
     _system_tab._render_recent_runs([])  # empty: its own distinct caption
     assert captions == ["No recent runs recorded."]
     assert markdowns == []
+
+
+def test_top_model_versions_caps_and_summarizes_rest() -> None:
+    results = [
+        {"labels": {"model_version": str(i)}, "value": float(i)} for i in range(1, 12)
+    ]
+    top, hidden_count, hidden_total = _top_model_versions(results, limit=8)
+    assert [e["labels"]["model_version"] for e in top[:2]] == ["11", "10"]
+    assert len(top) == 8
+    assert hidden_count == 3
+    assert hidden_total == 1 + 2 + 3
+
+
+def test_top_model_versions_no_summary_when_under_limit() -> None:
+    results = [{"labels": {"model_version": "1"}, "value": 5.0}]
+    top, hidden_count, hidden_total = _top_model_versions(results)
+    assert len(top) == 1
+    assert hidden_count == 0
+    assert hidden_total == 0
