@@ -136,6 +136,8 @@ Orchestration differs by environment: local runs use Airflow, while the hosted s
 2. Day-2: Terraform (manual dispatch), Cloud Build triggers (on push)
 3. Rollback: Cloud Run probes auto-rollback unhealthy revisions
 
+On a first run the container images must reach Artifact Registry before Terraform creates the Cloud Run services that consume them. Bootstrap enforces this order: foundation apply (Artifact Registry and IAM) → build the three images → full apply. Use `--skip-image-build` only when the images already exist.
+
 See the [Operator Runbook](delivery-and-operator-workflow.md) for the full process.
 
 ## What Stays Out of Cloud

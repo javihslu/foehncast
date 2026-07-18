@@ -42,6 +42,8 @@ Run from Google Cloud Shell:
 
 This is interactive — it walks you through project/billing setup, creates the Terraform backend, and syncs repo variables to GitHub.
 
+Container images must exist in Artifact Registry before the first platform Terraform apply, because Cloud Run fails to create a service whose image is missing. Bootstrap guarantees this: it applies the foundation (Artifact Registry, IAM, enabled services), builds the app, UI, and MLflow images, then runs the full apply. Pass `--skip-image-build` to opt out when the images already exist.
+
 ## Day-2 Delivery
 
 After bootstrap, everything goes through GitHub Actions:
