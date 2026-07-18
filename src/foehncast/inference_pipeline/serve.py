@@ -257,6 +257,8 @@ def create_app() -> FastAPI:
             return prediction_payload
         except KeyError as exc:
             raise _not_found(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/rank")
     def rank(
@@ -277,6 +279,8 @@ def create_app() -> FastAPI:
             return _rank_response(prediction_payload)
         except KeyError as exc:
             raise _not_found(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/features/online")
     def online_features(request: OnlineFeaturesRequest) -> dict[str, Any]:

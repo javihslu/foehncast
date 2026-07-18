@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import mlflow
 import pandas as pd
@@ -19,10 +21,12 @@ from foehncast.config import (
     get_mlflow_tracking_uri,
     get_model_config,
     get_spots,
+    get_storage_config,
 )
 from foehncast.env import env_value
 from foehncast.feature_pipeline.engineer import engineer_features, impute_model_features
 from foehncast.feature_pipeline.ingest import fetch_forecast
+from foehncast.feature_pipeline.store import _s3_endpoint
 from foehncast.monitoring.inference_prometheus import observe_mean_predicted_quality
 from foehncast.training_pipeline.register import get_model_by_alias
 
@@ -152,12 +156,29 @@ def _compute_shadow_divergence(
         return None
 
 
+def _artifact_store_reachable(timeout: float = 2.0) -> bool:
+    """Return whether the configured S3 artifact store endpoint accepts a TCP connection."""
+    endpoint = _s3_endpoint(get_storage_config())
+    if not endpoint:
+        return True
+    parsed = urlparse(endpoint)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        socket.create_connection((parsed.hostname, port), timeout=timeout).close()
+    except OSError:
+        return False
+    return True
+
+
 def predict_spots(spot_ids: list[str] | None = None) -> dict[str, Any]:
     """Fetch forecasts for the requested spots and return model predictions."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     requested_spots = _resolve_spots(spot_ids)
     serving_alias = get_serving_model_alias()
+    if not _artifact_store_reachable():
+        endpoint = _s3_endpoint(get_storage_config())
+        raise RuntimeError(f"artifact store unreachable at {endpoint}")
     model = get_model_by_alias(serving_alias)
     # Resolve the served version right after loading the model so the reported
     # version matches the weights actually loaded (a later lookup could read a

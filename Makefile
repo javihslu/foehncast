@@ -7,7 +7,8 @@ TF_REMOTE_ARGS ?= plan
 SMOKE_BOOTSTRAP_ARGS ?=
 NOTEBOOK_REVIEW_BACKEND ?= s3
 NOTEBOOK_REVIEW_DIR ?=
-LOCAL_ONLY_COMPOSE := COMPOSE_PROFILES=local-only docker compose
+LOCAL_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.objectstore.yml
+LOCAL_ONLY_COMPOSE := COMPOSE_PROFILES=local-only docker compose -f docker-compose.yml -f docker-compose.objectstore.yml
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "%-24s %s\n", $$1, $$2}'
@@ -86,16 +87,16 @@ smoke-bootstrap-only:  ## Run the disposable bootstrap-only smoke driver with SM
 	cd $(ROOT_DIR) && ./scripts/smoke-bootstrap-only.sh $(SMOKE_BOOTSTRAP_ARGS)
 
 compose-up:  ## Start the default local runtime stack
-	cd $(ROOT_DIR) && docker compose up -d
+	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) up -d
 
 compose-down:  ## Stop and remove the local compose stack
-	cd $(ROOT_DIR) && docker compose down
+	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) down
 
 compose-ps:  ## List compose services
-	cd $(ROOT_DIR) && docker compose ps
+	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) ps
 
 compose-logs:  ## Tail compose logs
-	cd $(ROOT_DIR) && docker compose logs -f
+	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) logs -f
 
 dev-build:  ## Rebuild the opt-in development_env image
 	cd $(ROOT_DIR) && $(LOCAL_ONLY_COMPOSE) build development_env

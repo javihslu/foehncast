@@ -680,6 +680,18 @@ def test_online_features_endpoint_returns_503_when_feast_runtime_is_unavailable(
     assert response.json() == {"detail": "Feast runtime is unavailable"}
 
 
+def test_predict_endpoint_returns_503_when_artifact_store_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(predict, "_artifact_store_reachable", lambda: False)
+    client = TestClient(serve.app)
+
+    response = client.post("/predict", json={"spot_ids": ["silvaplana"]})
+
+    assert response.status_code == 503
+    assert "artifact store" in response.json()["detail"]
+
+
 def test_online_features_demo_endpoint_returns_html(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
