@@ -13,7 +13,7 @@ Clean FTI split, feature store, model registry, containerized deployment.
 | Cloud Run jobs + Workflows (cloud) | `terraform/main.tf` — FTI cascade (6 h), drift detection (12 h) |
 | Feature store (Feast) | `feature_repo/` |
 | Model registry (MLflow) | Champion/candidate aliases in `training_pipeline/register.py` |
-| 6 container services | `containers/` (Airflow, MLflow, app, UI, monitoring, dev) |
+| 6 container services | `containers/` (Airflow, MLflow, app, UI, feast_online_store, dev) |
 | Compose with overlay pattern | `docker-compose.yml` + `objectstore.yml` / `gcp.yml` |
 | Local + cloud deployment | `scripts/bootstrap-local.sh`, `terraform/main.tf` |
 | Storage abstraction | `feature_pipeline/store.py` switches between S3 and BigQuery |
