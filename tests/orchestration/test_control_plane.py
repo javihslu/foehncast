@@ -30,8 +30,15 @@ def _workflows_request(method: str, url: str, **_: Any) -> _FakeResponse:
         return _FakeResponse({"access_token": "tok"})
     if method == "POST":
         return _FakeResponse({"name": "exec-1", "state": "ACTIVE"})
+    # API order (createTime desc) does not match started_at order, so the
+    # orchestrator must re-sort by started_at itself.
     return _FakeResponse(
-        {"executions": [{"name": "exec-1", "state": "SUCCEEDED", "startTime": "T10"}]}
+        {
+            "executions": [
+                {"name": "exec-1", "state": "SUCCEEDED", "startTime": "T10"},
+                {"name": "exec-2", "state": "SUCCEEDED", "startTime": "T15"},
+            ]
+        }
     )
 
 
@@ -109,8 +116,9 @@ def test_workflows_trigger_list_and_capabilities(
     assert orch.trigger("cascade") == cp.PipelineRun("exec-1", "cascade", "active", "")
     assert orch.capabilities() == ["cascade"]
     listed = orch.list_runs(limit=3)
-    assert [r.run_id for r in listed] == ["exec-1"]
-    assert listed[0].started_at == "T10"
+    # API order is createTime desc (exec-1 then exec-2); started_at desc reverses it.
+    assert [r.run_id for r in listed] == ["exec-2", "exec-1"]
+    assert listed[0].started_at == "T15"
 
     monkeypatch.setattr(cp.httpx, "request", lambda *a, **k: _FakeResponse({}))
     with pytest.raises(cp.OrchestratorError):

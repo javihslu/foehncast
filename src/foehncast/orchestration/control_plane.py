@@ -177,7 +177,11 @@ class WorkflowsOrchestrator:
         token = self._token()
         url = f"{self._executions_url()}?pageSize={limit}&orderBy=createTime%20desc"
         data = self._request("GET", url, headers={"Authorization": f"Bearer {token}"})
-        return [_workflow_run(item) for item in data.get("executions", [])]
+        runs = [_workflow_run(item) for item in data.get("executions", [])]
+        # The API orders by createTime, but started_at prefers startTime, so
+        # re-sort to keep displayed rows in the order they actually started.
+        runs.sort(key=lambda run: run.started_at, reverse=True)
+        return runs
 
 
 def build_orchestrator() -> Orchestrator | None:
