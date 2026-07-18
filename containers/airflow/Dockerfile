@@ -38,6 +38,7 @@ RUN python -m venv /home/airflow/.local/feast-venv \
     && ln -sf /usr/local/bin/uvx /home/airflow/.local/bin/uvx
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONHASHSEED=0 \
     AIRFLOW_HOME=/workspace/airflow \
     AIRFLOW__CORE__DAGS_FOLDER=/workspace/dags \
     FOEHNCAST_FEAST_PYTHON=/home/airflow/.local/feast-venv/bin/python \
