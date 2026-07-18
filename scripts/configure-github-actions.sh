@@ -95,7 +95,13 @@ fi
 
 cloud_run_synced=false
 mlflow_tracking_uri_synced=false
+variable_pairs="$(terraform_repo_variable_pairs "$TERRAFORM_DIR")"
 while IFS=$'\t' read -r variable_name variable_value; do
+  if [[ ! "$variable_name" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
+    echo "Refusing to sync malformed repository variable name: ${variable_name}" >&2
+    exit 1
+  fi
+
   set_variable "$REPOSITORY_PATH" "$variable_name" "$variable_value"
 
   if [[ "$variable_name" == "GCP_CLOUD_RUN_SERVICE" ]]; then
@@ -105,7 +111,7 @@ while IFS=$'\t' read -r variable_name variable_value; do
   if [[ "$variable_name" == "GCP_MLFLOW_TRACKING_URI" ]]; then
     mlflow_tracking_uri_synced=true
   fi
-done < <(terraform_repo_variable_pairs "$TERRAFORM_DIR")
+done <<< "$variable_pairs"
 
 if [[ "$cloud_run_synced" != "true" ]]; then
   delete_variable "$REPOSITORY_PATH" GCP_CLOUD_RUN_SERVICE

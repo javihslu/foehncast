@@ -254,6 +254,7 @@ load_terraform_platform_state() {
   FOEHNCAST_TF_CLOUD_RUN_MAX_INSTANCE_COUNT="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_max_instance_count cloud_run_max_instance_count)"
   FOEHNCAST_TF_CLOUD_RUN_CPU="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_cpu cloud_run_cpu)"
   FOEHNCAST_TF_CLOUD_RUN_MEMORY="$(terraform_output_or_tfvars_value "$terraform_dir" configured_cloud_run_memory cloud_run_memory)"
+  FOEHNCAST_TF_CLOUD_RUN_IMAGE="$(terraform_output_or_tfvars_value "$terraform_dir" cloud_run_image cloud_run_image)"
   FOEHNCAST_TF_MLFLOW_TRACKING_URI="$(terraform_output_or_tfvars_value "$terraform_dir" mlflow_tracking_uri mlflow_tracking_uri)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_MLFLOW="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_mlflow provision_cloud_run_mlflow)"
   FOEHNCAST_TF_PROVISION_CLOUD_RUN_UI="$(terraform_output_or_tfvars_value "$terraform_dir" provision_cloud_run_ui provision_cloud_run_ui)"
