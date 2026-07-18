@@ -59,3 +59,4 @@ Every MLflow run logs `dataset`, `data_hash` (SHA-256 of the training DataFrame)
 - It is trained per the six configured spots and will not generalize to other locations without new spot data and retraining.
 - Predictions inherit forecast errors from the weather API.
 - Hindcast validation (see [Monitoring](monitoring.md)) compares past predictions against later observations, which partially checks the rules against reality.
+- Backfilled history approximates upper-air fields: the Open-Meteo archive returns only surface data, so `wind_speed_80m` and `wind_speed_120m` are extrapolated from `wind_speed_10m` with a neutral-stability power law (exponent 0.143), and `cape` and `lifted_index` are filled with zeros. Only `wind_speed_80m` feeds the model, so for backfilled training rows it is a fixed function of the 10 m wind rather than an independent measurement. Live inference requests all four fields directly, so the approximation affects historical training data only.
