@@ -1,5 +1,7 @@
 # Operator Runbook
 
+*Status: the Cloud Run deployment this runbook operated was taken down after grading (July 2026); the workflow applies to a redeployed copy.*
+
 Contributors run locally with Docker. Maintainers deploy to GCP through GitHub Actions + Terraform. This page explains both paths.
 
 ## Two Paths
@@ -83,6 +85,8 @@ scripts/trigger-runtime-release.sh <action> <coordinates>
 ```
 
 Actions: `deploy_candidate`, `promote_candidate`, `rollback_live`
+
+These script actions target the Cloud Run runtime. In the local stack, day-to-day pipeline runs go through the serve-mediated control plane instead (the UI System tab calls `/pipeline/run`).
 
 The script calls the Airflow API, waits for the DAG to finish, and captures the result.
 
