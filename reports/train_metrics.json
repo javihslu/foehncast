@@ -1,13 +1,13 @@
 {
-  "mae": 0.00012376237623762333,
-  "rmse": 0.0010553963170954362,
-  "r2": 0.0,
+  "mae": 0.0,
+  "rmse": 0.0,
+  "r2": 1.0,
   "overall_class_accuracy": 1.0,
   "class_accuracy_1": 1.0,
   "training_row_count": 1008,
   "training_feature_count": 14,
   "train_row_count": 806,
   "test_row_count": 202,
-  "data_hash": "7e61dcd086f841ea0bc7acc8d10da1ed1bfd7bfeb398a307646ed33b660c8c46",
-  "git_commit": "b9dadd5"
+  "data_hash": "0705569121376b4d3cc0884fb480eaf9ba7ad1de5969fd3389c89df2f7fcab26",
+  "git_commit": "03283c7"
 }
