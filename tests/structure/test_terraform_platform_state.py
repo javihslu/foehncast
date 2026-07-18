@@ -152,7 +152,9 @@ def test_configure_github_actions_rejects_malformed_variable_name(
     two) must abort the sync instead of feeding a bogus name to gh."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_executable(bin_dir / "terraform", _FAKE_TERRAFORM_CORRUPTED_ARTIFACT_REPOSITORY)
+    _write_executable(
+        bin_dir / "terraform", _FAKE_TERRAFORM_CORRUPTED_ARTIFACT_REPOSITORY
+    )
     _write_executable(bin_dir / "gh", _FAKE_GH_REFUSES)
     terraform_dir = tmp_path / "terraform"
     terraform_dir.mkdir()
