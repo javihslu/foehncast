@@ -12,7 +12,7 @@ src/foehncast/         # All application code
   training_pipeline/   # Label → Train → Evaluate → Register
   inference_pipeline/  # FastAPI app (predict, rank, health)
   monitoring/          # Prometheus metrics, drift detection
-  orchestration/       # Airflow entry points
+  orchestration/       # Pipeline entry points + control-plane abstraction
   spots/               # Spot metadata and ranking
 dags/                  # Airflow DAG definitions
 ui/                    # Streamlit dashboard
@@ -52,7 +52,7 @@ flowchart LR
 | `feature_pipeline/` | Fetch weather data, engineer wind features, validate, store |
 | `training_pipeline/` | Label quality, train model, evaluate, register in MLflow |
 | `inference_pipeline/` | FastAPI routes: `/predict`, `/rank`, `/spots`, `/health`, `/metrics` |
-| `orchestration/` | Airflow pipeline entry points (feature, training, inference, drift) |
+| `orchestration/` | Pipeline entry points (feature, training, inference, drift) plus the control-plane abstraction over Airflow and Cloud Workflows that the serve API uses to trigger runs and read history |
 | `monitoring/` | Prometheus exporters, drift detection, prediction logging |
 | `spots/` | Spot metadata and ranking logic |
 
