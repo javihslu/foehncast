@@ -68,18 +68,27 @@ def get_online_spot_features(
     entity_rows = [{"spot_id": spot["id"]} for spot in requested_spots]
     store = _load_feature_store()
 
-    if feature_names:
-        response = store.get_online_features(
-            features=_feature_refs(feature_names),
-            entity_rows=entity_rows,
-        )
-        feature_service = None
-    else:
-        response = store.get_online_features(
-            features=store.get_feature_service(_DEFAULT_FEATURE_SERVICE),
-            entity_rows=entity_rows,
-        )
-        feature_service = _DEFAULT_FEATURE_SERVICE
+    from feast.errors import FeastObjectNotFoundException
+
+    try:
+        if feature_names:
+            response = store.get_online_features(
+                features=_feature_refs(feature_names),
+                entity_rows=entity_rows,
+            )
+            feature_service = None
+        else:
+            response = store.get_online_features(
+                features=store.get_feature_service(_DEFAULT_FEATURE_SERVICE),
+                entity_rows=entity_rows,
+            )
+            feature_service = _DEFAULT_FEATURE_SERVICE
+    except FeastObjectNotFoundException as exc:
+        # Empty registry (no `feast apply`/materialize run yet): map to the
+        # same RuntimeError-to-503 path serve.py already uses elsewhere.
+        raise RuntimeError(
+            "feast registry not initialized; run the feature pipeline first"
+        ) from exc
 
     columnar_features = response.to_dict()
 

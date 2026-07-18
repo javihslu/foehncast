@@ -116,7 +116,12 @@ run_feast_repo_apply_and_maybe_materialize() {
     done
 
     if [[ "$materialize" == "true" ]]; then
-      uv run --group feast feast materialize-incremental "$materialize_ts" >/dev/null
+      # Full range, not `-incremental` (mirrors prepare_feature_store's cold-
+      # start fix in feast.py). No cheap way here to read the dataset's true
+      # minimum timestamp, so fall back to a fixed one-year lookback.
+      # `-v-365d` is BSD date (macOS); the alternative covers GNU date (CI).
+      materialize_start_ts="$(date -u -v-365d +"%Y-%m-%dT%H:%M:%S" 2>/dev/null || date -u -d "365 days ago" +"%Y-%m-%dT%H:%M:%S")"
+      uv run --group feast feast materialize "$materialize_start_ts" "$materialize_ts" >/dev/null
     fi
   )
 }
