@@ -9,6 +9,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import mlflow
 import mlflow.sklearn
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -116,6 +117,7 @@ def run_training_pipeline(
 ) -> str:
     """Train the configured model, log the run to MLflow, and return the run id."""
     resolved_model_config = model_config or get_model_config()
+    np.random.seed(resolved_model_config["random_state"])
     mlflow_config = get_mlflow_config()
     resolved_model_name = str(mlflow_config.get("model_name") or "foehncast")
     mlflow.set_tracking_uri(get_mlflow_tracking_uri())

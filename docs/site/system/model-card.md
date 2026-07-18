@@ -43,6 +43,8 @@ The model uses 14 features, selected in `config.yaml`:
 
 Each training run holds out 20% of the data (`test_size: 0.2`, fixed random seed) and logs MAE, RMSE, R², and quality-bucket accuracy to MLflow. DVC snapshots the same metrics in `reports/train_metrics.json`.
 
+All estimator and split randomness flows from `model.random_state` in `config.yaml`: it seeds the forest and boosting estimators, `train_test_split`, and numpy's global RNG at both training entry points. No code uses Python's `random` module, `PYTHONHASHSEED=0` is pinned at the process boundaries (the DVC stage command and the Airflow image), and provenance hashing is SHA-256, so it is independent of hash randomization. Two runs with the same seed on the same curated data produce identical training metrics.
+
 For current numbers, check the run behind the `champion` alias in MLflow rather than any single snapshot. Because labels are rule-based, a training window with little wind variation produces near-constant labels and trivially good metrics; judging model quality requires looking at the data window a run was trained on.
 
 Beyond held-out metrics, a registered `candidate` is shadow-scored against the `champion` on live inference batches, so its divergence from the served model is visible before any promotion.
