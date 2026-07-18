@@ -95,7 +95,7 @@ make coverage      # coverage report
 
 ## Cloud Deployment
 
-The cloud version runs on GCP Cloud Run. Contributors do not need cloud access; Docker is enough to run everything locally.
+The system also ran on GCP Cloud Run during the course; that deployment was taken down after grading. This section documents the architecture as deployed, and [terraform/](terraform/) remains deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
 
 ```mermaid
 flowchart LR

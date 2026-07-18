@@ -1,5 +1,7 @@
 # Cloud Deployment
 
+*Status: the course deployment described here was taken down after grading (July 2026). The page stays as the reference architecture; the Terraform under `terraform/` deploys an identical copy.*
+
 The cloud deployment runs on GCP managed services (Cloud Run, BigQuery, Cloud Storage, Cloud SQL). Most services scale to zero; the Cloud SQL instance for MLflow metadata is the only service with a standing cost. The pipeline code is identical to the local stack — only the infrastructure underneath changes.
 
 ## Architecture Map

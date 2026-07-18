@@ -71,4 +71,4 @@ flowchart TD
 | Monitoring | Prometheus + StatsD | Managed Prometheus |
 | Cost | Free | ~$8/mo (Cloud SQL) |
 
-The full service-by-service mapping lives on the [Cloud Deployment](system/cloud-architecture.md) page.
+The full service-by-service mapping lives on the [Cloud Deployment](system/cloud-architecture.md) page. The cloud deployment was taken down after grading; the local stack is the maintained path.
