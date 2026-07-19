@@ -84,6 +84,4 @@ nav:
       - Operator Runbook: system/delivery-and-operator-workflow.md
   - Cloud:
       - Cloud Deployment: system/cloud-architecture.md
-  - For Reviewers:
-      - Grading Checklist: system/grading-checklist.md
-      - Media Kit: media-kit.md
+  - Media Kit: media-kit.md

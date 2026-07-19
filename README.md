@@ -13,8 +13,6 @@ Full docs: <https://javihslu.github.io/foehncast/>
 
 > **Educational project — not a forecasting service.** FoehnCast was built for the HSLU MLOps module. Its session-quality labels are rule-based and have not been validated against real sessions, so the rankings are a modelling exercise rather than a reliable forecast. Do not rely on it for kiteboarding, water-safety, or any other real-world decision; check current conditions and official forecasts instead. Provided as is, without warranty, under the [MIT License](LICENSE).
 
-> **Reviewers:** the [Grading Checklist](https://javihslu.github.io/foehncast/system/grading-checklist/) maps every grading criterion to where it is implemented in the code and docs.
-
 ## How It Works
 
 ```mermaid
@@ -153,7 +151,6 @@ FoehnCast itself is released under the [MIT License](LICENSE).
 ## Links
 
 - [Changelog](CHANGELOG.md) — releases since the course freeze
-- [Grading Checklist](https://javihslu.github.io/foehncast/system/grading-checklist/) — grading criteria mapped to evidence
 - [Visual tour](https://javihslu.github.io/foehncast/tour/) — screenshots of the running system
 - [Full documentation](https://javihslu.github.io/foehncast/)
 - [Getting started](https://javihslu.github.io/foehncast/getting-started/)
