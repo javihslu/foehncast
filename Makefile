@@ -70,7 +70,7 @@ cloud-triggers:  ## Setup Cloud Build triggers via Developer Connect (one browse
 	cd $(ROOT_DIR) && ./scripts/setup-cloud-triggers.sh
 
 cloud-data:  ## Backfill 1yr historical data to BigQuery (requires gcloud ADC)
-	cd $(ROOT_DIR) && STORAGE_BACKEND=bigquery uv run python scripts/backfill-history.py --no-push
+	cd $(ROOT_DIR) && set -a && . ./.env && set +a && STORAGE_BACKEND=bigquery uv run python scripts/backfill-history.py --no-push
 
 cloud-verify:  ## Verify Cloud Run services are healthy and BigQuery has data
 	@echo "Checking Cloud Run inference API..."

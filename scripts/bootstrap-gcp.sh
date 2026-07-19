@@ -322,8 +322,8 @@ tfvars_value_or_default() {
   }
 
   verify_cloud_run_runtime() {
-    local service_url health_url spots_url metrics_url identity_token
-    local -a curl_args
+    local service_url health_url spots_url metrics_url identity_token health_payload
+    local -a curl_args health_curl_args
 
     load_bootstrap_platform_state
 
@@ -342,19 +342,35 @@ tfvars_value_or_default() {
     spots_url="${service_url%/}/spots"
     metrics_url="${service_url%/}/metrics"
     curl_args=(--retry 90 --retry-all-errors --retry-delay 10 -fsS)
+    health_curl_args=(-sS)
 
     if [[ "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED" != "true" ]]; then
       echo "Cloud Run service requires authenticated invocation; requesting identity token..."
       identity_token="$(gcloud auth print-identity-token --audiences="$service_url")"
       curl_args+=(-H "Authorization: Bearer ${identity_token}")
+      health_curl_args+=(-H "Authorization: Bearer ${identity_token}")
     fi
 
+    # A fresh platform has no registered model until the first training run;
+    # serve stays up and /health answers 503 with the registry detail. That
+    # degraded payload is a valid bootstrap outcome, so this request must not
+    # use curl --retry (it treats 503 as transient and would spin for minutes).
     echo "Waiting for Cloud Run health at ${health_url}..."
-    require_curl_payload_patterns \
-      "$health_url" \
-      '"status"[[:space:]]*:[[:space:]]*"healthy"' 'Cloud Run health payload status' \
-      '"model_alias"[[:space:]]*:' 'Cloud Run health payload model alias' \
-      '"model_version"[[:space:]]*:' 'Cloud Run health payload model version'
+    health_payload=""
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      health_payload="$(curl "${health_curl_args[@]}" "$health_url")" || true
+      [[ -n "$health_payload" ]] && break
+      sleep 10
+    done
+    if printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+      require_payload_patterns "$health_payload" \
+        '"model_alias"[[:space:]]*:' 'Cloud Run health payload model alias' \
+        '"model_version"[[:space:]]*:' 'Cloud Run health payload model version'
+    else
+      require_payload_patterns "$health_payload" \
+        'Registered Model' 'Cloud Run health payload (healthy or model registry empty)'
+      echo "Serve is up without a registered model; /health reports healthy after the first training pipeline run."
+    fi
 
     echo "Checking Cloud Run spots endpoint at ${spots_url}..."
     require_curl_payload_patterns \
@@ -782,9 +798,9 @@ terraform_init_args=(
   -backend-config="prefix=$(terraform_remote_state_prefix)"
 )
 
-if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
-  ensure_remote_state_bucket
-fi
+# The GCS backend must exist before init in every mode, or a fresh project
+# fails right here; creation is guarded by a describe, so re-runs are no-ops.
+ensure_remote_state_bucket
 
 run_terraform -chdir="$TERRAFORM_DIR" "${terraform_init_args[@]}"
 
