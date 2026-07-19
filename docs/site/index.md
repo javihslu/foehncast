@@ -1,6 +1,6 @@
 # FoehnCast Docs
 
-![FoehnCast — is the drive worth it?](assets/cover.png)
+![FoehnCast — is the drive worth it?](assets/kit/01-cover.png)
 
 FoehnCast tells you which Swiss kiteboarding spot is worth the drive today. It combines live weather forecasts, wind features, drive times, and a trained quality model into a single ranked recommendation.
 
