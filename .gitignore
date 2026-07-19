@@ -39,7 +39,6 @@ keys/
 *.pem
 *.key
 *.json
-!config.json
 
 # Terraform
 terraform/.terraform/
