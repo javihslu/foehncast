@@ -64,8 +64,11 @@ One fixed profile keeps the problem consistent. The model doesn't try to serve e
 | Source | What it provides |
 |--------|-----------------|
 | Open-Meteo | Weather forecasts (wind, gusts, temperature, etc.) |
+| MeteoSwiss (data.geo.admin.ch) | Ten-minute wind station measurements |
 | OSRM | Drive time from home to each spot |
 | Spot metadata | Shore orientation, difficulty, local rules |
+
+Licence terms and attribution for these sources are listed in the repository README.
 
 ## Why Fixed Scope
 

@@ -11,7 +11,9 @@ FoehnCast tells you which Swiss kiteboarding spot is worth the drive today. It p
 
 Full docs: <https://javihslu.github.io/foehncast/>
 
-> **Reviewers:** the [Grading Checklist](https://javihslu.github.io/foehncast/system/grading-checklist/) maps every grading criterion to where it is implemented in the code, docs, and live services.
+> **Educational project — not a forecasting service.** FoehnCast was built for the HSLU MLOps module. Its session-quality labels are rule-based and have not been validated against real sessions, so the rankings are a modelling exercise rather than a reliable forecast. Do not rely on it for kiteboarding, water-safety, or any other real-world decision; check current conditions and official forecasts instead. Provided as is, without warranty, under the [MIT License](LICENSE).
+
+> **Reviewers:** the [Grading Checklist](https://javihslu.github.io/foehncast/system/grading-checklist/) maps every grading criterion to where it is implemented in the code and docs.
 
 ## How It Works
 
@@ -136,8 +138,21 @@ config.yaml          # All tuneable parameters (spots, model, APIs)
 dvc.yaml             # Reproducible pipeline stages
 ```
 
+## Data and Attribution
+
+FoehnCast consumes third-party data under the following terms:
+
+| Source | Used for | Terms |
+|--------|----------|-------|
+| [Open-Meteo](https://open-meteo.com/) | Weather forecasts and the historical archive | Data licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); the free API tier is for non-commercial use |
+| [MeteoSwiss](https://www.meteoswiss.admin.ch/) via [data.geo.admin.ch](https://data.geo.admin.ch/) | Ten-minute wind station measurements | © Data: MeteoSwiss; source citation required |
+| [OSRM](https://project-osrm.org/) on [OpenStreetMap](https://www.openstreetmap.org/copyright) data | Drive time from home to each spot | Map data © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/); the public demo server is for light use only, so self-host OSRM for any real deployment |
+
+FoehnCast itself is released under the [MIT License](LICENSE).
+
 ## Links
 
+- [Changelog](CHANGELOG.md) — releases since the course freeze
 - [Grading Checklist](https://javihslu.github.io/foehncast/system/grading-checklist/) — grading criteria mapped to evidence
 - [Visual tour](https://javihslu.github.io/foehncast/tour/) — screenshots of the running system
 - [Full documentation](https://javihslu.github.io/foehncast/)
