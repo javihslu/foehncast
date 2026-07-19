@@ -26,6 +26,11 @@ Compare: <https://github.com/javihslu/foehncast/compare/v1.1.0...v1.2.0>
 - Lead with the local path and document the control-plane environment variables (#119); describe the control-plane abstraction in the repository layout (#124).
 - State the backfill upper-air approximation as a model limitation (#123); explain the R2 convention on constant-label training windows (#128).
 - Mark the cloud deployment decommissioned (#118); list `feast_online_store` among the built container services (#117).
+- Credit the Open-Meteo, MeteoSwiss, and OSRM data sources with their licence terms, add an educational-use disclaimer, and document deploying your own copy (#132).
+
+### Maintenance
+
+- Extend Dependabot to the container base images and the compose stacks (#134).
 
 ## [v1.1.0] — 2026-07-17
 
