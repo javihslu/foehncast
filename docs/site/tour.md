@@ -4,15 +4,15 @@ What the running system looks like, captured from the local Docker stack.
 
 ## Rider console
 
-![Rider console](assets/tour/rider-console.png)
+![Rider console](assets/kit/02-rider-console.png)
 
-*Ride-quality and wind forecasts, six-spot ranking, and the champion model card.*
+*Session-quality heatmap across the six spots; the selected cell drives the wind dial and the metrics bubble, with the serving champion model in the sidebar.*
 
 ## Regional wind map
 
-![Regional wind map](assets/tour/wind-map.png)
+![Regional wind map](assets/kit/10-wind-map.png)
 
-*Per-spot wind arrows over the region: direction points downwind, color marks rideable status, with an hour slider across the forecast.*
+*Per-spot wind over the region: each wedge points downwind and its length is the speed, with an hour slider across the forecast and the rider home marked.*
 
 ## Orchestration
 
