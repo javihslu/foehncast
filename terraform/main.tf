@@ -428,7 +428,9 @@ resource "google_storage_bucket" "artifacts" {
   name                        = var.artifact_bucket_name
   location                    = var.region
   uniform_bucket_level_access = true
-  force_destroy               = false
+  # MLflow writes model artifacts here at runtime, so a real teardown hits a
+  # non-empty bucket; without this, terraform destroy fails on the bucket.
+  force_destroy = true
 
   versioning {
     enabled = true
@@ -712,9 +714,12 @@ resource "google_cloud_run_v2_service" "app" {
         value = var.control_token
       }
 
+      # /health reflects model-registry state and answers 503 until the first
+      # training run registers a model, so probing it blocks a fresh platform
+      # from ever starting serve and restart-loops it on MLflow outages. Probe
+      # process health only: TCP for startup, /metrics for liveness.
       startup_probe {
-        http_get {
-          path = "/health"
+        tcp_socket {
           port = var.cloud_run_container_port
         }
         initial_delay_seconds = 5
@@ -725,7 +730,7 @@ resource "google_cloud_run_v2_service" "app" {
 
       liveness_probe {
         http_get {
-          path = "/health"
+          path = "/metrics"
           port = var.cloud_run_container_port
         }
         period_seconds = 30
@@ -833,6 +838,10 @@ resource "google_sql_user" "mlflow" {
   instance = google_sql_database_instance.mlflow[0].name
   name     = "mlflow"
   password = random_password.mlflow_db[0].result
+  # MLflow creates tables owned by this user, so a runtime-used database cannot
+  # DROP USER at destroy. Abandon the user and let the instance deletion remove
+  # it; otherwise terraform destroy blocks on "role cannot be dropped".
+  deletion_policy = "ABANDON"
 }
 
 # Grant the Cloud Run SA permission to connect via Cloud SQL Auth Proxy.

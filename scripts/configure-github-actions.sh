@@ -95,10 +95,19 @@ fi
 
 cloud_run_synced=false
 mlflow_tracking_uri_synced=false
+ui_prometheus_url_synced=false
 variable_pairs="$(terraform_repo_variable_pairs "$TERRAFORM_DIR")"
 while IFS=$'\t' read -r variable_name variable_value; do
   if [[ ! "$variable_name" =~ ^[A-Z][A-Z0-9_]*$ ]]; then
     echo "Refusing to sync malformed repository variable name: ${variable_name}" >&2
+    exit 1
+  fi
+
+  # An empty value must fail loudly: gh variable set treats an empty --body as
+  # absent and reads the value from stdin, which swallows the rest of this
+  # loop's pair stream and corrupts the variable set.
+  if [[ -z "$variable_value" ]]; then
+    echo "Refusing to sync empty value for repository variable: ${variable_name}" >&2
     exit 1
   fi
 
@@ -111,6 +120,10 @@ while IFS=$'\t' read -r variable_name variable_value; do
   if [[ "$variable_name" == "GCP_MLFLOW_TRACKING_URI" ]]; then
     mlflow_tracking_uri_synced=true
   fi
+
+  if [[ "$variable_name" == "GCP_CLOUD_RUN_UI_PROMETHEUS_URL" ]]; then
+    ui_prometheus_url_synced=true
+  fi
 done <<< "$variable_pairs"
 
 if [[ "$cloud_run_synced" != "true" ]]; then
@@ -121,6 +134,11 @@ fi
 if [[ "$mlflow_tracking_uri_synced" != "true" ]]; then
   delete_variable "$REPOSITORY_PATH" GCP_MLFLOW_TRACKING_URI
   echo "Skipping GCP_MLFLOW_TRACKING_URI because Terraform does not currently define an MLflow tracking URI."
+fi
+
+if [[ "$ui_prometheus_url_synced" != "true" ]]; then
+  delete_variable "$REPOSITORY_PATH" GCP_CLOUD_RUN_UI_PROMETHEUS_URL
+  echo "Skipping GCP_CLOUD_RUN_UI_PROMETHEUS_URL because the deployment does not define a UI Prometheus URL."
 fi
 
 echo "GitHub Actions variables are configured for ${REPOSITORY_PATH}."
