@@ -1,13 +1,17 @@
 version: 2
+# The project is parked, so each ecosystem caps its concurrent pull requests.
+# Routine bumps stay visible without accumulating faster than they are reviewed.
 updates:
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
   # Base images for the six service containers and the compose stacks that
   # reference them; without these the runtime images get no CVE alerts.
   - package-ecosystem: docker
@@ -15,9 +19,11 @@ updates:
       - /containers/*
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
   - package-ecosystem: docker-compose
     directories:
       - /
       - /containers/*
     schedule:
       interval: monthly
+    open-pull-requests-limit: 2
