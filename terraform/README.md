@@ -189,7 +189,9 @@ State-changing upstream jobs should use safeguards that match their risk:
 - the remote Terraform workflow uses owner-only execution plus exact project-id confirmations for destroy and cleanup
 - Cloud Run health probes provide automatic rollback for unhealthy revisions
 
-Personal cloud deployments are out of scope for the default repo documentation. The documented path here is the shared project environment plus the local Docker setup for contributors.
+Deploying your own copy is supported. Fork the repository and run the bootstrap against your own GCP project and GitHub repository: the Terraform inputs and repository variables are derived from the fork's owner and project, so no resource from the original project is needed. Contributors who only want to run the system can use the local Docker setup instead.
+
+One external dependency needs attention before a real deployment. Drive times use the public OSRM demo server, which its operators provide for light use only. Point `api.osrm.base_url` in `config.yaml` at your own OSRM instance if you run this beyond experimentation.
 
 The Terraform workflow is manual-dispatch only. It relies on owner-only execution plus explicit destroy and cleanup confirmations instead of a per-run reviewer gate.
 
