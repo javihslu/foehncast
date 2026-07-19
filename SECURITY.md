@@ -1,5 +1,11 @@
 # Security Policy
 
+## Project Status
+
+FoehnCast is an educational project built for the HSLU MLOps module and is no
+longer under active development. Security reports are read and handled on a
+best-effort basis, with no committed response time.
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please report it privately via the
