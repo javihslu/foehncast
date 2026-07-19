@@ -1,4 +1,4 @@
-![FoehnCast — is the drive worth it?](docs/site/assets/cover.png)
+![FoehnCast — is the drive worth it?](docs/site/assets/kit/01-cover.png)
 
 # FoehnCast
 
