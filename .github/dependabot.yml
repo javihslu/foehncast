@@ -8,3 +8,16 @@ updates:
     directory: /
     schedule:
       interval: monthly
+  # Base images for the six service containers and the compose stacks that
+  # reference them; without these the runtime images get no CVE alerts.
+  - package-ecosystem: docker
+    directories:
+      - /containers/*
+    schedule:
+      interval: monthly
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /containers/*
+    schedule:
+      interval: monthly

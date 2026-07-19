@@ -97,6 +97,22 @@ def test_run_rejects_missing_or_wrong_token(
     assert client.post("/pipeline/run", json=body, headers=wrong).status_code == 401
 
 
+def test_run_401_precedes_body_validation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An invalid body must not leak schema detail to an unauthenticated caller."""
+    _use(monkeypatch, FakeOrchestrator())
+    invalid_body = {"pipeline": "bogus"}
+    response = client.post("/pipeline/run", json=invalid_body)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid control token"}
+
+    wrong = {"X-Foehncast-Control-Token": "nope"}
+    response = client.post("/pipeline/run", json=invalid_body, headers=wrong)
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid control token"}
+
+
 def test_run_401_when_token_env_unset(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -141,6 +157,17 @@ def test_run_400_unsupported_and_422_unknown_pipeline(
         "/pipeline/run", json={"pipeline": "bogus"}, headers=TOKEN_HEADER
     )
     assert response.status_code == 422
+
+
+def test_run_422_on_invalid_body_with_valid_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use(monkeypatch, FakeOrchestrator())
+    response = client.post(
+        "/pipeline/run", json={"pipeline": "bogus"}, headers=TOKEN_HEADER
+    )
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
 
 
 def test_run_503_unconfigured_with_valid_token(

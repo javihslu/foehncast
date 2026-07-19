@@ -17,7 +17,7 @@ stages:
           persist: true
 
   train:
-    cmd: python -m foehncast.dvc_stages train --dataset ${dataset}
+    cmd: PYTHONHASHSEED=0 python -m foehncast.dvc_stages train --dataset ${dataset}
     deps:
       - src/foehncast/training_pipeline/train.py
       - src/foehncast/training_pipeline/evaluate.py

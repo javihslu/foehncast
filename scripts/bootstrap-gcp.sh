@@ -21,11 +21,12 @@ TARGET_REPO=""
 PLAN_ONLY=false
 AUTO_APPROVE=false
 BOOTSTRAP_ONLY=false
+SKIP_IMAGE_BUILD=false
 INTERACTIVE=true
 TEMP_TERRAFORM_DIR=""
 
 usage() {
-  echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--bootstrap-only] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
+  echo "Usage: $0 [--env-file path] [--tfvars-file path] [--plan-only] [--auto-approve] [--bootstrap-only] [--skip-image-build] [--configure-github-actions] [--repo owner/repo] [--non-interactive]" >&2
   echo "Use ./scripts/bootstrap-local.sh for the default local evaluator path." >&2
   echo "Maintainer-only cloud bootstrap. Supported no-local-install path: run this from Google Cloud Shell." >&2
 }
@@ -169,7 +170,47 @@ tfvars_value_or_default() {
       "-target=google_project_iam_member.github_service_account_user" \
       "-target=google_iam_workload_identity_pool.github" \
       "-target=google_iam_workload_identity_pool_provider.github" \
-      "-target=google_service_account_iam_member.github_workload_identity_user"
+      "-target=google_service_account_iam_member.github_workload_identity_user" \
+      "-target=google_artifact_registry_repository.containers" \
+      "-target=google_artifact_registry_repository_iam_member.cloud_build_writer"
+  }
+
+  run_platform_apply() {
+    # Run terraform apply with the given -target args, honoring --auto-approve.
+    local apply_args=(apply -var-file="$TFVARS_FILE" "$@")
+
+    if [[ "$AUTO_APPROVE" == "true" ]]; then
+      apply_args+=(-auto-approve)
+    fi
+
+    run_terraform -chdir="$TERRAFORM_DIR" "${apply_args[@]}"
+  }
+
+  build_platform_images() {
+    # Build the app, ui, and mlflow images into Artifact Registry. Cloud Run
+    # CREATE fails when its image tag is missing, so a first run must populate
+    # the registry before Terraform creates the services that consume it.
+    local project region artifact_repo image_root
+
+    if [[ "$SKIP_IMAGE_BUILD" == "true" ]]; then
+      echo "Skipping platform image build (--skip-image-build); the platform apply expects the app, ui, and mlflow :latest images to already exist in Artifact Registry."
+      return
+    fi
+
+    load_bootstrap_platform_state
+    project="$FOEHNCAST_TF_PROJECT_ID"
+    region="$FOEHNCAST_TF_LOCATION"
+    artifact_repo="$FOEHNCAST_TF_ARTIFACT_REPOSITORY"
+    image_root="${region}-docker.pkg.dev/${project}/${artifact_repo}"
+
+    echo "Building three platform images (app, ui, mlflow) via Cloud Build; this takes several minutes..."
+    (
+      cd "$ROOT_DIR" || exit 1
+      gcloud builds submit . \
+        --config cloudbuild/images.yaml \
+        --project "$project" \
+        --substitutions="_IMAGE_ROOT=${image_root}"
+    )
   }
 
   sync_env_from_terraform_outputs() {
@@ -281,8 +322,8 @@ tfvars_value_or_default() {
   }
 
   verify_cloud_run_runtime() {
-    local service_url health_url spots_url metrics_url identity_token
-    local -a curl_args
+    local service_url health_url spots_url metrics_url identity_token health_payload
+    local -a curl_args health_curl_args
 
     load_bootstrap_platform_state
 
@@ -301,19 +342,35 @@ tfvars_value_or_default() {
     spots_url="${service_url%/}/spots"
     metrics_url="${service_url%/}/metrics"
     curl_args=(--retry 90 --retry-all-errors --retry-delay 10 -fsS)
+    health_curl_args=(-sS)
 
     if [[ "$FOEHNCAST_TF_CLOUD_RUN_ALLOW_UNAUTHENTICATED" != "true" ]]; then
       echo "Cloud Run service requires authenticated invocation; requesting identity token..."
       identity_token="$(gcloud auth print-identity-token --audiences="$service_url")"
       curl_args+=(-H "Authorization: Bearer ${identity_token}")
+      health_curl_args+=(-H "Authorization: Bearer ${identity_token}")
     fi
 
+    # A fresh platform has no registered model until the first training run;
+    # serve stays up and /health answers 503 with the registry detail. That
+    # degraded payload is a valid bootstrap outcome, so this request must not
+    # use curl --retry (it treats 503 as transient and would spin for minutes).
     echo "Waiting for Cloud Run health at ${health_url}..."
-    require_curl_payload_patterns \
-      "$health_url" \
-      '"status"[[:space:]]*:[[:space:]]*"healthy"' 'Cloud Run health payload status' \
-      '"model_alias"[[:space:]]*:' 'Cloud Run health payload model alias' \
-      '"model_version"[[:space:]]*:' 'Cloud Run health payload model version'
+    health_payload=""
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      health_payload="$(curl "${health_curl_args[@]}" "$health_url")" || true
+      [[ -n "$health_payload" ]] && break
+      sleep 10
+    done
+    if printf '%s' "$health_payload" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"healthy"'; then
+      require_payload_patterns "$health_payload" \
+        '"model_alias"[[:space:]]*:' 'Cloud Run health payload model alias' \
+        '"model_version"[[:space:]]*:' 'Cloud Run health payload model version'
+    else
+      require_payload_patterns "$health_payload" \
+        'Registered Model' 'Cloud Run health payload (healthy or model registry empty)'
+      echo "Serve is up without a registered model; /health reports healthy after the first training pipeline run."
+    fi
 
     echo "Checking Cloud Run spots endpoint at ${spots_url}..."
     require_curl_payload_patterns \
@@ -337,6 +394,13 @@ tfvars_value_or_default() {
     echo "Bootstrap-only remote state prefix: ${state_prefix}"
     print_bootstrap_identity_summary
     echo "GitHub workload identity provider: ${FOEHNCAST_TF_WORKLOAD_IDENTITY_PROVIDER}"
+
+    if [[ "$SKIP_IMAGE_BUILD" == "true" ]]; then
+      echo "Platform images were not built (--skip-image-build); build the app, ui, and mlflow :latest images before the platform apply so Cloud Run can start."
+    else
+      echo "Platform images (app, ui, mlflow :latest) are present in Artifact Registry, so the platform apply can create the Cloud Run services on the first try."
+    fi
+
     echo "Next step: run ./scripts/terraform-remote.sh apply to provision the broader platform through the remote backend."
   }
 
@@ -679,6 +743,9 @@ while [[ $# -gt 0 ]]; do
     --bootstrap-only)
       BOOTSTRAP_ONLY=true
       ;;
+    --skip-image-build)
+      SKIP_IMAGE_BUILD=true
+      ;;
     --non-interactive)
       INTERACTIVE=false
       ;;
@@ -731,9 +798,9 @@ terraform_init_args=(
   -backend-config="prefix=$(terraform_remote_state_prefix)"
 )
 
-if [[ "$BOOTSTRAP_ONLY" == "true" && "$PLAN_ONLY" != "true" ]]; then
-  ensure_remote_state_bucket
-fi
+# The GCS backend must exist before init in every mode, or a fresh project
+# fails right here; creation is guarded by a describe, so re-runs are no-ops.
+ensure_remote_state_bucket
 
 run_terraform -chdir="$TERRAFORM_DIR" "${terraform_init_args[@]}"
 
@@ -760,25 +827,29 @@ if [[ "$PLAN_ONLY" == "true" ]]; then
 
   run_terraform -chdir="$TERRAFORM_DIR" plan -var-file="$TFVARS_FILE" "${target_args[@]}"
 else
-  apply_args=(apply -var-file="$TFVARS_FILE")
-
-  apply_args+=("${target_args[@]}")
-
-  if [[ "$AUTO_APPROVE" == "true" ]]; then
-    apply_args+=( -auto-approve )
-  fi
-
   if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
     echo "Running bootstrap-only Terraform apply against the remote backend..."
-  else
-    echo "Running Terraform apply..."
-  fi
-
-  run_terraform -chdir="$TERRAFORM_DIR" "${apply_args[@]}"
-
-  if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then
+    run_platform_apply "${target_args[@]}"
+    build_platform_images
     print_bootstrap_only_summary
   else
+    # First-run ordering: apply the foundation (Artifact Registry, IAM,
+    # enabled services, identity, storage) so the image repository exists,
+    # build the images into it, then run the full apply. Cloud Run services
+    # fail at CREATE when their image is missing, so images must exist first.
+    foundation_args=()
+    while IFS= read -r target_arg; do
+      foundation_args+=("$target_arg")
+    done < <(bootstrap_target_args)
+
+    echo "Applying the Terraform foundation before building images..."
+    run_platform_apply "${foundation_args[@]}"
+
+    build_platform_images
+
+    echo "Running Terraform apply..."
+    run_platform_apply
+
     echo "Syncing local cloud identifiers into .env..."
     sync_env_from_terraform_outputs
     require_primary_hosted_api_configuration

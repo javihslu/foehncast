@@ -87,22 +87,41 @@ run_feast_repo_apply_and_maybe_materialize() {
     cd "$repo_dir" || exit 1
 
     # `feast apply` reads the offline parquet to infer its schema. Under CI the
-    # freshly exported file occasionally races filesystem visibility, so retry
-    # a few times before giving up.
+    # freshly exported file occasionally races filesystem visibility, surfacing
+    # as FileNotFoundError / "No such file or directory". Retry only that
+    # specific, known-transient case; any other failure is a real
+    # configuration error and should fail fast instead of repeating the same
+    # failure several times.
     apply_attempts=0
-    apply_max_attempts=5
-    until uv run --group feast feast apply >/dev/null; do
+    apply_max_attempts=3
+    while true; do
       apply_attempts=$((apply_attempts + 1))
+      if apply_output="$(uv run --group feast feast apply 2>&1)"; then
+        break
+      fi
+
       if (( apply_attempts >= apply_max_attempts )); then
+        printf '%s\n' "$apply_output" >&2
         echo "feast apply failed after ${apply_max_attempts} attempts" >&2
         exit 1
       fi
-      echo "feast apply attempt ${apply_attempts} failed; retrying..." >&2
+
+      if ! grep -qE 'FileNotFoundError|No such file or directory' <<< "$apply_output"; then
+        printf '%s\n' "$apply_output" >&2
+        exit 1
+      fi
+
+      echo "feast apply attempt ${apply_attempts} failed with the known transient parquet-visibility race; retrying..." >&2
       sleep 2
     done
 
     if [[ "$materialize" == "true" ]]; then
-      uv run --group feast feast materialize-incremental "$materialize_ts" >/dev/null
+      # Full range, not `-incremental` (mirrors prepare_feature_store's cold-
+      # start fix in feast.py). No cheap way here to read the dataset's true
+      # minimum timestamp, so fall back to a fixed one-year lookback.
+      # `-v-365d` is BSD date (macOS); the alternative covers GNU date (CI).
+      materialize_start_ts="$(date -u -v-365d +"%Y-%m-%dT%H:%M:%S" 2>/dev/null || date -u -d "365 days ago" +"%Y-%m-%dT%H:%M:%S")"
+      uv run --group feast feast materialize "$materialize_start_ts" "$materialize_ts" >/dev/null
     fi
   )
 }

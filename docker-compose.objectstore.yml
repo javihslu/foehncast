@@ -17,6 +17,11 @@ x-feast-runtime-env: &feast-runtime-env
 
 services:
   app:
+    depends_on:
+      objectstore-init:
+        condition: service_healthy
+      feast-online-store:
+        condition: service_healthy
     environment:
       <<: [*objectstore-runtime-env, *feast-runtime-env]
 

@@ -27,6 +27,7 @@ flowchart TD
 | User-facing | Streamlit UI, `/features/online/demo` | Users, reviewers | Public |
 | API endpoints | `/health`, `/predict`, `/rank`, `/spots` | Clients, tests | Public |
 | Operator tools | `/metrics`, Airflow, MLflow, Prometheus | Maintainers | Private |
+| Control plane | `/pipeline/capabilities`, `/pipeline/runs`, `/pipeline/run` | UI System tab, maintainers | Token-gated |
 | CI/CD | GitHub Actions, Terraform | Maintainers | Review-gated |
 | Documentation | This site, screenshots | Everyone | Public |
 

@@ -10,9 +10,18 @@ import logging
 import secrets
 from typing import Any, Literal
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Response
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from foehncast import __version__
 from foehncast.config import get_hindcast_interval_seconds, get_rider_config
@@ -257,6 +266,8 @@ def create_app() -> FastAPI:
             return prediction_payload
         except KeyError as exc:
             raise _not_found(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/rank")
     def rank(
@@ -277,6 +288,8 @@ def create_app() -> FastAPI:
             return _rank_response(prediction_payload)
         except KeyError as exc:
             raise _not_found(exc) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.post("/features/online")
     def online_features(request: OnlineFeaturesRequest) -> dict[str, Any]:
@@ -336,20 +349,29 @@ def create_app() -> FastAPI:
         return {"runs": [asdict(run) for run in runs]}
 
     @app.post("/pipeline/run", status_code=202)
-    def pipeline_run(
-        request: PipelineRunRequest,
+    async def pipeline_run(
+        request: Request,
         x_foehncast_control_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
+        # Authenticate before parsing the body: letting FastAPI validate the
+        # body model first would 422 (with field-level schema detail) before
+        # the token check runs, so an unauthenticated caller could probe the
+        # request schema.
         _require_control_token(x_foehncast_control_token)
+        body = await request.body()
+        try:
+            payload = PipelineRunRequest.model_validate_json(body)
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
         orchestrator = _orchestrator_or_503()
-        if request.pipeline not in orchestrator.capabilities():
+        if payload.pipeline not in orchestrator.capabilities():
             raise HTTPException(
                 status_code=400,
-                detail=f"Pipeline {request.pipeline!r} is not supported "
+                detail=f"Pipeline {payload.pipeline!r} is not supported "
                 "by the active orchestrator",
             )
         try:
-            run = orchestrator.trigger(request.pipeline)
+            run = orchestrator.trigger(payload.pipeline)
         except OrchestratorError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return asdict(run)

@@ -1,5 +1,7 @@
 # Cloud Deployment
 
+*Status: the course deployment described here was taken down after grading (July 2026). The page stays as the reference architecture; the Terraform under `terraform/` deploys an identical copy.*
+
 The cloud deployment runs on GCP managed services (Cloud Run, BigQuery, Cloud Storage, Cloud SQL). Most services scale to zero; the Cloud SQL instance for MLflow metadata is the only service with a standing cost. The pipeline code is identical to the local stack — only the infrastructure underneath changes.
 
 ## Architecture Map
@@ -135,6 +137,8 @@ Orchestration differs by environment: local runs use Airflow, while the hosted s
 1. One-time: `./scripts/bootstrap-gcp.sh` from Cloud Shell
 2. Day-2: Terraform (manual dispatch), Cloud Build triggers (on push)
 3. Rollback: Cloud Run probes auto-rollback unhealthy revisions
+
+On a first run the container images must reach Artifact Registry before Terraform creates the Cloud Run services that consume them. Bootstrap enforces this order: foundation apply (Artifact Registry and IAM) → build the three images → full apply. Use `--skip-image-build` only when the images already exist.
 
 See the [Operator Runbook](delivery-and-operator-workflow.md) for the full process.
 

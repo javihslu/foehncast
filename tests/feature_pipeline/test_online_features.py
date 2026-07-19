@@ -64,8 +64,11 @@ def test_get_online_spot_features_uses_feature_service(
 
     fake_feast = ModuleType("feast")
     fake_feast.FeatureStore = FakeStore
+    fake_errors = ModuleType("feast.errors")
+    fake_errors.FeastObjectNotFoundException = Exception
 
     monkeypatch.setitem(sys.modules, "feast", fake_feast)
+    monkeypatch.setitem(sys.modules, "feast.errors", fake_errors)
     monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
     monkeypatch.setattr(
         online_features,
@@ -133,8 +136,11 @@ def test_get_online_spot_features_prefixes_unqualified_feature_names(
 
     fake_feast = ModuleType("feast")
     fake_feast.FeatureStore = FakeStore
+    fake_errors = ModuleType("feast.errors")
+    fake_errors.FeastObjectNotFoundException = Exception
 
     monkeypatch.setitem(sys.modules, "feast", fake_feast)
+    monkeypatch.setitem(sys.modules, "feast.errors", fake_errors)
     monkeypatch.setenv("FOEHNCAST_FEAST_REPO_PATH", str(repo_path))
     monkeypatch.setattr(
         online_features,

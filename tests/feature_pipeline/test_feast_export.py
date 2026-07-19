@@ -126,6 +126,16 @@ def test_prepare_feature_store_applies_repo_and_materializes(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     export_destination = tmp_path / "data" / "feast" / "train.parquet"
+    export_destination.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        {
+            "spot_id": ["silvaplana", "silvaplana"],
+            "event_timestamp": pd.to_datetime(
+                ["2026-05-01T00:00:00Z", "2026-04-20T00:00:00Z"], utc=True
+            ),
+            "wind_speed_10m": [10.0, 12.0],
+        }
+    ).to_parquet(export_destination, index=False)
     config_path = tmp_path / ".state" / "feast" / "feature_store.runtime.yaml"
     repo_path = tmp_path / "feature_repo"
     repo_path.mkdir()
@@ -167,7 +177,11 @@ def test_prepare_feature_store_applies_repo_and_materializes(
             str(config_path),
         ),
         (
-            ["materialize-incremental", "2026-05-12T13:00:00+00:00"],
+            [
+                "materialize",
+                "2026-04-20T00:00:00+00:00",
+                "2026-05-12T13:00:00+00:00",
+            ],
             repo_path,
             str(config_path),
             str(config_path),
@@ -211,7 +225,10 @@ def test_prepare_feature_store_skips_export_for_bigquery_source(
         dataset="forecast", materialize_timestamp="2026-05-12T13:00:00+00:00"
     )
 
-    assert [command[0] for command in commands] == ["apply", "materialize-incremental"]
+    assert [command[0] for command in commands] == ["apply", "materialize"]
+    # No local parquet for the BigQuery source, so start falls back to the
+    # generous fixed lookback rather than a data-derived minimum.
+    assert commands[1][2] == "2026-05-12T13:00:00+00:00"
     assert result["output_path"] is None
     assert result["materialized"] is True
 

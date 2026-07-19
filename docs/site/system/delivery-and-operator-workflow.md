@@ -1,5 +1,7 @@
 # Operator Runbook
 
+*Status: the Cloud Run deployment this runbook operated was taken down after grading (July 2026); the workflow applies to a redeployed copy.*
+
 Contributors run locally with Docker. Maintainers deploy to GCP through GitHub Actions + Terraform. This page explains both paths.
 
 ## Two Paths
@@ -42,6 +44,8 @@ Run from Google Cloud Shell:
 
 This is interactive — it walks you through project/billing setup, creates the Terraform backend, and syncs repo variables to GitHub.
 
+Container images must exist in Artifact Registry before the first platform Terraform apply, because Cloud Run fails to create a service whose image is missing. Bootstrap guarantees this: it applies the foundation (Artifact Registry, IAM, enabled services), builds the app, UI, and MLflow images, then runs the full apply. Pass `--skip-image-build` to opt out when the images already exist.
+
 ## Day-2 Delivery
 
 After bootstrap, everything goes through GitHub Actions:
@@ -55,7 +59,7 @@ Repository variables store project IDs, bucket names, and Cloud Run settings. No
 
 ## Historical Data Backfill (One-Time)
 
-After Terraform has created the BigQuery dataset and table, load one year of history with `make cloud-data`. The target forces `STORAGE_BACKEND=bigquery` and reads these `.env` values (see the BigQuery block in `.env.example`):
+After Terraform has created the BigQuery dataset and table, load one year of history with `make cloud-data`. The backfill approximates the 80 m and 120 m winds from the 10 m wind and zero-fills `cape` and `lifted_index`; see the [model card limitations](model-card.md#limitations). The target forces `STORAGE_BACKEND=bigquery` and reads these `.env` values (see the BigQuery block in `.env.example`):
 
 - `STORAGE_BIGQUERY_PROJECT_ID`, `STORAGE_BIGQUERY_DATASET`, `STORAGE_BIGQUERY_TABLE` — curated feature destination
 - `GCP_PROJECT_ID`, `GCP_LOCATION` — project and region for gcloud ADC
@@ -81,6 +85,8 @@ scripts/trigger-runtime-release.sh <action> <coordinates>
 ```
 
 Actions: `deploy_candidate`, `promote_candidate`, `rollback_live`
+
+These script actions target the Cloud Run runtime. In the local stack, day-to-day pipeline runs go through the serve-mediated control plane instead (the UI System tab calls `/pipeline/run`).
 
 The script calls the Airflow API, waits for the DAG to finish, and captures the result.
 
