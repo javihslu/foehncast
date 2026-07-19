@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 from mlflow.exceptions import MlflowException
 from prometheus_client import CONTENT_TYPE_LATEST
 
-from foehncast.inference_pipeline import predict, serve
+from foehncast.inference_pipeline import online_features, predict, serve
 from foehncast.inference_pipeline.rank import RankedSpot
 from tests.mlflow_fixtures import clear_tracking_uri_env
 
@@ -678,6 +679,54 @@ def test_online_features_endpoint_returns_503_when_feast_runtime_is_unavailable(
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Feast runtime is unavailable"}
+
+
+def test_online_features_endpoint_returns_503_when_feast_registry_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_feast = ModuleType("feast")
+    fake_errors = ModuleType("feast.errors")
+
+    class FakeFeastObjectNotFoundException(Exception):
+        pass
+
+    fake_errors.FeastObjectNotFoundException = FakeFeastObjectNotFoundException
+
+    class FakeStore:
+        def get_feature_service(self, name: str) -> None:
+            raise FakeFeastObjectNotFoundException(
+                f"Feature service {name} does not exist"
+            )
+
+        def get_online_features(self, **kwargs: object) -> None:
+            raise AssertionError("get_online_features should not be reached")
+
+    monkeypatch.setitem(sys.modules, "feast", fake_feast)
+    monkeypatch.setitem(sys.modules, "feast.errors", fake_errors)
+    monkeypatch.setattr(online_features, "_load_feature_store", lambda: FakeStore())
+    client = TestClient(serve.app)
+
+    response = client.post(
+        "/features/online",
+        json={"spot_ids": ["silvaplana"]},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "feast registry not initialized; run the feature pipeline first"
+    }
+
+
+def test_predict_endpoint_returns_503_when_artifact_store_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(predict, "_artifact_store_reachable", lambda: False)
+    client = TestClient(serve.app)
+
+    response = client.post("/predict", json={"spot_ids": ["silvaplana"]})
+
+    assert response.status_code == 503
+    assert "artifact store" in response.json()["detail"]
 
 
 def test_online_features_demo_endpoint_returns_html(

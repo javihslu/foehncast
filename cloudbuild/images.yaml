@@ -1,0 +1,62 @@
+# Cloud Build config that builds the three FoehnCast platform images
+# (app, ui, mlflow) without deploying them.
+#
+# It exists to solve a first-run ordering problem: google_cloud_run_v2_service
+# fails at CREATE when its container image is missing from Artifact Registry.
+# The per-service configs (app.yaml, ui.yaml, mlflow.yaml) bundle deploy and
+# jobs-update steps, so they cannot run before Terraform creates the services.
+# This config is build-only, so bootstrap can populate the registry first.
+#
+# Manual submission (for testing):
+#   gcloud builds submit . \
+#     --config=cloudbuild/images.yaml \
+#     --substitutions=_IMAGE_ROOT=REGION-docker.pkg.dev/PROJECT/REPO
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker build \
+          --platform linux/amd64 \
+          -f containers/app/Dockerfile \
+          -t "${_IMAGE_ROOT}/foehncast-app:latest" \
+          .
+        docker push "${_IMAGE_ROOT}/foehncast-app:latest"
+
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker build \
+          --platform linux/amd64 \
+          -f containers/ui/Dockerfile \
+          -t "${_IMAGE_ROOT}/foehncast-ui:latest" \
+          .
+        docker push "${_IMAGE_ROOT}/foehncast-ui:latest"
+
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker build \
+          --platform linux/amd64 \
+          -f containers/mlflow/Dockerfile \
+          -t "${_IMAGE_ROOT}/foehncast-mlflow:latest" \
+          containers/mlflow
+        docker push "${_IMAGE_ROOT}/foehncast-mlflow:latest"
+
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - "${_IMAGE_ROOT}/foehncast-app:latest"
+  - "${_IMAGE_ROOT}/foehncast-ui:latest"
+  - "${_IMAGE_ROOT}/foehncast-mlflow:latest"
+
+substitutions:
+  _IMAGE_ROOT: europe-west6-docker.pkg.dev/${PROJECT_ID}/foehncast-docker

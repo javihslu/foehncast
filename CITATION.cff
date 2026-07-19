@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you reference this project, please cite it as below."
+title: "FoehnCast: Personalized Kiteboarding Forecast for Central Switzerland"
+type: software
+authors:
+  - family-names: Izquierdo
+    given-names: Javier
+year: 2026
+repository-code: "https://github.com/javihslu/foehncast"

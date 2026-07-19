@@ -43,7 +43,9 @@ The model uses 14 features, selected in `config.yaml`:
 
 Each training run holds out 20% of the data (`test_size: 0.2`, fixed random seed) and logs MAE, RMSE, R², and quality-bucket accuracy to MLflow. DVC snapshots the same metrics in `reports/train_metrics.json`.
 
-For current numbers, check the run behind the `champion` alias in MLflow rather than any single snapshot. Because labels are rule-based, a training window with little wind variation produces near-constant labels and trivially good metrics; judging model quality requires looking at the data window a run was trained on.
+All estimator and split randomness flows from `model.random_state` in `config.yaml`: it seeds the forest and boosting estimators, `train_test_split`, and numpy's global RNG at both training entry points. No code uses Python's `random` module, `PYTHONHASHSEED=0` is pinned at the process boundaries (the DVC stage command and the Airflow image), and provenance hashing is SHA-256, so it is independent of hash randomization. Two runs with the same seed on the same curated data produce identical training metrics.
+
+For current numbers, check the run behind the `champion` alias in MLflow rather than any single snapshot. Because labels are rule-based, a training window with little wind variation produces near-constant labels and trivially good metrics; judging model quality requires looking at the data window a run was trained on. The committed July 2026 snapshot is such a window: 1007 of its 1008 curated rows share one label, so the snapshot's error metrics collapse to zero. R² is not informative on such a window either: with a constant test target, scikit-learn reports 1.0 for an exact fit and 0.0 for any error at all, so the dashboard can legitimately show R² 0.00 next to perfect accuracy and near-zero RMSE.
 
 Beyond held-out metrics, a registered `candidate` is shadow-scored against the `champion` on live inference batches, so its divergence from the served model is visible before any promotion.
 
@@ -57,3 +59,4 @@ Every MLflow run logs `dataset`, `data_hash` (SHA-256 of the training DataFrame)
 - It is trained per the six configured spots and will not generalize to other locations without new spot data and retraining.
 - Predictions inherit forecast errors from the weather API.
 - Hindcast validation (see [Monitoring](monitoring.md)) compares past predictions against later observations, which partially checks the rules against reality.
+- Backfilled history approximates upper-air fields: the Open-Meteo archive returns only surface data, so `wind_speed_80m` and `wind_speed_120m` are extrapolated from `wind_speed_10m` with a neutral-stability power law (exponent 0.143), and `cape` and `lifted_index` are filled with zeros. Only `wind_speed_80m` feeds the model, so for backfilled training rows it is a fixed function of the 10 m wind rather than an independent measurement. Live inference requests all four fields directly, so the approximation affects historical training data only.

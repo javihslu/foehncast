@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 
 import pytest
@@ -212,6 +213,26 @@ def test_trigger_dag_returns_clean_error_when_unreachable(
 
     assert result.ok is False
     assert "auth failed" in result.error
+
+
+def test_trigger_dag_returns_error_with_response_body_snippet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom(request, timeout=None):
+        if request.full_url.endswith("/auth/token"):
+            return _FakeResponse({"access_token": "tok-123"})
+        body = json.dumps({"detail": "DAG runtime_release is paused"}).encode("utf-8")
+        raise airflow_api.urllib.error.HTTPError(
+            request.full_url, 409, "Conflict", {}, io.BytesIO(body)
+        )
+
+    monkeypatch.setattr(airflow_api.urllib.request, "urlopen", _boom)
+
+    result = airflow_api.trigger_dag("runtime_release", base_url="http://airflow:8080")
+
+    assert result.ok is False
+    assert result.error.startswith("HTTP 409:")
+    assert "DAG runtime_release is paused" in result.error
 
 
 # Read client (mocked transport, no network)

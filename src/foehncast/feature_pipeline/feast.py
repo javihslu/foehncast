@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import shutil
 import subprocess
@@ -131,6 +131,23 @@ def _run_feast_cli(
     )
 
 
+_MATERIALIZE_FALLBACK_LOOKBACK = timedelta(days=365)
+
+
+def _materialize_start_timestamp(destination: Path | None) -> str:
+    """Earliest timestamp to materialize from, so cold start covers the whole dataset.
+
+    Reads the minimum event_timestamp from the freshly exported local parquet.
+    BigQuery-sourced runs have no local parquet to inspect cheaply, so they
+    fall back to a generous one-year lookback instead of querying BigQuery.
+    """
+    if destination is not None:
+        offline_frame = pd.read_parquet(destination, columns=[_EVENT_TIMESTAMP_COLUMN])
+        return offline_frame[_EVENT_TIMESTAMP_COLUMN].min().isoformat()
+
+    return (datetime.now(tz=UTC) - _MATERIALIZE_FALLBACK_LOOKBACK).isoformat()
+
+
 def prepare_feature_store(
     dataset: str = "train",
     *,
@@ -161,8 +178,14 @@ def prepare_feature_store(
             materialize_timestamp
             or datetime.now(tz=UTC).replace(microsecond=0).isoformat()
         )
+        # Full range, not `-incremental` (see _materialize_start_timestamp):
+        # the dataset is small, so this is cheap and idempotent to repeat.
         _run_feast_cli(
-            ["materialize-incremental", resolved_materialize_timestamp],
+            [
+                "materialize",
+                _materialize_start_timestamp(destination),
+                resolved_materialize_timestamp,
+            ],
             cwd=repo_path,
             env=env,
         )

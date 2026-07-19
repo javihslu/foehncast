@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 
@@ -75,6 +76,7 @@ def train(dataset: str) -> None:
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     model_config = get_model_config()
+    np.random.seed(model_config["random_state"])
     rider_config = get_rider_config()
     feature_columns = model_config["features"]
     target_column = model_config["target"]

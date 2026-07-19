@@ -5,20 +5,20 @@ stages:
     deps:
     - path: config.yaml
       hash: md5
-      md5: 82ef34da5ef0b8821e06e6526f854e28
-      size: 6545
+      md5: 27a8482104185c2d06cdbed91111ec73
+      size: 6659
     - path: src/foehncast/dvc_stages.py
       hash: md5
-      md5: c1f7781ba18ede393ebf10d03a3e7700
-      size: 6043
+      md5: 7594c59bbf6fd85fa7582ec8b25e9eff
+      size: 6111
     - path: src/foehncast/feature_pipeline/engineer.py
       hash: md5
-      md5: 8c473926fca43799594d9d408d834bd1
-      size: 6307
+      md5: bf1e4b011e96f5885494192d2aa0f13b
+      size: 6304
     - path: src/foehncast/feature_pipeline/ingest.py
       hash: md5
-      md5: ead7fa9ff03f925578883b862c3919d6
-      size: 7191
+      md5: b556e05c16798e8b953917557fc7e87b
+      size: 7126
     - path: src/foehncast/feature_pipeline/store.py
       hash: md5
       md5: eb9742324e9f009d8153f1fd2a690f3d
@@ -102,37 +102,37 @@ stages:
     outs:
     - path: data/train
       hash: md5
-      md5: 6ed868efb22a725f8cd4fd4c3d512847.dir
-      size: 198456
+      md5: 32a3c43db1a8882c1c36fae92b7d60cf.dir
+      size: 199157
       nfiles: 6
   train:
-    cmd: python -m foehncast.dvc_stages train --dataset train
+    cmd: PYTHONHASHSEED=0 python -m foehncast.dvc_stages train --dataset train
     deps:
     - path: config.yaml
       hash: md5
-      md5: 82ef34da5ef0b8821e06e6526f854e28
-      size: 6545
+      md5: 27a8482104185c2d06cdbed91111ec73
+      size: 6659
     - path: data/train
       hash: md5
-      md5: 6ed868efb22a725f8cd4fd4c3d512847.dir
-      size: 198456
+      md5: 32a3c43db1a8882c1c36fae92b7d60cf.dir
+      size: 199157
       nfiles: 6
     - path: src/foehncast/dvc_stages.py
       hash: md5
-      md5: c1f7781ba18ede393ebf10d03a3e7700
-      size: 6043
+      md5: 7594c59bbf6fd85fa7582ec8b25e9eff
+      size: 6111
     - path: src/foehncast/training_pipeline/evaluate.py
       hash: md5
-      md5: 3f8068eb2f77378c58ce0e6054b543ce
-      size: 3231
+      md5: a38b1f065bad72e819e1a3940d660be6
+      size: 3194
     - path: src/foehncast/training_pipeline/label.py
       hash: md5
-      md5: 1bb1d1223c0a4b1846b1fb2ed1f4eba4
-      size: 3538
+      md5: d9a9669bdd65c635185252ee83a89972
+      size: 3423
     - path: src/foehncast/training_pipeline/train.py
       hash: md5
-      md5: adb46f360481b2be0202ed61101ea537
-      size: 6157
+      md5: 5288efa53b4daf3000d050dd07e8b4c5
+      size: 6234
     params:
       config.yaml:
         model:
@@ -194,9 +194,9 @@ stages:
     outs:
     - path: reports/feature_importance.png
       hash: md5
-      md5: c5ed033b0bca07be2986c2da7dedae38
-      size: 34323
+      md5: 0696e1bdd220db43737ee9736faf86f8
+      size: 34508
     - path: reports/train_metrics.json
       hash: md5
-      md5: 24018a2b27dac2660a4643563c17c8ff
-      size: 365
+      md5: 2b52b9c466bda54c2edbab3d6ecc77ba
+      size: 328
