@@ -15,6 +15,8 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _wind_map as wm  # noqa: E402
+from _dial_tokens import dial_tokens  # noqa: E402
+from _theme import DARK, LIGHT  # noqa: E402
 
 
 def test_hourly_map_records_resolve_via_utc_and_clamp(
@@ -69,20 +71,24 @@ def test_status_thresholds_speed_against_minimum() -> None:
 
     # Wording still grades the wind; the dot's hue does not, because its
     # position against the ideal band already carries strength.
-    assert wm._status(20.0, min_kts) == (wm._COLOR_READING, "Rideable")
-    assert wm._status(15.0, min_kts) == (wm._COLOR_READING, "Rideable")
-    assert wm._status(11.0, min_kts) == (wm._COLOR_READING, "Almost")  # >= 0.7 * min
-    assert wm._status(5.0, min_kts) == (wm._COLOR_READING, "Too light")
+    assert wm._status(20.0, min_kts) == "Rideable"
+    assert wm._status(15.0, min_kts) == "Rideable"
+    assert wm._status(11.0, min_kts) == "Almost"  # >= 0.7 * min
+    assert wm._status(5.0, min_kts) == "Too light"
 
 
 def test_status_never_calls_a_dark_hour_rideable() -> None:
     # Wind at 02:00 is real and still gets a dot, but it is not a session:
-    # darkness outranks every speed threshold, and it is the one fact the
-    # dot's position cannot show, so it is what recolors the dot.
-    color, label = wm._status(40.0, 15.0, is_day=False)
-    assert color == wm._COLOR_NIGHT
-    assert label == "Night, not rideable"
-    assert color != wm._COLOR_READING
+    # darkness outranks every speed threshold.
+    assert wm._status(40.0, 15.0, is_day=False) == "Night, not rideable"
+
+
+def test_night_recolors_the_dot_in_both_themes() -> None:
+    # Darkness is the one fact the dot's position cannot show, so it is the
+    # only thing that changes the dot's colour -- in either theme.
+    for pal in (LIGHT, DARK):
+        tok = dial_tokens(pal)
+        assert tok.night != tok.reading
 
 
 def test_to_utc_localizes_naive_and_converts_aware() -> None:
@@ -112,7 +118,7 @@ def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
         "lon",
         "dot_lon",
         "dot_lat",
-        "color",
+        "is_day",
         "label_lon",
         "label_lat",
         "speed_label",
@@ -131,7 +137,9 @@ def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
     )
     assert anchor["dot_lon"] == pytest.approx(expected[0])
     assert anchor["dot_lat"] == pytest.approx(expected[1])
-    assert anchor["color"] == wm._COLOR_READING
+    # Records carry daylight, not colour: colour is resolved per theme at
+    # render time, so a cached forecast lookup survives a theme switch.
+    assert anchor["is_day"] is True
 
     # Only the gust tick remains a drawn segment.
     assert len(segments) == 1
@@ -140,7 +148,7 @@ def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
         "from_lat",
         "to_lon",
         "to_lat",
-        "color",
+        "is_day",
         "width",
     }
 

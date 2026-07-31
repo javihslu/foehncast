@@ -1,40 +1,52 @@
-"""Shared color tokens for the wind dial.
+"""Dial colours, resolved from the active theme rather than hard-coded.
 
-The regional map (ui/_wind_map.py) and a later small SVG dial both read these,
-so the two renderings stay in visual sync. Dial geometry (radius, max kn, wedge
-angle) is map-specific and stays in _wind_map.py.
+The dial draws three marks that can sit next to each other -- the ideal band,
+the reading dot, and the night recolour of that dot -- so the three are held to
+the all-pairs colour-vision and contrast gates in _theme, per mode. Geometry
+constants that do not change with theme stay here.
 """
 
 from __future__ import annotations
 
-# Ink for chrome outlines and text.
-INK = [7, 37, 42]
+from dataclasses import dataclass
 
-# The ideal window: teal wash plus edge, drawn as a band between the ideal
-# direction range and the ideal speed range. This is the target, not a reading.
-RIDEABLE = [10, 163, 146]
+from _theme import Palette, active
 
-# The reading: one dot at the exact (direction, speed) the forecast gives.
-# Orange because it is the complement of the teal target, so the dot never
-# disappears into the band it is being compared against. Rideability is read
-# from WHERE the dot lands, not from its hue, so this one color serves every
-# wind strength. Freed for this use by moving the rider home to a hammock icon.
-READING = [255, 122, 38]
-
-# Sun below the horizon. Wind speed is still real at 02:00, so the dot is still
-# placed, but calling it a session claims one nobody can have. Darkness is the
-# single fact the dot's position cannot carry, so it is the one thing that
-# recolors the dot. Validated against the reading orange and the teal band on
-# the basemap tone: worst adjacent pair is dE 12.3 (deutan), 16.2 (normal).
-NIGHT = [131, 84, 184]
-
-# Light warm-grey casing drawn under needles, rings, and ticks so a mark stays
-# legible where it crosses the basemap or another mark (the surface-ring idea).
-HALO = [244, 241, 234]
-
-# Ideal-wedge alphas: a readable teal wash under a full-opacity teal edge.
+# Ideal-wedge alphas: a readable wash under a full-opacity edge.
 WEDGE_FILL_ALPHA = 110
 WEDGE_OUTLINE_ALPHA = 255
+
+
+@dataclass(frozen=True)
+class DialTokens:
+    """One theme's dial colours, as [R, G, B] lists for pydeck."""
+
+    ink: list[int]
+    halo: list[int]  # casing drawn under a mark so it survives any background
+    band: list[int]
+    reading: list[int]
+    night: list[int]
+
+    @property
+    def hex(self) -> dict[str, str]:
+        return {
+            "ink": rgb_to_hex(self.ink),
+            "halo": rgb_to_hex(self.halo),
+            "band": rgb_to_hex(self.band),
+            "reading": rgb_to_hex(self.reading),
+            "night": rgb_to_hex(self.night),
+        }
+
+
+def dial_tokens(pal: Palette | None = None) -> DialTokens:
+    pal = pal or active()
+    return DialTokens(
+        ink=pal.rgb(pal.ink),
+        halo=pal.rgb(pal.casing),
+        band=pal.rgb(pal.band),
+        reading=pal.rgb(pal.reading),
+        night=pal.rgb(pal.night),
+    )
 
 
 def rgb_to_hex(rgb: list[int]) -> str:

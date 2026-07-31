@@ -11,7 +11,8 @@ _UI = pathlib.Path(__file__).resolve().parents[2] / "ui"
 if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
-from _dial_tokens import NIGHT, READING, rgb_to_hex  # noqa: E402
+from _dial_tokens import dial_tokens, rgb_to_hex  # noqa: E402
+from _theme import LIGHT  # noqa: E402
 from _dial_svg import (  # noqa: E402
     _R,
     _radius,
@@ -27,6 +28,7 @@ def _svg(**overrides: float) -> str:
         "shore_orientation_deg": 20.0,
         "min_kts": 12.0,
         "band_kn": (15.0, 25.0),
+        "pal": LIGHT,
     }
     base.update(overrides)
     return wind_dial_svg(**base)
@@ -43,10 +45,11 @@ def test_wind_dial_svg() -> None:
 
 
 def test_dot_takes_the_night_color_after_dark() -> None:
-    assert rgb_to_hex(READING) in _svg(is_day=True)
-    night = _svg(is_day=False)
-    assert rgb_to_hex(NIGHT) in night
-    assert rgb_to_hex(READING) not in night
+    tok = dial_tokens(LIGHT)
+    assert rgb_to_hex(tok.reading) in _svg(is_day=True, pal=LIGHT)
+    night = _svg(is_day=False, pal=LIGHT)
+    assert rgb_to_hex(tok.night) in night
+    assert rgb_to_hex(tok.reading) not in night
 
 
 def test_compact_dial_is_small_and_label_free() -> None:
@@ -59,6 +62,7 @@ def test_compact_dial_is_small_and_label_free() -> None:
         size_px=120,
         detail="compact",
         band_kn=(15.0, 25.0),
+        pal=LIGHT,
     )
     assert compact.startswith("<svg")
     assert len(compact.encode("utf-8")) <= 1400  # fits the per-cell payload budget

@@ -11,13 +11,12 @@ from __future__ import annotations
 import math
 
 from _dial_tokens import (
-    HALO,
-    INK,
-    RIDEABLE,
     WEDGE_FILL_ALPHA,
     WEDGE_OUTLINE_ALPHA,
+    dial_tokens,
     rgb_to_hex,
 )
+from _theme import Palette
 from _wind_map import (
     _DIAL_MAX_KN as _MAX_KN,
     _IDEAL_HALF_ANGLE_DEG as _HALF_ANGLE_DEG,
@@ -67,6 +66,7 @@ def wind_dial_svg(
     detail: str = "full",
     is_day: bool = True,
     band_kn: tuple[float, float] | None = None,
+    pal: Palette | None = None,
 ) -> str:
     """Return an inline SVG dial for one spot at one hour.
 
@@ -80,9 +80,10 @@ def wind_dial_svg(
     band = ideal_band_kn() if band_kn is None else band_kn
     flow = (direction_deg + 180.0) % 360.0
     ideal_center = (shore_orientation_deg + 180.0) % 360.0
-    color, status_label = _status(speed_kn, min_kts, is_day)
-    dot_hex = rgb_to_hex(color)
-    ink, halo, teal = rgb_to_hex(INK), rgb_to_hex(HALO), rgb_to_hex(RIDEABLE)
+    status_label = _status(speed_kn, min_kts, is_day)
+    tok = dial_tokens(pal)
+    dot_hex = rgb_to_hex(tok.reading if is_day else tok.night)
+    ink, halo, teal = rgb_to_hex(tok.ink), rgb_to_hex(tok.halo), rgb_to_hex(tok.band)
 
     # Light casing lifts the outer ring off the panel. Full detail marks
     # 10/20/30 kn; compact keeps a single mid-scale (20 kn) reference ring.

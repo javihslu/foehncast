@@ -13,11 +13,10 @@ if str(_UI) not in sys.path:
 
 from _logo import (  # noqa: E402
     FRAME_COUNT,
-    MOON,
-    SUN,
     current_sky,
     logo_svg,
 )
+from _theme import DARK, LIGHT  # noqa: E402
 
 
 def test_mark_is_whole_pixels_on_the_grid() -> None:
@@ -29,12 +28,19 @@ def test_mark_is_whole_pixels_on_the_grid() -> None:
 
 def test_sun_by_day_moon_and_zeds_by_night() -> None:
     day = logo_svg(animate=False, is_day=True)
-    assert SUN in day
-    assert MOON not in day
+    assert LIGHT.sun in day
+    assert LIGHT.moon not in day
 
     night = logo_svg(animate=False, is_day=False)
-    assert SUN not in night
-    assert MOON in night  # moon and the sleep marks share the pale tone
+    assert LIGHT.sun not in night
+    assert LIGHT.moon in night  # moon and the sleep marks share the pale tone
+
+
+def test_mark_follows_the_theme() -> None:
+    light = logo_svg(animate=False, dark=False)
+    dark = logo_svg(animate=False, dark=True)
+    assert LIGHT.sand in light and DARK.sand in dark
+    assert DARK.sand not in light
 
 
 def test_sky_fraction_moves_the_sun_across() -> None:

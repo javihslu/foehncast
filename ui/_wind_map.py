@@ -14,16 +14,13 @@ from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.solar import is_daylight
 
 from _dial_tokens import (
-    HALO,
-    INK as _INK,
-    NIGHT as _COLOR_NIGHT,
-    READING as _COLOR_READING,
-    RIDEABLE as _COLOR_RIDEABLE,
     WEDGE_FILL_ALPHA,
     WEDGE_OUTLINE_ALPHA,
+    dial_tokens,
     rgb_to_hex as _rgb_to_hex,
 )
 from _hammock import hammock_data_uri
+from _theme import active
 
 _KN_TO_KMH = 1.852
 _FORECAST_HOURS = 48
@@ -100,24 +97,22 @@ def ideal_band_kn() -> tuple[float, float]:
     return float(band["min_kts"]), float(band["max_kts"])
 
 
-def _status(
-    speed_kn: float, min_kts: float, is_day: bool = True
-) -> tuple[list[int], str]:
-    """Reading-dot color and its wording.
+def _status(speed_kn: float, min_kts: float, is_day: bool = True) -> str:
+    """Wording for the reading.
 
-    The dot's position against the ideal band already answers "is it windy
-    enough", so strength does not need a hue of its own and every daylight
-    reading takes the same orange. Darkness is the one fact position cannot
-    carry -- 20 kn at 02:00 plots exactly like 20 kn at noon -- so night is the
-    only thing that recolors the dot.
+    Only wording: the dot's position against the ideal band already answers
+    "is it windy enough", so strength does not need a hue of its own. Colour is
+    resolved at render time from the active theme, and the only thing that
+    changes it is darkness -- the one fact position cannot carry, since 20 kn
+    at 02:00 plots exactly where 20 kn at noon does.
     """
     if not is_day:
-        return _COLOR_NIGHT, "Night, not rideable"
+        return "Night, not rideable"
     if speed_kn >= min_kts:
-        return _COLOR_READING, "Rideable"
+        return "Rideable"
     if speed_kn >= 0.7 * min_kts:
-        return _COLOR_READING, "Almost"
-    return _COLOR_READING, "Too light"
+        return "Almost"
+    return "Too light"
 
 
 def _dial_base_records(
@@ -175,7 +170,7 @@ def _reading_records(
     speed_kn = float(row["wind_speed_10m"]) / _KN_TO_KMH
     gusts_kn = float(row["wind_gusts_10m"]) / _KN_TO_KMH
     direction = float(row["wind_direction_10m"])
-    color, status = _status(speed_kn, min_kts, is_day)
+    status = _status(speed_kn, min_kts, is_day)
 
     lat, lon = float(spot["lat"]), float(spot["lon"])
     flow = (direction + 180.0) % 360.0
@@ -191,7 +186,7 @@ def _reading_records(
             "from_lat": start[1],
             "to_lon": end[0],
             "to_lat": end[1],
-            "color": color,
+            "is_day": bool(is_day),
             "width": 2.0,
         }
     ]
@@ -201,7 +196,7 @@ def _reading_records(
         "lon": lon,
         "dot_lon": dot[0],
         "dot_lat": dot[1],
-        "color": color,
+        "is_day": bool(is_day),
         "label_lon": label_pt[0],
         "label_lat": label_pt[1],
         "speed_label": f"{speed_kn:.0f} kn",
@@ -342,6 +337,14 @@ def _render_map_fragment(
     records = _lookup_hourly_records(hourly, hour)
     anchors, segments = records["anchors"], records["segments"]
 
+    # Colour is resolved here, not in the cached records: the geometry is
+    # theme-independent, so the cache key stays clean and a theme switch does
+    # not invalidate a single forecast lookup.
+    pal = active()
+    tok = dial_tokens(pal)
+    for row in (*anchors, *segments):
+        row["color"] = tok.reading if row["is_day"] else tok.night
+
     rider = get_rider_config()
     home_lat, home_lon = float(rider["home_lat"]), float(rider["home_lon"])
     # Label sits south of the pin: at this zoom a centred label lands on the
@@ -369,7 +372,9 @@ def _render_map_fragment(
 
     # Light casing under every needle so it reads on the muted basemap and where
     # needles cross rings or each other; the status-colored needle draws on top.
-    halo = [{**s, "color": [*HALO, 215], "width": s["width"] + 3.0} for s in segments]
+    halo = [
+        {**s, "color": [*tok.halo, 215], "width": s["width"] + 3.0} for s in segments
+    ]
     layers = [
         # Rings: recessive reference chrome. A faint light halo lifts them off
         # the muted basemap without letting the grid compete with the needles.
@@ -377,7 +382,7 @@ def _render_map_fragment(
             "PathLayer",
             data=base["rings"],
             get_path="path",
-            get_color=[*HALO, 110],
+            get_color=[*tok.halo, 110],
             get_width=90,
             width_min_pixels=2.5,
         ),
@@ -385,7 +390,7 @@ def _render_map_fragment(
             "PathLayer",
             data=base["rings"],
             get_path="path",
-            get_color=[*_INK, 55],
+            get_color=[*tok.ink, 55],
             get_width=60,
             width_min_pixels=1.3,
         ),
@@ -395,9 +400,9 @@ def _render_map_fragment(
             "PolygonLayer",
             data=base["wedges"],
             get_polygon="polygon",
-            get_fill_color=[*_COLOR_RIDEABLE, WEDGE_FILL_ALPHA],
+            get_fill_color=[*tok.band, WEDGE_FILL_ALPHA],
             stroked=True,
-            get_line_color=[*_COLOR_RIDEABLE, WEDGE_OUTLINE_ALPHA],
+            get_line_color=[*tok.band, WEDGE_OUTLINE_ALPHA],
             get_line_width=80,
             line_width_min_pixels=2,
         ),
@@ -407,7 +412,7 @@ def _render_map_fragment(
             data=base["ticks"],
             get_source_position="[from_lon, from_lat]",
             get_target_position="[to_lon, to_lat]",
-            get_color=[*HALO, 150],
+            get_color=[*tok.halo, 150],
             get_width=3.5,
         ),
         pdk.Layer(
@@ -415,7 +420,7 @@ def _render_map_fragment(
             data=base["ticks"],
             get_source_position="[from_lon, from_lat]",
             get_target_position="[to_lon, to_lat]",
-            get_color=[*_INK, 140],
+            get_color=[*tok.ink, 140],
             get_width=2.0,
         ),
     ]
@@ -436,7 +441,7 @@ def _render_map_fragment(
             "ScatterplotLayer",
             data=anchors,
             get_position="[lon, lat]",
-            get_fill_color=[*_INK, 150],
+            get_fill_color=[*tok.ink, 150],
             get_radius=700,
             pickable=True,
             stroked=False,
@@ -449,7 +454,7 @@ def _render_map_fragment(
             "ScatterplotLayer",
             data=anchors,
             get_position="[dot_lon, dot_lat]",
-            get_fill_color=[*HALO, 230],
+            get_fill_color=[*tok.halo, 230],
             get_radius=2100,
         )
     )
@@ -462,7 +467,7 @@ def _render_map_fragment(
             get_radius=1500,
             pickable=True,
             stroked=True,
-            get_line_color=[*_INK, 120],
+            get_line_color=[*tok.ink, 120],
             line_width_min_pixels=1,
         )
     )
@@ -484,7 +489,7 @@ def _render_map_fragment(
             get_position="[lon, lat]",
             get_text="name",
             get_size=14,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             get_alignment_baseline="'bottom'",
         )
     )
@@ -495,7 +500,7 @@ def _render_map_fragment(
             get_position="[label_lon, label_lat]",
             get_text="name",
             get_size=14,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             get_alignment_baseline="'top'",
         )
     )
@@ -506,12 +511,12 @@ def _render_map_fragment(
             get_position="[lon, lat]",
             get_text="label",
             get_size=13,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             font_weight="bold",
             # pydeck 0.9.2 forwards these deck.gl TextLayer props: a light
             # background pill keeps the cardinal "N" legible over any tone.
             background=True,
-            get_background_color=[*HALO, 205],
+            get_background_color=[*tok.halo, 205],
             background_padding=[3, 2],
         )
     )
@@ -522,7 +527,7 @@ def _render_map_fragment(
             get_position="[label_lon, label_lat]",
             get_text="speed_label",
             get_size=12,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             get_alignment_baseline="'top'",
         )
     )
@@ -546,16 +551,16 @@ def _render_map_fragment(
         'border-radius:2px;background:{};margin:0 0.3rem 0 0.9rem"></span>{}'
     )
     st.markdown(
-        '<p style="color:#07252a;font-size:0.85rem;margin-top:0.2rem">'
+        '<p style="color:var(--ink);font-size:0.85rem;margin-top:0.2rem">'
         "Rings mark 10/20/30 kn. The dot is this hour's wind: bearing is the "
         "direction it blows toward, distance from the centre is its speed, and "
         "the short tick beyond it marks gusts. A dot inside the teal band is a "
         "session &mdash; that band is the spot's ideal window (direction "
         f"&plusmn;45&deg;, {storm_band['min_kts']:.0f}&ndash;"
         f"{storm_band['max_kts']:.0f} kn)."
-        + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), "Ideal window")
-        + chip.format(_rgb_to_hex(_COLOR_READING), "This hour's wind")
-        + chip.format(_rgb_to_hex(_COLOR_NIGHT), "Night (sun down)")
+        + chip.format(_rgb_to_hex(tok.band), "Ideal window")
+        + chip.format(_rgb_to_hex(tok.reading), "This hour's wind")
+        + chip.format(_rgb_to_hex(tok.night), "Night (sun down)")
         + "</p>",
         unsafe_allow_html=True,
     )

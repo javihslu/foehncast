@@ -1,6 +1,17 @@
+# Colours mirror ui/_theme.py, which is the source of truth and carries the
+# validator results. Streamlit's own chrome reads these; the console's own
+# marks read the palette directly so both stay in step.
+
 [theme]
 base = "light"
-primaryColor = "#ff7a26"
-backgroundColor = "#eaf3ef"
-secondaryBackgroundColor = "#dbe9e3"
+primaryColor = "#d75a07"
+backgroundColor = "#eef6f3"
+secondaryBackgroundColor = "#e4efeb"
 textColor = "#07252a"
+
+[theme.dark]
+base = "dark"
+primaryColor = "#ea630c"
+backgroundColor = "#0c1f24"
+secondaryBackgroundColor = "#071418"
+textColor = "#eaf3f1"

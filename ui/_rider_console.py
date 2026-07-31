@@ -26,7 +26,8 @@ from foehncast.inference_pipeline.dashboard import (
 from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
-from _dial_tokens import INK, rgb_to_hex
+from _dial_tokens import dial_tokens, rgb_to_hex
+from _theme import Palette, active
 from _wind_map import (
     _KN_TO_KMH,
     _clamp_to_slider_option,
@@ -116,12 +117,10 @@ def _heatmap_x_axis(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> alt
 
 
 # One-hue ramp for the ordered elevation series; gusts differ by dash too.
-_ELEVATION_COLORS = {
-    "10m": "#5fa7a1",
-    "80m": "#20837c",
-    "120m": "#0b5e60",
-    "gusts": "#3b5a5a",
-}
+# Values live in _theme so the dark mode gets its own validated steps.
+def _elevation_colors(pal: Palette) -> dict[str, str]:
+    return dict(zip(("10m", "80m", "120m", "gusts"), pal.series, strict=True))
+
 
 # Ordinal 4-step teal ramp for the all-spots session-quality heatmap, covering
 # levels 2-5 (light to dark). Level 1 gets no ramp color at all: the dataviz
@@ -130,7 +129,7 @@ _ELEVATION_COLORS = {
 # "transparent" in the color scale (in-domain, so it still renders its stroke
 # and hit-tests). This four-step range passes: monotone lightness, visible
 # step gaps, 2.18:1 light end, 2 deg hue spread.
-_QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
+# (values in _theme.Palette.quality, per mode)
 
 # Night cells sit OFF the quality ramp entirely. A cell whose hour has the sun
 # below the horizon carries no rideable level, so painting it in any ramp step
@@ -150,20 +149,30 @@ _QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
 # Contrast vs surface is 1.5:1, which the validator flags as needing relief in
 # another channel — hence the legend chip and the tooltip's Daylight row, so
 # night is never signalled by color alone.
-_NIGHT_FILL = "#c9c4d6"
+# (value in _theme.Palette.night_fill, per mode)
 
-# Hairline between heatmap cells. Faint ink rather than the page surface tone:
-# level-1 cells are fill-free, and a surface-toned stroke would vanish on the
-# surface -- this keeps the flat-week "outline board" visible while reading as
-# normal gridwork between filled cells.
-_HEATMAP_GAP = "rgba(7, 37, 42, 0.16)"
+
+def _heatmap_gap(pal: Palette) -> str:
+    """Hairline between heatmap cells: faint ink, not the surface tone.
+
+    Level-1 cells are fill-free, so a surface-toned stroke would vanish and the
+    flat-week "outline board" with it. Faint ink keeps the gridwork visible in
+    either mode while still reading as a gap between filled cells.
+    """
+    r, g, b = pal.rgb(pal.ink)
+    return (
+        f"rgba({r}, {g}, {b}, 0.16)"
+        if pal.name == "light"
+        else f"rgba({r}, {g}, {b}, 0.28)"
+    )
+
 
 # Notice chip shown when the whole window is level 1: the outline board is
 # real data (a quiet week), not a render failure, and the chip says so.
 _FLAT_WEEK_CHIP = (
     '<span style="display:inline-block;font-family:Manrope,sans-serif;'
-    "font-size:0.72rem;color:#39544f;background:rgba(210, 226, 220, 0.6);"
-    "border:1px solid rgba(7, 37, 42, 0.18);border-radius:999px;"
+    "font-size:0.72rem;color:var(--muted);background:var(--panel);"
+    "border:1px solid var(--line);border-radius:999px;"
     'padding:0.1rem 0.6rem;margin:0.15rem 0 0.35rem">'
     "Quiet week — no spot rises above level 1 in daylight this window</span>"
 )
@@ -196,17 +205,17 @@ def _quality_legend_html() -> str:
     mirroring the wind map's chip row (_wind_map.render_wind_map): chip 1 is
     an outline-only swatch, chips 2-5 use the validated ramp.
     """
-    swatches = ["border:1px solid rgba(7, 37, 42, 0.4)"] + [
-        f"background:{color}" for color in _QUALITY_RAMP
+    swatches = ["border:1px solid var(--line)"] + [
+        f"background:{color}" for color in active().quality
     ]
     labels: tuple[int | str, ...] = (1, 2, 3, 4, 5, "Night")
-    swatches.append(f"background:{_NIGHT_FILL}")
+    swatches.append(f"background:{active().night_fill}")
     chips = "".join(
         _LEGEND_CHIP.format(swatch=swatch, level=level)
         for level, swatch in zip(labels, swatches, strict=True)
     )
     return (
-        "<p style=\"color:#07252a;font-family:'Manrope',sans-serif;"
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
         'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
         f"Session quality (1-5){chips}</p>"
     )
@@ -718,9 +727,9 @@ def _selection_bubble_html(
         )
     return (
         '<div style="background:rgba(255, 255, 255, 0.55);'
-        "border:1px solid rgba(7, 37, 42, 0.12);border-radius:14px;"
+        "border:1px solid var(--line);border-radius:14px;"
         "padding:0.7rem 0.9rem;font-family:Manrope,sans-serif;"
-        'font-size:0.85rem;color:#07252a">'
+        'font-size:0.85rem;color:var(--ink)">'
         f'<div style="font-weight:700">{spot_name}</div>'
         f'<div style="color:#5f6f7f;font-size:0.75rem;margin-bottom:0.45rem">'
         f"{local_time}</div>" + "".join(rows) + "</div>"
@@ -781,6 +790,9 @@ def render_rider_console(
     spot_lookup: dict[str, dict[str, Any]],
 ) -> None:
     ranked_spots = dashboard_data["ranked_spots"]
+    # One palette for every chart drawn in this render.
+    _pal = active()
+    _tok = dial_tokens(_pal)
 
     # Focus timeline (full width, past + future)
     focus_spot_ids = [spot["spot_id"] for spot in ranked_spots] or selected_spot_ids
@@ -924,14 +936,16 @@ def render_rider_console(
                         "band:N",
                         scale=alt.Scale(
                             domain=["1", "2", "3", "4", "5", "night"],
-                            range=["transparent", *_QUALITY_RAMP, _NIGHT_FILL],
+                            range=["transparent", *_pal.quality, _pal.night_fill],
                         ),
                         legend=None,
                     ),
                     # Selected cell gets a full-opacity ink stroke; the rest keep
                     # the hairline surface gap, so the pick is unmistakable.
                     stroke=alt.condition(
-                        cell_select, alt.value(rgb_to_hex(INK)), alt.value(_HEATMAP_GAP)
+                        cell_select,
+                        alt.value(rgb_to_hex(_tok.ink)),
+                        alt.value(_heatmap_gap(_pal)),
                     ),
                     strokeWidth=alt.condition(
                         cell_select, alt.value(2.5), alt.value(1.0)
@@ -959,7 +973,9 @@ def render_rider_console(
                 if domain_start <= rule_x <= domain_end:
                     highlight = (
                         alt.Chart(pd.DataFrame({"x": [rule_x]}))
-                        .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
+                        .mark_rule(
+                            color=rgb_to_hex(_tok.ink), strokeWidth=2, opacity=0.55
+                        )
                         .encode(x="x:T")
                     )
                     heatmap = heatmap_layer + highlight
@@ -976,9 +992,9 @@ def render_rider_console(
                 )
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
-                    domainColor="#3b5a5a",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
+                    domainColor=_pal.ink_secondary,
+                    labelColor=_pal.ink,
+                    titleColor=_pal.ink,
                 )
             )
             # Selection row (#37): board left, dial + bubble to its right, so
@@ -1113,15 +1129,15 @@ def render_rider_console(
                 .properties(height=180, background="transparent")
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
-                    domainColor="#3b5a5a",
-                    gridColor="rgba(7, 37, 42, 0.10)",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
+                    domainColor=_pal.ink_secondary,
+                    gridColor=_pal.grid,
+                    labelColor=_pal.ink,
+                    titleColor=_pal.ink,
                     labelFontSize=13,
                 )
                 .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
+                    labelColor=_pal.ink,
+                    titleColor=_pal.ink,
                     labelFont="Manrope",
                     titleFont="Manrope",
                     labelFontSize=13,
@@ -1182,7 +1198,8 @@ def render_rider_console(
                             scale=alt.Scale(
                                 domain=elevations_present,
                                 range=[
-                                    _ELEVATION_COLORS[e] for e in elevations_present
+                                    _elevation_colors(active())[e]
+                                    for e in elevations_present
                                 ],
                             ),
                             legend=alt.Legend(title="Elevation", orient="top"),
@@ -1276,15 +1293,15 @@ def render_rider_console(
                 .properties(height=300, background="transparent")
                 .configure_view(strokeWidth=0, fill=None)
                 .configure_axis(
-                    domainColor="#3b5a5a",
-                    gridColor="rgba(7, 37, 42, 0.10)",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
+                    domainColor=_pal.ink_secondary,
+                    gridColor=_pal.grid,
+                    labelColor=_pal.ink,
+                    titleColor=_pal.ink,
                     labelFontSize=13,
                 )
                 .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
+                    labelColor=_pal.ink,
+                    titleColor=_pal.ink,
                     labelFont="Manrope",
                     titleFont="Manrope",
                     labelFontSize=13,

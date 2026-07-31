@@ -4,9 +4,41 @@ from __future__ import annotations
 
 import streamlit as st
 
+from _theme import Palette, active
+
+
+def _root_vars(pal: Palette) -> str:
+    """The theme's colours as CSS variables; the sheet below reads only these."""
+    r, g, b = pal.rgb(pal.ink)
+    lift = "255, 255, 255" if pal.name == "light" else "168, 214, 205"
+    panel_a, panel_b = (0.82, 0.94) if pal.name == "light" else (0.06, 0.10)
+    return f"""
+<style>
+  :root {{
+    --bg: {pal.plane_bottom};
+    --surface: {pal.surface};
+    --panel: rgba({lift}, {panel_a});
+    --panel-strong: rgba({lift}, {panel_b});
+    --ink: {pal.ink};
+    --muted: {pal.ink_secondary};
+    --accent: {pal.band};
+    --accent-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.band))}, 0.16);
+    --pine: {pal.quality[2]};
+    --pine-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.quality[2]))}, 0.16);
+    --warm: {pal.reading};
+    --warm-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.reading))}, 0.20);
+    --line: rgba({r}, {g}, {b}, 0.18);
+    --grid: {pal.grid};
+    --shadow: 0 20px 60px rgba({r}, {g}, {b}, 0.14);
+    --app-gradient: linear-gradient(180deg, {pal.plane_top} 0%, {pal.plane_bottom} 100%);
+  }}
+</style>
+"""
+
 
 def inject_styles() -> None:
-    """Inject the full CSS stylesheet into the Streamlit app."""
+    """Inject the theme variables, then the stylesheet written against them."""
+    st.markdown(_root_vars(active()), unsafe_allow_html=True)
     st.markdown(_CSS, unsafe_allow_html=True)
 
 
@@ -14,28 +46,12 @@ _CSS = """
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Newsreader:opsz,wght@6..72,500;6..72,700&display=swap');
 
-  :root {
-    --bg: #c4d9d2;
-    --panel: rgba(255, 255, 255, 0.82);
-    --panel-strong: rgba(255, 255, 255, 0.94);
-    --ink: #07252a;
-    --muted: #3b5a5a;
-    --accent: #0e8a86;
-    --accent-soft: rgba(14, 138, 134, 0.16);
-    --pine: #1f5e44;
-    --pine-soft: rgba(31, 94, 68, 0.16);
-    --warm: #ff7a26;
-    --warm-soft: rgba(255, 122, 38, 0.20);
-    --line: rgba(7, 37, 42, 0.18);
-    --shadow: 0 20px 60px rgba(7, 37, 42, 0.14);
-  }
-
   .stApp {
     background:
       radial-gradient(circle at 12% 8%, rgba(14, 138, 134, 0.12), transparent 42%),
       radial-gradient(circle at 88% 6%, rgba(31, 94, 68, 0.10), transparent 40%),
       radial-gradient(circle at 70% 92%, rgba(255, 122, 38, 0.05), transparent 44%),
-      linear-gradient(180deg, #eaf3ef 0%, #dbe9e3 100%);
+      var(--app-gradient);
     color: var(--ink);
   }
 
@@ -44,11 +60,46 @@ _CSS = """
     padding-bottom: 2rem;
   }
 
-  header[data-testid="stHeader"],
+  /* The Streamlit chrome bar is flattened rather than removed: the sidebar's
+     expand control is rendered inside the header, so display:none there leaves
+     a collapsed sidebar with no way to reopen it. The header keeps zero height
+     and passes clicks through; the expand button is lifted out of its box so a
+     zero-height parent cannot collapse it to a zero-size target. */
+  header[data-testid="stHeader"] {
+    background: transparent !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    pointer-events: none;
+  }
+  /* stToolbar must stay displayed: the expand button is inside it, so hiding
+     the toolbar hides the only way to reopen a collapsed sidebar. Hide the
+     toolbar's ACTIONS instead -- deploy button and hamburger menu. */
   div[data-testid="stDecoration"],
-  div[data-testid="stToolbar"] {
+  div[data-testid="stToolbarActions"],
+  div[data-testid="stAppDeployButton"],
+  div[data-testid="stMainMenu"] {
     display: none !important;
   }
+  div[data-testid="stToolbar"] {
+    background: transparent !important;
+    pointer-events: none;
+  }
+
+  [data-testid="stExpandSidebarButton"] {
+    pointer-events: auto;
+    z-index: 1001;
+    background: var(--panel-strong) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px;
+    width: 2.3rem;
+    height: 2.3rem;
+  }
+  [data-testid="stExpandSidebarButton"] svg,
+  [data-testid="stExpandSidebarButton"] span {
+    color: var(--ink) !important;
+    fill: var(--ink) !important;
+  }
+
   div[data-testid="stAppViewContainer"] > .main,
   div[data-testid="stAppViewContainer"] section.main {
     padding-top: 0 !important;
@@ -60,7 +111,7 @@ _CSS = """
     z-index: 50;
     margin: -0.6rem -2rem 1.4rem -2rem;
     padding: 0.55rem 2rem 0.55rem;
-    background: rgba(234, 243, 239, 0.94);
+    background: var(--panel-strong);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line);
@@ -78,7 +129,7 @@ _CSS = """
   div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] {
     padding: 0.5rem 1.3rem;
     border-bottom: none;
-    background: rgba(255, 255, 255, 0.55);
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 999px;
     transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
@@ -221,7 +272,7 @@ _CSS = """
   }
 
   section[data-testid="stSidebar"] {
-    background: rgba(210, 226, 220, 0.88);
+    background: var(--panel-strong);
     border-right: 1px solid var(--line);
     color: var(--ink);
   }

@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import base64
 
-from _dial_tokens import HALO, INK, READING, rgb_to_hex
+from _dial_tokens import dial_tokens, rgb_to_hex
+from _theme import Palette
 
 # Slung fabric between two posts, drawn as a crescent so it reads as cloth
 # rather than a wire. Deliberately spare: at map-pin size the ground line and
@@ -19,14 +20,19 @@ from _dial_tokens import HALO, INK, READING, rgb_to_hex
 _FABRIC = "M 13 21 C 16 35, 32 35, 35 21 C 31 28, 17 28, 13 21 Z"
 
 
-def hammock_svg(size_px: int = 48) -> str:
+def hammock_svg(size_px: int = 48, pal: Palette | None = None) -> str:
     """Standalone hammock on a light disc, sized for a map pin.
 
     Shallow sag, pointed ends, and clear air beneath: fill the disc and it
     reads as a bowl, add uprights and it reads as the letter M. The two short
     ropes going up and out are what fix it as something slung.
     """
-    ink, halo, orange = rgb_to_hex(INK), rgb_to_hex(HALO), rgb_to_hex(READING)
+    tok = dial_tokens(pal)
+    ink, halo, orange = (
+        rgb_to_hex(tok.ink),
+        rgb_to_hex(tok.halo),
+        rgb_to_hex(tok.reading),
+    )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" '
         f'width="{size_px}" height="{size_px}">'
@@ -40,7 +46,7 @@ def hammock_svg(size_px: int = 48) -> str:
     )
 
 
-def hammock_data_uri(size_px: int = 44) -> str:
+def hammock_data_uri(size_px: int = 44, pal: Palette | None = None) -> str:
     """Base64 SVG data URI, the form deck.gl's IconLayer accepts."""
-    b64 = base64.b64encode(hammock_svg(size_px).encode("utf-8")).decode("ascii")
+    b64 = base64.b64encode(hammock_svg(size_px, pal).encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{b64}"

@@ -15,6 +15,7 @@ from foehncast.inference_pipeline.dashboard import (
 
 from _logo import current_sky, logo_svg
 from _styles import inject_styles
+from _theme import is_dark
 from _sidebar import render_freshness_bar, render_sidebar_ml_panels
 from _rider_console import prewarm_spot_caches, profile_card, render_rider_console
 from _system_tab import render_system_tab
@@ -40,13 +41,23 @@ def _live_dashboard_data(selected_spot_ids: tuple[str, ...]) -> dict[str, Any]:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _brand_mark() -> str:
-    """The pixel mark, with its sun or moon set to the rider's local sky."""
+def _brand_mark(dark: bool) -> str:
+    """The pixel mark, with its sun or moon set to the rider's local sky.
+
+    dark is an argument rather than read inside, so the cache keys on it and a
+    theme switch cannot serve the other mode's mark.
+    """
     rider = get_rider_config()
     fraction, is_day = current_sky(float(rider["home_lat"]), float(rider["home_lon"]))
     return (
-        '<div style="margin:0 0 0.6rem">'
-        + logo_svg(size_px=132, animate=True, sky_fraction=fraction, is_day=is_day)
+        '<div style="margin:0 0 0.7rem">'
+        + logo_svg(
+            size_px=196,
+            animate=True,
+            sky_fraction=fraction,
+            is_day=is_day,
+            dark=dark,
+        )
         + "</div>"
     )
 
@@ -63,7 +74,7 @@ def main() -> None:
 
     # Render sidebar immediately (PromQL calls are fast / cached).
     with st.sidebar:
-        st.markdown(_brand_mark(), unsafe_allow_html=True)
+        st.markdown(_brand_mark(is_dark()), unsafe_allow_html=True)
         st.markdown(
             """
             <p class="eyebrow" style="margin-top:0">FoehnCast</p>

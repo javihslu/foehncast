@@ -17,12 +17,15 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _rider_console as rc  # noqa: E402
+from _theme import DARK, LIGHT  # noqa: E402
 
 
 def test_quality_ramp_matches_validated_hexes() -> None:
     # Levels 2-5 only: level 1 is fill-free (see _quality_legend_html), not
     # part of the color scale's range at all.
-    assert rc._QUALITY_RAMP == ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
+    assert LIGHT.quality == ("#63b3a4", "#2f9384", "#0f7263", "#084c42")
+    # Dark is its own validated set, not a flip of the light one.
+    assert DARK.quality == ("#276553", "#21826a", "#2b9e81", "#3dbb9a")
 
 
 def test_all_spots_quality_grid_adds_tooltip_columns(
@@ -124,10 +127,10 @@ def test_night_hours_never_render_as_a_quality_level(
 def test_night_is_labelled_not_just_colored() -> None:
     # Contrast vs the page surface is only 1.5:1, so the state must also be
     # carried in words: a legend chip and the selection bubble's own row.
-    assert rc._NIGHT_FILL not in rc._QUALITY_RAMP
+    assert LIGHT.night_fill not in LIGHT.quality
     legend = rc._quality_legend_html()
     assert "Night" in legend
-    assert rc._NIGHT_FILL in legend
+    assert LIGHT.night_fill in legend
     bubble = rc._selection_bubble_html(
         "Silvaplana", "Thu 15 Jan 02:00", 5, None, None, None, False
     )
@@ -391,11 +394,11 @@ def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
     assert "Session quality (1-5)" in html
     # Level 1 is the outline-only swatch (no ramp fill).
     assert (
-        "border:1px solid rgba(7, 37, 42, 0.4);margin:0 0.3rem 0 0.9rem;"
+        "border:1px solid var(--line);margin:0 0.3rem 0 0.9rem;"
         'vertical-align:-0.05rem"></span>1' in html
     )
     # Levels 2-5 each carry their ramp color as the chip background.
-    for level, color in zip((2, 3, 4, 5), rc._QUALITY_RAMP, strict=True):
+    for level, color in zip((2, 3, 4, 5), LIGHT.quality, strict=True):
         assert (
             f"background:{color};margin:0 0.3rem 0 0.9rem;"
             f'vertical-align:-0.05rem"></span>{level}'
