@@ -23,6 +23,9 @@ def _root_vars(pal: Palette) -> str:
     --muted: {pal.ink_secondary};
     --accent: {pal.band};
     --accent-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.band))}, 0.16);
+    --accent-solid: {pal.accent_solid};
+    --on-accent: {pal.on_accent};
+    --status-ink: {pal.status_ink};
     --pine: {pal.quality[2]};
     --pine-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.quality[2]))}, 0.16);
     --warm: {pal.reading};
@@ -151,11 +154,14 @@ _CSS = """
     background: rgba(14, 138, 134, 0.12);
     color: var(--ink) !important;
   }
+  /* The selected pill carries text, so it uses the solid accent and its
+     paired ink: white on the plain band misses the 4.5:1 text floor in both
+     modes (4.21 light, 3.18 dark), while this pair clears it (5.82 / 5.05). */
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"],
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"] p {
-    color: #ffffff !important;
-    background: var(--accent) !important;
-    border-color: var(--accent) !important;
+    color: var(--on-accent) !important;
+    background: var(--accent-solid) !important;
+    border-color: var(--accent-solid) !important;
     box-shadow: 0 6px 16px rgba(14, 138, 134, 0.28);
   }
   div[data-testid="stTabs"] div[role="tablist"] div[data-baseweb="tab-highlight"] {
@@ -511,6 +517,19 @@ _CSS = """
     color: #07252a !important;
     font-family: 'Manrope', sans-serif !important;
     font-weight: 600 !important;
+  }
+
+  /* Slider labels ship under the text floor on the light surface: the end
+     labels at 4.20:1 and the value readout at 3.57:1, the latter because
+     Streamlit paints it in the accent. The thumb already carries the accent,
+     so the readout can wear ink and the ends the muted role. */
+  div[data-testid="stSliderTickBar"],
+  div[data-testid="stSliderTickBar"] p {
+    color: var(--muted) !important;
+  }
+  div[data-testid="stSliderThumbValue"],
+  div[data-testid="stSliderThumbValue"] p {
+    color: var(--ink) !important;
   }
 
   /* Expander: solid panel, legible header label. */

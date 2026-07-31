@@ -18,6 +18,19 @@ Re-run the validator if any hex changes. The quality ramp is ordinal, so it is
 one hue with monotone lightness, and its anchor flips between modes: level 1 is
 the step nearest the surface in both, which means lightest on light and darkest
 on dark.
+
+The status roles were added after an audit of the rendered DOM found 33 of 71
+text runs under the WCAG floor in dark mode and 18 of 67 in light: components
+were writing their own hexes, so the light theme's near-black ink was landing
+on the dark surface at 1.06:1. Each role is the worst case over every surface a
+status pill actually renders on in its mode, measured with contrast() from the
+same validator:
+
+  light  ok 5.39  idle 5.93  warn 5.31  danger 6.08  accent pill 5.82
+  dark   ok 5.90  idle 6.00  warn 6.61  danger 5.97  accent pill 5.05
+
+All clear the 4.5:1 floor for normal text. A component that needs a status
+colour asks for the role; it must not pick a hex.
 """
 
 from __future__ import annotations
@@ -58,6 +71,20 @@ class Palette:
     sand: str
     frond: str
     trunk: str
+    # Status, as TEXT. Components were writing their own hexes for these, which
+    # is how the dark mode ended up with near-black labels on a near-black
+    # surface. Each clears 4.5:1 against every surface a status pill actually
+    # renders on in its mode, so a component can use the role and stop
+    # choosing. They double as the pill's dot, which only needs 3:1.
+    status_ink: str  # text on a tinted status pill
+    ok: str
+    idle: str  # queued, cancelled, neutral-terminal, and secondary detail
+    warn: str  # in flight
+    danger: str
+    # A solid accent that can carry text, for the selected tab pill. The plain
+    # band is a mark colour: white on it misses the text floor in both modes.
+    accent_solid: str
+    on_accent: str
 
     def rgb(self, hex_value: str) -> list[int]:
         """[R, G, B], the form pydeck layers want."""
@@ -89,6 +116,13 @@ LIGHT = Palette(
     sand="#d8c9a6",
     frond="#0f7a62",
     trunk="#8a5a34",
+    status_ink="#07252a",
+    ok="#0a6357",
+    idle="#47535e",
+    warn="#8f430c",
+    danger="#96271b",
+    accent_solid="#0f7263",
+    on_accent="#ffffff",
 )
 
 DARK = Palette(
@@ -115,7 +149,25 @@ DARK = Palette(
     sand="#5a4e36",
     frond="#2b9e81",
     trunk="#a87048",
+    status_ink="#eaf3f1",
+    ok="#3dbb9a",
+    idle="#93aeb0",
+    warn="#f0a04b",
+    danger="#ff8579",
+    accent_solid="#16a384",
+    on_accent="#07252a",
 )
+
+
+def tint(hex_value: str, alpha: float) -> str:
+    """A translucent wash of a colour, for the pill behind its own status text.
+
+    The wash has to be derived from the role rather than written out per site,
+    or the pill and its text drift apart the moment a role changes.
+    """
+    h = hex_value.lstrip("#")
+    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r}, {g}, {b}, {alpha})"
 
 
 def palette(dark: bool = False) -> Palette:

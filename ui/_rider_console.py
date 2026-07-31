@@ -262,7 +262,7 @@ def _night_rect(
     """
     return (
         alt.Chart(_night_bands(t_min, t_max, lat, lon))
-        .mark_rect(color="#07252a", opacity=0.28, clip=True)
+        .mark_rect(color=active().ink, opacity=0.28, clip=True)
         .encode(x=alt.X("x:T", scale=x_scale), x2="x2:T")
     )
 
@@ -691,7 +691,7 @@ def _selection_wind(
 
 _BUBBLE_ROW = (
     '<div style="display:flex;justify-content:space-between;gap:1rem">'
-    '<span style="color:#5f6f7f">{label}</span><strong>{value}</strong></div>'
+    '<span style="color:var(--muted)">{label}</span><strong>{value}</strong></div>'
 )
 
 
@@ -731,7 +731,7 @@ def _selection_bubble_html(
         "padding:0.7rem 0.9rem;font-family:Manrope,sans-serif;"
         'font-size:0.85rem;color:var(--ink)">'
         f'<div style="font-weight:700">{spot_name}</div>'
-        f'<div style="color:#5f6f7f;font-size:0.75rem;margin-bottom:0.45rem">'
+        f'<div style="color:var(--muted);font-size:0.75rem;margin-bottom:0.45rem">'
         f"{local_time}</div>" + "".join(rows) + "</div>"
     )
 
@@ -1036,9 +1036,9 @@ def render_rider_console(
                 else pd.Timestamp.now(tz="UTC")
             )
             series_colors = {
-                "Predicted (past)": "#3b5a5a",
-                "Observed": "#0e8a86",
-                "Forecast": "#ff7a26",
+                "Predicted (past)": _pal.series[3],
+                "Observed": _pal.band,
+                "Forecast": _pal.reading,
             }
             series_present = [
                 s
@@ -1093,12 +1093,12 @@ def render_rider_console(
             )
             q_now_rule = (
                 alt.Chart(pd.DataFrame({"x": [q_now]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
+                .mark_rule(color=_pal.reading, strokeWidth=2, clip=True)
                 .encode(x=alt.X("x:T", scale=x_scale))
             )
             q_threshold = (
                 alt.Chart(pd.DataFrame({"y": [_RIDEABLE_QUALITY_THRESHOLD]}))
-                .mark_rule(color="#0e8a86", strokeDash=[4, 4], strokeWidth=1.2)
+                .mark_rule(color=_pal.band, strokeDash=[4, 4], strokeWidth=1.2)
                 .encode(y="y:Q")
             )
             q_threshold_label = (
@@ -1112,7 +1112,7 @@ def render_rider_console(
                     baseline="bottom",
                     dx=6,
                     dy=-3,
-                    color="#0e8a86",
+                    color=_pal.band,
                     fontSize=10,
                 )
                 .encode(y="y:Q", text="label:N")
@@ -1224,7 +1224,7 @@ def render_rider_console(
             )
             threshold = (
                 alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
-                .mark_rule(color="#c0392b", strokeDash=[4, 4], strokeWidth=1.5)
+                .mark_rule(color=_pal.danger, strokeDash=[4, 4], strokeWidth=1.5)
                 .encode(y="y:Q")
             )
             threshold_label = (
@@ -1241,14 +1241,14 @@ def render_rider_console(
                     baseline="bottom",
                     dx=6,
                     dy=-3,
-                    color="#c0392b",
+                    color=_pal.danger,
                     fontSize=10,
                 )
                 .encode(y="y:Q", text="label:N")
             )
             now_rule = (
                 alt.Chart(pd.DataFrame({"x": [now_ts]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
+                .mark_rule(color=_pal.reading, strokeWidth=2, clip=True)
                 .encode(x=alt.X("x:T", scale=x_scale))
             )
             # Solar-elevation curve along the chart bottom, pre-scaled into
@@ -1274,9 +1274,9 @@ def render_rider_console(
             solar_area = (
                 alt.Chart(solar_frame)
                 .mark_area(
-                    color="#1f5e44",
+                    color=_pal.quality[2],
                     opacity=0.22,
-                    line={"color": "#1f5e44", "strokeWidth": 1.0},
+                    line={"color": _pal.quality[2], "strokeWidth": 1.0},
                     clip=True,
                 )
                 .encode(x=alt.X("time:T", scale=x_scale), y="solar:Q")

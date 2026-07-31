@@ -12,6 +12,7 @@ import streamlit as st
 from foehncast.env import env_value
 
 from _promql import prom_query_batch, prom_query_vector
+from _theme import active, tint
 from _control import control_runs
 from _sidebar import fmt_delta
 
@@ -122,14 +123,15 @@ def _stage_index(rail: dict[str, Any]) -> dict[str, dict[str, float]]:
 
 
 def _stage_pill_html(name: str, state: float, duration: float) -> str:
+    pal = active()
     if state != state:  # NaN
-        bg, fg, dot, label = "#eef3ee", "#3b5a5a", "#9aa5a5", "—"
+        bg, fg, dot, label = tint(pal.idle, 0.12), pal.status_ink, pal.idle, "—"
     elif state >= 0.999:
-        bg, fg, dot, label = "rgba(14, 138, 134, 0.14)", "#07252a", "#0e8a86", "ok"
+        bg, fg, dot, label = tint(pal.ok, 0.14), pal.status_ink, pal.ok, "ok"
     elif state <= -0.5:
-        bg, fg, dot, label = "rgba(192, 57, 43, 0.10)", "#c0392b", "#c0392b", "fail"
+        bg, fg, dot, label = tint(pal.danger, 0.12), pal.danger, pal.danger, "fail"
     else:
-        bg, fg, dot, label = "rgba(255, 122, 38, 0.14)", "#7a3f10", "#ff7a26", "running"
+        bg, fg, dot, label = tint(pal.warn, 0.14), pal.warn, pal.warn, "running"
     dur_text = (
         f"{duration:.2f}s"
         if (duration == duration and duration < 60)
@@ -141,7 +143,8 @@ def _stage_pill_html(name: str, state: float, duration: float) -> str:
         f'font-family:Manrope,sans-serif;font-size:0.78rem;font-weight:600">'
         f'<span style="width:8px;height:8px;border-radius:50%;background:{dot}"></span>'
         f"<span>{name}</span>"
-        f'<span style="color:#5f6f7f;font-weight:500;font-size:0.72rem">{label} · {dur_text}</span>'
+        f'<span style="color:{pal.idle};font-weight:500;font-size:0.72rem">'
+        f"{label} · {dur_text}</span>"
         "</div>"
     )
 
@@ -176,16 +179,17 @@ def _stage_is_running(state: float) -> bool:
 def _status_pill_html(
     success: float | None, summary_ts: float | None, *, running: bool = False
 ) -> str:
+    pal = active()
     if running:
-        bg, fg, text = "rgba(255, 122, 38, 0.14)", "#7a3f10", "running"
+        bg, fg, text = tint(pal.warn, 0.14), pal.warn, "running"
     elif success is None and summary_ts is None:
-        bg, fg, text = "#eef3ee", "#3b5a5a", "no data"
+        bg, fg, text = tint(pal.idle, 0.12), pal.idle, "no data"
     elif success is None:
-        bg, fg, text = "rgba(14, 138, 134, 0.14)", "#07252a", "live"
+        bg, fg, text = tint(pal.ok, 0.14), pal.status_ink, "live"
     elif success >= 0.5:
-        bg, fg, text = "rgba(14, 138, 134, 0.16)", "#0e8a86", "last run ok"
+        bg, fg, text = tint(pal.ok, 0.16), pal.ok, "last run ok"
     else:
-        bg, fg, text = "rgba(192, 57, 43, 0.12)", "#c0392b", "last run failed"
+        bg, fg, text = tint(pal.danger, 0.12), pal.danger, "last run failed"
     age = (
         f"{fmt_delta(_time.time() - summary_ts)} ago"
         if (summary_ts is not None and summary_ts > 0)
@@ -196,24 +200,26 @@ def _status_pill_html(
         'font-family:Manrope,sans-serif;font-size:0.78rem">'
         f'<span style="padding:3px 10px;border-radius:999px;background:{bg};'
         f'color:{fg};font-weight:700">{text}</span>'
-        f'<span style="color:#5f6f7f">{age}</span>'
+        f'<span style="color:{pal.idle}">{age}</span>'
         "</div>"
     )
 
 
-# State colors match the app's status usage: teal for success, muted grey for
-# in-flight or neutral-terminal states, red for failure. Keys cover both
-# Airflow (queued/running/success/failed) and Workflows (active/succeeded/
-# cancelled) vocabularies.
-_RUN_STATE_COLOR = {
-    "success": "#0aa392",
-    "succeeded": "#0aa392",
-    "queued": "#5f6f7f",
-    "running": "#5f6f7f",
-    "active": "#c08a2b",
-    "cancelled": "#5f6f7f",
-    "failed": "#ff6e6e",
-}
+# State colours match the app's status usage: the ok role for success, the idle
+# role for in-flight or neutral-terminal states, danger for failure. Keys cover
+# both Airflow (queued/running/success/failed) and Workflows (active/succeeded/
+# cancelled) vocabularies. Roles rather than hexes, so both themes follow.
+def _run_state_color(state: str) -> str:
+    pal = active()
+    return {
+        "success": pal.ok,
+        "succeeded": pal.ok,
+        "queued": pal.idle,
+        "running": pal.idle,
+        "active": pal.warn,
+        "cancelled": pal.idle,
+        "failed": pal.danger,
+    }.get(state, pal.idle)
 
 
 def _run_age(run: dict[str, Any]) -> str:
@@ -229,21 +235,23 @@ def _run_age(run: dict[str, Any]) -> str:
 
 
 def _run_row_html(run: dict[str, Any]) -> str:
+    pal = active()
     state = str(run.get("state") or "unknown")
-    color = _RUN_STATE_COLOR.get(state, "#5f6f7f")
+    color = _run_state_color(state)
     rid = str(run.get("run_id") or "").rsplit("/", 1)[-1]
     rid = rid.replace("<", "&lt;").replace(">", "&gt;") or "—"
     return (
         '<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
         f'<span style="display:inline-flex;align-items:center;gap:5px;'
-        f"padding:2px 9px;border-radius:999px;background:{color}1a;color:{color};"
+        f"padding:2px 9px;border-radius:999px;background:{tint(color, 0.10)};"
+        f"color:{color};"
         f'font-family:Manrope,sans-serif;font-size:0.63rem;font-weight:700;min-width:62px">'
         f'<span style="width:6px;height:6px;border-radius:50%;background:{color}"></span>'
         f"{state}</span>"
         f'<span style="flex:1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;'
-        f"font-size:0.66rem;color:#07252a;overflow:hidden;text-overflow:ellipsis;"
+        f"font-size:0.66rem;color:{pal.ink};overflow:hidden;text-overflow:ellipsis;"
         f'white-space:nowrap">{rid}</span>'
-        f'<span style="font-family:Manrope,sans-serif;font-size:0.66rem;color:#5f6f7f;'
+        f'<span style="font-family:Manrope,sans-serif;font-size:0.66rem;color:{pal.idle};'
         f'white-space:nowrap">{_run_age(run)}</span>'
         "</div>"
     )
@@ -275,6 +283,7 @@ def _group_runs(runs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
 
 def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> None:
     """Render one pipeline as a horizontal rail."""
+    pal = active()
     success = prefetched["success"]
     summary_ts = prefetched["summary_ts"]
     stages = prefetched.get("stages") or {}
@@ -284,7 +293,7 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
     with header_cols[0]:
         st.markdown(
             f'<div style="font-family:Manrope,sans-serif;font-weight:800;'
-            f'font-size:0.95rem;color:#07252a;letter-spacing:0.01em">{rail["title"]}</div>',
+            f'font-size:0.95rem;color:{pal.ink};letter-spacing:0.01em">{rail["title"]}</div>',
             unsafe_allow_html=True,
         )
     with header_cols[1]:
@@ -310,7 +319,7 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
         else:
             st.markdown(
                 '<div style="font-family:Manrope,sans-serif;font-size:0.78rem;'
-                'color:#5f6f7f;padding:6px 0">no stage metrics — see runs →</div>',
+                f'color:{pal.idle};padding:6px 0">no stage metrics — see runs →</div>',
                 unsafe_allow_html=True,
             )
     with body_cols[1]:
@@ -327,8 +336,8 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
             'min-width:90px">'
             f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
             "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
-            f'color:#5f6f7f">{label}</span>'
-            f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{display}</strong>'
+            f'color:{pal.idle}">{label}</span>'
+            f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:{pal.ink}">{display}</strong>'
             "</div>"
         )
     st.markdown(
@@ -371,9 +380,10 @@ def _shadow_chip(
 
 
 def _render_prediction_health() -> None:
+    pal = active()
     st.markdown(
         '<div style="font-family:Manrope,sans-serif;font-weight:800;'
-        'font-size:0.95rem;color:#07252a;letter-spacing:0.01em;padding-bottom:8px">'
+        f'font-size:0.95rem;color:{pal.ink};letter-spacing:0.01em;padding-bottom:8px">'
         "Prediction Health</div>",
         unsafe_allow_html=True,
     )
@@ -413,13 +423,13 @@ def _render_prediction_health() -> None:
         fmt_delta(now - last_pred_ts) if last_pred_ts is not None else "unavailable"
     )
     if last_pred_ts is None:
-        fresh_color = "#5f6f7f"
+        fresh_color = pal.idle
     elif (now - last_pred_ts) < 3600:
-        fresh_color = "#0e8a86"
+        fresh_color = pal.ok
     elif (now - last_pred_ts) < 6 * 3600:
-        fresh_color = "#ff7a26"
+        fresh_color = pal.warn
     else:
-        fresh_color = "#c0392b"
+        fresh_color = pal.danger
 
     chips = [
         ("Predictions", f"{int(total_rows)}" if total_rows is not None else "—"),
@@ -452,8 +462,8 @@ def _render_prediction_health() -> None:
         'min-width:100px">'
         f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
         "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
-        f'color:#5f6f7f">{label}</span>'
-        f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:#07252a">{value}</strong>'
+        f'color:{pal.idle}">{label}</span>'
+        f'<strong style="font-family:Newsreader,serif;font-size:1rem;color:{pal.ink}">{value}</strong>'
         "</div>"
         for label, value in chips
     )
@@ -475,26 +485,26 @@ def _render_prediction_health() -> None:
             bars_html.append(
                 f'<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
                 f'<span style="font-family:Manrope,sans-serif;font-size:0.72rem;'
-                f'font-weight:600;min-width:50px;color:#07252a">v{version}</span>'
-                f'<div style="flex:1;height:14px;background:rgba(7,37,42,0.06);'
+                f'font-weight:600;min-width:50px;color:{pal.ink}">v{version}</span>'
+                f'<div style="flex:1;height:14px;background:{tint(pal.ink, 0.06)};'
                 f'border-radius:7px;overflow:hidden">'
-                f'<div style="width:{pct:.0f}%;height:100%;background:#0e8a86;'
+                f'<div style="width:{pct:.0f}%;height:100%;background:{pal.ok};'
                 f'border-radius:7px"></div></div>'
                 f'<span style="font-family:Manrope,sans-serif;font-size:0.68rem;'
-                f'font-weight:700;min-width:40px;text-align:right;color:#07252a">'
+                f'font-weight:700;min-width:40px;text-align:right;color:{pal.ink}">'
                 f"{count}</span></div>"
             )
         if hidden_count:
             bars_html.append(
                 f'<div style="font-family:Manrope,sans-serif;font-size:0.68rem;'
-                f'color:#5f6f7f;padding:3px 0">+{hidden_count} more versions · '
+                f'color:{pal.idle};padding:3px 0">+{hidden_count} more versions · '
                 f"{hidden_total} predictions</div>"
             )
         st.markdown(
             '<div style="padding:4px 0">'
             '<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
             "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
-            'color:#5f6f7f">predictions per model version</span>'
+            f'color:{pal.idle}">predictions per model version</span>'
             + "".join(bars_html)
             + "</div>",
             unsafe_allow_html=True,
@@ -502,9 +512,10 @@ def _render_prediction_health() -> None:
 
 
 def _render_drift_breakdown() -> None:
+    pal = active()
     st.markdown(
         '<div style="font-family:Manrope,sans-serif;font-weight:800;'
-        'font-size:0.95rem;color:#07252a;letter-spacing:0.01em;padding-bottom:8px">'
+        f'font-size:0.95rem;color:{pal.ink};letter-spacing:0.01em;padding-bottom:8px">'
         "Data Drift Breakdown</div>",
         unsafe_allow_html=True,
     )
@@ -537,17 +548,17 @@ def _render_drift_breakdown() -> None:
             name = entry["labels"].get("dataset_name", "?")
             score = entry["value"]
             if score < 0.3:
-                bar_color = "#0e8a86"
+                bar_color = pal.ok
             elif score < 0.7:
-                bar_color = "#ff7a26"
+                bar_color = pal.warn
             else:
-                bar_color = "#c0392b"
+                bar_color = pal.danger
             pct = min(score * 100, 100)
             bars_html.append(
                 f'<div style="display:flex;align-items:center;gap:8px;padding:3px 0">'
                 f'<span style="font-family:Manrope,sans-serif;font-size:0.72rem;'
-                f'font-weight:600;min-width:110px;color:#07252a">{name}</span>'
-                f'<div style="flex:1;height:14px;background:rgba(7,37,42,0.06);'
+                f'font-weight:600;min-width:110px;color:{pal.ink}">{name}</span>'
+                f'<div style="flex:1;height:14px;background:{tint(pal.ink, 0.06)};'
                 f'border-radius:7px;overflow:hidden">'
                 f'<div style="width:{pct:.0f}%;height:100%;background:{bar_color};'
                 f'border-radius:7px"></div></div>'
@@ -571,14 +582,14 @@ def _render_drift_breakdown() -> None:
                 chips_html.append(
                     f'<span style="display:inline-block;padding:3px 10px;'
                     f"margin:2px 4px 2px 0;border-radius:12px;font-family:Manrope,sans-serif;"
-                    f"font-size:0.68rem;font-weight:600;background:rgba(192,57,43,0.08);"
-                    f'color:#c0392b">{col_name} ({count})</span>'
+                    f"font-size:0.68rem;font-weight:600;background:{tint(pal.danger, 0.08)};"
+                    f'color:{pal.danger}">{col_name} ({count})</span>'
                 )
             st.markdown(
                 '<div style="padding:4px 0">'
                 '<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
                 "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
-                'color:#5f6f7f">drifted features</span><br/>'
+                f'color:{pal.idle}">drifted features</span><br/>'
                 + "".join(chips_html)
                 + "</div>",
                 unsafe_allow_html=True,
@@ -586,7 +597,7 @@ def _render_drift_breakdown() -> None:
         else:
             st.markdown(
                 '<div style="font-family:Manrope,sans-serif;font-size:0.78rem;'
-                'color:#0e8a86;padding:4px 0">✓ No drifted features detected</div>',
+                f'color:{pal.ok};padding:4px 0">✓ No drifted features detected</div>',
                 unsafe_allow_html=True,
             )
 
