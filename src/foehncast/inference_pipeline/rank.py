@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pandas as pd
+
 from foehncast.config import get_inference_config, get_spots
+from foehncast.solar import is_daylight
 from foehncast.spots.distance import get_drive_minutes_to_spot
 
 _RIDEABLE_QUALITY_THRESHOLD = 2.0
@@ -46,6 +49,24 @@ def _normalize(values: list[float]) -> list[float]:
     return [(value - min_value) / (max_value - min_value) for value in values]
 
 
+def _daylight_hours(
+    spot: dict[str, Any], forecast: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Forecast hours the sun is up for, since nobody rides in the dark.
+
+    Ranking on every hour lets a spot lead on a peak nobody can use, which then
+    reads as a recommendation with no rideable time in it.
+    """
+    if not forecast:
+        return forecast
+
+    times = pd.DatetimeIndex([pd.Timestamp(hour["time"]) for hour in forecast])
+    if times.tz is None:
+        times = times.tz_localize("UTC")
+    flags = is_daylight(float(spot["lat"]), float(spot["lon"]), times).to_numpy()
+    return [hour for hour, lit in zip(forecast, flags, strict=False) if lit]
+
+
 def _session_hours(forecast: list[dict[str, Any]]) -> float:
     return float(
         sum(
@@ -66,7 +87,7 @@ def rank_spots(
 
     for prediction in predictions.get("predictions", []):
         spot = spots_by_id[prediction["spot_id"]]
-        forecast = prediction.get("forecast", [])
+        forecast = _daylight_hours(spot, prediction.get("forecast", []))
         quality_index = max(
             (float(hour["quality_index"]) for hour in forecast),
             default=0.0,

@@ -72,25 +72,25 @@ def test_rank_spots_orders_by_weighted_score(monkeypatch: pytest.MonkeyPatch) ->
                 "spot_id": "near-strong",
                 "spot_name": "Near Strong",
                 "forecast": [
-                    {"time": "2025-01-01T00:00:00", "quality_index": 3.8},
-                    {"time": "2025-01-01T01:00:00", "quality_index": 3.4},
-                    {"time": "2025-01-01T02:00:00", "quality_index": 2.8},
-                    {"time": "2025-01-01T03:00:00", "quality_index": 2.4},
+                    {"time": "2025-01-01T09:00:00", "quality_index": 3.8},
+                    {"time": "2025-01-01T10:00:00", "quality_index": 3.4},
+                    {"time": "2025-01-01T11:00:00", "quality_index": 2.8},
+                    {"time": "2025-01-01T12:00:00", "quality_index": 2.4},
                 ],
             },
             {
                 "spot_id": "far-peak",
                 "spot_name": "Far Peak",
                 "forecast": [
-                    {"time": "2025-01-01T00:00:00", "quality_index": 4.0},
-                    {"time": "2025-01-01T01:00:00", "quality_index": 2.3},
+                    {"time": "2025-01-01T09:00:00", "quality_index": 4.0},
+                    {"time": "2025-01-01T10:00:00", "quality_index": 2.3},
                 ],
             },
             {
                 "spot_id": "weak-local",
                 "spot_name": "Weak Local",
                 "forecast": [
-                    {"time": "2025-01-01T00:00:00", "quality_index": 1.4},
+                    {"time": "2025-01-01T09:00:00", "quality_index": 1.4},
                 ],
             },
         ]
@@ -205,7 +205,7 @@ def test_rank_spots_tolerates_missing_spot_name(
             "predictions": [
                 {
                     "spot_id": "silvaplana",
-                    "forecast": [{"time": "2025-01-01T00:00:00", "quality_index": 3.0}],
+                    "forecast": [{"time": "2025-01-01T09:00:00", "quality_index": 3.0}],
                 }
             ]
         },
@@ -214,3 +214,46 @@ def test_rank_spots_tolerates_missing_spot_name(
 
     assert len(ranked_spots) == 1
     assert ranked_spots[0].spot_name == "Silvaplana"
+
+
+def test_rank_spots_ignores_hours_after_dark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A peak nobody can ride must not carry a spot up the ranking."""
+    predictions = {
+        "predictions": [
+            {
+                "spot_id": "night-peak",
+                "spot_name": "Night Peak",
+                "forecast": [
+                    {"time": "2025-01-01T09:00:00", "quality_index": 1.0},
+                    # Midnight at the equator: dark, so this must not count.
+                    {"time": "2025-01-01T00:00:00", "quality_index": 4.8},
+                ],
+            },
+        ]
+    }
+    spots = [{"id": "night-peak", "name": "Night Peak", "lat": 0.0, "lon": 0.0}]
+
+    monkeypatch.setattr(
+        rank,
+        "get_inference_config",
+        lambda: {
+            "ranking_weights": {
+                "quality_index": 0.6,
+                "ride_drive_ratio": 0.3,
+                "duration_forecast": 0.1,
+            }
+        },
+    )
+    monkeypatch.setattr(rank, "get_spots", lambda: spots)
+    monkeypatch.setattr(
+        rank, "get_drive_minutes_to_spot", lambda spot, rider_config: 30.0
+    )
+
+    ranked_spots = rank.rank_spots(
+        predictions, rider_config={"home_lat": 47.02, "home_lon": 8.65}
+    )
+
+    assert ranked_spots[0].quality_index == 1.0
+    assert ranked_spots[0].session_hours == 0.0
