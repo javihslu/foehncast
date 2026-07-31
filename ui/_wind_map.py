@@ -16,14 +16,14 @@ from foehncast.solar import is_daylight
 from _dial_tokens import (
     HALO,
     INK as _INK,
-    LIGHT_WIND as _COLOR_LIGHT,
-    NEAR as _COLOR_NEAR,
     NIGHT as _COLOR_NIGHT,
+    READING as _COLOR_READING,
     RIDEABLE as _COLOR_RIDEABLE,
     WEDGE_FILL_ALPHA,
     WEDGE_OUTLINE_ALPHA,
     rgb_to_hex as _rgb_to_hex,
 )
+from _hammock import hammock_data_uri
 
 _KN_TO_KMH = 1.852
 _FORECAST_HOURS = 48
@@ -94,17 +94,30 @@ def _arc(
     ]
 
 
+def ideal_band_kn() -> tuple[float, float]:
+    """The spot's ideal speed range, drawn as the radial extent of the wedge."""
+    band = get_labeling_config()["bands"]["perfect_storm"]
+    return float(band["min_kts"]), float(band["max_kts"])
+
+
 def _status(
     speed_kn: float, min_kts: float, is_day: bool = True
 ) -> tuple[list[int], str]:
-    """Needle color and label. Darkness outranks wind: no session happens at 02:00."""
+    """Reading-dot color and its wording.
+
+    The dot's position against the ideal band already answers "is it windy
+    enough", so strength does not need a hue of its own and every daylight
+    reading takes the same orange. Darkness is the one fact position cannot
+    carry -- 20 kn at 02:00 plots exactly like 20 kn at noon -- so night is the
+    only thing that recolors the dot.
+    """
     if not is_day:
         return _COLOR_NIGHT, "Night, not rideable"
     if speed_kn >= min_kts:
-        return _COLOR_RIDEABLE, "Rideable"
+        return _COLOR_READING, "Rideable"
     if speed_kn >= 0.7 * min_kts:
-        return _COLOR_NEAR, "Almost"
-    return _COLOR_LIGHT, "Too light"
+        return _COLOR_READING, "Almost"
+    return _COLOR_READING, "Too light"
 
 
 def _dial_base_records(
@@ -150,10 +163,15 @@ def _dial_base_records(
     }
 
 
-def _needle_records(
+def _reading_records(
     spot: dict[str, Any], row: pd.Series, min_kts: float, is_day: bool = True
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Anchor plus needle and gust-tick segments for one spot at one hour."""
+    """Anchor (carrying the reading dot) plus the gust tick, for one spot-hour.
+
+    The dot sits at the exact forecast point in polar terms: downwind bearing,
+    radius earned by speed. No shaft is drawn -- an arrow says the same thing
+    twice and its head crowds the neighbouring dial at this zoom.
+    """
     speed_kn = float(row["wind_speed_10m"]) / _KN_TO_KMH
     gusts_kn = float(row["wind_gusts_10m"]) / _KN_TO_KMH
     direction = float(row["wind_direction_10m"])
@@ -161,34 +179,29 @@ def _needle_records(
 
     lat, lon = float(spot["lat"]), float(spot["lon"])
     flow = (direction + 180.0) % 360.0
-    shaft_km = _dial_radius_km(speed_kn)
-    tip = _destination(lat, lon, flow, shaft_km)
-    head_km = max(shaft_km * 0.22, 0.9)
+    dot = _destination(lat, lon, flow, _dial_radius_km(speed_kn))
 
-    def _segment(start: list[float], end: list[float], width: float) -> dict[str, Any]:
-        return {
+    # Gust tick: same bearing, gust radius. The gap from the dot is gustiness.
+    gust_r = _dial_radius_km(gusts_kn)
+    start = _destination(lat, lon, flow - 6.0, gust_r)
+    end = _destination(lat, lon, flow + 6.0, gust_r)
+    segments = [
+        {
             "from_lon": start[0],
             "from_lat": start[1],
             "to_lon": end[0],
             "to_lat": end[1],
             "color": color,
-            "width": width,
+            "width": 2.0,
         }
-
-    segments = [
-        _segment([lon, lat], tip, 3.0),
-        _segment(tip, _destination(tip[1], tip[0], (flow + 152) % 360, head_km), 3.0),
-        _segment(tip, _destination(tip[1], tip[0], (flow - 152) % 360, head_km), 3.0),
-        _segment(
-            _destination(lat, lon, flow - 6.0, _dial_radius_km(gusts_kn)),
-            _destination(lat, lon, flow + 6.0, _dial_radius_km(gusts_kn)),
-            2.0,
-        ),
     ]
     label_pt = _destination(lat, lon, 180.0, _DIAL_RADIUS_KM * 1.32)
     anchor = {
         "lat": lat,
         "lon": lon,
+        "dot_lon": dot[0],
+        "dot_lat": dot[1],
+        "color": color,
         "label_lon": label_pt[0],
         "label_lat": label_pt[1],
         "speed_label": f"{speed_kn:.0f} kn",
@@ -226,7 +239,7 @@ def _hourly_map_records(
         for (ts, row), is_day in zip(frame.iterrows(), lit, strict=True):
             key = _to_utc(ts).isoformat()
             bucket = out.setdefault(key, {"anchors": [], "segments": []})
-            anchor, segments = _needle_records(spot, row, min_kts, bool(is_day))
+            anchor, segments = _reading_records(spot, row, min_kts, bool(is_day))
             bucket["anchors"].append(anchor)
             bucket["segments"].extend(segments)
     return out
@@ -324,21 +337,30 @@ def _render_map_fragment(
 
     spots_cfg = {s["id"]: s for s in get_spots()}
     storm_band = get_labeling_config()["bands"]["perfect_storm"]
-    base = _dial_base_records(
-        [spots_cfg[sid] for sid in spot_ids],
-        (float(storm_band["min_kts"]), float(storm_band["max_kts"])),
-    )
+    base = _dial_base_records([spots_cfg[sid] for sid in spot_ids], ideal_band_kn())
     hourly = _hourly_map_records(tuple(spot_ids), min_kts)
     records = _lookup_hourly_records(hourly, hour)
     anchors, segments = records["anchors"], records["segments"]
 
     rider = get_rider_config()
+    home_lat, home_lon = float(rider["home_lat"]), float(rider["home_lon"])
+    # Label sits south of the pin: at this zoom a centred label lands on the
+    # hammock and on whatever town name the basemap already put there.
+    home_label = _destination(home_lat, home_lon, 180.0, 9.0)
     home = [
         {
-            "lat": float(rider["home_lat"]),
-            "lon": float(rider["home_lon"]),
+            "lat": home_lat,
+            "lon": home_lon,
             "name": "Rider home",
             "tooltip": "Rider home",
+            "label_lon": home_label[0],
+            "label_lat": home_label[1],
+            "icon": {
+                "url": hammock_data_uri(),
+                "width": 48,
+                "height": 48,
+                "anchorY": 24,
+            },
         }
     ]
 
@@ -408,41 +430,73 @@ def _render_map_fragment(
         )
         for data in (halo, segments)
     ]
+    # Dial origin: recessive now that it is only the zero point of the scale.
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
             data=anchors,
             get_position="[lon, lat]",
-            get_fill_color=[*_INK, 235],
-            get_radius=1200,
+            get_fill_color=[*_INK, 150],
+            get_radius=700,
             pickable=True,
-            stroked=True,
-            get_line_color=[252, 252, 251, 255],
-            line_width_min_pixels=1,
+            stroked=False,
+        )
+    )
+    # The reading: one dot at the exact (direction, speed) point, over a light
+    # casing so it stays legible where it lands on the teal band or a ring.
+    layers.append(
+        pdk.Layer(
+            "ScatterplotLayer",
+            data=anchors,
+            get_position="[dot_lon, dot_lat]",
+            get_fill_color=[*HALO, 230],
+            get_radius=2100,
         )
     )
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
-            data=home,
-            get_position="[lon, lat]",
-            get_fill_color=[255, 122, 38, 240],
-            get_radius=2200,
+            data=anchors,
+            get_position="[dot_lon, dot_lat]",
+            get_fill_color="color",
+            get_radius=1500,
             pickable=True,
             stroked=True,
-            get_line_color=[*_INK, 255],
+            get_line_color=[*_INK, 120],
             line_width_min_pixels=1,
         )
     )
     layers.append(
         pdk.Layer(
+            "IconLayer",
+            data=home,
+            get_position="[lon, lat]",
+            get_icon="icon",
+            get_size=46,
+            size_units="'pixels'",
+            pickable=True,
+        )
+    )
+    layers.append(
+        pdk.Layer(
             "TextLayer",
-            data=base["names"] + home,
+            data=base["names"],
             get_position="[lon, lat]",
             get_text="name",
             get_size=14,
             get_color=[*_INK, 255],
             get_alignment_baseline="'bottom'",
+        )
+    )
+    layers.append(
+        pdk.Layer(
+            "TextLayer",
+            data=home,
+            get_position="[label_lon, label_lat]",
+            get_text="name",
+            get_size=14,
+            get_color=[*_INK, 255],
+            get_alignment_baseline="'top'",
         )
     )
     layers.append(
@@ -493,13 +547,14 @@ def _render_map_fragment(
     )
     st.markdown(
         '<p style="color:#07252a;font-size:0.85rem;margin-top:0.2rem">'
-        "Rings mark 10/20/30 kn; the teal wedge is the spot's ideal window "
-        "(direction &plusmn;45&deg;, "
-        f"{storm_band['min_kts']:.0f}&ndash;{storm_band['max_kts']:.0f} kn). "
-        "Needles point downwind, length is speed, the short tick marks gusts."
-        + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), f"Rideable (&ge; {min_kts:.0f} kn)")
-        + chip.format(_rgb_to_hex(_COLOR_NEAR), "Almost")
-        + chip.format(_rgb_to_hex(_COLOR_LIGHT), "Too light")
+        "Rings mark 10/20/30 kn. The dot is this hour's wind: bearing is the "
+        "direction it blows toward, distance from the centre is its speed, and "
+        "the short tick beyond it marks gusts. A dot inside the teal band is a "
+        "session &mdash; that band is the spot's ideal window (direction "
+        f"&plusmn;45&deg;, {storm_band['min_kts']:.0f}&ndash;"
+        f"{storm_band['max_kts']:.0f} kn)."
+        + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), "Ideal window")
+        + chip.format(_rgb_to_hex(_COLOR_READING), "This hour's wind")
         + chip.format(_rgb_to_hex(_COLOR_NIGHT), "Night (sun down)")
         + "</p>",
         unsafe_allow_html=True,

@@ -10,17 +10,22 @@ from __future__ import annotations
 # Ink for chrome outlines and text.
 INK = [7, 37, 42]
 
-# Status colors, shared by the needle and the legend chips.
+# The ideal window: teal wash plus edge, drawn as a band between the ideal
+# direction range and the ideal speed range. This is the target, not a reading.
 RIDEABLE = [10, 163, 146]
-NEAR = [255, 122, 38]
-# "Too light" wind: a dark slate that clears 3:1 on the light Carto Positron
-# basemap (assumed land tone ~#e8e6e0), replacing the old pale grey that
-# vanished on the muted map.
-LIGHT_WIND = [78, 92, 104]
-# Sun below the horizon. Wind speed is still real at 02:00, so the needle is
-# still drawn, but calling it "Rideable" claims a session nobody can have.
-# Validated against the other three status colors on the basemap tone: worst
-# adjacent pair is dE 12.3 (deutan), 16.2 (normal vision).
+
+# The reading: one dot at the exact (direction, speed) the forecast gives.
+# Orange because it is the complement of the teal target, so the dot never
+# disappears into the band it is being compared against. Rideability is read
+# from WHERE the dot lands, not from its hue, so this one color serves every
+# wind strength. Freed for this use by moving the rider home to a hammock icon.
+READING = [255, 122, 38]
+
+# Sun below the horizon. Wind speed is still real at 02:00, so the dot is still
+# placed, but calling it a session claims one nobody can have. Darkness is the
+# single fact the dot's position cannot carry, so it is the one thing that
+# recolors the dot. Validated against the reading orange and the teal band on
+# the basemap tone: worst adjacent pair is dE 12.3 (deutan), 16.2 (normal).
 NIGHT = [131, 84, 184]
 
 # Light warm-grey casing drawn under needles, rings, and ticks so a mark stays

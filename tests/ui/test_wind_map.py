@@ -67,19 +67,22 @@ def test_compass_maps_degrees_to_cardinal_labels() -> None:
 def test_status_thresholds_speed_against_minimum() -> None:
     min_kts = 15.0
 
-    assert wm._status(20.0, min_kts) == (wm._COLOR_RIDEABLE, "Rideable")
-    assert wm._status(15.0, min_kts) == (wm._COLOR_RIDEABLE, "Rideable")
-    assert wm._status(11.0, min_kts) == (wm._COLOR_NEAR, "Almost")  # >= 0.7 * min_kts
-    assert wm._status(5.0, min_kts) == (wm._COLOR_LIGHT, "Too light")
+    # Wording still grades the wind; the dot's hue does not, because its
+    # position against the ideal band already carries strength.
+    assert wm._status(20.0, min_kts) == (wm._COLOR_READING, "Rideable")
+    assert wm._status(15.0, min_kts) == (wm._COLOR_READING, "Rideable")
+    assert wm._status(11.0, min_kts) == (wm._COLOR_READING, "Almost")  # >= 0.7 * min
+    assert wm._status(5.0, min_kts) == (wm._COLOR_READING, "Too light")
 
 
 def test_status_never_calls_a_dark_hour_rideable() -> None:
-    # Wind at 02:00 is real and still gets a needle, but it is not a session:
-    # darkness outranks every speed threshold.
+    # Wind at 02:00 is real and still gets a dot, but it is not a session:
+    # darkness outranks every speed threshold, and it is the one fact the
+    # dot's position cannot show, so it is what recolors the dot.
     color, label = wm._status(40.0, 15.0, is_day=False)
     assert color == wm._COLOR_NIGHT
     assert label == "Night, not rideable"
-    assert color != wm._COLOR_RIDEABLE
+    assert color != wm._COLOR_READING
 
 
 def test_to_utc_localizes_naive_and_converts_aware() -> None:
@@ -95,18 +98,21 @@ def test_to_utc_localizes_naive_and_converts_aware() -> None:
     assert converted.hour == 9
 
 
-def test_needle_records_returns_anchor_and_four_segments() -> None:
+def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
     spot = {"name": "Silvaplana", "lat": 46.45, "lon": 9.79}
     row = pd.Series(
         {"wind_speed_10m": 40.0, "wind_gusts_10m": 55.0, "wind_direction_10m": 200.0}
     )
     min_kts = 15.0
 
-    anchor, segments = wm._needle_records(spot, row, min_kts)
+    anchor, segments = wm._reading_records(spot, row, min_kts)
 
     assert set(anchor) == {
         "lat",
         "lon",
+        "dot_lon",
+        "dot_lat",
+        "color",
         "label_lon",
         "label_lat",
         "speed_label",
@@ -115,33 +121,29 @@ def test_needle_records_returns_anchor_and_four_segments() -> None:
     assert anchor["lat"] == spot["lat"]
     assert anchor["lon"] == spot["lon"]
 
-    assert len(segments) == 4
-    for seg in segments:
-        assert set(seg) == {
-            "from_lon",
-            "from_lat",
-            "to_lon",
-            "to_lat",
-            "color",
-            "width",
-        }
-
-    # The needle shaft starts at the spot itself and points along the
-    # downwind bearing (direction + 180, always in [0, 360) by construction).
-    shaft = segments[0]
-    assert shaft["from_lon"] == spot["lon"]
-    assert shaft["from_lat"] == spot["lat"]
+    # The dot sits on the downwind bearing (direction + 180, in [0, 360) by
+    # construction) at the radius its speed earns -- no shaft is drawn.
     speed_kn = 40.0 / wm._KN_TO_KMH
     flow = (200.0 + 180.0) % 360.0
     assert 0.0 <= flow < 360.0
-    expected_tip = wm._destination(
+    expected = wm._destination(
         spot["lat"], spot["lon"], flow, wm._dial_radius_km(speed_kn)
     )
-    assert shaft["to_lon"] == pytest.approx(expected_tip[0])
-    assert shaft["to_lat"] == pytest.approx(expected_tip[1])
+    assert anchor["dot_lon"] == pytest.approx(expected[0])
+    assert anchor["dot_lat"] == pytest.approx(expected[1])
+    assert anchor["color"] == wm._COLOR_READING
 
-    # 40 km/h (~22 kn) clears a 15 kn minimum -> rideable status color.
-    assert shaft["color"] == wm._COLOR_RIDEABLE
+    # Only the gust tick remains a drawn segment.
+    assert len(segments) == 1
+    assert set(segments[0]) == {
+        "from_lon",
+        "from_lat",
+        "to_lon",
+        "to_lat",
+        "color",
+        "width",
+    }
+
     assert anchor["speed_label"] == f"{speed_kn:.0f} kn"
     assert "from S" in anchor["tooltip"]
     assert anchor["tooltip"].endswith("Rideable")

@@ -1,8 +1,9 @@
-"""Compact SVG wind dial for the heatmap detail panel.
+"""Compact SVG wind dial for the heatmap tooltip and detail panel.
 
-Mirrors the regional map dial (ui/_wind_map.py): shared status colors and wedge
-alphas from _dial_tokens, ideal wedge from the shore orientation, a downwind
-needle scaled to the same 30 kn cap, a gust tick. Pure string builder.
+Mirrors the regional map dial (ui/_wind_map.py): shared colors from
+_dial_tokens, the ideal window drawn as a band spanning both the direction
+range and the speed range, and one dot at the exact reading. Pure string
+builder.
 """
 
 from __future__ import annotations
@@ -21,12 +22,12 @@ from _wind_map import (
     _DIAL_MAX_KN as _MAX_KN,
     _IDEAL_HALF_ANGLE_DEG as _HALF_ANGLE_DEG,
     _status,
+    ideal_band_kn,
 )
 
 _SIZE = 160.0
 _CX = _CY = _SIZE / 2.0
 _R = 62.0  # outer ring == _MAX_KN on the speed scale, leaving room for ticks
-_MIN_NEEDLE_FRAC = 0.16  # needle floor so a light wind still shows a stub
 
 
 def _pt(r: float, bearing_deg: float) -> tuple[float, float]:
@@ -35,24 +36,23 @@ def _pt(r: float, bearing_deg: float) -> tuple[float, float]:
     return (_CX + r * math.sin(a), _CY - r * math.cos(a))
 
 
-def _offset(x: float, y: float, bearing_deg: float, dist: float) -> tuple[float, float]:
-    a = math.radians(bearing_deg)
-    return (x + dist * math.sin(a), y - dist * math.cos(a))
+def _radius(speed_kn: float) -> float:
+    """Speed on the shared 30 kn scale, in SVG units."""
+    return _R * min(max(speed_kn, 0.0), _MAX_KN) / _MAX_KN
 
 
-def _needle_len(speed_kn: float) -> float:
-    # Speed on the 30 kn scale in SVG units, floored so a light wind still shows.
-    frac = min(max(speed_kn, 0.0), _MAX_KN) / _MAX_KN
-    return max(_R * frac, _R * _MIN_NEEDLE_FRAC)
-
-
-def _sector(r: float, a0: float, a1: float) -> str:
-    x0, y0 = _pt(r, a0)
-    x1, y1 = _pt(r, a1)
+def _band(r_in: float, r_out: float, a0: float, a1: float) -> str:
+    """Annulus sector: the ideal window is a direction range AND a speed range."""
+    x0, y0 = _pt(r_out, a0)
+    x1, y1 = _pt(r_out, a1)
+    x2, y2 = _pt(r_in, a1)
+    x3, y3 = _pt(r_in, a0)
     large = 1 if (a1 - a0) % 360 > 180 else 0
     return (
-        f"M {_CX:.2f} {_CY:.2f} L {x0:.2f} {y0:.2f} "
-        f"A {r:.2f} {r:.2f} 0 {large} 1 {x1:.2f} {y1:.2f} Z"
+        f"M {x0:.2f} {y0:.2f} "
+        f"A {r_out:.2f} {r_out:.2f} 0 {large} 1 {x1:.2f} {y1:.2f} "
+        f"L {x2:.2f} {y2:.2f} "
+        f"A {r_in:.2f} {r_in:.2f} 0 {large} 0 {x3:.2f} {y3:.2f} Z"
     )
 
 
@@ -65,18 +65,23 @@ def wind_dial_svg(
     min_kts: float,
     size_px: int = 160,
     detail: str = "full",
+    is_day: bool = True,
+    band_kn: tuple[float, float] | None = None,
 ) -> str:
     """Return an inline SVG dial for one spot at one hour.
 
-    direction_deg is where the wind comes from; the needle is drawn downwind.
-    detail="compact" drops the tick marks, cardinal label, and all but one
-    reference ring so the dial is small enough to embed per heatmap cell.
+    direction_deg is where the wind comes from; the reading dot is placed
+    downwind, at the radius its speed earns. Whether the dot sits inside the
+    teal band is the rideability answer. detail="compact" drops the ticks,
+    cardinal label, and all but one reference ring so the dial fits in a
+    heatmap tooltip.
     """
     compact = detail == "compact"
+    band = ideal_band_kn() if band_kn is None else band_kn
     flow = (direction_deg + 180.0) % 360.0
     ideal_center = (shore_orientation_deg + 180.0) % 360.0
-    color, status_label = _status(speed_kn, min_kts)
-    needle_hex = rgb_to_hex(color)
+    color, status_label = _status(speed_kn, min_kts, is_day)
+    dot_hex = rgb_to_hex(color)
     ink, halo, teal = rgb_to_hex(INK), rgb_to_hex(HALO), rgb_to_hex(RIDEABLE)
 
     # Light casing lifts the outer ring off the panel. Full detail marks
@@ -92,7 +97,7 @@ def wind_dial_svg(
         for k in ring_ks
     )
     wedge = (
-        f'<path d="{_sector(_R, ideal_center - _HALF_ANGLE_DEG, ideal_center + _HALF_ANGLE_DEG)}" '
+        f'<path d="{_band(_radius(band[0]), _radius(band[1]), ideal_center - _HALF_ANGLE_DEG, ideal_center + _HALF_ANGLE_DEG)}" '
         f'fill="{teal}" fill-opacity="{WEDGE_FILL_ALPHA / 255:.3f}" '
         f'stroke="{teal}" stroke-opacity="{WEDGE_OUTLINE_ALPHA / 255:.3f}" '
         f'stroke-width="1.5" stroke-linejoin="round" data-role="wedge"/>'
@@ -113,41 +118,27 @@ def wind_dial_svg(
             f'font-size="11" font-weight="700" fill="{ink}">N</text>'
         )
 
-    # Gust tick: a short cross-arc at the gust radius, in the needle's status hue.
-    gr = min(max(gust_kn, 0.0), _MAX_KN) / _MAX_KN * _R
+    # Gust tick: a short cross-arc at the gust radius, on the same bearing, so
+    # the gap between dot and tick reads as gustiness.
+    gr = _radius(gust_kn)
     gx0, gy0 = _pt(gr, flow - 7.0)
     gx1, gy1 = _pt(gr, flow + 7.0)
     gust = (
         f'<line x1="{gx0:.2f}" y1="{gy0:.2f}" x2="{gx1:.2f}" y2="{gy1:.2f}" '
-        f'stroke="{needle_hex}" stroke-width="2" stroke-linecap="round" '
-        f'data-role="gust"/>'
+        f'stroke="{dot_hex}" stroke-opacity="0.75" stroke-width="2" '
+        f'stroke-linecap="round" data-role="gust"/>'
     )
 
-    # Needle: surface-tone halo casing under a status-colored shaft, arrowhead,
-    # and an ink hub, so it reads over the wedge and rings. Compact drops the
-    # halo underlay (fewer rings beneath it to fight through).
-    length = _needle_len(speed_kn)
-    tipx, tipy = _pt(length, flow)
-    head = min(max(0.25 * length, 6.0), 10.0)
-    hx1, hy1 = _offset(tipx, tipy, flow + 150.0, head)
-    hx2, hy2 = _offset(tipx, tipy, flow - 150.0, head)
-    needle_halo = (
-        ""
-        if compact
-        else (
-            f'<line x1="{_CX}" y1="{_CY}" x2="{tipx:.2f}" y2="{tipy:.2f}" '
-            f'stroke="{halo}" stroke-opacity="0.85" stroke-width="5" '
-            f'stroke-linecap="round" data-role="needle-halo"/>'
-        )
-    )
-    needle = (
-        f"{needle_halo}"
-        f'<line x1="{_CX}" y1="{_CY}" x2="{tipx:.2f}" y2="{tipy:.2f}" '
-        f'stroke="{needle_hex}" stroke-width="3" stroke-linecap="round" '
-        f'data-role="needle"/>'
-        f'<path d="M {tipx:.2f} {tipy:.2f} L {hx1:.2f} {hy1:.2f} '
-        f'L {hx2:.2f} {hy2:.2f} Z" fill="{needle_hex}" data-role="needle-head"/>'
-        f'<circle cx="{_CX}" cy="{_CY}" r="3" fill="{ink}"/>'
+    # The reading: one dot at (downwind bearing, speed radius), over a surface
+    # casing so it stays legible where it crosses the band or a ring.
+    dx, dy = _pt(_radius(speed_kn), flow)
+    dot_r = 4.5 if compact else 6.0
+    dot = (
+        f'<circle cx="{_CX}" cy="{_CY}" r="2" fill="{ink}" fill-opacity="0.55"/>'
+        f'<circle cx="{dx:.2f}" cy="{dy:.2f}" r="{dot_r + 1.6:.2f}" '
+        f'fill="{halo}" fill-opacity="0.9"/>'
+        f'<circle cx="{dx:.2f}" cy="{dy:.2f}" r="{dot_r:.2f}" fill="{dot_hex}" '
+        f'stroke="{ink}" stroke-opacity="0.35" stroke-width="1" data-role="reading"/>'
     )
 
     return (
@@ -155,5 +146,5 @@ def wind_dial_svg(
         f'height="{size_px}" xmlns="http://www.w3.org/2000/svg" role="img" '
         f'aria-label="Wind dial: {speed_kn:.0f} kn, {status_label.lower()}" '
         f'style="display:block;margin:0 auto">'
-        f"{casing}{rings}{wedge}{ticks}{label}{gust}{needle}</svg>"
+        f"{casing}{rings}{wedge}{ticks}{label}{gust}{dot}</svg>"
     )

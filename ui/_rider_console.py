@@ -421,6 +421,7 @@ def _compact_dial_uri(
     gust_kmh: float | None,
     shore_deg: float,
     min_kts: float,
+    is_day: bool = True,
 ) -> str:
     """Base64 SVG data URI of the compact wind dial for one cell, or "".
 
@@ -438,6 +439,7 @@ def _compact_dial_uri(
         min_kts=min_kts,
         size_px=_TOOLTIP_DIAL_PX,
         detail="compact",
+        is_day=is_day,
     )
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{b64}"
@@ -558,12 +560,13 @@ def all_spots_quality_grid(
     wind_vals = grid["wind"].to_numpy() if "wind" in grid.columns else [None] * n
     gust_vals = grid["gust"].to_numpy() if "gust" in grid.columns else [None] * n
     grid["dial"] = [
-        _compact_dial_uri(d, w, g, s, min_kts)
-        for d, w, g, s in zip(
+        _compact_dial_uri(d, w, g, s, min_kts, bool(day))
+        for d, w, g, s, day in zip(
             grid["direction"].to_numpy(),
             wind_vals,
             gust_vals,
             shore.to_numpy(),
+            grid["is_day"].to_numpy(),
             strict=True,
         )
     ]
@@ -745,10 +748,15 @@ def _render_selection_row(row: pd.Series, min_kts: float) -> None:
                     gust_kn=(gust or 0.0) / _KN_TO_KMH,
                     shore_orientation_deg=shore,
                     min_kts=min_kts,
+                    is_day=bool(row.get("is_day", True)),
                 ),
                 unsafe_allow_html=True,
             )
-            st.caption("Needle points downwind; length is speed (to 30 kn).")
+            st.caption(
+                "The dot is this hour's wind: bearing is where it blows toward, "
+                "distance from the centre is speed (to 30 kn). Inside the teal "
+                "band is a session."
+            )
         else:
             st.caption("Wind or direction unavailable for this hour — dial hidden.")
     with bubble_col:
