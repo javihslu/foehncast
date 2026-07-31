@@ -343,6 +343,7 @@ if [[ "$resolved_objectstore_console_port" != "$OBJECTSTORE_CONSOLE_PORT" ]]; th
 fi
 
 export OBJECTSTORE_PORT="$resolved_objectstore_port"
+set_env_value STORAGE_S3_ENDPOINT "http://127.0.0.1:${resolved_objectstore_port}"
 export OBJECTSTORE_CONSOLE_PORT="$resolved_objectstore_console_port"
 export STORAGE_S3_BUCKET="${STORAGE_S3_BUCKET:-$OBJECTSTORE_BUCKET}"
 export STORAGE_S3_ENDPOINT="${STORAGE_S3_ENDPOINT:-http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_PORT}}"

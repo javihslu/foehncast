@@ -46,6 +46,8 @@ cd foehncast
 
 The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, the app, and the rider console) and runs a smoke test. No cloud credentials are needed.
 
+The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than the hosted demo, which is trained on a year. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers.
+
 After bootstrap, you get:
 
 | Service | URL |
