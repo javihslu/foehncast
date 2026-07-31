@@ -1,4 +1,4 @@
-"""Rider console: quality timeline, wind chart, spot switcher, ranked grid."""
+"""Rider console: session-quality board, wind chart, spot switcher, ranked grid."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from foehncast.config import (
 )
 from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.inference_pipeline.dashboard import (
-    _RIDEABLE_QUALITY_THRESHOLD,
     quality_bucket,
     quality_label,
 )
@@ -227,7 +226,11 @@ _HEATMAP_ROW_PX = 30
 
 # Compact wind dial embedded per heatmap cell as a base64 data URI; small since
 # it renders inside a hover bubble. Spot-level metric columns the tooltip pulls
-# from ranked_spots, constant per spot but carried on every cell row.
+# from ranked_spots, constant per spot but carried on every cell row -- so each
+# one has to be LABELLED as a spot figure, or an hourly tooltip implies the
+# number describes that hour. "score" is gone from here: it is the spot's
+# ranking number, it cannot vary by hour by construction, and the cell's own
+# hour_quality is what an hourly tooltip should show.
 _TOOLTIP_DIAL_PX = 120
 _SPOT_METRIC_KEYS = (
     "quality_label",
@@ -236,7 +239,6 @@ _SPOT_METRIC_KEYS = (
     "drive_minutes",
     "session_hours",
     "ride_drive_ratio",
-    "score",
 )
 
 
@@ -399,6 +401,58 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
     return combined.sort_values("time")
 
 
+#: How far the predicted quality may sit from the observed one before the hour
+#: counts as a miss. The index runs 0-5, so a whole band is the honest cut.
+_ACCURACY_MISS_THRESHOLD = 1.0
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def all_spots_accuracy(spot_ids: tuple[str, ...], predictions_json: str) -> pd.DataFrame:
+    """Past predicted-vs-observed quality per spot, for the heatmap's row marks.
+
+    Reuses the per-spot timeline the ride-quality panel used to draw, so this
+    introduces no call the console was not already making -- it makes it for
+    every spot rather than only the focused one. Both layers are cached for
+    half an hour, which is what keeps that widening affordable.
+
+    Only hours carrying BOTH a past prediction and an observation survive: an
+    hour with one and not the other says nothing about accuracy.
+    """
+    frames: list[pd.DataFrame] = []
+    for spot_id in spot_ids:
+        timeline = spot_quality_timeline(spot_id, predictions_json)
+        if timeline.empty:
+            continue
+        wide = timeline.pivot_table(
+            index="time", columns="series", values="quality_index", aggfunc="mean"
+        )
+        if not {"Predicted (past)", "Observed"}.issubset(wide.columns):
+            continue
+        pair = wide[["Predicted (past)", "Observed"]].dropna()
+        if pair.empty:
+            continue
+        frames.append(
+            pd.DataFrame(
+                {
+                    "spot_id": spot_id,
+                    "time": pair.index,
+                    "predicted": pair["Predicted (past)"].to_numpy(),
+                    "observed": pair["Observed"].to_numpy(),
+                }
+            )
+        )
+    if not frames:
+        return pd.DataFrame(
+            columns=["spot_id", "time", "predicted", "observed", "delta", "verdict"]
+        )
+    out = pd.concat(frames, ignore_index=True)
+    out["delta"] = (out["predicted"] - out["observed"]).abs()
+    out["verdict"] = out["delta"].map(
+        lambda d: "missed" if d > _ACCURACY_MISS_THRESHOLD else "matched"
+    )
+    return out
+
+
 def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
     """Pre-warm timeline caches for all spots in parallel.
 
@@ -487,6 +541,12 @@ def all_spots_quality_grid(
                 "time": pd.to_datetime([r["time"] for r in forecast_rows], utc=True),
                 "quality": [
                     max(1, quality_bucket(r["quality_index"])) for r in forecast_rows
+                ],
+                # The cell's OWN quality, kept alongside its bucket. The tooltip
+                # used to show the spot-level ranking score here, which is
+                # constant across the row and so could not describe an hour.
+                "hour_quality": [
+                    float(r["quality_index"]) for r in forecast_rows
                 ],
             }
         )
@@ -886,7 +946,8 @@ def render_rider_console(
             tooltip += [
                 alt.Tooltip("direction:N", title="Direction"),
                 alt.Tooltip("quality_label:N", title="Signal"),
-                alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
+                alt.Tooltip("hour_quality:Q", title="Quality this hour", format=".2f"),
+                alt.Tooltip("quality_index:Q", title="Peak quality (spot)", format=".2f"),
                 # Daylight-scoped upstream (dashboard counts rideable & daylight),
                 # so the label says so rather than implying a round-the-clock count.
                 alt.Tooltip(
@@ -895,7 +956,6 @@ def render_rider_console(
                 alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
                 alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
                 alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
-                alt.Tooltip("score:Q", title="Score", format=".3f"),
             ]
 
             st.subheader("All spots — session quality")
@@ -961,8 +1021,118 @@ def render_rider_console(
             # The rule only layers when the hour falls inside the pinned x
             # domain -- outside it, the domain stays fixed and the rule is
             # just skipped rather than stretching the band (R6/J1).
-            map_hour = st.session_state.get("wind_map_hour")
+            # The ride-quality line chart used to carry two things the heatmap
+            # did not: where the record stops being hindcast and starts being
+            # forecast, and how the past predictions compared with what was
+            # actually observed. Both fold onto the rows here.
             heatmap = heatmap_layer
+            if domain_start <= now <= domain_end:
+                boundary = (
+                    alt.Chart(pd.DataFrame({"x": [now]}))
+                    .mark_rule(
+                        color=_pal.ink_secondary,
+                        strokeWidth=1.5,
+                        strokeDash=[5, 3],
+                        clip=True,
+                    )
+                    .encode(x=alt.X("x:T"))
+                )
+                heatmap = heatmap + boundary
+
+            accuracy = all_spots_accuracy(
+                tuple(spot["spot_id"] for spot in ranked_spots),
+                json.dumps(predictions_list, default=str),
+            )
+            if not accuracy.empty:
+                accuracy = accuracy.assign(
+                    spot=accuracy["spot_id"].map(
+                        lambda sid: spot_lookup[sid]["name"]
+                        if sid in spot_lookup
+                        else sid
+                    ),
+                    time=accuracy["time"].dt.tz_convert(display_tz),
+                )
+                # Half a cell right, so a mark sits in its hour rather than on
+                # the boundary between two.
+                accuracy = accuracy.assign(
+                    time=accuracy["time"] + pd.Timedelta(minutes=30)
+                )
+                accuracy = accuracy[
+                    (accuracy["time"] >= domain_start)
+                    & (accuracy["time"] <= domain_end)
+                    & accuracy["spot"].isin(rank_order)
+                ]
+            if not accuracy.empty:
+                # A mark on this board can land on any cell -- a dark quality
+                # step or the pale night fill -- so no single ink survives both.
+                # The casing is the palette's role for exactly that: a halo
+                # underneath, drawn first and slightly thicker.
+                casing = (
+                    alt.Chart(accuracy)
+                    .mark_point(size=80, strokeWidth=5, filled=False, clip=True)
+                    .encode(
+                        x=alt.X("time:T"),
+                        y=alt.Y("spot:N", sort=rank_order),
+                        shape=alt.Shape(
+                            "verdict:N",
+                            scale=alt.Scale(
+                                domain=["matched", "missed"],
+                                range=["circle", "cross"],
+                            ),
+                            legend=None,
+                        ),
+                        color=alt.value(_pal.casing),
+                    )
+                )
+                checks = (
+                    alt.Chart(accuracy)
+                    .mark_point(size=80, strokeWidth=2.2, filled=False, clip=True)
+                    .encode(
+                        x=alt.X("time:T"),
+                        y=alt.Y("spot:N", sort=rank_order),
+                        # Shape as well as colour: a hollow ring for an hour the
+                        # model called right, a filled cross where it missed, so
+                        # the verdict never rests on hue alone.
+                        shape=alt.Shape(
+                            "verdict:N",
+                            scale=alt.Scale(
+                                domain=["matched", "missed"],
+                                range=["circle", "cross"],
+                            ),
+                            legend=None,
+                        ),
+                        color=alt.Color(
+                            "verdict:N",
+                            scale=alt.Scale(
+                                domain=["matched", "missed"],
+                                range=[_pal.ink_secondary, _pal.danger],
+                            ),
+                            legend=None,
+                        ),
+                        opacity=alt.condition(
+                            alt.datum.verdict == "missed",
+                            alt.value(1.0),
+                            alt.value(0.85),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("spot:N", title="Spot"),
+                            alt.Tooltip("time:T", title="Hour", format="%a %H:00"),
+                            alt.Tooltip("predicted:Q", title="Predicted", format=".2f"),
+                            alt.Tooltip("observed:Q", title="Observed", format=".2f"),
+                            alt.Tooltip("delta:Q", title="Off by", format=".2f"),
+                        ],
+                    )
+                )
+                # Layered charts SHARE the colour and shape scales by default,
+                # so "matched"/"missed" would be looked up in the cells' own
+                # band domain ("1".."5", "night"), miss, and paint as undefined
+                # -- marks present in the DOM and invisible on screen. Same trap
+                # the level-1 note above describes. Resolve them independently.
+                heatmap = (heatmap + casing + checks).resolve_scale(
+                    color="independent", shape="independent"
+                )
+
+            map_hour = st.session_state.get("wind_map_hour")
             if map_hour is not None:
                 grid_tz = heat_grid["time"].dt.tz
                 rule_x = (
@@ -978,7 +1148,7 @@ def render_rider_console(
                         )
                         .encode(x="x:T")
                     )
-                    heatmap = heatmap_layer + highlight
+                    heatmap = heatmap + highlight
             heatmap = (
                 heatmap.properties(
                     height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
@@ -1016,140 +1186,17 @@ def render_rider_console(
             with side_col:
                 if selected is None:
                     st.caption("Click a heatmap cell to inspect that spot and hour.")
+                    if not accuracy.empty:
+                        missed = int((accuracy["verdict"] == "missed").sum())
+                        st.caption(
+                            f"Marks left of the dashed line compare past forecasts "
+                            f"with what was observed: a ring means the hour was "
+                            f"called within {_ACCURACY_MISS_THRESHOLD:.0f} quality "
+                            f"band, a cross means it missed "
+                            f"({missed} of {len(accuracy)} hours)."
+                        )
                 else:
                     _render_selection_row(selected, _minimum_rideable_kts())
-
-        # Quality index timeline
-        quality_frame = spot_quality_timeline(
-            focus_spot_id, json.dumps(predictions_list, default=str)
-        )
-        if not quality_frame.empty:
-            quality_frame["time"] = quality_frame["time"].dt.tz_convert(display_tz)
-            quality_frame["is_day"] = is_daylight(
-                spot_lat, spot_lon, pd.DatetimeIndex(quality_frame["time"])
-            ).to_numpy()
-            st.subheader(f"Ride quality — {spot_label(spot_lookup, focus_spot_id)}")
-            q_tz = quality_frame["time"].dt.tz
-            q_now = (
-                pd.Timestamp.now(tz=q_tz)
-                if q_tz is not None
-                else pd.Timestamp.now(tz="UTC")
-            )
-            series_colors = {
-                "Predicted (past)": _pal.series[3],
-                "Observed": _pal.band,
-                "Forecast": _pal.reading,
-            }
-            series_present = [
-                s
-                for s in ["Predicted (past)", "Observed", "Forecast"]
-                if s in quality_frame["series"].unique()
-            ]
-
-            def q_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
-                return (
-                    alt.Chart(data)
-                    .mark_line(
-                        interpolate="monotone",
-                        strokeWidth=1.6 if dim else 2.2,
-                        point=not dim,
-                        opacity=0.3 if dim else 1.0,
-                        clip=True,
-                    )
-                    .encode(
-                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS, scale=x_scale),
-                        y=alt.Y(
-                            "quality_index:Q",
-                            title="Quality index",
-                            scale=alt.Scale(domain=[0, 5]),
-                        ),
-                        color=alt.Color(
-                            "series:N",
-                            scale=alt.Scale(
-                                domain=series_present,
-                                range=[series_colors[s] for s in series_present],
-                            ),
-                            # Same legend on both layers: the shared color scale
-                            # renders it once; None here would suppress it entirely.
-                            legend=alt.Legend(title="Series", orient="top"),
-                        ),
-                        strokeDash=alt.StrokeDash(
-                            "series:N",
-                            scale=alt.Scale(
-                                domain=series_present,
-                                range=[
-                                    [4, 4] if s == "Predicted (past)" else [1, 0]
-                                    for s in series_present
-                                ],
-                            ),
-                            legend=None,
-                        ),
-                    )
-                )
-
-            # Night hours render dimmed underneath; daylight at full strength.
-            q_lines = q_layer(quality_frame, dim=True) + q_layer(
-                quality_frame[quality_frame["is_day"]], dim=False
-            )
-            q_now_rule = (
-                alt.Chart(pd.DataFrame({"x": [q_now]}))
-                .mark_rule(color=_pal.reading, strokeWidth=2, clip=True)
-                .encode(x=alt.X("x:T", scale=x_scale))
-            )
-            q_threshold = (
-                alt.Chart(pd.DataFrame({"y": [_RIDEABLE_QUALITY_THRESHOLD]}))
-                .mark_rule(color=_pal.band, strokeDash=[4, 4], strokeWidth=1.2)
-                .encode(y="y:Q")
-            )
-            q_threshold_label = (
-                alt.Chart(
-                    pd.DataFrame(
-                        {"y": [_RIDEABLE_QUALITY_THRESHOLD], "label": ["Rideable"]}
-                    )
-                )
-                .mark_text(
-                    align="left",
-                    baseline="bottom",
-                    dx=6,
-                    dy=-3,
-                    color=_pal.band,
-                    fontSize=10,
-                )
-                .encode(y="y:Q", text="label:N")
-            )
-            q_night = _night_rect(
-                quality_frame["time"].min(),
-                quality_frame["time"].max(),
-                spot_lat,
-                spot_lon,
-                x_scale,
-            )
-            st.altair_chart(
-                (q_night + q_lines + q_threshold + q_threshold_label + q_now_rule)
-                .properties(height=180, background="transparent")
-                .configure_view(strokeWidth=0, fill=None)
-                .configure_axis(
-                    domainColor=_pal.ink_secondary,
-                    gridColor=_pal.grid,
-                    labelColor=_pal.ink,
-                    titleColor=_pal.ink,
-                    labelFontSize=13,
-                )
-                .configure_legend(
-                    labelColor=_pal.ink,
-                    titleColor=_pal.ink,
-                    labelFont="Manrope",
-                    titleFont="Manrope",
-                    labelFontSize=13,
-                    titleFontSize=12,
-                    labelFontWeight=600,
-                    titleFontWeight=700,
-                    symbolSize=140,
-                    symbolStrokeWidth=3,
-                ),
-                use_container_width=True,
-                theme=None,
-            )
 
         # Wind and gust timeline (the features the model reads)
         st.subheader(f"Wind & gusts — {spot_label(spot_lookup, focus_spot_id)}")

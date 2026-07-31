@@ -75,11 +75,50 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
         json.dumps(ranked),
     )
 
-    new_columns = ("header", "dial", "direction", "quality_label", "score")
+    new_columns = ("header", "dial", "direction", "quality_label", "hour_quality")
     for col in new_columns:
         assert col in grid.columns
     assert grid["dial"].iloc[0].startswith("data:image/svg+xml;base64,")
     assert grid["header"].iloc[0].startswith("Silvaplana - ")
+    # The spot's ranking score is constant across the row, so it cannot
+    # describe an hour and must not ride on the cells.
+    assert "score" not in grid.columns
+
+
+def test_each_cell_carries_its_own_hourly_quality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hourly tooltip figure has to vary by hour, or it is claiming too much."""
+    times = pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h")
+    monkeypatch.setattr(
+        rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame()
+    )
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    hourly_quality = [4.2, 3.1, 1.5]
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": q}
+                for t, q in zip(times, hourly_quality)
+            ],
+        }
+    ]
+    ranked = [{"spot_id": "silvaplana", "quality_label": "Firing", "quality_index": 4.2}]
+
+    grid = rc.all_spots_quality_grid(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps(ranked),
+    )
+
+    assert grid["hour_quality"].tolist() == hourly_quality
+    # The spot-level peak is the same on every cell; the hourly figure must not
+    # be a copy of it, which is exactly what the old "Score" field was.
+    assert grid["quality_index"].nunique() == 1
+    assert grid["hour_quality"].nunique() == 3
 
 
 def test_night_hours_never_render_as_a_quality_level(
