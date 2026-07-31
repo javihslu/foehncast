@@ -73,16 +73,27 @@ _CSS = """
   }
   /* stToolbar must stay displayed: the expand button is inside it, so hiding
      the toolbar hides the only way to reopen a collapsed sidebar. Hide the
-     toolbar's ACTIONS instead -- deploy button and hamburger menu. */
-  div[data-testid="stDecoration"],
-  div[data-testid="stToolbarActions"],
-  div[data-testid="stAppDeployButton"],
-  div[data-testid="stMainMenu"] {
+     toolbar's ACTIONS instead -- deploy button and hamburger menu.
+     Match on the testid alone: stMainMenu is a <span> in Streamlit 1.57, so a
+     div-qualified selector silently missed it and left the menu on screen. */
+  [data-testid="stDecoration"],
+  [data-testid="stToolbarActions"],
+  [data-testid="stAppDeployButton"],
+  [data-testid="stMainMenu"] {
     display: none !important;
   }
+  /* The header and toolbar are flex boxes flattened to zero height, so their
+     children are centred on the top edge and render half above it. Aligning
+     to the start puts them back inside the viewport. */
   div[data-testid="stToolbar"] {
     background: transparent !important;
     pointer-events: none;
+  }
+  header[data-testid="stHeader"],
+  header[data-testid="stHeader"] > div,
+  div[data-testid="stToolbar"],
+  div[data-testid="stToolbar"] > div {
+    align-items: flex-start !important;
   }
 
   [data-testid="stExpandSidebarButton"] {
@@ -93,6 +104,7 @@ _CSS = """
     border-radius: 8px;
     width: 2.3rem;
     height: 2.3rem;
+    margin-top: 0.45rem !important;
   }
   [data-testid="stExpandSidebarButton"] svg,
   [data-testid="stExpandSidebarButton"] span {
@@ -105,7 +117,7 @@ _CSS = """
     padding-top: 0 !important;
   }
 
-  div[data-testid="stTabs"] > div[role="tablist"] {
+  div[data-testid="stTabs"] div[role="tablist"] {
     position: sticky;
     top: 0;
     z-index: 50;
@@ -118,15 +130,15 @@ _CSS = """
     box-shadow: 0 4px 16px rgba(7, 37, 42, 0.08);
     gap: 0.5rem;
   }
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"],
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] p {
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"],
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"] p {
     font-family: 'Manrope', sans-serif !important;
     font-weight: 800 !important;
     font-size: 1.02rem;
     letter-spacing: 0.01em;
     color: var(--ink) !important;
   }
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"] {
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"] {
     padding: 0.5rem 1.3rem;
     border-bottom: none;
     background: var(--panel);
@@ -134,19 +146,19 @@ _CSS = """
     border-radius: 999px;
     transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   }
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"]:hover,
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"]:hover p {
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"]:hover,
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"]:hover p {
     background: rgba(14, 138, 134, 0.12);
     color: var(--ink) !important;
   }
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"][aria-selected="true"],
-  div[data-testid="stTabs"] > div[role="tablist"] button[role="tab"][aria-selected="true"] p {
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"],
+  div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"] p {
     color: #ffffff !important;
     background: var(--accent) !important;
     border-color: var(--accent) !important;
     box-shadow: 0 6px 16px rgba(14, 138, 134, 0.28);
   }
-  div[data-testid="stTabs"] > div[role="tablist"] div[data-baseweb="tab-highlight"] {
+  div[data-testid="stTabs"] div[role="tablist"] div[data-baseweb="tab-highlight"] {
     display: none;
   }
 
