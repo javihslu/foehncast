@@ -1,8 +1,13 @@
 """FoehnCast brand mark: a hammock slung between two palm trees, in pixels.
 
-Drawn on a 28x20 grid of whole cells. Palms rather than peaks because a
+Drawn on a 56x40 grid of whole cells. Palms rather than peaks because a
 silhouette has to be identifiable at 130px in a sidebar, and a fronded crown on
 a leaning trunk is unmistakable where a triangle is just a triangle.
+
+The grid is fine enough that the trunks carry real thickness and the fronds
+curve, so the shapes are generated from a few parameters rather than placed
+cell by cell -- changing the scale again means changing the numbers at the top,
+not re-authoring every table.
 
 Motion is frame-based rather than a rotation: swinging pixel art by rotating it
 would put marks on half-cells. The sag is a parabola between the two tie
@@ -26,67 +31,53 @@ from foehncast.solar import solar_elevation_deg
 
 from _theme import Palette, palette
 
-_COLS, _ROWS = 28, 20
-_GROUND = 18  # sand fills rows 18-19
+_COLS, _ROWS = 56, 40
+_GROUND = 36  # sand fills rows 36-39
 
-# Trunks: base at the sand, leaning apart as they rise, 1 cell thick. The lean
-# is what stops two verticals reading as goalposts.
-_LEFT_TRUNK = (
-    (7, 17),
-    (7, 16),
-    (7, 15),
-    (6, 14),
-    (6, 13),
-    (6, 12),
-    (6, 11),
-    (5, 10),
-    (5, 9),
-    (5, 8),
-)
-_RIGHT_TRUNK = (
-    (20, 17),
-    (20, 16),
-    (20, 15),
-    (21, 14),
-    (21, 13),
-    (21, 12),
-    (21, 11),
-    (22, 10),
-    (22, 9),
-    (22, 8),
-    (22, 7),
-)
+# Trunks: base at the sand, leaning apart as they rise, two cells thick. The
+# lean is what stops two verticals reading as goalposts. Each entry is
+# (base column, base row, top row, lean direction); one column of lean is
+# spent every _TRUNK_RISE rows.
+_TRUNK_RISE = 4
+_LEFT_STEM = (14, 35, 16, -1)
+_RIGHT_STEM = (40, 35, 14, 1)
+_TRUNK_THICK = 2
 
-# Crowns: five fronds each, drooping at the tips. Cells are relative to the
-# trunk top so both crowns are one shape used twice.
+# Crown: one half, mirrored across the trunk's two-cell width, so both palms
+# are the same shape used twice and neither can drift from the other. Each
+# frond is a chain of waypoints rather than loose cells -- stepping diagonally
+# one cell at a time leaves marks touching only at their corners, which reads
+# as a dotted stipple instead of a leaf. Offsets are from the trunk's top-left
+# cell; a mirrored cell is (1 - dx, dy).
 # fmt: off
-_CROWN = (
-    (-3, 0), (-2, 0), (-1, 0),          # west frond
-    (-3, 1),                            # its droop
-    (1, 0), (2, 0), (3, 0),             # east frond
-    (3, 1),                             # its droop
-    (-2, -2), (-1, -1),                 # north-west frond
-    (2, -2), (1, -1),                   # north-east frond
-    (0, -2), (0, -1),                   # crown centre
+_CROWN_HALF = (
+    ((0, -1), (0, -6)),              # centre tuft, tying the crown to the trunk
+    ((-1, 0), (-3, 0), (-6, 2)),     # low frond, sweeping out then drooping
+    ((-1, -2), (-3, -3), (-6, -4)),  # mid frond, reaching out
+    ((-1, -4), (-3, -6), (-4, -8)),  # upper frond, reaching up
 )
 # fmt: on
 
-# Hammock tie points, partway up each trunk.
-_TIE_LEFT, _TIE_RIGHT = (6, 11), (21, 11)
+# Hammock tie points, partway up each trunk: the inner face of each stem.
+_TIE_LEFT, _TIE_RIGHT = (12, 22), (43, 22)
 # Sag depth per frame, and a lean that shifts the lowest point along the span.
-_SWING = ((5.0, 0.0), (4.6, 0.22), (5.0, 0.0), (4.6, -0.22))
-_WIND_ROWS = ((2, 3), (5, 2), (8, 3))
+_SWING = ((10.0, 0.0), (9.2, 0.22), (10.0, 0.0), (9.2, -0.22))
+_WIND_ROWS = ((5, 8), (11, 5), (19, 7))
 _WIND_FRAMES = 4
+_SKY_SIZE = 4  # the sun and moon are drawn in a 4x4 box
 
 # fmt: off
 _Z_GLYPH = (
-    (0, 0), (1, 0), (2, 0),
-            (2, 1),
-    (1, 2),
-    (0, 3), (1, 3), (2, 3),
+    (0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0),
+                                    (4, 1), (5, 1),
+                            (3, 2), (4, 2),
+                    (2, 3), (3, 3),
+            (1, 4), (2, 4),
+    (0, 5), (1, 5),
+    (0, 6), (1, 6), (2, 6), (3, 6), (4, 6), (5, 6),
 )
 # fmt: on
-_Z_ORIGINS = ((10, 7), (14, 3))
+_Z_ORIGINS = ((20, 14), (28, 6))
 
 #: Frames in one full loop of the still-frame sequence, for GIF export.
 FRAME_COUNT = 4
@@ -109,9 +100,52 @@ def _discrete_anim(index: int, count: int, dur: float) -> str:
     )
 
 
+def _trunk_cells(stem: tuple[int, int, int, int]) -> tuple[tuple[int, int], ...]:
+    """Cells of one leaning trunk, from the sand up to its top row."""
+    base_col, base_row, top_row, lean = stem
+    cells = []
+    for i in range(base_row - top_row + 1):
+        col = base_col + lean * (i // _TRUNK_RISE)
+        cells.extend((col + t, base_row - i) for t in range(_TRUNK_THICK))
+    return tuple(cells)
+
+
+def _chain(points: tuple[tuple[int, int], ...]) -> list[tuple[int, int]]:
+    """Cells along a run of waypoints, every step sharing an edge with the last."""
+    cells = [points[0]]
+    for x1, y1 in points[1:]:
+        x, y = cells[-1]
+        while (x, y) != (x1, y1):
+            if x != x1:
+                x += 1 if x1 > x else -1
+                cells.append((x, y))
+            if y != y1:
+                y += 1 if y1 > y else -1
+                cells.append((x, y))
+    return cells
+
+
 def _crown_cells(top: tuple[int, int]) -> tuple[tuple[int, int], ...]:
+    """Both halves of a crown, mirrored across the trunk's two-cell width."""
     col, row = top
-    return tuple((col + dx, row + dy) for dx, dy in _CROWN)
+    cells = []
+    for frond in _CROWN_HALF:
+        for dx, dy in _chain(frond):
+            cells.append((col + dx, row + dy))
+            cells.append((col + 1 - dx, row + dy))
+    return tuple(cells)
+
+
+def _disc(size: int, shift: float = 0.0) -> set[tuple[int, int]]:
+    """Cells of a circle inscribed in a size x size box, optionally shifted."""
+    centre = (size - 1) / 2
+    radius = size / 2 - 0.35
+    return {
+        (x, y)
+        for y in range(size)
+        for x in range(size)
+        if math.hypot(x - centre - shift, y - centre) <= radius
+    }
 
 
 def _hammock(depth: float, lean: float) -> dict[int, int]:
@@ -139,7 +173,7 @@ def _fabric(depth: float, lean: float, pal: Palette) -> str:
         top = row if prev is None else min(row, prev)
         cells.extend((col, r) for r in range(top, row + 1))
         # A second cell of cloth along the deepest run gives the fabric bulk.
-        if row >= lowest - 1:
+        if row >= lowest - 2:
             cells.append((col, row + 1))
         prev = row
     return _cells(cells, pal.reading)
@@ -152,14 +186,21 @@ def _sky_body(fraction: float, is_day: bool, pal: Palette) -> str:
     in the morning, overhead at midday, low right before dark.
     """
     f = min(max(fraction, 0.0), 1.0)
-    col = round(2 + 23 * f)
-    row = round(4 - 3.5 * math.sin(math.pi * f))
+    col = round(4 + 46 * f)
+    row = round(8 - 7 * math.sin(math.pi * f))
+    disc = _disc(_SKY_SIZE)
     if is_day:
-        cells = [(col, row), (col + 1, row), (col, row + 1), (col + 1, row + 1)]
-        return "".join(_rect(c, r, pal.sun) for c, r in cells if 0 <= c < _COLS)
-    # A bite out of the top-right corner is all a crescent can be at 2x2.
-    cells = [(col, row), (col, row + 1), (col + 1, row + 1)]
-    return "".join(_rect(c, r, pal.moon) for c, r in cells if 0 <= c < _COLS)
+        cells = sorted(disc)
+        colour = pal.sun
+    else:
+        # The crescent is the disc minus a second disc set off to the east.
+        cells = sorted(disc - _disc(_SKY_SIZE, shift=1.7))
+        colour = pal.moon
+    return "".join(
+        _rect(col + dx, row + dy, colour)
+        for dx, dy in cells
+        if 0 <= col + dx < _COLS
+    )
 
 
 def _zeds(frame: int, pal: Palette) -> str:
@@ -174,7 +215,7 @@ def _zeds(frame: int, pal: Palette) -> str:
 def _wind(frame: int, pal: Palette) -> str:
     cells = []
     for i, (row, length) in enumerate(_WIND_ROWS):
-        start = (frame * 2 + i * 3) % (_COLS + 6) - 4
+        start = (frame * 4 + 6 + i * 18) % (_COLS + 12) - 8
         cells.extend((c, row) for c in range(start, start + length) if 0 <= c < _COLS)
     return _cells(cells, pal.gust)
 
@@ -182,8 +223,9 @@ def _wind(frame: int, pal: Palette) -> str:
 def _scene(pal: Palette) -> str:
     """Sand and the two palms -- everything that does not move."""
     sand = [(c, r) for r in range(_GROUND, _ROWS) for c in range(_COLS)]
-    trunks = list(_LEFT_TRUNK) + list(_RIGHT_TRUNK)
-    crowns = _crown_cells(_LEFT_TRUNK[-1]) + _crown_cells(_RIGHT_TRUNK[-1])
+    left, right = _trunk_cells(_LEFT_STEM), _trunk_cells(_RIGHT_STEM)
+    trunks = list(left) + list(right)
+    crowns = _crown_cells(left[-_TRUNK_THICK]) + _crown_cells(right[-_TRUNK_THICK])
     return (
         _cells(sand, pal.sand)
         + _cells(trunks, pal.trunk)
