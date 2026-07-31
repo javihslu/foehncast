@@ -969,6 +969,17 @@ resource "google_cloud_run_v2_service" "ui" {
     service_account = google_service_account.cloud_run_runtime.email
     timeout         = "300s"
 
+    # Streamlit keeps session state and its st.cache_data entries in the memory
+    # of whichever instance served the websocket. Without affinity a reconnect
+    # can land elsewhere, dropping the session and replaying the script against
+    # a cold cache, which reads as the console being slow.
+    session_affinity = true
+
+    # A Streamlit session is served from one process, so the Cloud Run default
+    # queues concurrent visitors behind a single interpreter instead of scaling
+    # out. Keep the per-instance ceiling low.
+    max_instance_request_concurrency = 20
+
     scaling {
       min_instance_count = 1
       max_instance_count = 3

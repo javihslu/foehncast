@@ -156,6 +156,7 @@ BOOTSTRAP_SERVICES=(
   airflow-scheduler
   airflow-triggerer
   app
+  ui
   statsd
   prometheus
 )

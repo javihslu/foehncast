@@ -152,7 +152,7 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool, str]] = [
 ]
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def pipeline_capabilities() -> list[str]:
     """Cached control-plane capabilities probe, shared across reruns."""
     return control_capabilities() or []
@@ -288,9 +288,21 @@ def _render_freshness_bar() -> None:
             unsafe_allow_html=True,
         )
         _render_cascade_button(disabled=any(busy.values()))
+    elif not capabilities:
+        st.markdown(
+            "<div style='margin-top:14px;padding-top:11px;"
+            "border-top:1px solid rgba(7,37,42,0.08)'></div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Pipelines run on a schedule: the cascade every 6 hours, drift "
+            "detection every 12. Manual runs are turned off here because the "
+            "forecast is the same for every visitor, so triggering one on "
+            "demand would only repeat the same compute."
+        )
 
 
-@st.fragment(run_every=30)
+@st.fragment(run_every=120)
 def render_freshness_bar() -> None:
     """Source-by-source circular indicators, auto-refreshed every 30 s."""
     _render_freshness_bar()

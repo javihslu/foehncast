@@ -330,7 +330,13 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
                         "series": "Observed",
                     }
                 )
-                frames.append(obs_frame)
+                # The archive is requested by date, so the response runs to the
+                # end of the current day and its trailing hours have not
+                # happened yet. Nothing can be observed in the future, so drop
+                # them rather than drawing them as measurements.
+                obs_frame = obs_frame[obs_frame["time"] <= now]
+                if not obs_frame.empty:
+                    frames.append(obs_frame)
     except Exception:
         pass
 

@@ -112,6 +112,56 @@ tfvars_value_or_default() {
   printf '%s\n' "$value"
 }
 
+import_if_untracked() {
+  # Adopt a live resource that Terraform state does not know about yet. A
+  # failed import means the resource is genuinely absent, which is the normal
+  # fresh-project case, so it must not abort the bootstrap.
+  local address="$1"
+  local resource_id="$2"
+
+  if run_terraform -chdir="$TERRAFORM_DIR" state show "$address" >/dev/null 2>&1; then
+    return
+  fi
+
+  if run_terraform -chdir="$TERRAFORM_DIR" import -var-file="$TFVARS_FILE" \
+    "$address" "$resource_id" >/dev/null 2>&1; then
+    echo "Adopted existing ${address} into Terraform state."
+  fi
+}
+
+reconcile_soft_deleted_identity() {
+  # GCP retains deleted workload identity pools and providers for 30 days and
+  # keeps their names reserved, so recreating one returns 409 "already exists".
+  # A redeploy after a teardown therefore fails unless the soft-deleted pair is
+  # undeleted and adopted first. Both steps are no-ops on a fresh project.
+  local pool_id provider_id pool_path provider_path
+
+  pool_id="$(tfvars_value_or_default github_oidc_pool_id github-actions)"
+  provider_id="$(tfvars_value_or_default github_oidc_provider_id github-oidc)"
+  pool_path="projects/${GCP_PROJECT_ID}/locations/global/workloadIdentityPools/${pool_id}"
+  provider_path="${pool_path}/providers/${provider_id}"
+
+  if [[ "$(gcloud iam workload-identity-pools describe "$pool_id" \
+    --location=global --project "$GCP_PROJECT_ID" \
+    --format='value(state)' 2>/dev/null)" == "DELETED" ]]; then
+    echo "Workload identity pool ${pool_id} is soft-deleted; undeleting it so this apply can reuse the reserved name."
+    gcloud iam workload-identity-pools undelete "$pool_id" \
+      --location=global --project "$GCP_PROJECT_ID" --quiet >/dev/null
+  fi
+
+  if [[ "$(gcloud iam workload-identity-pools providers describe "$provider_id" \
+    --location=global --workload-identity-pool="$pool_id" \
+    --project "$GCP_PROJECT_ID" --format='value(state)' 2>/dev/null)" == "DELETED" ]]; then
+    echo "Workload identity provider ${provider_id} is soft-deleted; undeleting it so this apply can reuse the reserved name."
+    gcloud iam workload-identity-pools providers undelete "$provider_id" \
+      --location=global --workload-identity-pool="$pool_id" \
+      --project "$GCP_PROJECT_ID" --quiet >/dev/null
+  fi
+
+  import_if_untracked google_iam_workload_identity_pool.github "$pool_path"
+  import_if_untracked google_iam_workload_identity_pool_provider.github "$provider_path"
+}
+
   terraform_fmt_supports_file() {
     local file_path="$1"
 
@@ -380,7 +430,7 @@ tfvars_value_or_default() {
     echo "Checking Cloud Run metrics at ${metrics_url}..."
     require_curl_payload_patterns \
       "$metrics_url" \
-      'up{job="foehncast_app"} 1' 'Cloud Run metrics payload'
+      'up\{job="foehncast_app"\} 1' 'Cloud Run metrics payload'
   }
 
   print_bootstrap_only_summary() {
@@ -810,6 +860,10 @@ format_generated_tfvars_file "$TFVARS_FILE"
 echo "Checking Terraform formatting and validation..."
 run_terraform -chdir="$TERRAFORM_DIR" fmt -check
 run_terraform -chdir="$TERRAFORM_DIR" validate
+
+# Redeploying within 30 days of a teardown finds the identity pool and provider
+# soft-deleted but name-reserved; reconcile them before any apply touches them.
+reconcile_soft_deleted_identity
 
 target_args=()
 if [[ "$BOOTSTRAP_ONLY" == "true" ]]; then

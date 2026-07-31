@@ -72,7 +72,7 @@ curl -X POST http://127.0.0.1:8000/rank \
   <em>Session-quality heatmap across six spots; a selected cell drives the wind dial and metrics, with the serving champion model in the sidebar.</em>
 </p>
 
-During the course the full stack also ran on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. The cloud deployment was taken down after grading to stop incurring cost; everything reproduces locally with the bootstrap script above.
+The full stack also runs on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. A live demo is currently online at [https://foehncast-ui-qiwypnakeq-oa.a.run.app](https://foehncast-ui-qiwypnakeq-oa.a.run.app) - it is a temporary deployment and may be taken down without notice. Everything reproduces locally with the bootstrap script above.
 
 ### Reproducible pipelines (DVC)
 
@@ -95,7 +95,7 @@ make coverage      # coverage report
 
 ## Cloud Deployment
 
-The system also ran on GCP Cloud Run during the course; that deployment was taken down after grading. This section documents the architecture as deployed, and [terraform/](terraform/) remains deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
+The system runs on GCP Cloud Run. A live demo is online at [https://foehncast-ui-qiwypnakeq-oa.a.run.app](https://foehncast-ui-qiwypnakeq-oa.a.run.app), with the inference API at [https://foehncast-serve-qiwypnakeq-oa.a.run.app](https://foehncast-serve-qiwypnakeq-oa.a.run.app); both are temporary and may be taken down without notice. This section documents the architecture as deployed, and [terraform/](terraform/) is deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
 
 ```mermaid
 flowchart LR
@@ -156,5 +156,5 @@ FoehnCast itself is released under the [MIT License](LICENSE).
 - [Getting started](https://javihslu.github.io/foehncast/getting-started/)
 - [Architecture](https://javihslu.github.io/foehncast/system/architecture/)
 - [Cloud deployment](https://javihslu.github.io/foehncast/system/cloud-architecture/)
-- Terraform operator detail: `terraform/README.md`
-- Container detail: `containers/README.md`
+- [Terraform operator detail](terraform/README.md) - platform inputs, bootstrap, and teardown
+- [Container detail](containers/README.md) - the service images and their build contexts

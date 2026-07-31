@@ -12,6 +12,9 @@ cloud_run_service_name         = "foehncast-serve"
 cloud_run_image                = "europe-west6-docker.pkg.dev/your-gcp-project/foehncast-docker/foehncast-app:latest"
 cloud_run_container_port       = 8080
 cloud_run_allow_unauthenticated = true
+# 0 lets the API scale to zero, which costs nothing while idle but makes the
+# first request after an idle period wait ~30 s for a cold start. Set it to 1
+# for a hosted demo people click on; leave it at 0 for evaluation.
 cloud_run_min_instance_count   = 0
 cloud_run_max_instance_count   = 2
 cloud_run_cpu                  = "1"
