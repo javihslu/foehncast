@@ -17,6 +17,11 @@ NEAR = [255, 122, 38]
 # basemap (assumed land tone ~#e8e6e0), replacing the old pale grey that
 # vanished on the muted map.
 LIGHT_WIND = [78, 92, 104]
+# Sun below the horizon. Wind speed is still real at 02:00, so the needle is
+# still drawn, but calling it "Rideable" claims a session nobody can have.
+# Validated against the other three status colors on the basemap tone: worst
+# adjacent pair is dE 12.3 (deutan), 16.2 (normal vision).
+NIGHT = [131, 84, 184]
 
 # Light warm-grey casing drawn under needles, rings, and ticks so a mark stays
 # legible where it crosses the basemap or another mark (the surface-ring idea).

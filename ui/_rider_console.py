@@ -132,6 +132,26 @@ _ELEVATION_COLORS = {
 # step gaps, 2.18:1 light end, 2 deg hue spread.
 _QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
 
+# Night cells sit OFF the quality ramp entirely. A cell whose hour has the sun
+# below the horizon carries no rideable level, so painting it in any ramp step
+# would claim a session that cannot happen. Dimming a ramp step is not an option
+# either: a dimmed level 5 lands at the lightness of level 2 or 3 and reads as a
+# weaker but real session.
+#
+# The hue is picked, not eyeballed. Run against the ramp with the dataviz
+# validator (--pairs all, light surface #eaf3ef), this is the only candidate that
+# PASSES colorblind separation: worst pair vs any ramp step is dE 9.5 (protan),
+# 10.3 (tritan). Mid-lightness greys and violets all failed — under deuteranopia
+# they collapse onto the ramp (a grey #9aa6ac sits dE 1.0 from level 2, i.e.
+# indistinguishable). Lightness, not hue, is what survives CVD, so night has to
+# leave the ramp's lightness range. It goes to the LIGHT end deliberately: the
+# residual confusion is night-vs-level-1 ("nothing happening"), which still reads
+# as don't-go, whereas a dark night tone risks being mistaken for level 5.
+# Contrast vs surface is 1.5:1, which the validator flags as needing relief in
+# another channel — hence the legend chip and the tooltip's Daylight row, so
+# night is never signalled by color alone.
+_NIGHT_FILL = "#c9c4d6"
+
 # Hairline between heatmap cells. Faint ink rather than the page surface tone:
 # level-1 cells are fill-free, and a surface-toned stroke would vanish on the
 # surface -- this keeps the flat-week "outline board" visible while reading as
@@ -145,13 +165,20 @@ _FLAT_WEEK_CHIP = (
     "font-size:0.72rem;color:#39544f;background:rgba(210, 226, 220, 0.6);"
     "border:1px solid rgba(7, 37, 42, 0.18);border-radius:999px;"
     'padding:0.1rem 0.6rem;margin:0.15rem 0 0.35rem">'
-    "Quiet week — no spot rises above level 1 in this window</span>"
+    "Quiet week — no spot rises above level 1 in daylight this window</span>"
 )
 
 
 def _flat_week(heat_grid: pd.DataFrame) -> bool:
-    """True when the window has data but no cell rises above quality level 1."""
-    return (not heat_grid.empty) and int(heat_grid["quality"].max()) <= 1
+    """True when the window has daylight but no daylight cell rises above level 1.
+
+    Night cells are excluded: they render off-ramp, so a strong 02:00 would
+    otherwise suppress the quiet-week chip on a board with nothing rideable in it.
+    """
+    if heat_grid.empty:
+        return False
+    daylight = heat_grid[heat_grid["is_day"]]
+    return (not daylight.empty) and int(daylight["quality"].max()) <= 1
 
 
 _LEGEND_CHIP = (
@@ -162,7 +189,7 @@ _LEGEND_CHIP = (
 
 
 def _quality_legend_html() -> str:
-    """Manual chip row for the heatmap legend, level 1 through 5.
+    """Manual chip row for the heatmap legend: levels 1-5 plus the night swatch.
 
     The Vega legend would render level 1 as a transparent (invisible) swatch,
     since the color scale maps it to "transparent". Built by hand instead,
@@ -172,9 +199,11 @@ def _quality_legend_html() -> str:
     swatches = ["border:1px solid rgba(7, 37, 42, 0.4)"] + [
         f"background:{color}" for color in _QUALITY_RAMP
     ]
+    labels: tuple[int | str, ...] = (1, 2, 3, 4, 5, "Night")
+    swatches.append(f"background:{_NIGHT_FILL}")
     chips = "".join(
         _LEGEND_CHIP.format(swatch=swatch, level=level)
-        for level, swatch in zip((1, 2, 3, 4, 5), swatches, strict=True)
+        for level, swatch in zip(labels, swatches, strict=True)
     )
     return (
         "<p style=\"color:#07252a;font-family:'Manrope',sans-serif;"
@@ -453,6 +482,18 @@ def all_spots_quality_grid(
         frame["spot_id"] = spot_id
         frame["hour"] = frame["time"].dt.floor("h")
 
+        # Daylight is per spot, per hour: rank_spots already drops dark hours
+        # from the score, but every hour still gets a cell here, so the grid has
+        # to carry its own flag or it paints unrideable darkness as a session.
+        cfg = spots_cfg.get(spot_id)
+        frame["is_day"] = (
+            is_daylight(
+                float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex(frame["time"])
+            ).to_numpy()
+            if cfg
+            else True
+        )
+
         # Merge 10 m wind and gusts from the warmed focus timeline (long form),
         # joined on the UTC hour so tz differences never misalign. Missing wind
         # just leaves the tooltip fields blank; the quality cell still renders.
@@ -492,6 +533,14 @@ def all_spots_quality_grid(
     grid["time_end"] = grid["time"] + pd.Timedelta(hours=1)
     if "direction" not in grid.columns:
         grid["direction"] = pd.NA
+
+    # Fill key for the rect mark: a daylight cell takes its quality level, a night
+    # cell leaves the ramp. "daylight" carries the same fact in words for the
+    # tooltip, so night never rests on color alone.
+    grid["band"] = grid["quality"].astype(str).where(grid["is_day"], "night")
+    grid["daylight"] = grid["is_day"].map(
+        {True: "Day", False: "Night — sun below horizon"}
+    )
 
     # Tooltip payload, built once here so the fragment's reruns only serialize.
     # Header is "SpotName - Ddd HH:00" in local time; the dial is a compact
@@ -641,6 +690,7 @@ def _selection_bubble_html(
     wind: float | None,
     gust: float | None,
     direction: float | None,
+    is_day: bool = True,
 ) -> str:
     """Rounded metrics bubble for the selection row."""
     rows = [
@@ -648,6 +698,11 @@ def _selection_bubble_html(
             label="Quality", value=f"{quality}/5 ({quality_label(float(quality))})"
         )
     ]
+    # A dark hour still has a wind forecast, and the quality row above still
+    # reports it. Say plainly that it is not a session so the number is read as
+    # weather rather than as a recommendation.
+    if not is_day:
+        rows.append(_BUBBLE_ROW.format(label="Daylight", value="Night — no session"))
     if wind is not None and not pd.isna(wind):
         rows.append(_BUBBLE_ROW.format(label="Wind", value=f"{wind:.0f} km/h"))
     if gust is not None and not pd.isna(gust):
@@ -699,7 +754,13 @@ def _render_selection_row(row: pd.Series, min_kts: float) -> None:
     with bubble_col:
         st.markdown(
             _selection_bubble_html(
-                spot_name, local_time, int(row["quality"]), wind, gust, direction
+                spot_name,
+                local_time,
+                int(row["quality"]),
+                wind,
+                gust,
+                direction,
+                bool(row.get("is_day", True)),
             ),
             unsafe_allow_html=True,
         )
@@ -735,8 +796,9 @@ def render_rider_console(
         predictions_list = dashboard_data.get("predictions", [])
 
         # All-spots session-quality heatmap: every ranked spot on one grid so
-        # they compare at a glance, best spot on the top row. No night shading
-        # here - daylight is already baked into the score.
+        # they compare at a glance, best spot on the top row. Daylight is baked
+        # into the SCORE that orders the rows, but each cell is its own hour, so
+        # cells carry the flag themselves and dark hours render off-ramp.
         ranked_meta = [
             {
                 "spot_id": s["spot_id"],
@@ -793,6 +855,7 @@ def render_rider_console(
                 alt.Tooltip("header:N", title="title"),
                 alt.Tooltip("dial:N", title="image"),
                 alt.Tooltip("quality:O", title="Quality (1-5)"),
+                alt.Tooltip("daylight:N", title="Daylight"),
             ]
             if "wind" in heat_grid.columns:
                 tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
@@ -804,7 +867,11 @@ def render_rider_console(
                 alt.Tooltip("direction:N", title="Direction"),
                 alt.Tooltip("quality_label:N", title="Signal"),
                 alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
-                alt.Tooltip("rideable_hours:Q", title="Rideable hrs", format=".0f"),
+                # Daylight-scoped upstream (dashboard counts rideable & daylight),
+                # so the label says so rather than implying a round-the-clock count.
+                alt.Tooltip(
+                    "rideable_hours:Q", title="Rideable hrs (day)", format=".0f"
+                ),
                 alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
                 alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
                 alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
@@ -846,10 +913,10 @@ def render_rider_console(
                     # all). "transparent" is a defined fill, so the cell keeps
                     # its stroke and stays hover- and clickable.
                     color=alt.Color(
-                        "quality:O",
+                        "band:N",
                         scale=alt.Scale(
-                            domain=[1, 2, 3, 4, 5],
-                            range=["transparent", *_QUALITY_RAMP],
+                            domain=["1", "2", "3", "4", "5", "night"],
+                            range=["transparent", *_QUALITY_RAMP, _NIGHT_FILL],
                         ),
                         legend=None,
                     ),

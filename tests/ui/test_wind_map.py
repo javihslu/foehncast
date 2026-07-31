@@ -73,6 +73,15 @@ def test_status_thresholds_speed_against_minimum() -> None:
     assert wm._status(5.0, min_kts) == (wm._COLOR_LIGHT, "Too light")
 
 
+def test_status_never_calls_a_dark_hour_rideable() -> None:
+    # Wind at 02:00 is real and still gets a needle, but it is not a session:
+    # darkness outranks every speed threshold.
+    color, label = wm._status(40.0, 15.0, is_day=False)
+    assert color == wm._COLOR_NIGHT
+    assert label == "Night, not rideable"
+    assert color != wm._COLOR_RIDEABLE
+
+
 def test_to_utc_localizes_naive_and_converts_aware() -> None:
     naive = pd.Timestamp("2026-07-12T09:00:00")
     localized = wm._to_utc(naive)

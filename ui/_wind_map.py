@@ -11,12 +11,14 @@ import streamlit as st
 
 from foehncast.config import get_labeling_config, get_rider_config, get_spots
 from foehncast.feature_pipeline.ingest import fetch_forecast
+from foehncast.solar import is_daylight
 
 from _dial_tokens import (
     HALO,
     INK as _INK,
     LIGHT_WIND as _COLOR_LIGHT,
     NEAR as _COLOR_NEAR,
+    NIGHT as _COLOR_NIGHT,
     RIDEABLE as _COLOR_RIDEABLE,
     WEDGE_FILL_ALPHA,
     WEDGE_OUTLINE_ALPHA,
@@ -92,7 +94,12 @@ def _arc(
     ]
 
 
-def _status(speed_kn: float, min_kts: float) -> tuple[list[int], str]:
+def _status(
+    speed_kn: float, min_kts: float, is_day: bool = True
+) -> tuple[list[int], str]:
+    """Needle color and label. Darkness outranks wind: no session happens at 02:00."""
+    if not is_day:
+        return _COLOR_NIGHT, "Night, not rideable"
     if speed_kn >= min_kts:
         return _COLOR_RIDEABLE, "Rideable"
     if speed_kn >= 0.7 * min_kts:
@@ -144,13 +151,13 @@ def _dial_base_records(
 
 
 def _needle_records(
-    spot: dict[str, Any], row: pd.Series, min_kts: float
+    spot: dict[str, Any], row: pd.Series, min_kts: float, is_day: bool = True
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Anchor plus needle and gust-tick segments for one spot at one hour."""
     speed_kn = float(row["wind_speed_10m"]) / _KN_TO_KMH
     gusts_kn = float(row["wind_gusts_10m"]) / _KN_TO_KMH
     direction = float(row["wind_direction_10m"])
-    color, status = _status(speed_kn, min_kts)
+    color, status = _status(speed_kn, min_kts, is_day)
 
     lat, lon = float(spot["lat"]), float(spot["lon"])
     flow = (direction + 180.0) % 360.0
@@ -207,10 +214,19 @@ def _hourly_map_records(
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for sid in spot_ids:
         frame = _spot_wind_frame(sid)
-        for ts, row in frame.iterrows():
+        if frame.empty:
+            continue
+        spot = spots_cfg[sid]
+        # Daylight per spot per hour, computed once for the frame rather than
+        # per row, so the slider can never land on a dark hour showing "Rideable".
+        index = pd.DatetimeIndex(frame.index)
+        if index.tz is None:
+            index = index.tz_localize("UTC")
+        lit = is_daylight(float(spot["lat"]), float(spot["lon"]), index).to_numpy()
+        for (ts, row), is_day in zip(frame.iterrows(), lit, strict=True):
             key = _to_utc(ts).isoformat()
             bucket = out.setdefault(key, {"anchors": [], "segments": []})
-            anchor, segments = _needle_records(spots_cfg[sid], row, min_kts)
+            anchor, segments = _needle_records(spot, row, min_kts, bool(is_day))
             bucket["anchors"].append(anchor)
             bucket["segments"].extend(segments)
     return out
@@ -484,6 +500,7 @@ def _render_map_fragment(
         + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), f"Rideable (&ge; {min_kts:.0f} kn)")
         + chip.format(_rgb_to_hex(_COLOR_NEAR), "Almost")
         + chip.format(_rgb_to_hex(_COLOR_LIGHT), "Too light")
+        + chip.format(_rgb_to_hex(_COLOR_NIGHT), "Night (sun down)")
         + "</p>",
         unsafe_allow_html=True,
     )

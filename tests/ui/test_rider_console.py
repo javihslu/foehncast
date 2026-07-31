@@ -79,6 +79,61 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
     assert grid["header"].iloc[0].startswith("Silvaplana - ")
 
 
+def test_night_hours_never_render_as_a_quality_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No cell may carry a ramp level while the sun is below the horizon.
+
+    The grid used to bucket every forecast hour, so a windy 02:00 painted the
+    same green as a rideable afternoon.
+    """
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    # A full day, so the window straddles sunrise and sunset, and a quality that
+    # would otherwise bucket to the top of the ramp on every single hour.
+    times = pd.date_range("2026-01-15T00:00:00Z", periods=24, freq="h")
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+    )
+
+    spot = next(s for s in rc.get_spots() if s["id"] == "silvaplana")
+    elevation = rc.solar_elevation_deg(
+        float(spot["lat"]), float(spot["lon"]), pd.DatetimeIndex(grid["time"])
+    ).to_numpy()
+    dark = elevation <= -0.833
+    bands = grid["band"].to_numpy()
+
+    # The window has to contain both, or the assertions below prove nothing.
+    assert dark.any() and (~dark).any()
+    assert set(bands[dark]) == {"night"}
+    assert "night" not in set(bands[~dark])
+    # Daylight still reads on the ramp, so the fix removed darkness, not signal.
+    assert set(bands[~dark]) <= {"1", "2", "3", "4", "5"}
+
+
+def test_night_is_labelled_not_just_colored() -> None:
+    # Contrast vs the page surface is only 1.5:1, so the state must also be
+    # carried in words: a legend chip and the selection bubble's own row.
+    assert rc._NIGHT_FILL not in rc._QUALITY_RAMP
+    legend = rc._quality_legend_html()
+    assert "Night" in legend
+    assert rc._NIGHT_FILL in legend
+    bubble = rc._selection_bubble_html(
+        "Silvaplana", "Thu 15 Jan 02:00", 5, None, None, None, False
+    )
+    assert "Night" in bubble
+
+
 def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -278,10 +333,15 @@ def test_heatmap_x_axis_uses_numeric_tick_count() -> None:
 
 
 def test_flat_week_detects_all_level_one_grid() -> None:
-    assert rc._flat_week(pd.DataFrame({"quality": [1, 1, 1]}))
-    assert not rc._flat_week(pd.DataFrame({"quality": [1, 3, 1]}))
+    day = [True, True, True]
+    assert rc._flat_week(pd.DataFrame({"quality": [1, 1, 1], "is_day": day}))
+    assert not rc._flat_week(pd.DataFrame({"quality": [1, 3, 1], "is_day": day}))
     # An empty grid is "no data", not a quiet week: the chip must not show.
-    assert not rc._flat_week(pd.DataFrame({"quality": []}))
+    assert not rc._flat_week(pd.DataFrame({"quality": [], "is_day": []}))
+    # A strong night hour is not a session, so it must not clear the chip.
+    assert rc._flat_week(
+        pd.DataFrame({"quality": [1, 5, 1], "is_day": [True, False, True]})
+    )
 
 
 def test_flat_week_chip_names_the_quiet_state() -> None:
