@@ -263,6 +263,37 @@ reconcile_soft_deleted_identity() {
     )
   }
 
+  pin_platform_image_digests() {
+    # Cloud Run only rolls a new revision when the container spec changes, and
+    # the :latest tag keeps that string identical across builds. Without this a
+    # rebuilt image is pushed but never served, so code changes silently never
+    # reach the deployment. Pin the digest each build so the spec moves with it.
+    local project region artifact_repo image_root
+    local image_name tfvar_key digest pair
+
+    load_bootstrap_platform_state
+    project="$FOEHNCAST_TF_PROJECT_ID"
+    region="$FOEHNCAST_TF_LOCATION"
+    artifact_repo="$FOEHNCAST_TF_ARTIFACT_REPOSITORY"
+    image_root="${region}-docker.pkg.dev/${project}/${artifact_repo}"
+
+    for pair in \
+      "foehncast-app cloud_run_image" \
+      "foehncast-ui cloud_run_ui_image" \
+      "foehncast-mlflow cloud_run_mlflow_image"; do
+      image_name="${pair%% *}"
+      tfvar_key="${pair##* }"
+      digest="$(gcloud artifacts docker images list "${image_root}/${image_name}" \
+        --project "$project" --include-tags --filter="tags:latest" \
+        --format="value(version)" 2>/dev/null | head -1)"
+
+      if [[ -n "$digest" ]]; then
+        echo "Pinning ${tfvar_key} to ${image_name}@${digest}"
+        set_tfvars_string "$tfvar_key" "${image_root}/${image_name}@${digest}"
+      fi
+    done
+  }
+
   sync_env_from_terraform_outputs() {
     local cloud_run_service
 
@@ -900,6 +931,7 @@ else
     run_platform_apply "${foundation_args[@]}"
 
     build_platform_images
+    pin_platform_image_digests
 
     echo "Running Terraform apply..."
     run_platform_apply
