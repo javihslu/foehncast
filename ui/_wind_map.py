@@ -541,7 +541,10 @@ def _render_map_fragment(
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=view,
-        map_style="light",
+        # The basemap follows the theme: dark-mode marks were measured against
+        # the dark surface, so on a light basemap they would sit below the
+        # contrast floor the palette guarantees.
+        map_style="dark" if pal.name == "dark" else "light",
         tooltip={"text": "{tooltip}"},
     )
     st.pydeck_chart(deck, use_container_width=True, height=620)

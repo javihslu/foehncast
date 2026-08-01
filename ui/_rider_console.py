@@ -286,14 +286,16 @@ def _night_rect(
     lon: float,
     x_scale: Any = alt.Undefined,
 ) -> alt.Chart:
-    """Altair layer obscuring night hours with a dark wash.
+    """Altair layer obscuring night hours with the off-ramp night hue.
 
+    Same night_fill the heatmap's night cells carry, at wash opacity so the
+    wind series still read across it -- one night hue across both plots.
     Clipped and sharing the caller's pinned x scale so a night band reaching
     past the shared domain neither draws outside the plot nor stretches it.
     """
     return (
         alt.Chart(_night_bands(t_min, t_max, lat, lon))
-        .mark_rect(color=active().ink, opacity=0.28, clip=True)
+        .mark_rect(color=active().night_fill, opacity=0.4, clip=True)
         .encode(x=alt.X("x:T", scale=x_scale), x2="x2:T")
     )
 
