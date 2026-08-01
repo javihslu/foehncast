@@ -527,18 +527,20 @@ _CSS = """
   }
 
   /* Readable Streamlit alerts. The default theme renders mid-tone text on a
-     same-hue tint (low contrast); force dark ink so the message is legible on
-     any success / info / warning / error tint. */
+     same-hue tint (low contrast); force the mode's ink so the message is
+     legible on any success / info / warning / error tint. The literal ink this
+     used to force was the light mode's, which is the 1.06:1 failure the
+     status-role sweep was for, so it reads the role like everything else. */
   div[data-testid="stAlert"] {
     border-radius: 14px !important;
-    border: 1px solid rgba(7, 37, 42, 0.14) !important;
+    border: 1px solid var(--line) !important;
     box-shadow: none !important;
   }
   div[data-testid="stAlert"] p,
   div[data-testid="stAlert"] span,
   div[data-testid="stAlert"] div,
   div[data-testid="stAlert"] code {
-    color: #07252a !important;
+    color: var(--ink) !important;
     font-family: 'Manrope', sans-serif !important;
     font-weight: 600 !important;
   }

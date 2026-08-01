@@ -27,7 +27,7 @@ from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
 from _dial_tokens import dial_tokens, rgb_to_hex
-from _theme import Palette, active, tint
+from _theme import Palette, active, is_dark, palette, tint
 from _wind_map import (
     _KN_TO_KMH,
     _clamp_to_slider_option,
@@ -560,11 +560,14 @@ def _compact_dial_uri(
     shore_deg: float,
     min_kts: float,
     is_day: bool = True,
+    pal: Palette | None = None,
 ) -> str:
     """Base64 SVG data URI of the compact wind dial for one cell, or "".
 
     Empty when wind or direction is missing so the tooltip just drops the image.
     The base64 alphabet has no raw ``&`` or ``<``, so the URI is tooltip-safe.
+    The palette is passed in rather than resolved here, since the caller caches
+    the result and has to key on the mode.
     """
     if direction is None or wind_kmh is None or pd.isna(direction) or pd.isna(wind_kmh):
         return ""
@@ -578,6 +581,7 @@ def _compact_dial_uri(
         size_px=_TOOLTIP_DIAL_PX,
         detail="compact",
         is_day=is_day,
+        pal=pal,
     )
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{b64}"
@@ -589,8 +593,14 @@ def all_spots_quality_grid(
     predictions_json: str,
     display_tz: str,
     ranked_json: str,
+    dark: bool,
 ) -> pd.DataFrame:
     """Hourly quality band (1-5) per spot over the forecast window, with tooltip payload.
+
+    dark is an argument rather than read inside, so the cache keys on it. The
+    frame carries theme-resolved dial SVGs and the cache is process-global, so
+    resolving the mode in here would serve one viewer the other mode's dials
+    for the rest of the TTL.
 
     Quality reuses the ranked predictions already in dashboard_data (the /rank
     flow computed them), so nothing re-runs inference. Wind and gusts come from
@@ -604,6 +614,7 @@ def all_spots_quality_grid(
     meta_by_spot = {m["spot_id"]: m for m in json.loads(ranked_json)}
     spots_cfg = {s["id"]: s for s in get_spots()}
     min_kts = _minimum_rideable_kts()
+    pal = palette(dark)
 
     frames: list[pd.DataFrame] = []
     for spot_id in spot_ids:
@@ -701,7 +712,7 @@ def all_spots_quality_grid(
     wind_vals = grid["wind"].to_numpy() if "wind" in grid.columns else [None] * n
     gust_vals = grid["gust"].to_numpy() if "gust" in grid.columns else [None] * n
     grid["dial"] = [
-        _compact_dial_uri(d, w, g, s, min_kts, bool(day))
+        _compact_dial_uri(d, w, g, s, min_kts, bool(day), pal)
         for d, w, g, s, day in zip(
             grid["direction"].to_numpy(),
             wind_vals,
@@ -928,7 +939,7 @@ def _selection_bubble_html(
             )
         )
     return (
-        '<div style="background:rgba(255, 255, 255, 0.55);'
+        '<div style="background:var(--panel);'
         "border:1px solid var(--line);border-radius:14px;"
         "padding:0.7rem 0.9rem;font-family:Manrope,sans-serif;"
         'font-size:0.85rem;color:var(--ink)">'
@@ -1041,9 +1052,12 @@ def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
         tooltip.append(alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f"))
     return tooltip + [
         alt.Tooltip("direction:N", title="Direction"),
-        alt.Tooltip("quality_label:N", title="Signal"),
         alt.Tooltip("hour_quality:Q", title="Quality this hour", format=".2f"),
         alt.Tooltip("quality_index:Q", title="Peak quality (spot)", format=".2f"),
+        # The label names the spot's best daylight hour, so it is titled for
+        # that peak and kept beside it. Called plain "Signal" next to the
+        # hourly figure it read as this cell's own verdict.
+        alt.Tooltip("quality_label:N", title="Peak signal (spot)"),
         # Daylight-scoped upstream (dashboard counts rideable & daylight), so
         # the label says so rather than implying a round-the-clock count.
         alt.Tooltip("rideable_hours:Q", title="Rideable hrs (day)", format=".0f"),
@@ -1541,6 +1555,7 @@ def render_rider_console(
             json.dumps(predictions_list, default=str),
             display_tz,
             json.dumps(ranked_meta),
+            is_dark(),
         )
         # ONE CLOCK: derive the prediction window once from the grid so the
         # panel's pinned x domain -- both plots and both rulers -- and the

@@ -74,6 +74,7 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
         json.dumps(predictions),
         "Europe/Zurich",
         json.dumps(ranked),
+        False,
     )
 
     new_columns = ("header", "dial", "direction", "quality_label", "hour_quality")
@@ -113,6 +114,7 @@ def test_each_cell_carries_its_own_hourly_quality(
         json.dumps(predictions),
         "Europe/Zurich",
         json.dumps(ranked),
+        False,
     )
 
     assert grid["hour_quality"].tolist() == hourly_quality
@@ -147,6 +149,7 @@ def test_night_hours_never_render_as_a_quality_level(
         json.dumps(predictions),
         "Europe/Zurich",
         json.dumps([{"spot_id": "silvaplana"}]),
+        False,
     )
 
     spot = next(s for s in rc.get_spots() if s["id"] == "silvaplana")
@@ -734,3 +737,61 @@ def test_quality_legend_html_draws_the_ramp_as_a_gradient() -> None:
     assert "linear-gradient(90deg" in html
     for color in LIGHT.quality:
         assert color in html
+
+
+def test_compact_dial_uri_follows_the_palette_it_is_given() -> None:
+    # The cached grid bakes these URIs, so the mode has to arrive as an
+    # argument: resolving it inside would serve one viewer the other's dials.
+    args = (200.0, 25.0, 30.0, 45.0, 12.0, True)
+    assert rc._compact_dial_uri(*args, LIGHT) != rc._compact_dial_uri(*args, DARK)
+
+
+_ACCURACY_COLUMNS = ["spot_id", "time", "predicted", "observed", "delta", "verdict"]
+
+
+def _accuracy_timeline() -> pd.DataFrame:
+    """Long-form quality for one spot: three paired hours and one unpaired."""
+    times = pd.date_range("2026-07-17T06:00", periods=4, freq="h", tz="UTC")
+    rows = [
+        (times[0], 4.0, "Predicted (past)"),
+        (times[0], 4.0, "Observed"),
+        (times[1], 3.0, "Predicted (past)"),
+        (times[1], 4.0, "Observed"),
+        (times[2], 2.0, "Predicted (past)"),
+        (times[2], 4.5, "Observed"),
+        # Nothing observed this hour, so it says nothing about accuracy.
+        (times[3], 3.5, "Predicted (past)"),
+        (times[3], 3.5, "Forecast"),
+    ]
+    return pd.DataFrame(rows, columns=["time", "quality_index", "series"])
+
+
+def test_all_spots_accuracy_pairs_hours_and_grades_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        rc, "spot_quality_timeline", lambda *a, **k: _accuracy_timeline()
+    )
+    rc.all_spots_accuracy.clear()
+
+    frame = rc.all_spots_accuracy(("silvaplana",), "[]")
+
+    assert list(frame.columns) == _ACCURACY_COLUMNS
+    # The unpaired hour is dropped; the three paired ones survive, in time order.
+    assert len(frame) == 3
+    assert frame["spot_id"].unique().tolist() == ["silvaplana"]
+    assert frame["delta"].tolist() == [0.0, 1.0, 2.5]
+    # A whole band is the cut, so one band off still counts as matched.
+    assert frame["verdict"].tolist() == ["matched", "matched", "missed"]
+
+
+def test_all_spots_accuracy_keeps_its_columns_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: pd.DataFrame())
+    rc.all_spots_accuracy.clear()
+
+    frame = rc.all_spots_accuracy(("silvaplana",), "[]")
+
+    assert frame.empty
+    assert list(frame.columns) == _ACCURACY_COLUMNS

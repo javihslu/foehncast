@@ -264,11 +264,12 @@ def _render_recent_runs(runs: list[dict[str, Any]] | None) -> None:
     if not runs:
         st.caption("No recent runs recorded.")
         return
+    pal = active()
     rows_html = "".join(_run_row_html(run) for run in runs)
     st.markdown(
         '<div style="max-height:170px;overflow-y:auto;padding:10px 12px;'
-        "background:rgba(7,37,42,0.03);border-radius:8px;"
-        'border:1px solid rgba(7,37,42,0.08)">' + rows_html + "</div>",
+        f"background:{tint(pal.ink, 0.03)};border-radius:8px;"
+        f'border:1px solid {tint(pal.ink, 0.08)}">' + rows_html + "</div>",
         unsafe_allow_html=True,
     )
 
@@ -332,7 +333,7 @@ def _render_pipeline_rail(rail: dict[str, Any], prefetched: dict[str, Any]) -> N
         display = _format_chip(value, kind)
         chip_parts.append(
             f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
-            "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
+            f"padding:6px 12px;background:{tint(pal.ink, 0.04)};border-radius:8px;"
             'min-width:90px">'
             f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
             "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
@@ -458,7 +459,7 @@ def _render_prediction_health() -> None:
         chips.append(shadow_chip)
     chips_html = "".join(
         f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
-        "padding:6px 12px;background:rgba(7,37,42,0.04);border-radius:8px;"
+        f"padding:6px 12px;background:{tint(pal.ink, 0.04)};border-radius:8px;"
         'min-width:100px">'
         f'<span style="font-family:Manrope,sans-serif;font-size:0.62rem;'
         "font-weight:700;letter-spacing:0.04em;text-transform:uppercase;"
@@ -602,6 +603,14 @@ def _render_drift_breakdown() -> None:
             )
 
 
+def _rule_html(margin: str) -> str:
+    """A hairline separator in the ink role, so it follows the theme."""
+    return (
+        f'<hr style="border:none;border-top:1px solid {tint(active().ink, 0.10)};'
+        f'margin:{margin}">'
+    )
+
+
 def _render_pipelines_panel() -> None:
     """System tab body: three pipeline rails with recent run history."""
     # Run controls live in the sidebar; run history comes from the serving
@@ -666,11 +675,7 @@ def _render_pipelines_panel() -> None:
 
     for index, rail in enumerate(_PIPELINE_RAILS):
         if index > 0:
-            st.markdown(
-                '<hr style="border:none;border-top:1px solid rgba(7,37,42,0.10);'
-                'margin:14px 0">',
-                unsafe_allow_html=True,
-            )
+            st.markdown(_rule_html("14px 0"), unsafe_allow_html=True)
         _render_pipeline_rail(rail, rail_data[index])
 
 
@@ -683,15 +688,7 @@ def render_system_tab() -> None:
     repeat renders cheap.
     """
     _render_pipelines_panel()
-    st.markdown(
-        '<hr style="border:none;border-top:1px solid rgba(7,37,42,0.10);'
-        'margin:18px 0">',
-        unsafe_allow_html=True,
-    )
+    st.markdown(_rule_html("18px 0"), unsafe_allow_html=True)
     _render_drift_breakdown()
-    st.markdown(
-        '<hr style="border:none;border-top:1px solid rgba(7,37,42,0.10);'
-        'margin:18px 0">',
-        unsafe_allow_html=True,
-    )
+    st.markdown(_rule_html("18px 0"), unsafe_allow_html=True)
     _render_prediction_health()
