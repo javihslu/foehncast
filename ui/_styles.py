@@ -12,7 +12,6 @@ def _root_vars(pal: Palette) -> str:
     r, g, b = pal.rgb(pal.ink)
     lift = "255, 255, 255" if pal.name == "light" else "168, 214, 205"
     panel_a, panel_b = (0.82, 0.94) if pal.name == "light" else (0.06, 0.10)
-    nav_rgb = ", ".join(str(v) for v in pal.rgb(pal.plane_top))
     return f"""
 <style>
   :root {{
@@ -20,7 +19,6 @@ def _root_vars(pal: Palette) -> str:
     --surface: {pal.surface};
     --panel: rgba({lift}, {panel_a});
     --panel-strong: rgba({lift}, {panel_b});
-    --nav-bg: rgba({nav_rgb}, 0.85);
     --ink: {pal.ink};
     --muted: {pal.ink_secondary};
     --accent: {pal.band};
@@ -121,17 +119,26 @@ _CSS = """
     padding-top: 0 !important;
   }
 
+  /* The wrapper Streamlit 1.57 puts between stTabs and the tablist is only
+     as tall as the bar, so a sticky tablist has no room to travel and
+     scrolls away with the page. Flattening it makes the tall tabs container
+     the containing block, and the sticky bar actually sticks. */
+  div[data-testid="stTabs"] > div > div:has(> div[role="tablist"]) {
+    display: contents;
+  }
   div[data-testid="stTabs"] div[role="tablist"] {
     position: sticky;
     top: 0;
     z-index: 50;
     margin: -0.6rem -2rem 1.4rem -2rem;
     padding: 0.35rem 2rem 0;
-    background: var(--nav-bg);
+    /* No background of its own: the nav is page chrome, so at rest it is the
+       page. The blur alone keeps the tabs legible when content scrolls
+       under them. */
+    background: transparent;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line);
-    box-shadow: 0 4px 16px rgba(7, 37, 42, 0.08);
     gap: 1.6rem;
   }
   /* Text tabs, not pills: the nav reads as page chrome, so a tab is ink that
