@@ -66,6 +66,25 @@ curl -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
+### Render the console without Docker
+
+UI work and visual checks do not need the stack. The console reads a stored
+prediction snapshot before it falls back to live inference, so installing one is
+enough to render every panel on the host:
+
+```bash
+make ui-local
+```
+
+That writes a snapshot and starts Streamlit on `http://127.0.0.1:8501`. Wind and
+drive times still come from the live Open-Meteo and OSRM APIs; Airflow, MLflow,
+MinIO, and the serving container are not involved. With the stack up, `uv run
+python scripts/ui_fixture.py --capture` records real predictions once so later
+offline runs replay them instead of a synthetic curve.
+
+Fixture snapshots are labelled as such, and the console shows a banner saying the
+numbers are not a forecast. Use the full stack for anything that has to be true.
+
 ### The rider console
 
 <p align="center">
