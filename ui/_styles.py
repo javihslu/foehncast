@@ -204,6 +204,17 @@ _CSS = """
     background: transparent !important;
   }
 
+  /* The unified time panel is a measuring strip, so the pointer over it is a
+     fine crosshair rather than an arrow. The rules drawn inside the chart snap
+     to the hour and to the hovered row; the native crosshair keeps the pointer
+     itself exact in between, which is why it is replaced and not hidden --
+     cursor:none would leave the reader with only the snapped rules. */
+  div[class*="st-key-time_panel_select"],
+  div[class*="st-key-time_panel_select"] canvas,
+  div[class*="st-key-time_panel_select"] .vega-embed {
+    cursor: crosshair;
+  }
+
   div[data-testid="stButton"] > button,
   div[data-testid="stFormSubmitButton"] > button {
     background: #4d5450 !important;
