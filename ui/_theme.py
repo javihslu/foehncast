@@ -56,9 +56,11 @@ class Palette:
     band: str  # the ideal window: direction range x speed range
     reading: str  # this hour's wind, the dot
     night: str  # sun below the horizon, on a dial dot
-    # Session quality on the heatmap: levels 2-5, ordinal, one hue. Level 1 has
-    # no step of its own -- a fill that pale cannot clear the light-end floor,
-    # so it renders as the bare surface and keeps only its stroke.
+    # Session quality on the heatmap: anchors of the continuous ramp at levels
+    # 2-5, one hue. Level 1 has no step of its own -- the ramp fades to a
+    # zero-alpha wash of step 2 there, since a fill that pale cannot clear the
+    # light-end floor, so it renders as the bare surface and keeps only its
+    # stroke.
     quality: tuple[str, str, str, str]
     night_fill: str  # a night CELL, off the ramp entirely so it claims nothing
     # Wind chart series: three elevations (ordinal) plus gusts (dashed, so it

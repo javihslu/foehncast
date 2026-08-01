@@ -7,6 +7,7 @@ import pathlib
 import sys
 import types
 
+import altair as alt
 import pandas as pd
 import pytest
 
@@ -153,14 +154,39 @@ def test_night_hours_never_render_as_a_quality_level(
         float(spot["lat"]), float(spot["lon"]), pd.DatetimeIndex(grid["time"])
     ).to_numpy()
     dark = elevation <= -0.833
-    bands = grid["band"].to_numpy()
+    is_day = grid["is_day"].to_numpy()
 
     # The window has to contain both, or the assertions below prove nothing.
     assert dark.any() and (~dark).any()
-    assert set(bands[dark]) == {"night"}
-    assert "night" not in set(bands[~dark])
-    # Daylight still reads on the ramp, so the fix removed darkness, not signal.
-    assert set(bands[~dark]) <= {"1", "2", "3", "4", "5"}
+    assert not is_day[dark].any()
+    assert is_day[~dark].all()
+
+
+def test_quality_fill_keeps_night_off_the_ramp() -> None:
+    """The fill encoding routes night to the off-ramp fill, day to the ramp.
+
+    The ramp itself is continuous on the hour's own quality, anchored so the
+    level-1 end fades to the bare surface, and clamped so an out-of-range
+    index can never produce an undefined fill (the flat-week bug).
+    """
+    chart = (
+        alt.Chart(pd.DataFrame({"is_day": [True], "hour_quality": [3.0]}))
+        .mark_rect()
+        .encode(color=rc._quality_fill(LIGHT))
+    )
+    enc = chart.to_dict()["encoding"]["color"]
+
+    assert enc["value"] == LIGHT.night_fill
+    condition = enc["condition"]
+    assert condition["test"] == "datum.is_day"
+    assert condition["field"] == "hour_quality"
+    scale = condition["scale"]
+    assert scale["domain"] == [1, 2, 3, 4, 5]
+    assert scale["range"][1:] == list(LIGHT.quality)
+    # The level-1 anchor is the first step at zero alpha: a fade, not a fill.
+    assert scale["range"][0].startswith("rgba(")
+    assert scale["range"][0].endswith(", 0.0)")
+    assert scale["clamp"] is True
 
 
 def test_night_is_labelled_not_just_colored() -> None:
@@ -427,18 +453,12 @@ def test_selection_bubble_html_carries_panel_fields() -> None:
     assert "Wind" not in bare and "1/5" in bare
 
 
-def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
+def test_quality_legend_html_draws_the_ramp_as_a_gradient() -> None:
     html = rc._quality_legend_html()
 
     assert "Session quality (1-5)" in html
-    # Level 1 is the outline-only swatch (no ramp fill).
-    assert (
-        "border:1px solid var(--line);margin:0 0.3rem 0 0.9rem;"
-        'vertical-align:-0.05rem"></span>1' in html
-    )
-    # Levels 2-5 each carry their ramp color as the chip background.
-    for level, color in zip((2, 3, 4, 5), LIGHT.quality, strict=True):
-        assert (
-            f"background:{color};margin:0 0.3rem 0 0.9rem;"
-            f'vertical-align:-0.05rem"></span>{level}'
-        ) in html
+    # One strip through the validated anchors, not a chip per level: the fill
+    # is continuous, so the legend is too.
+    assert "linear-gradient(90deg" in html
+    for color in LIGHT.quality:
+        assert color in html

@@ -26,7 +26,7 @@ from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
 from _dial_tokens import dial_tokens, rgb_to_hex
-from _theme import Palette, active
+from _theme import Palette, active, tint
 from _wind_map import (
     _KN_TO_KMH,
     _clamp_to_slider_option,
@@ -166,6 +166,32 @@ def _heatmap_gap(pal: Palette) -> str:
     )
 
 
+def _quality_fill(pal: Palette) -> alt.Condition:
+    """Continuous fill for a heatmap cell: the hour's own quality, one hue.
+
+    The ramp keeps the two properties the discrete scale existed to protect.
+    The low anchor is the first validated step at zero alpha, so a level-1 hour
+    still renders as the bare surface -- a fill that pale cannot clear the
+    light-end floor -- and the fade through the hue reads as "barely" rather
+    than claiming a session. Night never enters the scale: it takes the
+    off-ramp night_fill outright, or a windy 02:00 would paint the same green
+    as a rideable afternoon. clamp pins out-of-range values to the anchors.
+    """
+    return alt.condition(
+        "datum.is_day",
+        alt.Color(
+            "hour_quality:Q",
+            scale=alt.Scale(
+                domain=[1, 2, 3, 4, 5],
+                range=[tint(pal.quality[0], 0.0), *pal.quality],
+                clamp=True,
+            ),
+            legend=None,
+        ),
+        alt.value(pal.night_fill),
+    )
+
+
 # Notice chip shown when the whole window is level 1: the outline board is
 # real data (a quiet week), not a render failure, and the chip says so.
 _FLAT_WEEK_CHIP = (
@@ -197,26 +223,29 @@ _LEGEND_CHIP = (
 
 
 def _quality_legend_html() -> str:
-    """Manual chip row for the heatmap legend: levels 1-5 plus the night swatch.
+    """Manual legend for the heatmap: a gradient strip plus the night swatch.
 
-    The Vega legend would render level 1 as a transparent (invisible) swatch,
-    since the color scale maps it to "transparent". Built by hand instead,
-    mirroring the wind map's chip row (_wind_map.render_wind_map): chip 1 is
-    an outline-only swatch, chips 2-5 use the validated ramp.
+    The fill is a continuous ramp on the hour's own quality, so the legend is a
+    strip through the validated anchors -- fading to the bare surface at the
+    level-1 end, where a fill that pale could not clear the light-end floor --
+    rather than one chip per level. A Vega legend cannot draw the zero-alpha
+    fade, so this is built by hand, mirroring the wind map's chip row
+    (_wind_map.render_wind_map).
     """
-    swatches = ["border:1px solid var(--line)"] + [
-        f"background:{color}" for color in active().quality
-    ]
-    labels: tuple[int | str, ...] = (1, 2, 3, 4, 5, "Night")
-    swatches.append(f"background:{active().night_fill}")
-    chips = "".join(
-        _LEGEND_CHIP.format(swatch=swatch, level=level)
-        for level, swatch in zip(labels, swatches, strict=True)
+    ramp = ", ".join([tint(active().quality[0], 0.0), *active().quality])
+    strip = (
+        '<span style="display:inline-block;width:3.6rem;height:0.7rem;'
+        "border-radius:2px;border:1px solid var(--line);"
+        f"background:linear-gradient(90deg, {ramp});"
+        'margin:0 0.3rem 0 0.9rem;vertical-align:-0.05rem"></span>'
+    )
+    night = _LEGEND_CHIP.format(
+        swatch=f"background:{active().night_fill}", level="Night"
     )
     return (
         "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
         'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
-        f"Session quality (1-5){chips}</p>"
+        f"Session quality (1-5) 1{strip}5{night}</p>"
     )
 
 
@@ -605,10 +634,9 @@ def all_spots_quality_grid(
     if "direction" not in grid.columns:
         grid["direction"] = pd.NA
 
-    # Fill key for the rect mark: a daylight cell takes its quality level, a night
-    # cell leaves the ramp. "daylight" carries the same fact in words for the
-    # tooltip, so night never rests on color alone.
-    grid["band"] = grid["quality"].astype(str).where(grid["is_day"], "night")
+    # "daylight" carries the day/night fact in words for the tooltip, so night
+    # never rests on color alone; the fill encoding (_quality_fill) reads
+    # is_day directly and never lets a dark hour onto the ramp.
     grid["daylight"] = grid["is_day"].map(
         {True: "Day", False: "Night — sun below horizon"}
     )
@@ -987,19 +1015,9 @@ def render_rider_console(
                         sort=rank_order,
                         axis=alt.Axis(orient="right", labelFontSize=13),
                     ),
-                    # Level 1 must stay INSIDE the scale domain: an out-of-domain
-                    # value gives Vega an undefined fill and the mark neither
-                    # renders nor hit-tests (a flat week then draws nothing at
-                    # all). "transparent" is a defined fill, so the cell keeps
-                    # its stroke and stays hover- and clickable.
-                    color=alt.Color(
-                        "band:N",
-                        scale=alt.Scale(
-                            domain=["1", "2", "3", "4", "5", "night"],
-                            range=["transparent", *_pal.quality, _pal.night_fill],
-                        ),
-                        legend=None,
-                    ),
+                    # The cell's own quality drives the fill continuously;
+                    # night cells leave the ramp entirely. See _quality_fill.
+                    color=_quality_fill(_pal),
                     # Selected cell gets a full-opacity ink stroke; the rest keep
                     # the hairline surface gap, so the pick is unmistakable.
                     stroke=alt.condition(
@@ -1125,9 +1143,9 @@ def render_rider_console(
                 )
                 # Layered charts SHARE the colour and shape scales by default,
                 # so "matched"/"missed" would be looked up in the cells' own
-                # band domain ("1".."5", "night"), miss, and paint as undefined
-                # -- marks present in the DOM and invisible on screen. Same trap
-                # the level-1 note above describes. Resolve them independently.
+                # quality ramp, miss, and paint as undefined -- marks present
+                # in the DOM and invisible on screen. Same trap the level-1
+                # note in _quality_fill describes. Resolve them independently.
                 heatmap = (heatmap + casing + checks).resolve_scale(
                     color="independent", shape="independent"
                 )
