@@ -12,6 +12,7 @@ def _root_vars(pal: Palette) -> str:
     r, g, b = pal.rgb(pal.ink)
     lift = "255, 255, 255" if pal.name == "light" else "168, 214, 205"
     panel_a, panel_b = (0.82, 0.94) if pal.name == "light" else (0.06, 0.10)
+    nav_rgb = ", ".join(str(v) for v in pal.rgb(pal.plane_top))
     return f"""
 <style>
   :root {{
@@ -19,12 +20,12 @@ def _root_vars(pal: Palette) -> str:
     --surface: {pal.surface};
     --panel: rgba({lift}, {panel_a});
     --panel-strong: rgba({lift}, {panel_b});
+    --nav-bg: rgba({nav_rgb}, 0.85);
     --ink: {pal.ink};
     --muted: {pal.ink_secondary};
     --accent: {pal.band};
     --accent-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.band))}, 0.16);
-    --accent-solid: {pal.accent_solid};
-    --on-accent: {pal.on_accent};
+    --accent-text: {pal.accent_text};
     --status-ink: {pal.status_ink};
     --pine: {pal.quality[2]};
     --pine-soft: rgba({", ".join(str(v) for v in pal.rgb(pal.quality[2]))}, 0.16);
@@ -125,47 +126,52 @@ _CSS = """
     top: 0;
     z-index: 50;
     margin: -0.6rem -2rem 1.4rem -2rem;
-    padding: 0.55rem 2rem 0.55rem;
-    background: var(--panel-strong);
+    padding: 0.35rem 2rem 0;
+    background: var(--nav-bg);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line);
     box-shadow: 0 4px 16px rgba(7, 37, 42, 0.08);
-    gap: 0.5rem;
+    gap: 1.6rem;
   }
+  /* Text tabs, not pills: the nav reads as page chrome, so a tab is ink that
+     turns brand orange when selected, with the accent carried by the
+     underline (a mark) rather than by a filled pill. The teal solid pill this
+     replaces introduced a second accent hue and, in light mode, sat a
+     near-white button on a near-white bar. */
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"],
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"] p {
     font-family: 'Manrope', sans-serif !important;
     font-weight: 800 !important;
     font-size: 1.02rem;
     letter-spacing: 0.01em;
-    color: var(--ink) !important;
+    color: var(--muted) !important;
   }
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"] {
-    padding: 0.5rem 1.3rem;
+    padding: 0.55rem 0.1rem;
+    border: none;
     border-bottom: none;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    background: transparent;
+    transition: color 0.15s ease;
   }
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"]:hover,
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"]:hover p {
-    background: rgba(14, 138, 134, 0.12);
+    background: transparent;
     color: var(--ink) !important;
   }
-  /* The selected pill carries text, so it uses the solid accent and its
-     paired ink: white on the plain band misses the 4.5:1 text floor in both
-     modes (4.21 light, 3.18 dark), while this pair clears it (5.82 / 5.05). */
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"],
   div[data-testid="stTabs"] div[role="tablist"] button[role="tab"][aria-selected="true"] p {
-    color: var(--on-accent) !important;
-    background: var(--accent-solid) !important;
-    border-color: var(--accent-solid) !important;
-    box-shadow: 0 6px 16px rgba(14, 138, 134, 0.28);
+    color: var(--accent-text) !important;
+    background: transparent !important;
+    box-shadow: none;
   }
+  /* The selected tab's underline: Streamlit positions this element under the
+     active tab. The accent hue here is the bright reading orange -- it is a
+     mark, so the 3:1 floor applies, which reading clears in both modes. */
   div[data-testid="stTabs"] div[role="tablist"] div[data-baseweb="tab-highlight"] {
-    display: none;
+    background-color: var(--warm);
+    height: 3px;
+    border-radius: 2px 2px 0 0;
   }
 
   button[role="tab"] {

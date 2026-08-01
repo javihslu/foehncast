@@ -26,8 +26,8 @@ on the dark surface at 1.06:1. Each role is the worst case over every surface a
 status pill actually renders on in its mode, measured with contrast() from the
 same validator:
 
-  light  ok 5.39  idle 5.93  warn 5.31  danger 6.08  accent pill 5.82
-  dark   ok 5.90  idle 6.00  warn 6.61  danger 5.97  accent pill 5.05
+  light  ok 5.39  idle 5.93  warn 5.31  danger 6.08  nav accent text 4.66
+  dark   ok 5.90  idle 6.00  warn 6.61  danger 5.97  nav accent text 5.08
 
 All clear the 4.5:1 floor for normal text. A component that needs a status
 colour asks for the role; it must not pick a hex.
@@ -83,10 +83,11 @@ class Palette:
     idle: str  # queued, cancelled, neutral-terminal, and secondary detail
     warn: str  # in flight
     danger: str
-    # A solid accent that can carry text, for the selected tab pill. The plain
-    # band is a mark colour: white on it misses the text floor in both modes.
-    accent_solid: str
-    on_accent: str
+    # A text-grade orange for the selected nav tab, the brand accent hue
+    # deepened until it clears the 4.5:1 text floor on each mode's surface
+    # (the plain reading orange is a mark: 3.34:1 on the light surface). The
+    # underline under the tab is a mark, so it uses reading itself.
+    accent_text: str
 
     def rgb(self, hex_value: str) -> list[int]:
         """[R, G, B], the form pydeck layers want."""
@@ -123,8 +124,7 @@ LIGHT = Palette(
     idle="#47535e",
     warn="#8f430c",
     danger="#96271b",
-    accent_solid="#0f7263",
-    on_accent="#ffffff",
+    accent_text="#b04a06",
 )
 
 DARK = Palette(
@@ -156,8 +156,7 @@ DARK = Palette(
     idle="#93aeb0",
     warn="#f0a04b",
     danger="#ff8579",
-    accent_solid="#16a384",
-    on_accent="#07252a",
+    accent_text="#ea630c",
 )
 
 
