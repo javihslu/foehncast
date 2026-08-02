@@ -9,8 +9,9 @@ backgroundColor = "#eef6f3"
 secondaryBackgroundColor = "#e4efeb"
 textColor = "#07252a"
 
+# base belongs to [theme] only; Streamlit rejects theme.dark.base and logs a
+# warning on every boot. The section itself is what selects the dark values.
 [theme.dark]
-base = "dark"
 primaryColor = "#ea630c"
 backgroundColor = "#0c1f24"
 secondaryBackgroundColor = "#071418"
