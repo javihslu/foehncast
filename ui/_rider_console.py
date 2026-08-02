@@ -33,6 +33,7 @@ from _wind_map import (
     _clamp_to_slider_option,
     _compass,
     _spot_wind_frame,
+    dangerous_kts,
     render_wind_map,
 )
 
@@ -696,6 +697,29 @@ def all_spots_quality_grid(
         {True: "Day", False: "Night — sun below horizon"}
     )
 
+    # Danger is the other fact the quality level cannot carry. _score_row marks
+    # an hour class 0 when it is too windy to ride, but quality_bucket sends
+    # ANY index <= 0.5 to class 0, so a dangerous hour and a dead-calm one are
+    # indistinguishable once the model has scored them. The cell therefore
+    # reads the wind itself, against the same ceilings the labeling model uses.
+    # Unknown wind stays False: absence of data is not safety, but a warning
+    # with nothing behind it is worse than none, and the words below say which
+    # case a cell is in.
+    max_speed_kn, max_gust_kn = dangerous_kts()
+
+    def _kn(column: str) -> pd.Series:
+        if column not in grid.columns:
+            return pd.Series(float("nan"), index=grid.index)
+        return pd.to_numeric(grid[column], errors="coerce") / _KN_TO_KMH
+
+    wind_kn, gust_kn = _kn("wind"), _kn("gust")
+    grid["is_dangerous"] = (wind_kn > max_speed_kn) | (gust_kn > max_gust_kn)
+    grid["safety"] = "Within the safe limits"
+    grid.loc[wind_kn.isna() & gust_kn.isna(), "safety"] = "No wind reading"
+    grid.loc[grid["is_dangerous"], "safety"] = (
+        f"Too strong — over {max_speed_kn:.0f} kn or gusting over {max_gust_kn:.0f} kn"
+    )
+
     # Tooltip payload, built once here so the fragment's reruns only serialize.
     # Header is "SpotName - Ddd HH:00" in local time; the dial is a compact
     # base64 SVG; metrics come straight from the ranked cards (constant per spot).
@@ -916,13 +940,17 @@ def _selection_bubble_html(
     gust: float | None,
     direction: float | None,
     is_day: bool = True,
+    is_dangerous: bool = False,
 ) -> str:
     """Rounded metrics bubble for the selection row."""
-    rows = [
-        _BUBBLE_ROW.format(
-            label="Quality", value=f"{quality}/5 ({quality_label(float(quality))})"
-        )
-    ]
+    # The quality scale bottoms out at 1 here, so a dangerous hour would
+    # otherwise read "1/5 (Too Light)" -- the exact opposite of the fact. The
+    # level is still shown, because it is what the board painted, but the word
+    # comes from the wind rather than from the floored level.
+    label = "Too strong" if is_dangerous else quality_label(float(quality))
+    rows = [_BUBBLE_ROW.format(label="Quality", value=f"{quality}/5 ({label})")]
+    if is_dangerous:
+        rows.append(_BUBBLE_ROW.format(label="Safety", value="Over the safe limit"))
     # A dark hour still has a wind forecast, and the quality row above still
     # reports it. Say plainly that it is not a session so the number is read as
     # weather rather than as a recommendation.
@@ -1010,6 +1038,7 @@ def _render_selection_row(row: pd.Series, min_kts: float) -> None:
                 gust,
                 direction,
                 bool(row.get("is_day", True)),
+                bool(row.get("is_dangerous", False)),
             ),
             unsafe_allow_html=True,
         )
@@ -1046,6 +1075,11 @@ def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
         alt.Tooltip("quality:O", title="Quality (1-5)"),
         alt.Tooltip("daylight:N", title="Daylight"),
     ]
+    # The quality level cannot say "too much wind" -- it floors at 1, and the
+    # danger class shares its number with a dead-calm hour. So the tooltip says
+    # it in words, and says plainly when there is no wind reading to judge.
+    if "safety" in heat_grid.columns:
+        tooltip.append(alt.Tooltip("safety:N", title="Safety"))
     if "wind" in heat_grid.columns:
         tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
     if "gust" in heat_grid.columns:
@@ -1191,6 +1225,26 @@ def _board_view(
         .add_params(panel.cell, panel.hover_board, panel.hover_row)
     )
     layers = [cells]
+
+    # Dangerous hours, painted over their own cell. The fill below cannot carry
+    # this: a conditional encoding falls back to ONE constant, which night
+    # already claims, and the ramp floors these hours at level 1 -- the same
+    # bare surface a dead-calm hour gets. Drawn as its own layer so the danger
+    # colour is exact rather than a step on the quality ramp. It repeats the
+    # tooltip because the top mark is the one that answers the pointer.
+    if "is_dangerous" in heat_grid.columns and bool(heat_grid["is_dangerous"].any()):
+        layers.append(
+            alt.Chart(heat_grid)
+            .mark_rect()
+            .transform_filter("datum.is_dangerous")
+            .encode(
+                x=_panel_x(panel),
+                x2="time_end:T",
+                y=alt.Y("spot:N", title=None, sort=rank_order, axis=None),
+                color=alt.value(pal.danger),
+                tooltip=_heat_tooltip(heat_grid),
+            )
+        )
 
     # Where the record stops being hindcast and starts being forecast.
     if panel.domain_start <= now <= panel.domain_end:
