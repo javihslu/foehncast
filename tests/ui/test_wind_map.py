@@ -83,6 +83,18 @@ def test_status_never_calls_a_dark_hour_rideable() -> None:
     assert wm._status(40.0, 15.0, is_day=False) == "Night, not rideable"
 
 
+def test_status_stops_calling_dangerous_wind_rideable() -> None:
+    # The dial's radius saturates at 30 kn, so position cannot say "too much".
+    # Above the labeling thresholds the word has to, or the console recommends
+    # a session in conditions its own model marks unsafe.
+    max_speed_kn, max_gust_kn = wm.dangerous_kts()
+
+    assert wm._status(max_speed_kn + 5.0, 15.0) == "Too strong"
+    assert wm._status(max_speed_kn, 15.0) == "Rideable"  # strict, like _score_row
+    assert wm._status(25.0, 15.0, gust_kn=max_gust_kn + 5.0) == "Too strong"
+    assert wm._status(25.0, 15.0, gust_kn=max_gust_kn) == "Rideable"
+
+
 def test_night_recolors_the_dot_in_both_themes() -> None:
     # Darkness is the one fact the dot's position cannot show, so it is the
     # only thing that changes the dot's colour -- in either theme.

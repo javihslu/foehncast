@@ -80,7 +80,7 @@ def wind_dial_svg(
     band = ideal_band_kn() if band_kn is None else band_kn
     flow = (direction_deg + 180.0) % 360.0
     ideal_center = (shore_orientation_deg + 180.0) % 360.0
-    status_label = _status(speed_kn, min_kts, is_day)
+    status_label = _status(speed_kn, min_kts, is_day, gust_kn=gust_kn)
     tok = dial_tokens(pal)
     dot_hex = rgb_to_hex(tok.reading if is_day else tok.night)
     ink, halo, teal = rgb_to_hex(tok.ink), rgb_to_hex(tok.halo), rgb_to_hex(tok.band)
