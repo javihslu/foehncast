@@ -291,6 +291,29 @@ def append_prediction_log(
     return destination
 
 
+def write_prediction_events(
+    rows: list[dict[str, Any]],
+    *,
+    event_path: Path | None = None,
+) -> None:
+    """Write prepared event rows to the durable prediction-event history.
+
+    Seeded history has to land where ``read_prediction_history`` looks, which
+    is BigQuery for the cloud deployment and the JSONL event log otherwise.
+    """
+    if not rows:
+        return
+
+    storage_config = get_storage_config()
+    backend = _prediction_event_storage_backend(storage_config)
+
+    if event_path is None and backend == "bigquery":
+        _write_prediction_events_bigquery(storage_config, rows)
+        return
+
+    _append_prediction_rows(prediction_event_log_path(event_path), rows)
+
+
 def read_prediction_log(
     path: Path | None = None,
     *,
@@ -430,4 +453,5 @@ __all__ = [
     "read_prediction_event_log",
     "read_prediction_history",
     "read_prediction_log",
+    "write_prediction_events",
 ]
