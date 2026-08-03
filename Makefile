@@ -1,10 +1,12 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify cloud-parity compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
 JUPYTER_TOKEN ?= foehncast-local
 TF_REMOTE_ARGS ?= plan
 SMOKE_BOOTSTRAP_ARGS ?=
+PARITY_BASELINE_URL ?= http://127.0.0.1:8000
+PARITY_ARGS ?=
 NOTEBOOK_REVIEW_BACKEND ?= s3
 NOTEBOOK_REVIEW_DIR ?=
 LOCAL_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.objectstore.yml
@@ -79,6 +81,12 @@ cloud-verify:  ## Verify Cloud Run services are healthy and BigQuery has data
 	@echo "Checking BigQuery row count..."
 	@bq query --project_id="$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)" --use_legacy_sql=false \
 		'SELECT spot_id, COUNT(*) as row_count FROM `'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_dataset_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_feature_table_id)"'` GROUP BY spot_id ORDER BY spot_id'
+
+cloud-parity:  ## Compare local and cloud APIs; needs PARITY_ARGS='--start YYYY-MM-DD --end YYYY-MM-DD'
+	cd $(ROOT_DIR) && uv run python scripts/compare-deployments.py \
+		$(PARITY_BASELINE_URL) \
+		"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw cloud_run_service_url)" \
+		$(PARITY_ARGS)
 
 terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS='<command> [flags]'
 	cd $(ROOT_DIR) && ./scripts/terraform-remote.sh $(TF_REMOTE_ARGS)
