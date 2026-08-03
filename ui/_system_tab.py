@@ -387,6 +387,30 @@ def _shadow_chip(
     return ("Shadow", f"{shadow_mean:.2g} vs v{candidate_version}")
 
 
+_MONITOR_RUN_WINDOW = "24h"
+_MONITOR_RUN_WINDOW_LABEL = "24 h"
+_MONITOR_EXEC = "foehncast_prediction_monitoring_execution_total"
+_MONITOR_RUNS_WINDOW_EXPR = f"sum(increase({_MONITOR_EXEC}[{_MONITOR_RUN_WINDOW}]))"
+_MONITOR_RUNS_TOTAL_EXPR = f"sum({_MONITOR_EXEC})"
+
+
+def _monitor_runs_chip(
+    windowed: float | None,
+    process_total: float | None,
+) -> tuple[str, str]:
+    """Build the (label, value) chip for prediction-monitoring executions.
+
+    The counter is process-local and resets with every revision, so the
+    windowed increase is the honest reading. Query backends without range
+    support fall back to the process total, labelled as such.
+    """
+    if windowed is not None:
+        return (f"Monitor runs ({_MONITOR_RUN_WINDOW_LABEL})", f"{int(windowed)}")
+    if process_total is not None:
+        return ("Monitor runs (since restart)", f"{int(process_total)}")
+    return ("Monitor runs", "—")
+
+
 def _render_prediction_health() -> None:
     pal = active()
     st.markdown(
@@ -400,7 +424,8 @@ def _render_prediction_health() -> None:
         "foehncast_prediction_log_total_row_count",
         "foehncast_prediction_log_model_count",
         "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
-        "foehncast_prediction_monitoring_execution_total",
+        _MONITOR_RUNS_WINDOW_EXPR,
+        _MONITOR_RUNS_TOTAL_EXPR,
         "foehncast_hindcast_accuracy",
         "foehncast_hindcast_validated_count",
     ]
@@ -418,7 +443,8 @@ def _render_prediction_health() -> None:
         total_rows,
         model_count,
         last_pred_ts,
-        exec_total,
+        monitor_runs_window,
+        monitor_runs_total,
         hindcast_acc,
         hindcast_n,
         shadow_mean,
@@ -446,10 +472,7 @@ def _render_prediction_health() -> None:
             "Last prediction",
             f'<span style="color:{fresh_color}">{pred_age}</span>',
         ),
-        (
-            "Monitor runs",
-            f"{int(exec_total)}" if exec_total is not None else "—",
-        ),
+        _monitor_runs_chip(monitor_runs_window, monitor_runs_total),
         (
             "Hindcast",
             (
