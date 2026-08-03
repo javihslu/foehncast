@@ -224,6 +224,84 @@ def test_dangerous_cell_bubble_does_not_say_too_light() -> None:
     assert "Over the safe limit" in bubble
 
 
+def test_dangerous_hour_still_reads_as_dangerous_on_the_rendered_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The danger class has to survive from the wind reading to the drawn cell.
+
+    Two steps in between can erase it: the level floors at 1, and night cells
+    leave the quality ramp for a single flat fill.
+    """
+    times = pd.date_range("2026-01-15T00:00:00Z", periods=24, freq="h")
+    max_speed_kn, max_gust_kn = rc.dangerous_kts()
+    # Too windy at 02:00 UTC (dark) and at 13:00 UTC (daylight), ordinary
+    # otherwise, so the flag has to track the wind rather than the hour.
+    windy = {2, 13}
+
+    def fake_timeline(spot_id: str, *args: object, **kwargs: object) -> pd.DataFrame:
+        rows = []
+        for i, t in enumerate(times):
+            over = i in windy
+            speed = (max_speed_kn + 10 if over else 18.0) * 1.852
+            gust = (max_gust_kn + 10 if over else 24.0) * 1.852
+            rows.append({"time": t, "elevation": "10m", "wind_speed": speed})
+            rows.append({"time": t, "elevation": "gusts", "wind_speed": gust})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+        False,
+    ).sort_values("time")
+
+    dangerous = grid[grid["is_dangerous"]]
+    assert len(dangerous) == len(windy)
+    # One of the two is a night hour: the night handling must not take it back.
+    assert set(dangerous["is_day"]) == {True, False}
+    # Nothing else on those cells says it. The level sits in the rideable band,
+    # and the night one is painted the same fill a dead-calm 02:00 gets.
+    assert dangerous["quality"].between(1, 5).all()
+
+    grid = grid.assign(spot="Silvaplana", t_ms=rc._epoch_ms(grid["time"]))
+    chart, _ = rc._time_panel(
+        grid,
+        ["Silvaplana"],
+        pd.DataFrame(),
+        fake_timeline("silvaplana"),
+        46.45,
+        9.79,
+        [grid["time"].min(), grid["time"].max() + pd.Timedelta(hours=1)],
+        grid["time"].iloc[0],
+        None,
+        16.0,
+    )
+    board = chart.to_dict()["vconcat"][1]
+    marks = [
+        i
+        for i, layer in enumerate(board["layer"])
+        if {"filter": "datum.is_dangerous"} in layer.get("transform", [])
+    ]
+    assert len(marks) == 1
+    danger_layer = board["layer"][marks[0]]
+    # Above the quality cells, so neither the ramp nor the night fill paints
+    # over it, and in its own colour rather than a step on the ramp.
+    assert marks[0] > 0
+    pal = rc.active()
+    assert danger_layer["encoding"]["color"]["value"] == pal.danger
+    assert pal.danger not in pal.quality and pal.danger != pal.night_fill
+
+
 def test_quality_fill_keeps_night_off_the_ramp() -> None:
     """The fill encoding routes night to the off-ramp fill, day to the ramp.
 
