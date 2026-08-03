@@ -361,21 +361,28 @@ def _top_model_versions(
     return ranked[:limit], len(rest), int(sum(e["value"] for e in rest))
 
 
+_SHADOW_EMPTY_CHIP = ("Shadow", "no challenger registered")
+_SHADOW_EMPTY_NOTE = (
+    "Shadow scoring compares a registered challenger against the champion. "
+    "This deployment registers a champion only, so the empty value is expected."
+)
+
+
 def _shadow_chip(
     shadow_mean: float | None,
     shadow_info: list[dict[str, Any]],
-) -> tuple[str, str] | None:
-    """Build the optional (label, value) shadow chip.
+) -> tuple[str, str]:
+    """Build the (label, value) shadow chip.
 
-    Shadow scoring is an optional capability, so the chip renders only when
-    both the divergence value and the candidate version label are present.
-    Returns *None* to omit the chip entirely rather than show an em-dash.
+    Shadow scoring needs both a divergence value and a candidate version. When
+    either is missing the chip states the empty case, because omitting it would
+    hide the absence.
     """
     if shadow_mean is None or not shadow_info:
-        return None
+        return _SHADOW_EMPTY_CHIP
     candidate_version = shadow_info[0]["labels"].get("candidate_version")
     if not candidate_version:
-        return None
+        return _SHADOW_EMPTY_CHIP
     # Two significant figures: small divergences must not collapse to 0.000.
     return ("Shadow", f"{shadow_mean:.2g} vs v{candidate_version}")
 
@@ -455,8 +462,7 @@ def _render_prediction_health() -> None:
         ),
     ]
     shadow_chip = _shadow_chip(shadow_mean, shadow_info)
-    if shadow_chip is not None:
-        chips.append(shadow_chip)
+    chips.append(shadow_chip)
     chips_html = "".join(
         f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
         f"padding:6px 12px;background:{tint(pal.ink, 0.04)};border-radius:8px;"
@@ -474,6 +480,13 @@ def _render_prediction_health() -> None:
         + "</div>",
         unsafe_allow_html=True,
     )
+
+    if shadow_chip == _SHADOW_EMPTY_CHIP:
+        st.markdown(
+            '<div style="font-family:Manrope,sans-serif;font-size:0.72rem;'
+            f'color:{pal.idle};padding-bottom:10px">{_SHADOW_EMPTY_NOTE}</div>',
+            unsafe_allow_html=True,
+        )
 
     if model_results:
         models_sorted, hidden_count, hidden_total = _top_model_versions(model_results)
