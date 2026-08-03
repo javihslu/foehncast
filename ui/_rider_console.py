@@ -1301,7 +1301,7 @@ def _board_view(
                     alt.Tooltip("spot:N", title="Spot"),
                     alt.Tooltip("time:T", title="Hour", format="%a %H:00"),
                     alt.Tooltip("predicted:Q", title="Predicted", format=".2f"),
-                    alt.Tooltip("observed:Q", title="Observed", format=".2f"),
+                    alt.Tooltip("observed:Q", title="Archive estimate", format=".2f"),
                     alt.Tooltip("delta:Q", title="Off by", format=".2f"),
                 ],
             )
@@ -1739,7 +1739,9 @@ def render_rider_console(
                     missed = int((accuracy["verdict"] == "missed").sum())
                     st.caption(
                         f"Marks left of the dashed line compare past forecasts "
-                        f"with what was observed: a ring means the hour was "
+                        f"with a quality index recomputed from archive data, "
+                        f"which lags about five days, so recent hours are "
+                        f"provisional: a ring means the hour was "
                         f"called within {_ACCURACY_MISS_THRESHOLD:.0f} quality "
                         f"band, a cross means it missed "
                         f"({missed} of {len(accuracy)} hours)."
