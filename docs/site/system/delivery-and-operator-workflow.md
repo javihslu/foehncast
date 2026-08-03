@@ -1,6 +1,6 @@
 # Operator Runbook
 
-*Status: this runbook describes the hosted Cloud Run environment. It applies to the live demo and to any copy redeployed from `terraform/`.*
+*Status: this runbook describes the hosted Cloud Run environment. It applies to any deployment made from `terraform/`, including the hosted demo when one is running.*
 
 Contributors run locally with Docker. Maintainers deploy to GCP through GitHub Actions + Terraform. This page explains both paths.
 

@@ -46,7 +46,7 @@ cd foehncast
 
 The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, the app, and the rider console) and runs a smoke test. No cloud credentials are needed.
 
-The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than the hosted demo, which is trained on a year. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers.
+The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than a cloud deployment trained on a year of history. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers.
 
 After bootstrap, you get:
 
@@ -74,7 +74,7 @@ curl -X POST http://127.0.0.1:8000/rank \
   <em>Session-quality heatmap across six spots; a selected cell drives the wind dial and metrics, with the serving champion model in the sidebar.</em>
 </p>
 
-The full stack also runs on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. A live demo is currently online at [https://foehncast-ui-qiwypnakeq-oa.a.run.app](https://foehncast-ui-qiwypnakeq-oa.a.run.app) - it is a temporary deployment and may be taken down without notice. Everything reproduces locally with the bootstrap script above.
+The full stack also runs on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. A hosted demo is deployed from the same Terraform when one is running; deployments are temporary and taken down to avoid idle cost. Everything reproduces locally with the bootstrap script above.
 
 ### Reproducible pipelines (DVC)
 
@@ -97,7 +97,7 @@ make coverage      # coverage report
 
 ## Cloud Deployment
 
-The system runs on GCP Cloud Run. A live demo is online at [https://foehncast-ui-qiwypnakeq-oa.a.run.app](https://foehncast-ui-qiwypnakeq-oa.a.run.app), with the inference API at [https://foehncast-serve-qiwypnakeq-oa.a.run.app](https://foehncast-serve-qiwypnakeq-oa.a.run.app); both are temporary and may be taken down without notice. This section documents the architecture as deployed, and [terraform/](terraform/) is deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
+The system runs on GCP Cloud Run. A hosted demo (console plus inference API) is deployed from [terraform/](terraform/) when one is running; deployments are temporary and taken down to avoid idle cost. This section documents the architecture as deployed, and the same Terraform is deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
 
 ```mermaid
 flowchart LR
