@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import altair as alt
@@ -1115,6 +1115,7 @@ class _Panel:
     hover_row: alt.Parameter
     hover_wind: alt.Parameter
     pin_time: alt.Parameter
+    hour_verdicts: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
@@ -1150,6 +1151,64 @@ def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
         alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
         alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
     ]
+
+
+def _hour_verdicts(accuracy: pd.DataFrame) -> pd.DataFrame:
+    """Per-hour accuracy, collapsed across spots, for the ruler's tint.
+
+    The board carries one verdict per spot AND hour; the ruler has only the
+    hour, so an hour reads as missed when any spot's forecast missed it. The
+    counts ride along in the tooltip, which is where the per-spot detail that
+    the collapse drops comes back.
+    """
+    if accuracy.empty:
+        return pd.DataFrame(
+            columns=["time", "time_end", "missed", "pairs", "worst", "verdict"]
+        )
+    grouped = accuracy.groupby("time", as_index=False).agg(
+        missed=("verdict", lambda v: int((v == "missed").sum())),
+        pairs=("verdict", "size"),
+        worst=("delta", "max"),
+    )
+    grouped["time_end"] = grouped["time"] + pd.Timedelta(hours=1)
+    grouped["verdict"] = grouped["missed"].map(
+        lambda n: "missed" if n > 0 else "matched"
+    )
+    return grouped
+
+
+def _verdict_band(panel: _Panel) -> alt.Chart:
+    """The hour's verdict as a tint on the time ruler.
+
+    Colour and opacity move together: a matched hour is a quiet wash of the
+    secondary ink, a missed one a solid danger tint, so the miss reads on a
+    greyscale print too rather than resting on hue alone.
+    """
+    return (
+        alt.Chart(panel.hour_verdicts)
+        .mark_rect(clip=True)
+        .encode(
+            x=_panel_x(panel),
+            x2=alt.X2("time_end:T"),
+            color=alt.Color(
+                "verdict:N",
+                scale=alt.Scale(
+                    domain=["matched", "missed"],
+                    range=[panel.pal.ink_secondary, panel.pal.danger],
+                ),
+                legend=None,
+            ),
+            opacity=alt.condition(
+                alt.datum.verdict == "missed", alt.value(0.85), alt.value(0.3)
+            ),
+            tooltip=[
+                alt.Tooltip("time:T", title="Hour", format="%a %H:00"),
+                alt.Tooltip("missed:Q", title="Spots missed", format=".0f"),
+                alt.Tooltip("pairs:Q", title="Spots compared", format=".0f"),
+                alt.Tooltip("worst:Q", title="Worst miss", format=".2f"),
+            ],
+        )
+    )
 
 
 def _pin_frame(pinned: pd.Timestamp) -> pd.DataFrame:
@@ -1246,8 +1305,15 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
         .mark_rule(opacity=0)
         .encode(x=alt.X("time:T", axis=axis, scale=panel.x_scale))
     )
+    # The ruler carries the axis, so it stays the first layer: a sibling that
+    # left its own axis implicit would leave vega-lite nothing to merge.
+    graded = [] if panel.hour_verdicts.empty else [_verdict_band(panel)]
     if panel.pinned is None:
-        return ruler.properties(height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH)
+        if not graded:
+            return ruler.properties(height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH)
+        return alt.layer(ruler, *graded).properties(
+            height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
+        )
     pin = _pin_frame(panel.pinned)
     tick = (
         alt.Chart(pin)
@@ -1268,7 +1334,7 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
         )
         .encode(x=alt.X("time_mid:T", scale=panel.x_scale), text="label:N")
     )
-    return alt.layer(ruler, tick, label).properties(
+    return alt.layer(ruler, *graded, tick, label).properties(
         height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
     )
 
@@ -1277,7 +1343,6 @@ def _board_view(
     panel: _Panel,
     heat_grid: pd.DataFrame,
     rank_order: list[str],
-    accuracy: pd.DataFrame,
     now: pd.Timestamp,
 ) -> alt.LayerChart:
     """The session-quality board, without an x axis of its own.
@@ -1322,57 +1387,6 @@ def _board_view(
                 color=pal.ink_secondary, strokeWidth=1.5, strokeDash=[5, 3], clip=True
             )
             .encode(x=_panel_x(panel, "x"))
-        )
-
-    if not accuracy.empty:
-        # A mark on this board can land on any cell -- a dark quality step or
-        # the pale night fill -- so no single ink survives both. The casing is
-        # the palette's role for exactly that: a halo underneath, drawn first
-        # and slightly thicker.
-        shape = alt.Shape(
-            "verdict:N",
-            scale=alt.Scale(domain=["matched", "missed"], range=["circle", "cross"]),
-            legend=None,
-        )
-        layers.append(
-            alt.Chart(accuracy)
-            .mark_point(size=80, strokeWidth=5, filled=False, clip=True)
-            .encode(
-                x=_panel_x(panel),
-                y=alt.Y("spot:N", sort=rank_order),
-                shape=shape,
-                color=alt.value(pal.casing),
-            )
-        )
-        layers.append(
-            alt.Chart(accuracy)
-            .mark_point(size=80, strokeWidth=2.2, filled=False, clip=True)
-            .encode(
-                x=_panel_x(panel),
-                y=alt.Y("spot:N", sort=rank_order),
-                # Shape as well as colour: a hollow ring for an hour the model
-                # called right, a filled cross where it missed, so the verdict
-                # never rests on hue alone.
-                shape=shape,
-                color=alt.Color(
-                    "verdict:N",
-                    scale=alt.Scale(
-                        domain=["matched", "missed"],
-                        range=[pal.ink_secondary, pal.danger],
-                    ),
-                    legend=None,
-                ),
-                opacity=alt.condition(
-                    alt.datum.verdict == "missed", alt.value(1.0), alt.value(0.85)
-                ),
-                tooltip=[
-                    alt.Tooltip("spot:N", title="Spot"),
-                    alt.Tooltip("time:T", title="Hour", format="%a %H:00"),
-                    alt.Tooltip("predicted:Q", title="Predicted", format=".2f"),
-                    alt.Tooltip("observed:Q", title="Observed", format=".2f"),
-                    alt.Tooltip("delta:Q", title="Off by", format=".2f"),
-                ],
-            )
         )
 
     # The horizontal half of the crosshair: the hovered row, which on this board
@@ -1599,6 +1613,7 @@ def _time_panel(
         pal=pal,
         pinned=pinned,
         focus_spot=focus_spot,
+        hour_verdicts=_hour_verdicts(accuracy),
         cell=alt.selection_point(
             name="cell", fields=["spot", "time"], on="click", empty=False
         ),
@@ -1631,7 +1646,7 @@ def _time_panel(
     views = [_ruler_view(panel, "top")]
     modes: list[str] = []
     if not heat_grid.empty:
-        views.append(_board_view(panel, heat_grid, rank_order, accuracy, now))
+        views.append(_board_view(panel, heat_grid, rank_order, now))
         modes.append("cell")
     if not timeline_frame.empty:
         views.append(_wind_view(panel, timeline_frame, spot_lat, spot_lon, min_kts))
@@ -1857,13 +1872,16 @@ def render_rider_console(
                 else:
                     _render_selection_bubble(detail)
                 if not accuracy.empty:
-                    missed = int((accuracy["verdict"] == "missed").sum())
+                    hours = _hour_verdicts(accuracy)
+                    missed = int((hours["verdict"] == "missed").sum())
                     st.caption(
-                        f"Marks left of the dashed line compare past forecasts "
-                        f"with what was observed: a ring means the hour was "
-                        f"called within {_ACCURACY_MISS_THRESHOLD:.0f} quality "
-                        f"band, a cross means it missed "
-                        f"({missed} of {len(accuracy)} hours)."
+                        f"The time ruler is tinted left of the dashed line, "
+                        f"where past forecasts can be compared with what was "
+                        f"observed: a quiet tint means every spot was called "
+                        f"within {_ACCURACY_MISS_THRESHOLD:.0f} quality band, a "
+                        f"red one means at least one spot missed "
+                        f"({missed} of {len(hours)} hours). Hover an hour for "
+                        f"the count."
                     )
 
     st.divider()

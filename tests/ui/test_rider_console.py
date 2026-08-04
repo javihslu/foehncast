@@ -614,6 +614,50 @@ def test_heat_cells_declare_where_they_end() -> None:
     assert hits["encoding"]["x2"]["field"] == "time_end"
 
 
+def test_hour_verdicts_collapse_spots_and_keep_the_counts() -> None:
+    """One row per hour, missed as soon as any spot missed, counts preserved."""
+    hour = pd.Timestamp("2026-07-12T09:00:00", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "spot": ["Silvaplana", "Urnersee", "Silvaplana"],
+            "time": [hour, hour, hour + pd.Timedelta(hours=1)],
+            "delta": [0.2, 1.6, 0.1],
+            "verdict": ["matched", "missed", "matched"],
+        }
+    )
+
+    graded = rc._hour_verdicts(accuracy)
+
+    assert graded["verdict"].tolist() == ["missed", "matched"]
+    assert graded["missed"].tolist() == [1, 0]
+    assert graded["pairs"].tolist() == [2, 1]
+    assert graded["worst"].tolist() == [1.6, 0.1]
+    # The tint spans the hour it grades, so it has to say where that hour ends.
+    assert (graded["time_end"] - graded["time"]).unique() == pd.Timedelta(hours=1)
+
+
+def test_the_verdict_is_a_tint_on_the_ruler_not_a_mark_on_the_board() -> None:
+    """Accuracy reads off the time axis; the board is left to the quality cells."""
+    spec, _ = _build_panel(None)
+    top, board, bottom = spec["vconcat"][0], spec["vconcat"][1], spec["vconcat"][3]
+
+    for ruler in (top, bottom):
+        tint = next(
+            layer
+            for layer in ruler["layer"]
+            if layer["mark"]["type"] == "rect"
+            and layer["encoding"]["color"]["field"] == "verdict"
+        )
+        # A rect on a continuous x has to declare its end, and the tint must not
+        # draw an axis of its own beside the ruler that does.
+        assert tint["encoding"]["x2"]["field"] == "time_end"
+        assert tint["encoding"]["x"]["axis"] is None
+
+    assert not [
+        layer for layer in board["layer"] if layer["mark"]["type"] == "point"
+    ], "the board should carry no accuracy marks now the ruler is tinted"
+
+
 def test_panel_reruns_on_clicks_only_never_on_hover() -> None:
     """Hover params stay client-side: listening to them would rerun on every move."""
     spec, modes = _build_panel(None)
