@@ -105,7 +105,7 @@ def test_to_utc_localizes_naive_and_converts_aware() -> None:
 
 
 def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
-    spot = {"name": "Silvaplana", "lat": 46.45, "lon": 9.79}
+    spot = {"id": "silvaplana", "name": "Silvaplana", "lat": 46.45, "lon": 9.79}
     row = pd.Series(
         {"wind_speed_10m": 40.0, "wind_gusts_10m": 55.0, "wind_direction_10m": 200.0}
     )
@@ -114,6 +114,7 @@ def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
     anchor, segments = wm._reading_records(spot, row, min_kts)
 
     assert set(anchor) == {
+        "spot_id",
         "lat",
         "lon",
         "dot_lon",

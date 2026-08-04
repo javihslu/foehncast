@@ -23,7 +23,7 @@ from foehncast.inference_pipeline.dashboard import (
     quality_bucket,
     quality_label,
 )
-from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
+from foehncast.solar import is_daylight_hour, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
 from _dial_tokens import dial_tokens, rgb_to_hex
@@ -314,9 +314,30 @@ _SPOT_METRIC_KEYS = (
 def _night_bands(
     t_min: pd.Timestamp, t_max: pd.Timestamp, lat: float, lon: float
 ) -> pd.DataFrame:
-    """Dusk-to-dawn rectangles for the spot, from real solar geometry."""
-    intervals = night_intervals(lat, lon, t_min, t_max)
-    return pd.DataFrame([{"x": lo, "x2": hi} for lo, hi in intervals])
+    """Night rectangles for the spot, quantized to the panel's hourly cells.
+
+    Built from the same per-hour daylight rule the heatmap cells use
+    (is_daylight_hour), so the wash and the night cells start and end on the
+    same column edges. Exact sunrise/sunset instants would sit up to an hour
+    inside a cell and read as the two plots disagreeing about the night.
+    """
+    hours = pd.date_range(
+        t_min.floor("h"), t_max.ceil("h"), freq="h", inclusive="left"
+    )
+    if hours.empty:
+        return pd.DataFrame(columns=["x", "x2"])
+    day = is_daylight_hour(lat, lon, hours).to_numpy()
+    spans: list[dict[str, pd.Timestamp]] = []
+    open_i: int | None = None
+    for i, lit in enumerate(day):
+        if not lit and open_i is None:
+            open_i = i
+        if lit and open_i is not None:
+            spans.append({"x": hours[open_i], "x2": hours[i]})
+            open_i = None
+    if open_i is not None:
+        spans.append({"x": hours[open_i], "x2": hours[-1] + pd.Timedelta(hours=1)})
+    return pd.DataFrame(spans)
 
 
 def _night_rect(
@@ -640,10 +661,12 @@ def all_spots_quality_grid(
         # Daylight is per spot, per hour: rank_spots already drops dark hours
         # from the score, but every hour still gets a cell here, so the grid has
         # to carry its own flag or it paints unrideable darkness as a session.
+        # The hourly-cell rule (midpoint) keeps these cells on the wind plot's
+        # night-band edges.
         cfg = spots_cfg.get(spot_id)
         frame["is_day"] = (
-            is_daylight(
-                float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex(frame["time"])
+            is_daylight_hour(
+                float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex(frame["hour"])
             ).to_numpy()
             if cfg
             else True
@@ -1358,10 +1381,17 @@ def _wind_view(
 ) -> alt.LayerChart:
     """The wind and gust plot, on the board's clock and carrying the panel's hit layer."""
     pal = panel.pal
+    # A sample at H:00 borders the cells [H-1, H) and [H, H+1); it draws at
+    # full strength when either neighbour is a daylight cell, so the bright
+    # line runs edge-to-edge of the day region and meets the night wash
+    # exactly where the heatmap's night cells begin.
+    hours = pd.DatetimeIndex(timeline_frame["time"]).floor("h")
+    cell_day = is_daylight_hour(spot_lat, spot_lon, hours).to_numpy()
+    prev_day = is_daylight_hour(
+        spot_lat, spot_lon, hours - pd.Timedelta(hours=1)
+    ).to_numpy()
     frame = timeline_frame.assign(
-        is_day=is_daylight(
-            spot_lat, spot_lon, pd.DatetimeIndex(timeline_frame["time"])
-        ).to_numpy(),
+        is_day=cell_day | prev_day,
         t_ms=_epoch_ms(timeline_frame["time"]),
         # An hourly value is drawn at the middle of its hour, where the board
         # draws that hour's cell, so the two plots align column for column.

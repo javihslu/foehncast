@@ -11,7 +11,7 @@ import streamlit as st
 
 from foehncast.config import get_labeling_config, get_rider_config, get_spots
 from foehncast.feature_pipeline.ingest import fetch_forecast
-from foehncast.solar import is_daylight
+from foehncast.solar import is_daylight_hour
 
 from _dial_tokens import (
     WEDGE_FILL_ALPHA,
@@ -192,6 +192,7 @@ def _reading_records(
     ]
     label_pt = _destination(lat, lon, 180.0, _DIAL_RADIUS_KM * 1.32)
     anchor = {
+        "spot_id": spot["id"],
         "lat": lat,
         "lon": lon,
         "dot_lon": dot[0],
@@ -226,11 +227,15 @@ def _hourly_map_records(
             continue
         spot = spots_cfg[sid]
         # Daylight per spot per hour, computed once for the frame rather than
-        # per row, so the slider can never land on a dark hour showing "Rideable".
+        # per row, so the slider can never land on a dark hour showing
+        # "Rideable". The hourly-cell rule keeps a dial's night state in step
+        # with the heatmap cell for the same hour.
         index = pd.DatetimeIndex(frame.index)
         if index.tz is None:
             index = index.tz_localize("UTC")
-        lit = is_daylight(float(spot["lat"]), float(spot["lon"]), index).to_numpy()
+        lit = is_daylight_hour(
+            float(spot["lat"]), float(spot["lon"]), index.floor("h")
+        ).to_numpy()
         for (ts, row), is_day in zip(frame.iterrows(), lit, strict=True):
             key = _to_utc(ts).isoformat()
             bucket = out.setdefault(key, {"anchors": [], "segments": []})
@@ -259,6 +264,43 @@ def _lookup_hourly_records(
         return hourly[key]
     nearest = min(hourly, key=lambda k: abs((pd.Timestamp(k) - target).total_seconds()))
     return hourly[nearest]
+
+
+def _selected_dial_spot(event: Any) -> str | None:
+    """Spot id of the dial picked on the map, or None when nothing was picked.
+
+    Both dial layers carry the anchor records, so a click on either the origin
+    or the reading dot resolves to the same spot.
+    """
+    raw = getattr(event, "selection", None)
+    objects = getattr(raw, "objects", None)
+    if objects is None and hasattr(raw, "get"):
+        objects = raw.get("objects")
+    if not objects:
+        return None
+    for layer_id in ("dial-reading", "dial-origin"):
+        hits = objects.get(layer_id) or []
+        if hits:
+            picked = hits[0].get("spot_id")
+            return str(picked) if picked is not None else None
+    return None
+
+
+def _sync_focus_to_dial_click(spot_id: str | None) -> None:
+    """Focus the console on a clicked dial's spot, mirroring the heatmap click.
+
+    The console fragment rendered before this map in the same script run, so an
+    actual change needs an app-scope rerun. Guarded by map_spot_applied: the
+    chart re-reports its last selection on every rerun, and without the mirror
+    a stale pick would fight a focus change made elsewhere (heatmap click,
+    default fallback) and rerun forever.
+    """
+    if spot_id is None or st.session_state.get("map_spot_applied") == spot_id:
+        return
+    st.session_state["map_spot_applied"] = spot_id
+    if st.session_state.get("rider_focus_spot") != spot_id:
+        st.session_state["rider_focus_spot"] = spot_id
+        st.rerun(scope="app")
 
 
 def _clamp_to_slider_option(
@@ -439,6 +481,7 @@ def _render_map_fragment(
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
+            id="dial-origin",
             data=anchors,
             get_position="[lon, lat]",
             get_fill_color=[*tok.ink, 150],
@@ -461,6 +504,7 @@ def _render_map_fragment(
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
+            id="dial-reading",
             data=anchors,
             get_position="[dot_lon, dot_lat]",
             get_fill_color="color",
@@ -547,7 +591,15 @@ def _render_map_fragment(
         map_style="dark" if pal.name == "dark" else "light",
         tooltip={"text": "{tooltip}"},
     )
-    st.pydeck_chart(deck, use_container_width=True, height=620)
+    event = st.pydeck_chart(
+        deck,
+        use_container_width=True,
+        height=620,
+        on_select="rerun",
+        selection_mode="single-object",
+        key="wind_map_select",
+    )
+    _sync_focus_to_dial_click(_selected_dial_spot(event))
 
     chip = (
         '<span style="display:inline-block;width:0.7rem;height:0.7rem;'
@@ -560,7 +612,8 @@ def _render_map_fragment(
         "the short tick beyond it marks gusts. A dot inside the teal band is a "
         "session &mdash; that band is the spot's ideal window (direction "
         f"&plusmn;45&deg;, {storm_band['min_kts']:.0f}&ndash;"
-        f"{storm_band['max_kts']:.0f} kn)."
+        f"{storm_band['max_kts']:.0f} kn). Click a dial to focus the console "
+        "on that spot."
         + chip.format(_rgb_to_hex(tok.band), "Ideal window")
         + chip.format(_rgb_to_hex(tok.reading), "This hour's wind")
         + chip.format(_rgb_to_hex(tok.night), "Night (sun down)")

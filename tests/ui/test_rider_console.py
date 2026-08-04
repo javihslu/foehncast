@@ -153,8 +153,12 @@ def test_night_hours_never_render_as_a_quality_level(
     )
 
     spot = next(s for s in rc.get_spots() if s["id"] == "silvaplana")
+    # Cells are judged at their midpoint (is_daylight_hour), so a cell counts
+    # as night when the sun is down at H+30 -- the same rule the wind plot's
+    # hourly night wash uses.
+    mid = pd.DatetimeIndex(grid["time"]) + pd.Timedelta(minutes=30)
     elevation = rc.solar_elevation_deg(
-        float(spot["lat"]), float(spot["lon"]), pd.DatetimeIndex(grid["time"])
+        float(spot["lat"]), float(spot["lon"]), mid
     ).to_numpy()
     dark = elevation <= -0.833
     is_day = grid["is_day"].to_numpy()
@@ -376,21 +380,28 @@ def test_minimum_rideable_kts_uses_light_threshold_below_weight_cutoff(
     assert rc._minimum_rideable_kts() == 16.0
 
 
-def test_night_bands_wraps_night_intervals_as_dataframe() -> None:
+def test_night_bands_align_to_hourly_daylight_cells() -> None:
     lat, lon = 46.45, 9.79
     t_min = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
     t_max = t_min + pd.Timedelta(hours=48)
 
     bands = rc._night_bands(t_min, t_max, lat, lon)
-    expected = rc.night_intervals(lat, lon, t_min, t_max)
+    hours = pd.date_range(t_min, t_max, freq="h", inclusive="left")
+    day = rc.is_daylight_hour(lat, lon, hours)
 
     assert list(bands.columns) == ["x", "x2"]
-    assert len(bands) == len(expected)
     assert len(bands) >= 1
-    for (_, row), (lo, hi) in zip(bands.iterrows(), expected, strict=True):
-        assert row["x"] == lo
-        assert row["x2"] == hi
+    covered: set[pd.Timestamp] = set()
+    for _, row in bands.iterrows():
         assert row["x"] < row["x2"]
+        # Edges sit on cell boundaries, where the heatmap's night cells sit.
+        assert row["x"] == row["x"].floor("h")
+        assert row["x2"] == row["x2"].floor("h")
+        covered.update(
+            pd.date_range(row["x"], row["x2"] - pd.Timedelta(hours=1), freq="h")
+        )
+    # The wash covers exactly the hours the heatmap rule calls night.
+    assert {h for h in hours if not day[h]} == covered
 
 
 def test_heatmap_tick_count_scales_with_window() -> None:
