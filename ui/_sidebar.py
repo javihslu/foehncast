@@ -14,7 +14,7 @@ from _control import (
 )
 from _promql import prom_query_batch
 
-_PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule: 0 */6 * * *
+_PREDICTION_CYCLE_SECONDS = 6 * 3600  # Airflow schedule of the feature DAG: 0 */6 * * *
 
 # A pipeline reads busy while its most recent run is queued or running; a fresh
 # trigger also flags it in session state for up to this long, bridging the gap
@@ -140,7 +140,7 @@ _FRESHNESS_SOURCES: list[tuple[str, str, bool, str]] = [
     (
         "Training",
         "foehncast_training_pipeline_summary_generated_timestamp_seconds",
-        True,
+        False,
         "training",
     ),
     (
@@ -341,7 +341,7 @@ def render_sidebar_ml_panels() -> None:
     if serving_ver is not None:
         badge_color = "var(--accent)"
         badge_bg = "var(--accent-soft)"
-        badge_text = "Serving"
+        badge_text = "Registry"
     else:
         badge_color = "#c0392b"
         badge_bg = "rgba(192, 57, 43, 0.10)"

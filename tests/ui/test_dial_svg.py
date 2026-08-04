@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 # The ui modules import each other by bare name (e.g. `from _wind_map import`),
@@ -50,6 +51,37 @@ def test_dot_takes_the_night_color_after_dark() -> None:
     night = _svg(is_day=False, pal=LIGHT)
     assert rgb_to_hex(tok.night) in night
     assert rgb_to_hex(tok.reading) not in night
+
+
+def test_dial_never_reads_rideable_after_dark() -> None:
+    # A strong wind at 02:00 must not come back looking like an afternoon
+    # session, in colour or in words. The aria-label carries the same fact,
+    # since a screen reader never sees the dot.
+    windy = {"speed_kn": 40.0, "min_kts": 15.0}
+    tok = dial_tokens(LIGHT)
+    day = _svg(**windy, pal=LIGHT)
+    night = _svg(**windy, is_day=False, pal=LIGHT)
+
+    def reading_fill(svg: str) -> str:
+        # Read the fill off the reading mark itself: other marks share the hue,
+        # and stroke attributes sit between fill and data-role, so matching the
+        # two as one substring never works.
+        mark = re.search(r'<[^>]*data-role="reading"[^>]*>', svg)
+        assert mark is not None
+        found = re.search(r'fill="(#[0-9a-fA-F]{6})"', mark.group(0))
+        assert found is not None
+        return found.group(1).lower()
+
+    assert reading_fill(day) == rgb_to_hex(tok.reading).lower()
+    assert reading_fill(night) == rgb_to_hex(tok.night).lower()
+    assert "night, not rideable" in night.lower()
+
+
+def test_dial_label_says_when_the_wind_is_too_strong() -> None:
+    # Radius saturates at the 30 kn scale, so the label is the only place the
+    # dial can say that the wind is past the point of being rideable.
+    too_much = _svg(speed_kn=55.0, gust_kn=70.0, min_kts=15.0, pal=LIGHT)
+    assert "too strong" in too_much.lower()
 
 
 def test_compact_dial_is_small_and_label_free() -> None:

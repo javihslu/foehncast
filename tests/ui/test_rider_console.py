@@ -169,6 +169,65 @@ def test_night_hours_never_render_as_a_quality_level(
     assert is_day[~dark].all()
 
 
+def test_dangerous_hours_are_flagged_from_the_wind_not_the_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Too much wind has to be readable, and the quality level cannot say it.
+
+    quality_bucket sends any index <= 0.5 to class 0, so the danger class and a
+    dead-calm hour share a number. The cell reads the wind against the same
+    ceilings the labeling model uses instead.
+    """
+    times = pd.date_range("2026-07-15T09:00:00Z", periods=3, freq="h")
+    max_speed_kn, max_gust_kn = rc.dangerous_kts()
+    # One hour over the speed ceiling, one over the gust ceiling, one ordinary.
+    winds_kmh = [(max_speed_kn + 10) * 1.852, 20.0 * 1.852, 18.0 * 1.852]
+    gusts_kmh = [(max_speed_kn + 15) * 1.852, (max_gust_kn + 5) * 1.852, 24.0 * 1.852]
+
+    def fake_timeline(spot_id: str, *args: object, **kwargs: object) -> pd.DataFrame:
+        rows = []
+        for t, w, g in zip(times, winds_kmh, gusts_kmh, strict=True):
+            rows.append({"time": t, "elevation": "10m", "wind_speed": w})
+            rows.append({"time": t, "elevation": "gusts", "wind_speed": g})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+        False,
+    ).sort_values("time")
+
+    assert grid["is_dangerous"].tolist() == [True, True, False]
+    # The word carries it, so the fact does not rest on the cell's colour.
+    assert grid["safety"].tolist()[2] == "Within the safe limits"
+    assert "Too strong" in grid["safety"].tolist()[0]
+    # The level itself is unchanged: it still floors at 1, which is precisely
+    # why the flag has to exist.
+    assert grid["quality"].min() >= 1
+
+
+def test_dangerous_cell_bubble_does_not_say_too_light() -> None:
+    # The floored level reads "1/5 (Too Light)" on an hour that is unrideable
+    # for the opposite reason. The bubble takes its word from the wind.
+    bubble = rc._selection_bubble_html(
+        "Silvaplana", "Mon 04 Aug 14:00", 1, 90.0, 110.0, 200.0, True, True
+    )
+    assert "Too Light" not in bubble
+    assert "Too strong" in bubble
+    assert "Over the safe limit" in bubble
+
+
 def test_quality_fill_keeps_night_off_the_ramp() -> None:
     """The fill encoding routes night to the off-ramp fill, day to the ramp.
 

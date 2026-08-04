@@ -337,7 +337,7 @@ def test_ml_panel_badge_reflects_serving_gauge_presence(
     )
     sb.render_sidebar_ml_panels()
     present_card = "".join(present)
-    assert "Serving" in present_card
+    assert "Registry" in present_card
     assert "No model" not in present_card
 
     absent: list[str] = []
@@ -348,7 +348,7 @@ def test_ml_panel_badge_reflects_serving_gauge_presence(
     sb.render_sidebar_ml_panels()
     absent_card = "".join(absent)
     assert "No model" in absent_card
-    assert "Serving" not in absent_card
+    assert "Registry" not in absent_card
 
 
 def _recording_button(keys: list, *, clicked: bool, calls: list | None = None):

@@ -97,7 +97,21 @@ def ideal_band_kn() -> tuple[float, float]:
     return float(band["min_kts"]), float(band["max_kts"])
 
 
-def _status(speed_kn: float, min_kts: float, is_day: bool = True) -> str:
+def dangerous_kts() -> tuple[float, float]:
+    """Speed and gust ceilings above which the labeling model calls an hour unsafe."""
+    cfg = get_labeling_config()["dangerous"]
+    return (
+        float(cfg["max_wind_speed_10m_kts"]),
+        float(cfg["max_wind_gusts_10m_kts"]),
+    )
+
+
+def _status(
+    speed_kn: float,
+    min_kts: float,
+    is_day: bool = True,
+    gust_kn: float | None = None,
+) -> str:
     """Wording for the reading.
 
     Only wording: the dot's position against the ideal band already answers
@@ -105,9 +119,18 @@ def _status(speed_kn: float, min_kts: float, is_day: bool = True) -> str:
     resolved at render time from the active theme, and the only thing that
     changes it is darkness -- the one fact position cannot carry, since 20 kn
     at 02:00 plots exactly where 20 kn at noon does.
+
+    The ceiling is the other fact position cannot carry. The dial's radius
+    saturates at its 30 kn scale, so 45 kn plots where 30 kn does, and without
+    this the word "Rideable" ran unbounded upward -- past the very thresholds
+    labeling.dangerous uses to mark an hour unsafe. Comparison is strict, like
+    _score_row's, so the two agree on the boundary.
     """
     if not is_day:
         return "Night, not rideable"
+    max_speed_kn, max_gust_kn = dangerous_kts()
+    if speed_kn > max_speed_kn or (gust_kn is not None and gust_kn > max_gust_kn):
+        return "Too strong"
     if speed_kn >= min_kts:
         return "Rideable"
     if speed_kn >= 0.7 * min_kts:
@@ -170,7 +193,7 @@ def _reading_records(
     speed_kn = float(row["wind_speed_10m"]) / _KN_TO_KMH
     gusts_kn = float(row["wind_gusts_10m"]) / _KN_TO_KMH
     direction = float(row["wind_direction_10m"])
-    status = _status(speed_kn, min_kts, is_day)
+    status = _status(speed_kn, min_kts, is_day, gust_kn=gusts_kn)
 
     lat, lon = float(spot["lat"]), float(spot["lon"])
     flow = (direction + 180.0) % 360.0

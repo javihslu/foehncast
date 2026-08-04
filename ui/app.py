@@ -81,7 +81,8 @@ def main() -> None:
             <p class="hero-lede">
               One rider profile, six Swiss spots, one served model. Ranked recommendations
               combine live Open-Meteo forecasts, engineered wind features, drive-time estimates,
-              and the current champion model through the same inference path the API serves.
+              and the current champion model. Forecasts come from the most recent stored
+              prediction batch, not recomputed per visit.
             </p>
             """,
             unsafe_allow_html=True,
@@ -129,6 +130,7 @@ def main() -> None:
                     "and live OSRM route estimates."
                 )
             render_rider_console(dashboard_data, all_spot_ids, spot_lookup)
+            st.caption(f"Forecasts from model v{dashboard_data['model_version']}")
 
     with system_tab:
         render_system_tab()
