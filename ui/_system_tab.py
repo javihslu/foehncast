@@ -361,23 +361,54 @@ def _top_model_versions(
     return ranked[:limit], len(rest), int(sum(e["value"] for e in rest))
 
 
+_SHADOW_EMPTY_CHIP = ("Shadow", "no challenger registered")
+_SHADOW_EMPTY_NOTE = (
+    "Shadow scoring compares a registered challenger against the champion. "
+    "This deployment registers a champion only, so the empty value is expected."
+)
+
+
 def _shadow_chip(
     shadow_mean: float | None,
     shadow_info: list[dict[str, Any]],
-) -> tuple[str, str] | None:
-    """Build the optional (label, value) shadow chip.
+) -> tuple[str, str]:
+    """Build the (label, value) shadow chip.
 
-    Shadow scoring is an optional capability, so the chip renders only when
-    both the divergence value and the candidate version label are present.
-    Returns *None* to omit the chip entirely rather than show an em-dash.
+    Shadow scoring needs both a divergence value and a candidate version. When
+    either is missing the chip states the empty case, because omitting it would
+    hide the absence.
     """
     if shadow_mean is None or not shadow_info:
-        return None
+        return _SHADOW_EMPTY_CHIP
     candidate_version = shadow_info[0]["labels"].get("candidate_version")
     if not candidate_version:
-        return None
+        return _SHADOW_EMPTY_CHIP
     # Two significant figures: small divergences must not collapse to 0.000.
     return ("Shadow", f"{shadow_mean:.2g} vs v{candidate_version}")
+
+
+_MONITOR_RUN_WINDOW = "24h"
+_MONITOR_RUN_WINDOW_LABEL = "24 h"
+_MONITOR_EXEC = "foehncast_prediction_monitoring_execution_total"
+_MONITOR_RUNS_WINDOW_EXPR = f"sum(increase({_MONITOR_EXEC}[{_MONITOR_RUN_WINDOW}]))"
+_MONITOR_RUNS_TOTAL_EXPR = f"sum({_MONITOR_EXEC})"
+
+
+def _monitor_runs_chip(
+    windowed: float | None,
+    process_total: float | None,
+) -> tuple[str, str]:
+    """Build the (label, value) chip for prediction-monitoring executions.
+
+    The counter is process-local and resets with every revision, so the
+    windowed increase is the honest reading. Query backends without range
+    support fall back to the process total, labelled as such.
+    """
+    if windowed is not None:
+        return (f"Monitor runs ({_MONITOR_RUN_WINDOW_LABEL})", f"{int(windowed)}")
+    if process_total is not None:
+        return ("Monitor runs (since restart)", f"{int(process_total)}")
+    return ("Monitor runs", "—")
 
 
 def _render_prediction_health() -> None:
@@ -393,7 +424,8 @@ def _render_prediction_health() -> None:
         "foehncast_prediction_log_total_row_count",
         "foehncast_prediction_log_model_count",
         "max(foehncast_prediction_log_latest_prediction_timestamp_seconds)",
-        "foehncast_prediction_monitoring_execution_total",
+        _MONITOR_RUNS_WINDOW_EXPR,
+        _MONITOR_RUNS_TOTAL_EXPR,
         "foehncast_hindcast_accuracy",
         "foehncast_hindcast_validated_count",
     ]
@@ -411,7 +443,8 @@ def _render_prediction_health() -> None:
         total_rows,
         model_count,
         last_pred_ts,
-        exec_total,
+        monitor_runs_window,
+        monitor_runs_total,
         hindcast_acc,
         hindcast_n,
         shadow_mean,
@@ -439,10 +472,7 @@ def _render_prediction_health() -> None:
             "Last prediction",
             f'<span style="color:{fresh_color}">{pred_age}</span>',
         ),
-        (
-            "Monitor runs",
-            f"{int(exec_total)}" if exec_total is not None else "—",
-        ),
+        _monitor_runs_chip(monitor_runs_window, monitor_runs_total),
         (
             "Hindcast",
             (
@@ -455,8 +485,7 @@ def _render_prediction_health() -> None:
         ),
     ]
     shadow_chip = _shadow_chip(shadow_mean, shadow_info)
-    if shadow_chip is not None:
-        chips.append(shadow_chip)
+    chips.append(shadow_chip)
     chips_html = "".join(
         f'<div style="display:flex;flex-direction:column;align-items:flex-start;'
         f"padding:6px 12px;background:{tint(pal.ink, 0.04)};border-radius:8px;"
@@ -474,6 +503,13 @@ def _render_prediction_health() -> None:
         + "</div>",
         unsafe_allow_html=True,
     )
+
+    if shadow_chip == _SHADOW_EMPTY_CHIP:
+        st.markdown(
+            '<div style="font-family:Manrope,sans-serif;font-size:0.72rem;'
+            f'color:{pal.idle};padding-bottom:10px">{_SHADOW_EMPTY_NOTE}</div>',
+            unsafe_allow_html=True,
+        )
 
     if model_results:
         models_sorted, hidden_count, hidden_total = _top_model_versions(model_results)

@@ -3,9 +3,10 @@
 
 Fetches 1 year of archive data from Open-Meteo for all configured spots,
 engineers features through the standard pipeline, writes curated parquet
-files to both local DVC-tracked storage and the S3 feature store, generates
-synthetic prediction events, and optionally trains + registers a new model
-in MLflow.
+files to both local DVC-tracked storage and the S3 feature store, seeds
+synthetic prediction events into the durable prediction-event history
+(BigQuery when ``STORAGE_BACKEND=bigquery``, the JSONL event log otherwise),
+and optionally trains + registers a new model in MLflow.
 
 Export the storage and GCP variables first (for example ``set -a; source .env``).
 
@@ -42,6 +43,10 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 from foehncast.config import get_rider_config, get_spots  # noqa: E402
 from foehncast.feature_pipeline.engineer import engineer_features  # noqa: E402
 from foehncast.feature_pipeline.validate import run_validation  # noqa: E402
+from foehncast.monitoring.prediction_log import (  # noqa: E402
+    read_prediction_history,
+    write_prediction_events,
+)
 from foehncast.training_pipeline.label import compute_quality_index  # noqa: E402
 
 logging.basicConfig(
@@ -55,6 +60,11 @@ logger = logging.getLogger(__name__)
 _ARCHIVE_LAG_DAYS = 7
 _PREDICTION_EVENT_INTERVAL_HOURS = 6  # Simulate predictions every 6 h.
 _API_PAUSE_SECONDS = 1.5  # Be polite to the free API.
+
+# Duplicate suppression has to see every stored row, not just the rows inside
+# the monitoring retention window that readers apply by default.
+_HISTORY_SCAN_MAX_ROWS = 1_000_000
+_HISTORY_SCAN_RETENTION_DAYS = 36_500
 
 # Archive API only provides surface-level data. Upper-level wind and
 # convective indices must be approximated.
@@ -252,7 +262,7 @@ def _generate_prediction_events(
             continue
 
         forecast_time = quality.index[idx]
-        qi = int(quality.iloc[idx])
+        qi = float(quality.iloc[idx])
 
         events.append(
             {
@@ -270,14 +280,50 @@ def _generate_prediction_events(
     return events
 
 
-def _write_prediction_events(events: list[dict], event_path: Path) -> None:
-    """Append synthetic prediction events to the durable JSONL log."""
-    event_path.parent.mkdir(parents=True, exist_ok=True)
+def _event_key(spot_id: object, forecast_time: object) -> tuple[str, str]:
+    """Natural key of a prediction event, normalized to UTC."""
+    return str(spot_id), pd.to_datetime(forecast_time, utc=True).isoformat()
 
-    # Read existing events to avoid duplicates.
+
+def _stored_event_keys() -> set[tuple[str, str]]:
+    """Keys already present in the durable prediction-event history."""
+    history = read_prediction_history(
+        max_rows=_HISTORY_SCAN_MAX_ROWS,
+        retention_days=_HISTORY_SCAN_RETENTION_DAYS,
+    )
+    if history.empty:
+        return set()
+
+    return {
+        _event_key(row.spot_id, row.forecast_time)
+        for row in history.itertuples(index=False)
+    }
+
+
+def _write_prediction_events(events: list[dict]) -> None:
+    """Seed synthetic events into the history the monitoring jobs read."""
+    stored = _stored_event_keys()
+    new_events = [
+        event
+        for event in events
+        if _event_key(event["spot_id"], event["forecast_time"]) not in stored
+    ]
+
+    if not new_events:
+        logger.info("No new prediction events to write (all duplicates)")
+        return
+
+    write_prediction_events(new_events)
+    logger.info("Seeded %d synthetic prediction events", len(new_events))
+
+
+def _write_working_log(events: list[dict], log_path: Path) -> None:
+    """Append synthetic events to the local bounded working log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     existing_keys: set[tuple[str, str]] = set()
-    if event_path.exists():
-        with event_path.open("r", encoding="utf-8") as fh:
+    if log_path.exists():
+        with log_path.open("r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -295,16 +341,13 @@ def _write_prediction_events(events: list[dict], event_path: Path) -> None:
     ]
 
     if not new_events:
-        logger.info("No new prediction events to write (all duplicates)")
         return
 
-    with event_path.open("a", encoding="utf-8") as fh:
+    with log_path.open("a", encoding="utf-8") as fh:
         for event in new_events:
             fh.write(json.dumps(event, sort_keys=True) + "\n")
 
-    logger.info(
-        "Wrote %d synthetic prediction events to %s", len(new_events), event_path
-    )
+    logger.info("Wrote %d synthetic prediction events to %s", len(new_events), log_path)
 
 
 def _write_to_feature_store(spots: list[dict], output_dir: Path) -> None:
@@ -371,7 +414,6 @@ def main() -> None:
     output_dir = _PROJECT_ROOT / "data" / args.dataset
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    event_path = _PROJECT_ROOT / ".state" / "monitoring" / "prediction-events.jsonl"
     working_log_path = _PROJECT_ROOT / ".state" / "monitoring" / "prediction-log.jsonl"
 
     logger.info(
@@ -413,8 +455,8 @@ def main() -> None:
 
     # Write synthetic prediction events.
     if all_events and not args.no_predictions:
-        _write_prediction_events(all_events, event_path)
-        _write_prediction_events(all_events, working_log_path)
+        _write_prediction_events(all_events)
+        _write_working_log(all_events, working_log_path)
 
     # Write to S3 feature store.
     _write_to_feature_store(spots, output_dir)
