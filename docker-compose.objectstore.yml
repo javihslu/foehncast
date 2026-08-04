@@ -64,4 +64,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin123}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       MLFLOW_S3_ENDPOINT_URL: http://objectstore:9000
-      MLFLOW_ARTIFACT_DESTINATION: ${MLFLOW_ARTIFACT_DESTINATION:-s3://${STORAGE_S3_BUCKET:-foehncast-data}/mlflow/artifacts}
+      # Pinned, not interpolated: this overlay is the MinIO-backed local stack,
+      # and a cloud .env in the project dir would otherwise point the local
+      # registry at GCS, where its artifact proxy answers 500s.
+      MLFLOW_ARTIFACT_DESTINATION: s3://${STORAGE_S3_BUCKET:-foehncast-data}/mlflow/artifacts
