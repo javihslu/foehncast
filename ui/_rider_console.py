@@ -1073,7 +1073,7 @@ def _render_dial_grid(
                 st.caption(f"{cfg['name']}: no wind data")
                 continue
             day = bool(
-                is_daylight(
+                is_daylight_hour(
                     float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex([hour])
                 ).to_numpy()[0]
             )
