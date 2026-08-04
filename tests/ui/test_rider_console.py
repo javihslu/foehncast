@@ -795,3 +795,76 @@ def test_all_spots_accuracy_keeps_its_columns_when_empty(
 
     assert frame.empty
     assert list(frame.columns) == _ACCURACY_COLUMNS
+
+
+def test_hourly_marks_sit_mid_cell() -> None:
+    # The board draws an hour as a rect spanning it; the wind series, the
+    # crosshair, and the pin mark the same hour as a point, so they sit at the
+    # cell's middle rather than on its left edge.
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+    board, wind = spec["vconcat"][1], spec["vconcat"][2]
+
+    lines = [v for v in wind["layer"] if v["mark"]["type"] == "line"]
+    assert lines and all(v["encoding"]["x"]["field"] == "time_mid" for v in lines)
+
+    hover_rules = [
+        v
+        for view in (board, wind)
+        for v in view["layer"]
+        if v["mark"]["type"] == "rule"
+        and v.get("transform")
+        and v["transform"][0]["filter"]["param"] in ("hover_board", "hover_wind")
+        and "x" in v["encoding"]
+    ]
+    assert hover_rules and all(
+        v["encoding"]["x"]["field"] == "t_mid" for v in hover_rules
+    )
+
+    pin_rules = [
+        v
+        for view in (board, wind)
+        for v in view["layer"]
+        if v["mark"]["type"] == "rule"
+        and not v.get("transform")
+        and v["encoding"].get("x", {}).get("field") == "time_mid"
+    ]
+    assert len(pin_rules) == 2  # one in each plot
+
+
+def test_hover_readout_shows_each_series_value() -> None:
+    # Hovering an hour prints every series' own number on the plot, driven by
+    # either hover param; the old horizontal rule only marked the 10 m
+    # reading's position without saying what it was.
+    spec, _ = _build_panel(None)
+    wind = spec["vconcat"][2]
+
+    texts = [
+        v for v in wind["layer"] if v["mark"]["type"] == "text" and v.get("transform")
+    ]
+    assert {v["transform"][0]["filter"]["param"] for v in texts} == {
+        "hover_board",
+        "hover_wind",
+    }
+    for layer in texts:
+        assert layer["encoding"]["text"]["field"] == "wind_speed"
+        assert layer["encoding"]["text"]["format"] == ".0f"
+
+    # No y-only hover rule survives in the wind plot.
+    y_only = [
+        v
+        for v in wind["layer"]
+        if v["mark"]["type"] == "rule"
+        and v.get("transform")
+        and "x" not in v["encoding"]
+    ]
+    assert not y_only
+
+
+def test_dial_tile_highlights_only_the_selected_spot() -> None:
+    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True)
+    other = rc._dial_tile_html("Sils", "<svg/>", False)
+
+    assert LIGHT.reading in selected and LIGHT.accent_text in selected
+    assert "transparent" in other and LIGHT.reading not in other
+    assert "<svg/>" in selected and "Sils" in other

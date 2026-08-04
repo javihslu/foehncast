@@ -787,7 +787,12 @@ def _epoch_ms(times: Any) -> list[int]:
 
 
 def _time_spine(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> pd.DataFrame:
-    """One row per hour of the panel window: its shared hit target and ruler data."""
+    """One row per hour of the panel window: its shared hit target and ruler data.
+
+    t_mid is the centre of the hour cell. The board draws an hour as a rect
+    spanning it, so anything that marks "this hour" as a point -- the crosshair,
+    the pin, a series reading -- sits at the middle, not on the cell's left edge.
+    """
     hours = pd.date_range(
         domain_start.floor("h"), domain_end.ceil("h"), freq="h", inclusive="left"
     )
@@ -795,6 +800,7 @@ def _time_spine(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> pd.Data
         {
             "time": hours,
             "time_end": hours + pd.Timedelta(hours=1),
+            "t_mid": hours + pd.Timedelta(minutes=30),
             "t_ms": _epoch_ms(hours),
         }
     )
@@ -876,21 +882,20 @@ def _sync_slider_to_heatmap_click(
     st.rerun(scope="app")
 
 
-def _selection_wind(
-    row: pd.Series,
+def _spot_hour_wind(
+    spot_id: str, time: pd.Timestamp
 ) -> tuple[float | None, float | None, float | None]:
-    """Numeric wind, gust, and direction for the picked cell.
+    """Numeric wind, gust, and direction for one spot at one hour.
 
-    Reuses the map's cached per-spot frame (no new fetch) so the dial matches
-    the map; the grid's own direction column is display text. Nearest hour in
-    UTC, within 90 minutes.
+    Reuses the map's cached per-spot frame (no new fetch) so the dials match
+    the map. Nearest hour in UTC, within 90 minutes.
     """
-    frame = _spot_wind_frame(str(row["spot_id"]))
+    frame = _spot_wind_frame(spot_id)
     if frame.empty:
         return None, None, None
     idx = frame.index
     idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
-    target = row["time"].tz_convert("UTC")
+    target = time.tz_convert("UTC") if time.tzinfo else time.tz_localize("UTC")
     pos = int(idx.get_indexer(pd.DatetimeIndex([target]), method="nearest")[0])
     if pos < 0 or abs((idx[pos] - target).total_seconds()) > 5400:
         return None, None, None
@@ -900,6 +905,13 @@ def _selection_wind(
         float(src["wind_gusts_10m"]),
         float(src["wind_direction_10m"]),
     )
+
+
+def _selection_wind(
+    row: pd.Series,
+) -> tuple[float | None, float | None, float | None]:
+    """Wind, gust, and direction for the picked grid row."""
+    return _spot_hour_wind(str(row["spot_id"]), row["time"])
 
 
 _BUBBLE_ROW = (
@@ -968,51 +980,102 @@ def _default_detail_row(
     return rows.loc[delta.idxmin()]
 
 
-def _render_selection_row(row: pd.Series, min_kts: float) -> None:
-    """Compact wind dial plus metrics bubble beside the heatmap."""
+def _render_selection_bubble(row: pd.Series) -> None:
+    """Metrics bubble for the selected spot and hour, beside the wind plot."""
     spot_id = str(row["spot_id"])
     spot_cfg = next((s for s in get_spots() if s["id"] == spot_id), None)
     spot_name = spot_cfg["name"] if spot_cfg else str(row.get("spot", spot_id))
     local_time = row["time"].strftime("%a %d %b %H:%M")
     wind, gust, direction = _selection_wind(row)
+    st.markdown(
+        _selection_bubble_html(
+            spot_name,
+            local_time,
+            int(row["quality"]),
+            wind,
+            gust,
+            direction,
+            bool(row.get("is_day", True)),
+        ),
+        unsafe_allow_html=True,
+    )
 
-    have_wind = wind is not None and not pd.isna(wind)
-    have_dir = direction is not None and not pd.isna(direction)
-    dial_col, bubble_col = st.columns([2, 3])
-    with dial_col:
-        if have_wind and have_dir:
-            shore = float(spot_cfg["shore_orientation_deg"]) if spot_cfg else 0.0
+
+def _dial_tile_html(name: str, dial_svg: str, selected: bool) -> str:
+    """One tile of the comparison grid: a compact dial with the spot's name.
+
+    The selected spot wears the reading-orange border and the accent-text name;
+    the rest keep a transparent border so every tile holds the same footprint.
+    """
+    pal = active()
+    border = pal.reading if selected else "transparent"
+    name_style = (
+        f"color:{pal.accent_text};font-weight:700"
+        if selected
+        else "color:var(--muted);font-weight:600"
+    )
+    return (
+        f'<div style="border:2px solid {border};border-radius:12px;'
+        'padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
+        f"{dial_svg}"
+        f'<div style="text-align:center;font-family:Manrope,sans-serif;'
+        f'font-size:0.72rem;{name_style}">{name}</div></div>'
+    )
+
+
+def _render_dial_grid(
+    spot_ids: list[str],
+    selected_spot_id: str | None,
+    hour: pd.Timestamp,
+    min_kts: float,
+) -> None:
+    """Wind dials for every ranked spot at the selected hour, beside the board.
+
+    All spots at one instant, so the selected spot's wind reads against its
+    alternatives; the highlight marks which one the details below describe.
+    """
+    spots_cfg = {s["id"]: s for s in get_spots()}
+    st.markdown(
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
+        f"All spots — {hour.strftime('%a %d %b %H:%M')}</p>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(3)
+    for i, spot_id in enumerate(spot_ids):
+        cfg = spots_cfg.get(spot_id)
+        if cfg is None:
+            continue
+        wind, gust, direction = _spot_hour_wind(spot_id, hour)
+        with cols[i % 3]:
+            if wind is None or direction is None:
+                st.caption(f"{cfg['name']}: no wind data")
+                continue
+            day = bool(
+                is_daylight(
+                    float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex([hour])
+                ).to_numpy()[0]
+            )
+            svg = wind_dial_svg(
+                direction_deg=direction,
+                speed_kn=wind / _KN_TO_KMH,
+                gust_kn=(gust or 0.0) / _KN_TO_KMH,
+                shore_orientation_deg=float(cfg["shore_orientation_deg"]),
+                min_kts=min_kts,
+                size_px=92,
+                detail="compact",
+                is_day=day,
+            )
             st.markdown(
-                wind_dial_svg(
-                    direction_deg=direction,
-                    speed_kn=wind / _KN_TO_KMH,
-                    gust_kn=(gust or 0.0) / _KN_TO_KMH,
-                    shore_orientation_deg=shore,
-                    min_kts=min_kts,
-                    is_day=bool(row.get("is_day", True)),
-                ),
+                _dial_tile_html(cfg["name"], svg, spot_id == selected_spot_id),
                 unsafe_allow_html=True,
             )
-            st.caption(
-                "The dot is this hour's wind: bearing is where it blows toward, "
-                "distance from the centre is speed (to 30 kn). Inside the teal "
-                "band is a session."
-            )
-        else:
-            st.caption("Wind or direction unavailable for this hour — dial hidden.")
-    with bubble_col:
-        st.markdown(
-            _selection_bubble_html(
-                spot_name,
-                local_time,
-                int(row["quality"]),
-                wind,
-                gust,
-                direction,
-                bool(row.get("is_day", True)),
-            ),
-            unsafe_allow_html=True,
-        )
+    st.caption(
+        "Each dial is that spot's wind at the selected hour: the dot's bearing "
+        "is where the wind blows toward, its distance from the centre is speed "
+        "(to 30 kn), and inside the teal band is a session. The orange frame "
+        "marks the selected spot."
+    )
 
 
 @dataclass(frozen=True, eq=False)
@@ -1068,9 +1131,16 @@ def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
 
 
 def _pin_frame(pinned: pd.Timestamp) -> pd.DataFrame:
-    """The pinned hour and the day+time label the rulers print beside it."""
+    """The pinned hour and the day+time label the rulers print beside it.
+
+    time_mid centres the pin in its hour cell, matching the spine's t_mid.
+    """
     return pd.DataFrame(
-        {"time": [pinned], "label": [pinned.strftime("%a %d %b %H:00")]}
+        {
+            "time": [pinned],
+            "time_mid": [pinned + pd.Timedelta(minutes=30)],
+            "label": [pinned.strftime("%a %d %b %H:00")],
+        }
     )
 
 
@@ -1097,17 +1167,17 @@ def _hover_rule(panel: _Panel, param: alt.Parameter) -> alt.Chart:
         .mark_rule(
             color=panel.pal.ink_secondary, strokeWidth=1, opacity=0.85, clip=True
         )
-        .encode(x=_panel_x(panel))
+        .encode(x=_panel_x(panel, "t_mid"))
         .transform_filter(param)
     )
 
 
 def _pin_rule(panel: _Panel) -> alt.Chart:
-    """The pinned time selector: a reading-orange rule at the clicked hour."""
+    """The pinned time selector: a reading-orange rule bisecting the pinned cell."""
     return (
         alt.Chart(_pin_frame(panel.pinned))
         .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
-        .encode(x=_panel_x(panel))
+        .encode(x=_panel_x(panel, "time_mid"))
     )
 
 
@@ -1130,7 +1200,7 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
     tick = (
         alt.Chart(pin)
         .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
-        .encode(x=alt.X("time:T", scale=panel.x_scale))
+        .encode(x=alt.X("time_mid:T", scale=panel.x_scale))
     )
     label = (
         alt.Chart(pin)
@@ -1144,7 +1214,7 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
             baseline="middle",
             dx=5,
         )
-        .encode(x=alt.X("time:T", scale=panel.x_scale), text="label:N")
+        .encode(x=alt.X("time_mid:T", scale=panel.x_scale), text="label:N")
     )
     return alt.layer(ruler, tick, label).properties(
         height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
@@ -1293,12 +1363,16 @@ def _wind_view(
             spot_lat, spot_lon, pd.DatetimeIndex(timeline_frame["time"])
         ).to_numpy(),
         t_ms=_epoch_ms(timeline_frame["time"]),
+        # An hourly value is drawn at the middle of its hour, where the board
+        # draws that hour's cell, so the two plots align column for column.
+        time_mid=timeline_frame["time"] + pd.Timedelta(minutes=30),
     )
     threshold_kmh = min_kts * _KN_TO_KMH
     elevations = [
         e for e in ("10m", "80m", "120m", "gusts") if e in set(frame["elevation"])
     ]
     colors = _elevation_colors(pal)
+    color_scale = alt.Scale(domain=elevations, range=[colors[e] for e in elevations])
 
     def wind_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
         return (
@@ -1310,7 +1384,7 @@ def _wind_view(
                 clip=True,
             )
             .encode(
-                x=_panel_x(panel),
+                x=_panel_x(panel, "time_mid"),
                 y=alt.Y(
                     "wind_speed:Q",
                     title="Wind speed (km/h)",
@@ -1318,9 +1392,7 @@ def _wind_view(
                 ),
                 color=alt.Color(
                     "elevation:N",
-                    scale=alt.Scale(
-                        domain=elevations, range=[colors[e] for e in elevations]
-                    ),
+                    scale=color_scale,
                     # The key is drawn in HTML above the panel: see
                     # _elevation_legend_html.
                     legend=None,
@@ -1374,14 +1446,32 @@ def _wind_view(
         )
         .encode(y="y:Q", text="label:N")
     )
-    # The horizontal half of the crosshair here is a reading, not a row: the
-    # hovered hour's 10 m wind, laid against the speed axis.
-    reading_rule = (
-        alt.Chart(frame[frame["elevation"] == "10m"])
-        .mark_rule(color=pal.ink_secondary, strokeWidth=1, opacity=0.85, clip=True)
-        .encode(y=alt.Y("wind_speed:Q"))
-        .transform_filter(panel.hover_wind)
-    )
+
+    # At the hovered hour every series shows its own number: a dot on the line
+    # and the value beside it. This replaces the old horizontal rule, which
+    # only marked the 10 m reading's position without saying what it was.
+    def value_marks(param: alt.Parameter) -> list[alt.Chart]:
+        base = alt.Chart(frame).transform_filter(param)
+        points = base.mark_point(filled=True, size=45, clip=True).encode(
+            x=_panel_x(panel, "time_mid"),
+            y=alt.Y("wind_speed:Q"),
+            color=alt.Color("elevation:N", scale=color_scale, legend=None),
+        )
+        labels = base.mark_text(
+            align="left",
+            baseline="middle",
+            dx=7,
+            fontSize=11,
+            fontWeight=700,
+            clip=True,
+        ).encode(
+            x=_panel_x(panel, "time_mid"),
+            y=alt.Y("wind_speed:Q"),
+            text=alt.Text("wind_speed:Q", format=".0f"),
+            color=alt.Color("elevation:N", scale=color_scale, legend=None),
+        )
+        return [points, labels]
+
     # Hit layer, on top and invisible: it gives the wind plot the same hourly
     # hover and click targets the board's cells give, so a click on empty space
     # still pins a time. A rect on a continuous x must declare x2.
@@ -1402,9 +1492,10 @@ def _wind_view(
         wind_layer(frame[frame["is_day"]], dim=False),
         threshold,
         threshold_label,
-        reading_rule,
         _hover_rule(panel, panel.hover_board),
         _hover_rule(panel, panel.hover_wind),
+        *value_marks(panel.hover_board),
+        *value_marks(panel.hover_wind),
     ]
     if panel.pinned is not None:
         layers.append(_pin_rule(panel))
@@ -1674,13 +1765,30 @@ def render_rider_console(
                     if selected is not None
                     else _default_detail_row(heat_grid, focus_spot_id, pinned)
                 )
+                # The comparison grid sits beside the board, the bubble below it
+                # beside the wind plot; both follow the selected spot and hour.
+                dial_hour = (
+                    detail["time"]
+                    if detail is not None
+                    else pinned
+                    if pinned is not None
+                    else _clamp_to_slider_option(now, pred_hours)
+                )
+                ranked_ids = [s["spot_id"] for s in ranked_spots]
+                if dial_hour is not None and ranked_ids:
+                    _render_dial_grid(
+                        ranked_ids,
+                        str(detail["spot_id"]) if detail is not None else focus_spot_id,
+                        dial_hour,
+                        min_kts,
+                    )
                 if detail is None:
                     st.caption(
                         "Click a board cell to inspect that spot and hour, or "
                         "anywhere else in the panel to pin a time."
                     )
                 else:
-                    _render_selection_row(detail, min_kts)
+                    _render_selection_bubble(detail)
                 if not accuracy.empty:
                     missed = int((accuracy["verdict"] == "missed").sum())
                     st.caption(
