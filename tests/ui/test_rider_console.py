@@ -539,7 +539,9 @@ def _panel_frames() -> tuple[
     return grid, timeline, accuracy, hours
 
 
-def _build_panel(pinned: pd.Timestamp | None) -> tuple[dict, list[str]]:
+def _build_panel(
+    pinned: pd.Timestamp | None, focus_spot: str | None = None
+) -> tuple[dict, list[str]]:
     grid, timeline, accuracy, hours = _panel_frames()
     domain = [hours[0], hours[-1] + pd.Timedelta(hours=1)]
     chart, modes = rc._time_panel(
@@ -553,6 +555,7 @@ def _build_panel(pinned: pd.Timestamp | None) -> tuple[dict, list[str]]:
         hours[3],
         pinned,
         16.0,
+        focus_spot=focus_spot,
     )
     return chart.to_dict(), modes
 
@@ -649,6 +652,48 @@ def test_crosshair_spans_both_plots_and_the_hovered_row() -> None:
     )
     assert row_rule["encoding"]["y"]["field"] == "spot"
     assert "x" not in row_rule["encoding"]
+
+
+def test_focused_spot_wears_the_location_half_of_the_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The focused spot gets an orange row rule and an accented axis label."""
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    spec, _ = _build_panel(None, focus_spot="Sils")
+    board = spec["vconcat"][1]
+
+    row = next(
+        layer
+        for layer in board["layer"]
+        if layer["mark"].get("type") == "rule"
+        and not layer.get("transform")
+        and "y" in layer["encoding"]
+        and "x" not in layer["encoding"]
+    )
+    assert row["mark"]["color"] == LIGHT.reading
+    assert spec["datasets"][row["data"]["name"]] == [{"spot": "Sils"}]
+
+    # The axis label is text on the page surface, so it takes accent_text
+    # rather than the mark orange, and only for the focused spot's name.
+    axis = board["layer"][0]["encoding"]["y"]["axis"]
+    assert axis["labelColor"]["condition"]["test"] == 'datum.value === "Sils"'
+    assert axis["labelColor"]["condition"]["value"] == LIGHT.accent_text
+    assert axis["labelColor"]["value"] == LIGHT.ink
+    assert axis["labelFontWeight"]["condition"]["value"] == 700
+
+
+def test_unfocused_panel_draws_no_row_rule() -> None:
+    """Without a focus spot the board carries only the hover row rule."""
+    spec, _ = _build_panel(None)
+    board = spec["vconcat"][1]
+    plain_row_rules = [
+        layer
+        for layer in board["layer"]
+        if layer["mark"].get("type") == "rule"
+        and not layer.get("transform")
+        and "y" in layer["encoding"]
+    ]
+    assert plain_row_rules == []
 
 
 @pytest.mark.parametrize("palette", [LIGHT, DARK])

@@ -321,9 +321,7 @@ def _night_bands(
     same column edges. Exact sunrise/sunset instants would sit up to an hour
     inside a cell and read as the two plots disagreeing about the night.
     """
-    hours = pd.date_range(
-        t_min.floor("h"), t_max.ceil("h"), freq="h", inclusive="left"
-    )
+    hours = pd.date_range(t_min.floor("h"), t_max.ceil("h"), freq="h", inclusive="left")
     if hours.empty:
         return pd.DataFrame(columns=["x", "x2"])
     day = is_daylight_hour(lat, lon, hours).to_numpy()
@@ -1111,6 +1109,7 @@ class _Panel:
     domain_end: pd.Timestamp
     pal: Palette
     pinned: pd.Timestamp | None
+    focus_spot: str | None
     cell: alt.Parameter
     hover_board: alt.Parameter
     hover_row: alt.Parameter
@@ -1204,6 +1203,36 @@ def _pin_rule(panel: _Panel) -> alt.Chart:
     )
 
 
+def _focus_row_rule(panel: _Panel, rank_order: list[str]) -> alt.Chart:
+    """The location half of the selector: an orange rule on the focused spot's row."""
+    return (
+        alt.Chart(pd.DataFrame({"spot": [panel.focus_spot]}))
+        .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+        .encode(y=alt.Y("spot:N", sort=rank_order))
+    )
+
+
+def _board_y_axis(pal: Palette, focus_spot: str | None) -> alt.Axis:
+    """The board's spot axis, printing the focused spot's name in the accent.
+
+    accent_text rather than the mark orange for the same reason the ruler label
+    wears it: an axis label is text on the page surface, so it has to clear the
+    4.5:1 floor the plain mark orange misses in light mode.
+    """
+    if focus_spot is None:
+        return alt.Axis(orient="right", labelFontSize=13)
+    test = f"datum.value === {json.dumps(focus_spot)}"
+    return alt.Axis(
+        orient="right",
+        labelFontSize=13,
+        labelColor={
+            "condition": {"test": test, "value": pal.accent_text},
+            "value": pal.ink,
+        },
+        labelFontWeight={"condition": {"test": test, "value": 700}, "value": 400},
+    )
+
+
 def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
     """One ruler edge: the shared time axis, plus the pinned label when there is one.
 
@@ -1268,7 +1297,7 @@ def _board_view(
                 "spot:N",
                 title=None,
                 sort=rank_order,
-                axis=alt.Axis(orient="right", labelFontSize=13),
+                axis=_board_y_axis(pal, panel.focus_spot),
             ),
             # The cell's own quality drives the fill continuously; night cells
             # leave the ramp entirely. See _quality_fill.
@@ -1356,6 +1385,10 @@ def _board_view(
     )
     layers.append(_hover_rule(panel, panel.hover_board))
     layers.append(_hover_rule(panel, panel.hover_wind))
+    # The selection crosshair: the focused spot's row crossing the pinned hour,
+    # both in the same reading orange.
+    if panel.focus_spot in rank_order:
+        layers.append(_focus_row_rule(panel, rank_order))
     if panel.pinned is not None:
         layers.append(_pin_rule(panel))
 
@@ -1546,6 +1579,7 @@ def _time_panel(
     now: pd.Timestamp,
     pinned: pd.Timestamp | None,
     min_kts: float,
+    focus_spot: str | None = None,
 ) -> tuple[alt.VConcatChart, list[str]]:
     """The board and the wind plot as one strip, ruled top and bottom.
 
@@ -1564,6 +1598,7 @@ def _time_panel(
         domain_end=domain_end,
         pal=pal,
         pinned=pinned,
+        focus_spot=focus_spot,
         cell=alt.selection_point(
             name="cell", fields=["spot", "time"], on="click", empty=False
         ),
@@ -1758,6 +1793,7 @@ def render_rider_console(
                 now,
                 pinned,
                 min_kts,
+                focus_spot=spot_label(spot_lookup, focus_spot_id),
             )
             # The details panel holds its column whether or not a cell is
             # picked, so the panel beside it never changes width.
@@ -1772,7 +1808,8 @@ def render_rider_console(
                 )
                 st.caption(
                     "Click anywhere in the panel to pin a time; the orange rule "
-                    "and the label on both rulers mark it. The green band along "
+                    "and the label on both rulers mark it, and the horizontal "
+                    "orange rule tracks the focused spot. The green band along "
                     "the wind plot traces solar elevation, scaled to the "
                     "wind-speed axis."
                 )
