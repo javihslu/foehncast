@@ -666,9 +666,11 @@ def _panel_frames() -> tuple[
     accuracy = pd.DataFrame(
         {
             "spot": _PANEL_SPOTS,
+            "spot_id": [spot.lower() for spot in _PANEL_SPOTS],
             "time": [hours[1], hours[2]],
             "predicted": [3.0, 3.0],
             "observed": [3.1, 4.6],
+            "coverage": ["both", "both"],
             "delta": [0.1, 1.6],
             "verdict": ["matched", "missed"],
         }
@@ -727,13 +729,22 @@ def _panel_views(spec: dict) -> dict[str, dict]:
     return named
 
 
+def _row_outlines(board: dict) -> list[dict]:
+    """The board's row-selector layers: a bordered rect with no fill."""
+    return [
+        layer
+        for layer in board["layer"]
+        if layer["mark"].get("type") == "rect" and layer["mark"].get("fillOpacity") == 0
+    ]
+
+
 def test_time_panel_is_one_composite_on_one_domain() -> None:
     """Board and wind plot share a domain exactly, and only the rulers carry an axis."""
     hours = _panel_frames()[3]
     spec, _ = _build_panel(hours[4])
 
     views = spec["vconcat"]
-    assert len(views) == 4  # top ruler, board, wind, bottom ruler
+    assert len(views) == 5  # top ruler, board, coverage strip, wind, bottom ruler
     # Views are laid out flush at one width, which is what makes the two plots
     # line up column for column.
     assert spec["bounds"] == "flush"
@@ -750,9 +761,10 @@ def test_time_panel_is_one_composite_on_one_domain() -> None:
         if isinstance(x.get("axis"), dict)
     ]
     assert [a["orient"] for a in axes] == ["top", "bottom"]
-    # Every layer inside the two plots nulls its own x axis. A layer that left
-    # it implicit next to a sibling that nulled it would not compile.
-    for view in views[1:3]:
+    # Every layer inside the plots and the coverage strip nulls its own x axis.
+    # A layer that left it implicit next to a sibling that nulled it would not
+    # compile.
+    for view in views[1:-1]:
         assert all(x["axis"] is None for x in _x_channels(view))
 
 
@@ -859,7 +871,7 @@ def test_crosshair_spans_both_plots_and_the_hovered_row() -> None:
 def test_focused_spot_wears_the_location_half_of_the_selector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The focused spot gets an orange row rule and an accented axis label."""
+    """The focused spot's row is outlined, and its axis label wears the accent."""
     monkeypatch.setattr(rc, "active", lambda: LIGHT)
     spec, _ = _build_panel(None, focus_spot="Sils")
     board = _panel_views(spec)["board"]
@@ -867,12 +879,12 @@ def test_focused_spot_wears_the_location_half_of_the_selector(
     row = next(
         layer
         for layer in board["layer"]
-        if layer["mark"].get("type") == "rule"
-        and not layer.get("transform")
-        and "y" in layer["encoding"]
-        and "x" not in layer["encoding"]
+        if layer["mark"].get("type") == "rect" and layer["mark"].get("fillOpacity") == 0
     )
-    assert row["mark"]["color"] == LIGHT.reading
+    # A row is a band, so the selector is its border and the cells inside keep
+    # their fill; with no x encoding the outline spans the whole window.
+    assert row["mark"]["stroke"] == LIGHT.reading
+    assert "x" not in row["encoding"]
     assert spec["datasets"][row["data"]["name"]] == [{"spot": "Sils"}]
 
     # The axis label is text on the page surface, so it takes accent_text
@@ -884,18 +896,19 @@ def test_focused_spot_wears_the_location_half_of_the_selector(
     assert axis["labelFontWeight"]["condition"]["value"] == 700
 
 
-def test_unfocused_panel_draws_no_row_rule() -> None:
+def test_unfocused_panel_draws_no_row_outline() -> None:
     """Without a focus spot the board carries only the hover row rule."""
     spec, _ = _build_panel(None)
     board = _panel_views(spec)["board"]
-    plain_row_rules = [
-        layer
-        for layer in board["layer"]
-        if layer["mark"].get("type") == "rule"
-        and not layer.get("transform")
-        and "y" in layer["encoding"]
-    ]
-    assert plain_row_rules == []
+    assert _row_outlines(board) == []
+
+
+def test_the_row_selector_needs_the_spot_plain_name() -> None:
+    # The board's rows are spot names. The labelled "Name (id)" form the spot
+    # switcher prints matches no row, so the selector would draw nothing --
+    # which is exactly what the console used to hand it.
+    spec, _ = _build_panel(None, focus_spot="Sils (sils)")
+    assert _row_outlines(_panel_views(spec)["board"]) == []
 
 
 @pytest.mark.parametrize("palette", [LIGHT, DARK])
@@ -1006,7 +1019,15 @@ def test_compact_dial_uri_follows_the_palette_it_is_given() -> None:
     assert rc._compact_dial_uri(*args, LIGHT) != rc._compact_dial_uri(*args, DARK)
 
 
-_ACCURACY_COLUMNS = ["spot_id", "time", "predicted", "observed", "delta", "verdict"]
+_ACCURACY_COLUMNS = [
+    "spot_id",
+    "time",
+    "predicted",
+    "observed",
+    "coverage",
+    "delta",
+    "verdict",
+]
 
 
 def _accuracy_timeline() -> pd.DataFrame:
@@ -1037,12 +1058,16 @@ def test_all_spots_accuracy_pairs_hours_and_grades_them(
     frame = rc.all_spots_accuracy(("silvaplana",), "[]")
 
     assert list(frame.columns) == _ACCURACY_COLUMNS
-    # The unpaired hour is dropped; the three paired ones survive, in time order.
-    assert len(frame) == 3
+    # Every hour survives, in time order: the three paired ones plus the hour
+    # that was only ever predicted, which is a coverage fact, not an accuracy one.
+    assert len(frame) == 4
     assert frame["spot_id"].unique().tolist() == ["silvaplana"]
-    assert frame["delta"].tolist() == [0.0, 1.0, 2.5]
-    # A whole band is the cut, so one band off still counts as matched.
-    assert frame["verdict"].tolist() == ["matched", "matched", "missed"]
+    assert frame["coverage"].tolist() == ["both", "both", "both", "predicted"]
+    assert frame["delta"].tolist()[:3] == [0.0, 1.0, 2.5]
+    assert pd.isna(frame["delta"].iloc[3])
+    # A whole band is the cut, so one band off still counts as matched, and an
+    # hour with nothing to compare against is graded not at all.
+    assert frame["verdict"].tolist() == ["matched", "matched", "missed", None]
 
 
 def test_all_spots_accuracy_keeps_its_columns_when_empty(
@@ -1197,3 +1222,86 @@ def test_now_and_the_sun_are_marked_across_the_panel(
     assert frame["event"].tolist() == ["Sunset"]
     assert frame["time"].iloc[0].tzinfo is not None
     assert start <= frame["time"].iloc[0] <= end + pd.Timedelta(hours=6)
+
+
+def test_hour_coverage_classes_the_record_and_its_error() -> None:
+    """Each hour reports which halves exist, and the gap where both do."""
+    hours = pd.date_range("2026-07-12T06:00", periods=3, freq="h", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana", "sils", "silvaplana"],
+            "time": [hours[0], hours[0], hours[1]],
+            "predicted": [3.0, 4.0, 2.0],
+            "observed": [3.2, float("nan"), float("nan")],
+            "coverage": ["both", "predicted", "predicted"],
+            "delta": [0.2, float("nan"), float("nan")],
+            "verdict": ["matched", None, None],
+        }
+    )
+
+    band = rc._hour_coverage(accuracy)
+
+    assert band["coverage"].tolist() == ["matched", "predicted"]
+    assert band["holds"].tolist() == ["Predicted and observed", "Predicted only"]
+    assert band["predicted"].tolist() == [2, 1]
+    assert band["observed"].tolist() == [1, 0]
+    assert band["error"].tolist()[0] == pytest.approx(0.2)
+    # The strip spans the hour it grades, and a small gap shades lighter than
+    # the miss threshold would.
+    assert (band["time_end"] - band["time"]).unique() == pd.Timedelta(hours=1)
+    assert band["shade"].iloc[0] < 1.0
+    assert band["shade"].iloc[1] == pytest.approx(0.4)
+
+
+def test_the_coverage_strip_sits_between_the_plots() -> None:
+    """A colour-coded hour strip, with the error in its tooltip."""
+    spec, _ = _build_panel(None)
+    views = spec["vconcat"]
+    strip = _panel_views(spec)["coverage"]
+
+    assert views.index(strip) == views.index(_panel_views(spec)["board"]) + 1
+    assert views.index(strip) == views.index(_panel_views(spec)["wind"]) - 1
+    assert strip["height"] == rc._COVERAGE_HEIGHT_PX
+
+    band = strip["layer"][0]
+    assert band["encoding"]["color"]["scale"]["domain"] == [
+        "predicted",
+        "observed",
+        "matched",
+        "missed",
+    ]
+    # The rect spans its hour, and the error rides in the shade and the tooltip.
+    assert band["encoding"]["x2"]["field"] == "time_end"
+    assert band["encoding"]["opacity"]["field"] == "shade"
+    titles = [tip["title"] for tip in band["encoding"]["tooltip"]]
+    assert "Record" in titles and "Quality error" in titles
+
+
+def test_the_selector_takes_the_colour_of_what_the_hour_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Reading orange says forecast. A measured hour is not a forecast, so it
+    # takes the neutral role instead of borrowing the same orange.
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    hours = _panel_frames()[3]
+
+    def pin_colours(pinned: pd.Timestamp) -> set[str]:
+        spec, _ = _build_panel(pinned, focus_spot="Sils")
+        return {
+            layer["mark"]["color"]
+            for view in spec["vconcat"]
+            for layer in view["layer"]
+            if layer["mark"].get("type") == "rule"
+            and layer["encoding"].get("x", {}).get("field") == "time_mid"
+        }
+
+    def outline_stroke(pinned: pd.Timestamp) -> str:
+        spec, _ = _build_panel(pinned, focus_spot="Sils")
+        return _row_outlines(_panel_views(spec)["board"])[0]["mark"]["stroke"]
+
+    # The fixture observed Sils at hours[2] and nothing at hours[5].
+    assert pin_colours(hours[2]) == {LIGHT.idle}
+    assert outline_stroke(hours[2]) == LIGHT.idle
+    assert pin_colours(hours[5]) == {LIGHT.reading}
+    assert outline_stroke(hours[5]) == LIGHT.reading
+    assert LIGHT.idle != LIGHT.reading

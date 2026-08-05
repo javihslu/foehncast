@@ -77,6 +77,7 @@ def _minimum_rideable_kts() -> float:
 _PANEL_PLOT_WIDTH = 480
 _PANEL_SPACING_PX = 6
 _RULER_HEIGHT_PX = 22
+_COVERAGE_HEIGHT_PX = 14
 _WIND_HEIGHT_PX = 240
 
 # An axis is drawn OUTSIDE the view it belongs to, and the panel lays its views
@@ -545,20 +546,35 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
 #: counts as a miss. The index runs 0-5, so a whole band is the honest cut.
 _ACCURACY_MISS_THRESHOLD = 1.0
 
+#: Columns of the per-spot, per-hour accuracy frame. "coverage" says which
+#: halves of the record the hour holds; delta and verdict exist only where it
+#: holds both.
+_ACCURACY_COLUMNS = (
+    "spot_id",
+    "time",
+    "predicted",
+    "observed",
+    "coverage",
+    "delta",
+    "verdict",
+)
+
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def all_spots_accuracy(
     spot_ids: tuple[str, ...], predictions_json: str
 ) -> pd.DataFrame:
-    """Past predicted-vs-observed quality per spot, for the heatmap's row marks.
+    """Per spot and hour, what the record holds: a prediction, an observation, or both.
 
     Reuses the per-spot timeline the ride-quality panel used to draw, so this
     introduces no call the console was not already making -- it makes it for
     every spot rather than only the focused one. Both layers are cached for
     half an hour, which is what keeps that widening affordable.
 
-    Only hours carrying BOTH a past prediction and an observation survive: an
-    hour with one and not the other says nothing about accuracy.
+    Only an hour carrying BOTH halves can be graded, so delta and verdict are
+    set there and left null everywhere else. The unpaired hours still ride
+    along: "predicted and never measured" is exactly what the coverage band
+    exists to show.
     """
     frames: list[pd.DataFrame] = []
     for spot_id in spot_ids:
@@ -568,31 +584,44 @@ def all_spots_accuracy(
         wide = timeline.pivot_table(
             index="time", columns="series", values="quality_index", aggfunc="mean"
         )
-        if not {"Predicted (past)", "Observed"}.issubset(wide.columns):
-            continue
-        pair = wide[["Predicted (past)", "Observed"]].dropna()
-        if pair.empty:
-            continue
+        # A forward forecast and a logged past prediction are both predictions;
+        # where an hour has each, the logged one wins, since it is what the
+        # console actually said while the session could still be ridden.
+        predicted = pd.Series(float("nan"), index=wide.index)
+        for column in ("Forecast", "Predicted (past)"):
+            if column in wide.columns:
+                predicted = wide[column].combine_first(predicted)
+        observed = (
+            wide["Observed"]
+            if "Observed" in wide.columns
+            else pd.Series(float("nan"), index=wide.index)
+        )
         frames.append(
             pd.DataFrame(
                 {
                     "spot_id": spot_id,
-                    "time": pair.index,
-                    "predicted": pair["Predicted (past)"].to_numpy(),
-                    "observed": pair["Observed"].to_numpy(),
+                    "time": wide.index,
+                    "predicted": predicted.to_numpy(),
+                    "observed": observed.to_numpy(),
                 }
             )
         )
     if not frames:
-        return pd.DataFrame(
-            columns=["spot_id", "time", "predicted", "observed", "delta", "verdict"]
-        )
+        return pd.DataFrame(columns=list(_ACCURACY_COLUMNS))
     out = pd.concat(frames, ignore_index=True)
+    out = out[out[["predicted", "observed"]].notna().any(axis=1)].reset_index(drop=True)
+    out["coverage"] = "both"
+    out.loc[out["observed"].isna(), "coverage"] = "predicted"
+    out.loc[out["predicted"].isna(), "coverage"] = "observed"
     out["delta"] = (out["predicted"] - out["observed"]).abs()
     out["verdict"] = out["delta"].map(
-        lambda d: "missed" if d > _ACCURACY_MISS_THRESHOLD else "matched"
+        lambda d: (
+            None
+            if pd.isna(d)
+            else ("missed" if d > _ACCURACY_MISS_THRESHOLD else "matched")
+        )
     )
-    return out
+    return out[list(_ACCURACY_COLUMNS)]
 
 
 def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
@@ -1195,6 +1224,8 @@ class _Panel:
     pin_time: alt.Parameter
     sun: pd.DataFrame = field(default_factory=pd.DataFrame)
     hour_verdicts: pd.DataFrame = field(default_factory=pd.DataFrame)
+    hour_coverage: pd.DataFrame = field(default_factory=pd.DataFrame)
+    observed_selection: bool = False
 
 
 def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
@@ -1245,11 +1276,16 @@ def _hour_verdicts(accuracy: pd.DataFrame) -> pd.DataFrame:
     counts ride along in the tooltip, which is where the per-spot detail that
     the collapse drops comes back.
     """
-    if accuracy.empty:
+    graded = (
+        accuracy[accuracy["verdict"].notna()]
+        if "verdict" in accuracy.columns
+        else accuracy
+    )
+    if graded.empty:
         return pd.DataFrame(
             columns=["time", "time_end", "missed", "pairs", "worst", "verdict"]
         )
-    grouped = accuracy.groupby("time", as_index=False).agg(
+    grouped = graded.groupby("time", as_index=False).agg(
         missed=("verdict", lambda v: int((v == "missed").sum())),
         pairs=("verdict", "size"),
         worst=("delta", "max"),
@@ -1259,6 +1295,56 @@ def _hour_verdicts(accuracy: pd.DataFrame) -> pd.DataFrame:
         lambda n: "missed" if n > 0 else "matched"
     )
     return grouped
+
+
+def _hour_coverage(accuracy: pd.DataFrame) -> pd.DataFrame:
+    """Per hour, which halves of the record exist and how far apart they are.
+
+    The board's rows are spots and this band's are hours, so an hour counts as
+    predicted or observed as soon as any spot holds that half. Only the spots
+    holding both can be compared, and their mean absolute quality-index gap is
+    the hour's error; it lands in the same matched/missed classes the ruler's
+    verdict tint uses, so one hour never reads two ways in one panel.
+    """
+    columns = [
+        "time",
+        "time_end",
+        "coverage",
+        "holds",
+        "predicted",
+        "observed",
+        "paired",
+        "error",
+        "shade",
+    ]
+    if accuracy.empty:
+        return pd.DataFrame(columns=columns)
+    marked = accuracy.assign(
+        has_predicted=accuracy["coverage"].isin(["predicted", "both"]),
+        has_observed=accuracy["coverage"].isin(["observed", "both"]),
+    )
+    grouped = marked.groupby("time", as_index=False).agg(
+        predicted=("has_predicted", "sum"),
+        observed=("has_observed", "sum"),
+        paired=("delta", "count"),
+        error=("delta", "mean"),
+    )
+    grouped["time_end"] = grouped["time"] + pd.Timedelta(hours=1)
+    both = (grouped["predicted"] > 0) & (grouped["observed"] > 0)
+    grouped["holds"] = "Predicted only"
+    grouped.loc[grouped["predicted"] == 0, "holds"] = "Observed only"
+    grouped.loc[both, "holds"] = "Predicted and observed"
+    grouped["coverage"] = "predicted"
+    grouped.loc[grouped["predicted"] == 0, "coverage"] = "observed"
+    grouped.loc[both, "coverage"] = grouped.loc[both, "error"].map(
+        lambda e: "missed" if e > _ACCURACY_MISS_THRESHOLD else "matched"
+    )
+    # The class says whether the hour was called right, the shade by how much,
+    # so a near miss and a wild one do not paint the same.
+    grouped["shade"] = (
+        0.4 + 0.6 * (grouped["error"] / _ACCURACY_MISS_THRESHOLD).clip(upper=1.0)
+    ).fillna(0.4)
+    return grouped[columns]
 
 
 def _verdict_band(panel: _Panel) -> alt.Chart:
@@ -1309,6 +1395,42 @@ def _pin_frame(pinned: pd.Timestamp) -> pd.DataFrame:
     )
 
 
+def _selection_color(pal: Palette, observed: bool, *, text: bool = False) -> str:
+    """What the selector wears, by what the selected hour actually holds.
+
+    A predicted hour keeps the reading orange the console selects everything
+    with. An observed one takes the neutral slate of the matched-verdict tint,
+    so the crosshair says whether the numbers beside it are a forecast or a
+    measurement instead of painting the two alike. That role clears the 4.5:1
+    text floor in both modes, so the mark and its label can share it; the
+    orange cannot, which is why the predicted label falls back to accent_text.
+    """
+    if observed:
+        return pal.idle
+    return pal.accent_text if text else pal.reading
+
+
+def _utc_hours(times: Any) -> pd.DatetimeIndex:
+    """The hour each timestamp falls in, in UTC.
+
+    The panel runs in the display timezone and the timelines in UTC, so
+    anything joining the two matches on this rather than on the timestamps.
+    """
+    index = pd.DatetimeIndex(times)
+    index = index.tz_localize("UTC") if index.tz is None else index.tz_convert("UTC")
+    return index.floor("h")
+
+
+def _hour_is_observed(
+    focus_accuracy: pd.DataFrame, pinned: pd.Timestamp | None
+) -> bool:
+    """Whether the pinned hour at the focused spot carries a measurement."""
+    if pinned is None or focus_accuracy.empty:
+        return False
+    rows = focus_accuracy[_utc_hours(focus_accuracy["time"]) == _utc_hours([pinned])[0]]
+    return bool(rows["observed"].notna().any())
+
+
 def _panel_x(panel: _Panel, field: str = "time") -> alt.X:
     """The panel's x channel: the shared domain, and no axis of the layer's own.
 
@@ -1338,10 +1460,15 @@ def _hover_rule(panel: _Panel, param: alt.Parameter) -> alt.Chart:
 
 
 def _pin_rule(panel: _Panel) -> alt.Chart:
-    """The pinned time selector: a reading-orange rule bisecting the pinned cell."""
+    """The pinned time selector: a rule bisecting the pinned cell, in the colour
+    of what that hour holds."""
     return (
         alt.Chart(_pin_frame(panel.pinned))
-        .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+        .mark_rule(
+            color=_selection_color(panel.pal, panel.observed_selection),
+            strokeWidth=2,
+            clip=True,
+        )
         .encode(x=_panel_x(panel, "time_mid"))
     )
 
@@ -1395,21 +1522,33 @@ def _sun_marks(panel: _Panel) -> list[alt.Chart]:
     return [mark("Sunrise", [1, 0]), mark("Sunset", [3, 2])]
 
 
-def _focus_row_rule(panel: _Panel, rank_order: list[str]) -> alt.Chart:
-    """The location half of the selector: an orange rule on the focused spot's row."""
+def _focus_row_outline(panel: _Panel, rank_order: list[str]) -> alt.Chart:
+    """The location half of the selector: the focused spot's row, outlined.
+
+    The pinned hour draws a vertical rule, but a row is a band rather than an
+    instant, so its counterpart is the band's own border: the cells inside keep
+    their quality fill and stay readable under it.
+    """
     return (
         alt.Chart(pd.DataFrame({"spot": [panel.focus_spot]}))
-        .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+        .mark_rect(
+            fillOpacity=0,
+            stroke=_selection_color(panel.pal, panel.observed_selection),
+            strokeWidth=2,
+            clip=True,
+        )
         .encode(y=alt.Y("spot:N", sort=rank_order))
     )
 
 
-def _board_y_axis(pal: Palette, focus_spot: str | None) -> alt.Axis:
+def _board_y_axis(
+    pal: Palette, focus_spot: str | None, observed: bool = False
+) -> alt.Axis:
     """The board's spot axis, printing the focused spot's name in the accent.
 
-    accent_text rather than the mark orange for the same reason the ruler label
-    wears it: an axis label is text on the page surface, so it has to clear the
-    4.5:1 floor the plain mark orange misses in light mode.
+    A text-grade role rather than the mark colour for the same reason the ruler
+    label wears one: an axis label is text on the page surface, so it has to
+    clear the 4.5:1 floor the plain mark orange misses in light mode.
     """
     if focus_spot is None:
         return alt.Axis(orient="right", labelFontSize=13)
@@ -1418,7 +1557,10 @@ def _board_y_axis(pal: Palette, focus_spot: str | None) -> alt.Axis:
         orient="right",
         labelFontSize=13,
         labelColor={
-            "condition": {"test": test, "value": pal.accent_text},
+            "condition": {
+                "test": test,
+                "value": _selection_color(pal, observed, text=True),
+            },
             "value": pal.ink,
         },
         labelFontWeight={"condition": {"test": test, "value": 700}, "value": 400},
@@ -1466,7 +1608,11 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
         pin = _pin_frame(panel.pinned)
         layers.append(
             alt.Chart(pin)
-            .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+            .mark_rule(
+                color=_selection_color(panel.pal, panel.observed_selection),
+                strokeWidth=2,
+                clip=True,
+            )
             .encode(x=_panel_x(panel, "time_mid"))
         )
         layers.append(
@@ -1474,7 +1620,7 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
             # No font family: the ruler's own labels take the chart default, and
             # a family the renderer does not have drops the glyphs silently.
             .mark_text(
-                color=panel.pal.accent_text,
+                color=_selection_color(panel.pal, panel.observed_selection, text=True),
                 fontSize=11,
                 fontWeight=700,
                 align="left",
@@ -1510,7 +1656,7 @@ def _board_view(
                 "spot:N",
                 title=None,
                 sort=rank_order,
-                axis=_board_y_axis(pal, panel.focus_spot),
+                axis=_board_y_axis(pal, panel.focus_spot, panel.observed_selection),
             ),
             # The cell's own quality drives the fill continuously; night cells
             # leave the ramp entirely. See _quality_fill.
@@ -1565,7 +1711,7 @@ def _board_view(
     # The selection crosshair: the focused spot's row crossing the pinned hour,
     # both in the same reading orange.
     if panel.focus_spot in rank_order:
-        layers.append(_focus_row_rule(panel, rank_order))
+        layers.append(_focus_row_outline(panel, rank_order))
     if panel.pinned is not None:
         layers.append(_pin_rule(panel))
 
@@ -1579,6 +1725,52 @@ def _board_view(
         .properties(
             height=_HEATMAP_ROW_PX * max(len(rank_order), 1), width=_PANEL_PLOT_WIDTH
         )
+    )
+
+
+def _coverage_view(panel: _Panel) -> alt.LayerChart:
+    """The strip between the plots: what the record holds for each hour.
+
+    Colour separates an hour the console only predicted from one only measured,
+    and where both exist it takes the ruler's own matched/missed verdict; the
+    shade then deepens with the mean absolute quality gap, so a near miss and a
+    wild one do not paint the same. The NOW rule crosses it like every other
+    view, which is what keeps the strip reading as part of the panel rather
+    than as a legend stuck between two plots.
+    """
+    pal = panel.pal
+    layers = [
+        alt.Chart(panel.hour_coverage)
+        .mark_rect(clip=True)
+        .encode(
+            x=_panel_x(panel),
+            x2=alt.X2("time_end:T"),
+            color=alt.Color(
+                "coverage:N",
+                scale=alt.Scale(
+                    domain=["predicted", "observed", "matched", "missed"],
+                    range=[pal.ink_muted, pal.night, pal.ink_secondary, pal.danger],
+                ),
+                legend=None,
+            ),
+            opacity=alt.Opacity(
+                "shade:Q",
+                scale=alt.Scale(domain=[0, 1], range=[0, 1]),
+                legend=None,
+            ),
+            tooltip=[
+                alt.Tooltip("time:T", title="Hour", format="%a %d %b %H:00"),
+                alt.Tooltip("holds:N", title="Record"),
+                alt.Tooltip("predicted:Q", title="Spots predicted", format=".0f"),
+                alt.Tooltip("observed:Q", title="Spots observed", format=".0f"),
+                alt.Tooltip("error:Q", title="Quality error", format=".2f"),
+            ],
+        )
+    ]
+    if panel.now is not None:
+        layers.append(_now_rule(panel))
+    return alt.layer(*layers).properties(
+        height=_COVERAGE_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
     )
 
 
@@ -1769,6 +1961,11 @@ def _time_panel(
     """
     pal = active()
     domain_start, domain_end = domain[0], domain[1]
+    focus_accuracy = (
+        accuracy[accuracy["spot"] == focus_spot]
+        if focus_spot is not None and not accuracy.empty
+        else pd.DataFrame(columns=list(_ACCURACY_COLUMNS))
+    )
     panel = _Panel(
         spine=_time_spine(domain_start, domain_end),
         x_scale=alt.Scale(domain=domain, nice=False),
@@ -1780,6 +1977,8 @@ def _time_panel(
         now=now if domain_start <= now <= domain_end else None,
         sun=_sun_frame(domain_start, domain_end, spot_lat, spot_lon),
         hour_verdicts=_hour_verdicts(accuracy),
+        hour_coverage=_hour_coverage(accuracy),
+        observed_selection=_hour_is_observed(focus_accuracy, pinned),
         cell=alt.selection_point(
             name="cell", fields=["spot", "time"], on="click", empty=False
         ),
@@ -1814,6 +2013,8 @@ def _time_panel(
     if not heat_grid.empty:
         views.append(_board_view(panel, heat_grid, rank_order))
         modes.append("cell")
+    if not panel.hour_coverage.empty:
+        views.append(_coverage_view(panel))
     if not timeline_frame.empty:
         views.append(_wind_view(panel, timeline_frame, spot_lat, spot_lon, min_kts))
         modes.append("pin_time")
@@ -1939,10 +2140,11 @@ def render_rider_console(
                 spot=accuracy["spot_id"].map(
                     lambda sid: spot_lookup[sid]["name"] if sid in spot_lookup else sid
                 ),
-                # Half a cell right, so a mark sits in its hour rather than on
-                # the boundary between two.
-                time=accuracy["time"].dt.tz_convert(display_tz)
-                + pd.Timedelta(minutes=30),
+                # The ruler's tint and the coverage strip are rects spanning
+                # [H, H+1), so an hour has to stay on its own cell edge: the
+                # half-cell offset the board's old accuracy dots needed would
+                # slide both of them half an hour off the columns they grade.
+                time=accuracy["time"].dt.tz_convert(display_tz),
             )
             accuracy = accuracy[
                 (accuracy["time"] >= domain[0])
@@ -1980,7 +2182,12 @@ def render_rider_console(
                 now,
                 pinned,
                 min_kts,
-                focus_spot=spot_label(spot_lookup, focus_spot_id),
+                # The board's rows are spot NAMES, so the focused spot has to
+                # arrive in that form. The labelled "Name (id)" the switcher
+                # prints matched no row, which left both halves of the location
+                # selector -- the row outline and the accented axis label --
+                # drawing nothing at all.
+                focus_spot=spot_lookup[focus_spot_id]["name"],
             )
             # The details panel holds its column whether or not a cell is
             # picked, so the panel beside it never changes width.
@@ -1994,13 +2201,15 @@ def render_rider_console(
                     selection_mode=modes,
                 )
                 st.caption(
-                    "Click anywhere in the panel to pin a time; the orange rule "
-                    "and the label on both rulers mark it, and the horizontal "
-                    "orange rule tracks the focused spot. Both rulers carry the "
-                    "clock and the date, a green NOW rule, and amber ticks at "
-                    "sunrise (solid) and sunset (dashed). The green band along "
-                    "the wind plot traces solar elevation, scaled to the "
-                    "wind-speed axis."
+                    "Click anywhere in the panel to pin a time. The selector "
+                    "labels the pinned hour on both rulers and outlines the "
+                    "focused spot's row, in orange where that hour is a "
+                    "forecast and in slate where it is a measurement. Both "
+                    "rulers carry the clock and the date, a green NOW rule, "
+                    "and amber ticks at sunrise (solid) and sunset (dashed). "
+                    "The strip between the plots says what the record holds "
+                    "for each hour. The green band along the wind plot traces "
+                    "solar elevation, scaled to the wind-speed axis."
                 )
             selected = (
                 _selected_heat_cell(event, heat_grid) if not heat_grid.empty else None
