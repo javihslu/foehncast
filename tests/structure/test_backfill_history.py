@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,3 +78,14 @@ def test_cli_exposes_recent_days_defaulting_to_zero(monkeypatch) -> None:
 
     monkeypatch.setattr(sys, "argv", ["backfill-history.py", "--recent-days", "2"])
     assert backfill_history._parse_args().recent_days == 2
+
+
+def test_objectstore_credentials_default_into_aws_env(monkeypatch) -> None:
+    monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
+    monkeypatch.setenv("OBJECTSTORE_ACCESS_KEY", "objkey")
+    # An explicit AWS value must never be overwritten.
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "explicit")
+    monkeypatch.setenv("OBJECTSTORE_SECRET_KEY", "objsecret")
+    backfill_history._default_objectstore_credentials()
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "objkey"
+    assert os.environ["AWS_SECRET_ACCESS_KEY"] == "explicit"
