@@ -18,6 +18,7 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _rider_console as rc  # noqa: E402
+import _styles  # noqa: E402
 from _theme import DARK, LIGHT  # noqa: E402
 
 
@@ -1148,8 +1149,8 @@ def test_hover_readout_shows_each_series_value() -> None:
 
 
 def test_dial_tile_highlights_only_the_selected_spot() -> None:
-    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True, "", "silvaplana")
-    other = rc._dial_tile_html("Sils", "<svg/>", False, "", "sils")
+    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True)
+    other = rc._dial_tile_html("Sils", "<svg/>", False)
 
     assert LIGHT.reading in selected and LIGHT.accent_text in selected
     assert "transparent" in other and LIGHT.reading not in other
@@ -1360,12 +1361,10 @@ def test_dial_tiles_can_be_picked_and_hovered() -> None:
     summary = rc._dial_summary(23.0, 31.0, 220.0)
     assert "23 km/h" in summary and "gusting 31" in summary and "220" in summary
 
-    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary, "silvaplana")
-    # The tile IS the control: a link back to the page carrying its spot id,
-    # so no auxiliary button is drawn beside it.
-    assert tile.startswith('<a href="?spot=silvaplana" target="_self"')
-    assert tile.endswith("</a>")
-    # A drawn block can only raise a hover bubble through its title.
+    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary)
+    # The tile is a plain block: a link would have navigated, reloading the
+    # page and losing the session, so the control is a button stretched over it.
+    assert "<a " not in tile and "href" not in tile
     assert f'title="Silvaplana — {summary}"' in tile
     # A gustless reading says nothing about gusts rather than printing a zero.
     assert "gusting" not in rc._dial_summary(23.0, None, 220.0)
@@ -1389,31 +1388,6 @@ def test_the_details_follow_the_focused_spot_not_a_stale_click() -> None:
 
     # Nothing picked and nothing pinned leaves the panel on its hint.
     assert rc._detail_row(None, grid, "sils", None) is None
-
-
-def test_a_dial_click_arrives_and_is_cleared(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The click comes back as a query parameter. It has to be spent on arrival,
-    # or it would outlive the click and re-select that spot on every rerun.
-    picked: list[str] = []
-    monkeypatch.setattr(rc, "_focus_spot", picked.append)
-    params: dict[str, str] = {"spot": "sils"}
-    monkeypatch.setattr(rc.st, "query_params", params)
-
-    rc._apply_dial_query(["silvaplana", "sils"])
-    assert picked == ["sils"]
-    assert params == {}
-
-    # A spot that is not on the board changes nothing, and is still cleared.
-    params["spot"] = "nowhere"
-    rc._apply_dial_query(["silvaplana", "sils"])
-    assert picked == ["sils"]
-    assert params == {}
-
-    # No parameter, nothing to do.
-    rc._apply_dial_query(["silvaplana", "sils"])
-    assert picked == ["sils"]
 
 
 def test_the_now_label_leaves_the_rulers_to_their_dates(
@@ -1449,3 +1423,75 @@ def test_the_now_label_leaves_the_rulers_to_their_dates(
             if layer["mark"].get("type") == "text"
         )
         assert offsets == [-5, 6]
+
+
+class _Ctx:
+    """Minimal context manager standing in for a column or a container."""
+
+    def __enter__(self) -> "_Ctx":
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+def test_a_dial_click_switches_the_focused_spot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The tile is the control and the click is a widget event, so the script
+    # reruns in place: no navigation, no page load, no session thrown away.
+    picked: list[str] = []
+    buttons: list[dict] = []
+    drawn: list[str] = []
+
+    monkeypatch.setattr(
+        rc,
+        "get_spots",
+        lambda: [
+            {
+                "id": "sils",
+                "name": "Sils",
+                "lat": 46.43,
+                "lon": 9.75,
+                "shore_orientation_deg": 40.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(rc, "_spot_hour_wind", lambda *a: (23.0, 31.0, 220.0))
+    monkeypatch.setattr(rc, "wind_dial_svg", lambda **kw: "<svg/>")
+    monkeypatch.setattr(rc, "_focus_spot", picked.append)
+    monkeypatch.setattr(rc.st, "columns", lambda n: [_Ctx() for _ in range(n)])
+    monkeypatch.setattr(rc.st, "container", lambda **kw: _Ctx())
+    monkeypatch.setattr(rc.st, "markdown", lambda html, **kw: drawn.append(html))
+    monkeypatch.setattr(rc.st, "caption", lambda *a, **k: None)
+
+    def _button(label: str, **kwargs: object) -> bool:
+        buttons.append({"label": label, **kwargs})
+        return True
+
+    monkeypatch.setattr(rc.st, "button", _button)
+
+    hour = pd.Timestamp("2026-07-12T09:00:00", tz="Europe/Zurich")
+    rc._render_dial_grid(["sils"], "silvaplana", hour, 16.0)
+
+    assert picked == ["sils"]
+    # One stable key per spot, a real label under the transparent paint, and
+    # the spot's wind as the hover bubble.
+    assert buttons[0]["key"] == "dial_pick_sils"
+    assert buttons[0]["label"] == "Sils"
+    assert "23 km/h" in str(buttons[0]["help"])
+    # Nothing of the link route survives.
+    tile = next(html for html in drawn if "<svg/>" in html)
+    assert "<a " not in tile and "href" not in tile
+    assert not hasattr(rc, "_apply_dial_query")
+    assert not hasattr(rc, "_DIAL_QUERY_KEY")
+
+
+def test_dial_overlay_css_hooks_the_tile_containers() -> None:
+    # The overlay is what makes the dial itself the button, and it hangs on the
+    # container keys the grid writes -- so the selectors and the keys have to
+    # agree.
+    css = _styles._CSS
+    assert "st-key-dialtile_" in css
+    assert "st-key-dial_pick_" in css
+    assert "inset: 0" in css.split("st-key-dialtile_", 1)[1]

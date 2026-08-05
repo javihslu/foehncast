@@ -1165,16 +1165,14 @@ def _dial_summary(wind: float, gust: float | None, direction: float) -> str:
     return f"{wind:.0f} km/h{gusting}, {_compass(direction)} ({direction:.0f}°)"
 
 
-def _dial_tile_html(
-    name: str, dial_svg: str, selected: bool, summary: str, spot_id: str
-) -> str:
+def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "") -> str:
     """One tile of the comparison grid: a compact dial with the spot's name.
 
     The selected spot wears the reading-orange border and the accent-text name;
     the rest keep a transparent border so every tile holds the same footprint.
-    The whole tile is a link back to the page carrying its spot id, which is
-    how a page hears a click on HTML it drew itself, and the summary rides on
-    the title, which is the hover bubble such a block can raise.
+    The tile is drawn plain and its button is stretched over it by the styles,
+    so the summary rides on the title as well: that is what a viewer sees if
+    the overlay ever fails to cover the tile.
     """
     pal = active()
     border = pal.reading if selected else "transparent"
@@ -1185,13 +1183,11 @@ def _dial_tile_html(
     )
     hover = f"{name} — {summary}" if summary else name
     return (
-        f'<a href="?{_DIAL_QUERY_KEY}={spot_id}" target="_self" title="{hover}" '
-        'style="text-decoration:none;color:inherit;display:block;cursor:pointer">'
-        f'<div style="border:2px solid {border};border-radius:12px;'
+        f'<div title="{hover}" style="border:2px solid {border};border-radius:12px;'
         'padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
         f"{dial_svg}"
         f'<div style="text-align:center;font-family:Manrope,sans-serif;'
-        f'font-size:0.72rem;{name_style}">{name}</div></div></a>'
+        f'font-size:0.72rem;{name_style}">{name}</div></div>'
     )
 
 
@@ -1211,26 +1207,6 @@ def _focus_spot(spot_id: str) -> None:
     st.rerun(scope="app")
 
 
-#: Query parameter a dial tile's link carries; read and dropped on arrival.
-_DIAL_QUERY_KEY = "spot"
-
-
-def _apply_dial_query(spot_ids: list[str]) -> None:
-    """Route a click on a dial tile, which arrives as a query parameter.
-
-    A page cannot hear a click on HTML it drew, but it can follow a link, so
-    each tile links back to the page carrying its spot id. The id is read once
-    and dropped at once: left in the address bar it would outlive the click
-    that set it and re-select that spot on every later rerun.
-    """
-    picked = st.query_params.get(_DIAL_QUERY_KEY)
-    if picked is None:
-        return
-    del st.query_params[_DIAL_QUERY_KEY]
-    if picked in spot_ids:
-        _focus_spot(picked)
-
-
 def _render_dial_grid(
     spot_ids: list[str],
     selected_spot_id: str | None,
@@ -1241,8 +1217,10 @@ def _render_dial_grid(
 
     All spots at one instant, so the selected spot's wind reads against its
     alternatives; the highlight marks which one the details below describe.
-    Each tile is itself the control that switches to its spot, and carries that
-    spot's wind as a hover bubble.
+    Each tile is itself the control that switches to its spot: a transparent
+    button is stretched across it by the styles, the same way the sidebar's
+    freshness dials work. A widget click reruns the script in place, where a
+    link would reload the page and take the session with it.
     """
     spots_cfg = {s["id"]: s for s in get_spots()}
     st.markdown(
@@ -1276,16 +1254,30 @@ def _render_dial_grid(
                 detail="compact",
                 is_day=day,
             )
-            st.markdown(
-                _dial_tile_html(
+            summary = _dial_summary(wind, gust, direction)
+            # The wrapper is what the styles hang the overlay on: st.container
+            # stamps st-key-dialtile_<id> on it and the button's own container
+            # carries st-key-dial_pick_<id>, so the rule needs no positional
+            # selector. The button keeps a real label for screen readers and
+            # for the case where the styles do not load; the styles paint it
+            # transparent. Its help text is the hover bubble, since the overlay
+            # sits above the tile and takes the pointer.
+            with st.container(key=f"dialtile_{spot_id}"):
+                st.markdown(
+                    _dial_tile_html(
+                        cfg["name"],
+                        svg,
+                        spot_id == selected_spot_id,
+                        summary,
+                    ),
+                    unsafe_allow_html=True,
+                )
+                if st.button(
                     cfg["name"],
-                    svg,
-                    spot_id == selected_spot_id,
-                    _dial_summary(wind, gust, direction),
-                    spot_id,
-                ),
-                unsafe_allow_html=True,
-            )
+                    key=f"dial_pick_{spot_id}",
+                    help=f"{cfg['name']} — {summary}",
+                ):
+                    _focus_spot(spot_id)
     st.caption(
         "Each dial is that spot's wind at the selected hour: the dot's bearing "
         "is where the wind blows toward, its distance from the centre is speed "
@@ -2248,9 +2240,6 @@ def render_rider_console(
 
     # Focus timeline (full width, past + future)
     focus_spot_ids = [spot["spot_id"] for spot in ranked_spots] or selected_spot_ids
-    # A dial click arrives as a query parameter, read before the focus is
-    # resolved so the console never renders at the spot the click replaced.
-    _apply_dial_query(focus_spot_ids)
     default_focus = focus_spot_ids[0] if focus_spot_ids else None
     if "rider_focus_spot" not in st.session_state or (
         st.session_state["rider_focus_spot"] not in focus_spot_ids

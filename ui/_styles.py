@@ -395,6 +395,47 @@ _CSS = """
     outline-offset: 2px;
   }
 
+  /* The console's comparison dials are buttons too: a transparent st.button is
+     stretched across each tile so the dial itself switches the focused spot. A
+     link would navigate, which reloads the page and loses the session; a widget
+     click reruns the script in place. The st-key-<key> classes are the hook, so
+     nothing here depends on where Streamlit puts the element. */
+  div[class*="st-key-dialtile_"] {
+    position: relative;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+  }
+  /* Whatever the widget wraps the button in -- the tooltip target when it
+     carries help text -- has to fill the tile as well, or the hit area is only
+     as tall as the button's own line box. */
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] div {
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] button {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    cursor: pointer;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] button p {
+    color: transparent !important;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"]
+    button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .fc-ring,
   .fc-ring-arc,
   .fc-disc,
