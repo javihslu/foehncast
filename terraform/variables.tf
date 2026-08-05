@@ -63,7 +63,7 @@ variable "cloud_run_service_name" {
 }
 
 variable "cloud_run_image" {
-  description = "Container image URI for the Cloud Run inference service. Leave empty to use the default Artifact Registry path."
+  description = "Container image URI used when Terraform first creates the Cloud Run inference service. Later images are deployed by Cloud Build, so changing this does not move a running service. Leave empty to use the default Artifact Registry path."
   type        = string
   default     = ""
 }
@@ -142,7 +142,7 @@ variable "cloud_run_mlflow_service_name" {
 }
 
 variable "cloud_run_mlflow_image" {
-  description = "Container image URI for the Cloud Run MLflow service. Leave empty to use the default Artifact Registry path."
+  description = "Container image URI used when Terraform first creates the Cloud Run MLflow service. Later images are deployed by Cloud Build, so changing this does not move a running service. Leave empty to use the default Artifact Registry path."
   type        = string
   default     = ""
 }
@@ -166,7 +166,7 @@ variable "cloud_run_ui_service_name" {
 }
 
 variable "cloud_run_ui_image" {
-  description = "Container image URI for the Cloud Run UI service. Leave empty to use the default Artifact Registry path."
+  description = "Container image URI used when Terraform first creates the Cloud Run UI service. Later images are deployed by Cloud Build, so changing this does not move a running service. Leave empty to use the default Artifact Registry path."
   type        = string
   default     = ""
 }

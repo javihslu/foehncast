@@ -1,4 +1,4 @@
-"""Structural checks for the build-only cloudbuild/images.yaml config."""
+"""Structural checks for the cloudbuild build and deploy configs."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMAGES_CONFIG = REPO_ROOT / "cloudbuild" / "images.yaml"
+APP_CONFIG = REPO_ROOT / "cloudbuild" / "app.yaml"
 PLATFORM_IMAGES = ("foehncast-app", "foehncast-ui", "foehncast-mlflow")
 
 
@@ -23,6 +24,11 @@ def _step_text(step: dict) -> str:
 @pytest.fixture(scope="module")
 def images_config() -> dict:
     return yaml.safe_load(IMAGES_CONFIG.read_text())
+
+
+@pytest.fixture(scope="module")
+def app_config() -> dict:
+    return yaml.safe_load(APP_CONFIG.read_text())
 
 
 def test_images_config_is_build_only(images_config: dict) -> None:
@@ -48,3 +54,16 @@ def test_images_config_builds_and_pushes_each_latest_image(images_config: dict) 
 def test_images_config_uses_no_sha_tags(images_config: dict) -> None:
     text = "\n".join(_step_text(step) for step in images_config["steps"])
     assert "sha-" not in text
+
+
+def test_app_config_labels_every_deploy_with_its_commit(app_config: dict) -> None:
+    """Every deploy stamps the commit so the live revision is identifiable."""
+    deploys = [
+        step
+        for step in app_config["steps"]
+        if "run deploy" in _step_text(step) or "jobs update" in _step_text(step)
+    ]
+    assert len(deploys) == 5
+
+    for step in deploys:
+        assert "--update-labels=git-sha=${_COMMIT_SHA}" in step["args"]
