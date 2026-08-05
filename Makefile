@@ -1,4 +1,4 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify cloud-parity compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify cloud-parity ui-fixture ui-local compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
@@ -93,6 +93,12 @@ terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS=
 
 smoke-bootstrap-only:  ## Run the disposable bootstrap-only smoke driver with SMOKE_BOOTSTRAP_ARGS='--repo owner/repo'
 	cd $(ROOT_DIR) && ./scripts/smoke-bootstrap-only.sh $(SMOKE_BOOTSTRAP_ARGS)
+
+ui-fixture:  ## Install a prediction snapshot so the console renders without the stack
+	cd $(ROOT_DIR) && uv run python scripts/ui_fixture.py
+
+ui-local: ui-fixture  ## Render the rider console on the host, no Docker required
+	cd $(ROOT_DIR) && uv run streamlit run ui/app.py
 
 compose-up:  ## Start the default local runtime stack
 	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) up -d

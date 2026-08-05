@@ -113,6 +113,17 @@ def main() -> None:
             )
             st.exception(dashboard_error)
         elif dashboard_data is not None:
+            # scripts/ui_fixture.py marks its snapshot in model_version. The
+            # numbers below are then synthetic or time-shifted, so say so before
+            # anything else renders: a fixture board is indistinguishable from a
+            # real one in a screenshot.
+            if str(dashboard_data.get("model_version", "")).startswith("fixture"):
+                st.warning(
+                    "Fixture data — not a forecast. This console is running on a "
+                    "stored snapshot from scripts/ui_fixture.py for UI work. "
+                    "Nothing here reflects real conditions.",
+                    icon=None,
+                )
             # Pre-warm timeline caches for all spots in parallel so
             # switching spots via buttons is instant.
             prewarm_spot_caches(
