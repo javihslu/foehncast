@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -477,7 +478,25 @@ def _dvc_push() -> None:
         )
 
 
+def _default_objectstore_credentials() -> None:
+    """Fill AWS credentials from the objectstore values, the way bootstrap does.
+
+    Sourcing .env alone leaves AWS_ACCESS_KEY_ID unset, and the S3 writers
+    fail with NoCredentialsError even though the objectstore keys are right
+    there. Explicit AWS values always win.
+    """
+    pairs = (
+        ("AWS_ACCESS_KEY_ID", "OBJECTSTORE_ACCESS_KEY"),
+        ("AWS_SECRET_ACCESS_KEY", "OBJECTSTORE_SECRET_KEY"),
+        ("MLFLOW_S3_ENDPOINT_URL", "STORAGE_S3_ENDPOINT"),
+    )
+    for target, source in pairs:
+        if not os.environ.get(target) and os.environ.get(source):
+            os.environ[target] = os.environ[source]
+
+
 def main() -> None:
+    _default_objectstore_credentials()
     args = _parse_args()
     spots = get_spots()
     rider_config = get_rider_config()
@@ -555,7 +574,14 @@ def main() -> None:
 
     logger.info("")
     logger.info("Backfill complete. Rebuild containers to pick up changes:")
-    logger.info("  docker compose build app ui && docker compose up -d app ui")
+    logger.info(
+        "  docker compose -f docker-compose.yml -f docker-compose.objectstore.yml"
+        " build app ui"
+    )
+    logger.info(
+        "  docker compose -f docker-compose.yml -f docker-compose.objectstore.yml"
+        " up -d app ui"
+    )
 
 
 if __name__ == "__main__":
