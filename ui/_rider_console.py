@@ -1165,13 +1165,16 @@ def _dial_summary(wind: float, gust: float | None, direction: float) -> str:
     return f"{wind:.0f} km/h{gusting}, {_compass(direction)} ({direction:.0f}°)"
 
 
-def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "") -> str:
+def _dial_tile_html(
+    name: str, dial_svg: str, selected: bool, summary: str, spot_id: str
+) -> str:
     """One tile of the comparison grid: a compact dial with the spot's name.
 
     The selected spot wears the reading-orange border and the accent-text name;
     the rest keep a transparent border so every tile holds the same footprint.
-    The summary rides on the tile's title, which is the only hover bubble a
-    block of drawn HTML can raise without a component of its own.
+    The whole tile is a link back to the page carrying its spot id, which is
+    how a page hears a click on HTML it drew itself, and the summary rides on
+    the title, which is the hover bubble such a block can raise.
     """
     pal = active()
     border = pal.reading if selected else "transparent"
@@ -1182,11 +1185,13 @@ def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "")
     )
     hover = f"{name} — {summary}" if summary else name
     return (
-        f'<div title="{hover}" style="border:2px solid {border};border-radius:12px;'
+        f'<a href="?{_DIAL_QUERY_KEY}={spot_id}" target="_self" title="{hover}" '
+        'style="text-decoration:none;color:inherit;display:block;cursor:pointer">'
+        f'<div style="border:2px solid {border};border-radius:12px;'
         'padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
         f"{dial_svg}"
         f'<div style="text-align:center;font-family:Manrope,sans-serif;'
-        f'font-size:0.72rem;{name_style}">{name}</div></div>'
+        f'font-size:0.72rem;{name_style}">{name}</div></div></a>'
     )
 
 
@@ -1206,6 +1211,26 @@ def _focus_spot(spot_id: str) -> None:
     st.rerun(scope="app")
 
 
+#: Query parameter a dial tile's link carries; read and dropped on arrival.
+_DIAL_QUERY_KEY = "spot"
+
+
+def _apply_dial_query(spot_ids: list[str]) -> None:
+    """Route a click on a dial tile, which arrives as a query parameter.
+
+    A page cannot hear a click on HTML it drew, but it can follow a link, so
+    each tile links back to the page carrying its spot id. The id is read once
+    and dropped at once: left in the address bar it would outlive the click
+    that set it and re-select that spot on every later rerun.
+    """
+    picked = st.query_params.get(_DIAL_QUERY_KEY)
+    if picked is None:
+        return
+    del st.query_params[_DIAL_QUERY_KEY]
+    if picked in spot_ids:
+        _focus_spot(picked)
+
+
 def _render_dial_grid(
     spot_ids: list[str],
     selected_spot_id: str | None,
@@ -1216,8 +1241,8 @@ def _render_dial_grid(
 
     All spots at one instant, so the selected spot's wind reads against its
     alternatives; the highlight marks which one the details below describe.
-    Each tile carries a button, since a page cannot hear a click on an SVG it
-    drew itself, and its own wind summary as a hover bubble.
+    Each tile is itself the control that switches to its spot, and carries that
+    spot's wind as a hover bubble.
     """
     spots_cfg = {s["id"]: s for s in get_spots()}
     st.markdown(
@@ -1251,25 +1276,22 @@ def _render_dial_grid(
                 detail="compact",
                 is_day=day,
             )
-            summary = _dial_summary(wind, gust, direction)
-            picked = spot_id == selected_spot_id
             st.markdown(
-                _dial_tile_html(cfg["name"], svg, picked, summary),
+                _dial_tile_html(
+                    cfg["name"],
+                    svg,
+                    spot_id == selected_spot_id,
+                    _dial_summary(wind, gust, direction),
+                    spot_id,
+                ),
                 unsafe_allow_html=True,
             )
-            if st.button(
-                "Select",
-                key=f"dial_pick_{spot_id}",
-                help=f"{cfg['name']} — {summary}",
-                disabled=picked,
-            ):
-                _focus_spot(spot_id)
     st.caption(
         "Each dial is that spot's wind at the selected hour: the dot's bearing "
         "is where the wind blows toward, its distance from the centre is speed "
         "(to 30 kn), and inside the teal band is a session. The orange frame "
         "marks the selected spot; hover a dial for its wind at this hour, or "
-        "select another to switch the console to it."
+        "click one to switch the console to it."
     )
 
 
@@ -1477,10 +1499,11 @@ def _hour_coverage(accuracy: pd.DataFrame) -> pd.DataFrame:
         lambda e: "missed" if e > _ACCURACY_MISS_THRESHOLD else "matched"
     )
     # The class says whether the hour was called right, the shade by how much,
-    # so a near miss and a wild one do not paint the same.
+    # so a near miss and a wild one do not paint the same. The floor is high:
+    # under it the segments washed out and the strip read as one flat track.
     grouped["shade"] = (
-        0.4 + 0.6 * (grouped["error"] / _ACCURACY_MISS_THRESHOLD).clip(upper=1.0)
-    ).fillna(0.4)
+        0.75 + 0.25 * (grouped["error"] / _ACCURACY_MISS_THRESHOLD).clip(upper=1.0)
+    ).fillna(0.75)
     return grouped[columns]
 
 
@@ -1625,7 +1648,13 @@ def _now_rule(panel: _Panel) -> alt.Chart:
 
 
 def _now_label(panel: _Panel) -> alt.Chart:
-    """The word beside the NOW rule, so the green line is never read as a series."""
+    """The word beside the NOW rule, so the green line is never read as a series.
+
+    It prints at the top of the wind plot rather than on a ruler. The rulers
+    already carry the day label, the pinned hour's label and the sun ticks, and
+    a forecast window opens near the present, so the word landed on top of the
+    date every time.
+    """
     return (
         alt.Chart(pd.DataFrame({"time": [panel.now], "label": ["NOW"]}))
         .mark_text(
@@ -1633,11 +1662,12 @@ def _now_label(panel: _Panel) -> alt.Chart:
             fontSize=10,
             fontWeight=700,
             align="left",
-            baseline="middle",
+            baseline="top",
             dx=4,
+            dy=2,
             clip=True,
         )
-        .encode(x=_panel_x(panel), text="label:N")
+        .encode(x=_panel_x(panel), y=alt.value(0), text="label:N")
     )
 
 
@@ -1728,19 +1758,23 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
     if not day.empty:
         layers.append(
             alt.Chart(day)
+            # Hugging the strip's top half, with the pinned hour's label in the
+            # bottom one: the two print at the same edge when the window opens
+            # on the pinned hour, and stacking is what keeps both readable.
             .mark_text(
                 color=panel.pal.ink_secondary,
                 fontSize=10,
                 align="left",
                 baseline="middle",
                 dx=3,
+                dy=-5,
                 clip=True,
             )
             .encode(x=_panel_x(panel), text="label:N")
         )
     layers.extend(_sun_marks(panel))
     if panel.now is not None:
-        layers.extend([_now_rule(panel), _now_label(panel)])
+        layers.append(_now_rule(panel))
     if panel.pinned is not None:
         pin = _pin_frame(panel.pinned)
         layers.append(
@@ -1763,6 +1797,7 @@ def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
                 align="left",
                 baseline="middle",
                 dx=5,
+                dy=6,
             )
             .encode(x=_panel_x(panel, "time_mid"), text="label:N")
         )
@@ -1868,12 +1903,14 @@ def _board_view(
 def _coverage_view(panel: _Panel) -> alt.LayerChart:
     """The strip between the plots: what the record holds for each hour.
 
-    Colour separates an hour the console only predicted from one only measured,
-    and where both exist it takes the ruler's own matched/missed verdict; the
-    shade then deepens with the mean absolute quality gap, so a near miss and a
-    wild one do not paint the same. The NOW rule crosses it like every other
-    view, which is what keeps the strip reading as part of the panel rather
-    than as a legend stuck between two plots.
+    Four hues, not four greys. An hour the console only predicted wears the
+    same orange the selector gives a forecast, one only measured wears the
+    violet of a record, and an hour holding both takes the ruler's own
+    matched/missed verdict; the shade then deepens with the mean absolute
+    quality gap, so a near miss and a wild one do not paint the same. The NOW
+    rule crosses the strip like every other view, over the palette's halo,
+    since a thin line on a saturated fill otherwise disappears into whichever
+    segment it lands on.
     """
     pal = panel.pal
     layers = [
@@ -1886,7 +1923,7 @@ def _coverage_view(panel: _Panel) -> alt.LayerChart:
                 "coverage:N",
                 scale=alt.Scale(
                     domain=["predicted", "observed", "matched", "missed"],
-                    range=[pal.ink_muted, pal.night, pal.ink_secondary, pal.danger],
+                    range=[pal.reading, pal.night, pal.band, pal.danger],
                 ),
                 legend=None,
             ),
@@ -1905,6 +1942,11 @@ def _coverage_view(panel: _Panel) -> alt.LayerChart:
         )
     ]
     if panel.now is not None:
+        layers.append(
+            alt.Chart(pd.DataFrame({"time": [panel.now]}))
+            .mark_rule(color=pal.casing, strokeWidth=5, clip=True)
+            .encode(x=_panel_x(panel))
+        )
         layers.append(_now_rule(panel))
     return alt.layer(*layers).properties(
         height=_COVERAGE_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
@@ -2071,7 +2113,7 @@ def _wind_view(
         wind_layer(frame[frame["is_day"]], dim=False),
         threshold,
         threshold_label,
-        *([_now_rule(panel)] if panel.now is not None else []),
+        *([_now_rule(panel), _now_label(panel)] if panel.now is not None else []),
         _hover_rule(panel, panel.hover_board),
         _hover_rule(panel, panel.hover_wind),
         *value_marks(panel.hover_board),
@@ -2206,6 +2248,9 @@ def render_rider_console(
 
     # Focus timeline (full width, past + future)
     focus_spot_ids = [spot["spot_id"] for spot in ranked_spots] or selected_spot_ids
+    # A dial click arrives as a query parameter, read before the focus is
+    # resolved so the console never renders at the spot the click replaced.
+    _apply_dial_query(focus_spot_ids)
     default_focus = focus_spot_ids[0] if focus_spot_ids else None
     if "rider_focus_spot" not in st.session_state or (
         st.session_state["rider_focus_spot"] not in focus_spot_ids

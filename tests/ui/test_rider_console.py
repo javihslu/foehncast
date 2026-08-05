@@ -1148,8 +1148,8 @@ def test_hover_readout_shows_each_series_value() -> None:
 
 
 def test_dial_tile_highlights_only_the_selected_spot() -> None:
-    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True)
-    other = rc._dial_tile_html("Sils", "<svg/>", False)
+    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True, "", "silvaplana")
+    other = rc._dial_tile_html("Sils", "<svg/>", False, "", "sils")
 
     assert LIGHT.reading in selected and LIGHT.accent_text in selected
     assert "transparent" in other and LIGHT.reading not in other
@@ -1249,12 +1249,18 @@ def test_hour_coverage_classes_the_record_and_its_error() -> None:
     # The strip spans the hour it grades, and a small gap shades lighter than
     # the miss threshold would.
     assert (band["time_end"] - band["time"]).unique() == pd.Timedelta(hours=1)
-    assert band["shade"].iloc[0] < 1.0
-    assert band["shade"].iloc[1] == pytest.approx(0.4)
+    # No segment fades into the track, and a compared hour still shades by the
+    # size of its gap.
+    assert band["shade"].min() >= 0.75
+    assert band["shade"].iloc[0] == pytest.approx(0.8)
+    assert band["shade"].iloc[1] == pytest.approx(0.75)
 
 
-def test_the_coverage_strip_sits_between_the_plots() -> None:
+def test_the_coverage_strip_sits_between_the_plots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A colour-coded hour strip, with the error in its tooltip."""
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
     spec, _ = _build_panel(None)
     views = spec["vconcat"]
     strip = _panel_views(spec)["coverage"]
@@ -1264,12 +1270,13 @@ def test_the_coverage_strip_sits_between_the_plots() -> None:
     assert strip["height"] == rc._COVERAGE_HEIGHT_PX
 
     band = strip["layer"][0]
-    assert band["encoding"]["color"]["scale"]["domain"] == [
-        "predicted",
-        "observed",
-        "matched",
-        "missed",
-    ]
+    scale = band["encoding"]["color"]["scale"]
+    assert scale["domain"] == ["predicted", "observed", "matched", "missed"]
+    # Four hues, not four greys: a predicted hour and a measured one cannot be
+    # left to differ by shade alone.
+    assert len(set(scale["range"])) == 4
+    assert scale["range"][0] == LIGHT.reading
+    assert scale["range"][1] == LIGHT.night
     # The rect spans its hour, and the error rides in the shade and the tooltip.
     assert band["encoding"]["x2"]["field"] == "time_end"
     assert band["encoding"]["opacity"]["field"] == "shade"
@@ -1353,7 +1360,11 @@ def test_dial_tiles_can_be_picked_and_hovered() -> None:
     summary = rc._dial_summary(23.0, 31.0, 220.0)
     assert "23 km/h" in summary and "gusting 31" in summary and "220" in summary
 
-    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary)
+    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary, "silvaplana")
+    # The tile IS the control: a link back to the page carrying its spot id,
+    # so no auxiliary button is drawn beside it.
+    assert tile.startswith('<a href="?spot=silvaplana" target="_self"')
+    assert tile.endswith("</a>")
     # A drawn block can only raise a hover bubble through its title.
     assert f'title="Silvaplana — {summary}"' in tile
     # A gustless reading says nothing about gusts rather than printing a zero.
@@ -1378,3 +1389,63 @@ def test_the_details_follow_the_focused_spot_not_a_stale_click() -> None:
 
     # Nothing picked and nothing pinned leaves the panel on its hint.
     assert rc._detail_row(None, grid, "sils", None) is None
+
+
+def test_a_dial_click_arrives_and_is_cleared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The click comes back as a query parameter. It has to be spent on arrival,
+    # or it would outlive the click and re-select that spot on every rerun.
+    picked: list[str] = []
+    monkeypatch.setattr(rc, "_focus_spot", picked.append)
+    params: dict[str, str] = {"spot": "sils"}
+    monkeypatch.setattr(rc.st, "query_params", params)
+
+    rc._apply_dial_query(["silvaplana", "sils"])
+    assert picked == ["sils"]
+    assert params == {}
+
+    # A spot that is not on the board changes nothing, and is still cleared.
+    params["spot"] = "nowhere"
+    rc._apply_dial_query(["silvaplana", "sils"])
+    assert picked == ["sils"]
+    assert params == {}
+
+    # No parameter, nothing to do.
+    rc._apply_dial_query(["silvaplana", "sils"])
+    assert picked == ["sils"]
+
+
+def test_the_now_label_leaves_the_rulers_to_their_dates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A forecast window opens near the present, so a NOW printed on a ruler
+    # landed on the day label every time. It prints in the wind plot instead,
+    # where nothing else does, still beside its own green rule.
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+    views = _panel_views(spec)
+
+    def labels(view: dict) -> list[str]:
+        found: list[str] = []
+        for layer in view["layer"]:
+            if layer["mark"].get("type") != "text":
+                continue
+            rows = spec["datasets"].get(layer.get("data", {}).get("name"), [])
+            found += [row["label"] for row in rows if "label" in row]
+        return found
+
+    for role in ("top", "bottom"):
+        assert "NOW" not in labels(views[role])
+    assert "NOW" in labels(views["wind"])
+
+    # On the rulers the day label sits in the top half and the pinned hour's
+    # label in the bottom one, so two labels at the same edge stack.
+    for role in ("top", "bottom"):
+        offsets = sorted(
+            layer["mark"]["dy"]
+            for layer in views[role]["layer"]
+            if layer["mark"].get("type") == "text"
+        )
+        assert offsets == [-5, 6]
