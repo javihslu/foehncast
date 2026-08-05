@@ -34,6 +34,14 @@ def test_local_registry_artifacts_cannot_be_redirected_by_env(
     assert "MLFLOW_ARTIFACT_DESTINATION" not in destination
 
 
+def test_local_feast_cannot_be_redirected_by_env(objectstore_overlay: dict) -> None:
+    """A cloud .env must not steer local Feast to BigQuery or a GCS registry."""
+    feast_env = objectstore_overlay["x-feast-runtime-env"]
+
+    assert feast_env["FOEHNCAST_FEAST_SOURCE"] == "local"
+    assert feast_env["FOEHNCAST_FEAST_REGISTRY"] == ""
+
+
 def test_cloud_overlay_still_stores_artifacts_in_gcs(gcp_overlay: dict) -> None:
     destination = gcp_overlay["services"]["model-registry"]["environment"][
         "MLFLOW_ARTIFACT_DESTINATION"

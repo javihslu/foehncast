@@ -10,6 +10,10 @@ x-objectstore-runtime-env: &objectstore-runtime-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin123}
 
 x-feast-runtime-env: &feast-runtime-env
+  # Pin Feast to local mode so a cloud-mode .env cannot redirect the registry
+  # to GCS (same guard as the model-registry MLFLOW_ARTIFACT_DESTINATION pin).
+  FOEHNCAST_FEAST_SOURCE: local
+  FOEHNCAST_FEAST_REGISTRY: ""
   FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID:-foehncast-local}
   FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE:-}
   FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE:-}
