@@ -1627,3 +1627,62 @@ def test_earliest_observed_ignores_hours_with_no_measurement() -> None:
     # Nothing measured at all, and an empty frame, both say so.
     assert rc._earliest_observed(accuracy.assign(observed=float("nan"))) is None
     assert rc._earliest_observed(pd.DataFrame()) is None
+
+
+def test_grid_fills_hindcast_from_prediction_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    forecast_times = pd.date_range(now, periods=3, freq="h")
+    past = [now - pd.Timedelta(hours=3), now - pd.Timedelta(hours=2)]
+
+    history = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"] * 3,
+            "forecast_time": [past[0], past[1], past[1]],
+            "quality_index": [2.4, 1.0, 3.6],
+            # Two runs spoke about the same hour; the later one must win.
+            "prediction_timestamp": [
+                now - pd.Timedelta(hours=4),
+                now - pd.Timedelta(hours=8),
+                now - pd.Timedelta(hours=2),
+            ],
+        }
+    )
+    monkeypatch.setattr(rc, "_prediction_history_cached", lambda: history)
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": 1.5} for t in forecast_times
+            ],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",), json.dumps(predictions), "Europe/Zurich", json.dumps([]), False
+    )
+
+    hind = grid[grid["is_hindcast"]]
+    assert len(hind) == 2
+    # The later run's word stands for the duplicated hour.
+    dup = hind[hind["time"] == past[1].tz_convert("Europe/Zurich")]
+    assert dup["hour_quality"].iloc[0] == 3.6
+    # Forecast cells keep their provenance too.
+    assert not grid.loc[~grid["is_hindcast"]].empty
+    # The panel window is anchored on the forecast start, not the hindcast.
+    domain = rc._panel_x_domain(grid, pd.DataFrame())
+    assert domain[0] == forecast_times[0].tz_convert("Europe/Zurich")
+
+
+def test_flat_week_ignores_windy_hindcast() -> None:
+    grid = pd.DataFrame(
+        {
+            "quality": [4, 1, 1],
+            "is_day": [True, True, True],
+            "is_hindcast": [True, False, False],
+        }
+    )
+    assert rc._flat_week(grid)

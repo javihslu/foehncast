@@ -292,7 +292,12 @@ def _flat_week(heat_grid: pd.DataFrame) -> bool:
     """
     if heat_grid.empty:
         return False
-    daylight = heat_grid[heat_grid["is_day"]]
+    cells = heat_grid
+    # The chip claims "this window" about the forecast; a windy yesterday on
+    # the board's hindcast stretch is not a counterexample.
+    if "is_hindcast" in cells.columns:
+        cells = cells[~cells["is_hindcast"]]
+    daylight = cells[cells["is_day"]]
     return (not daylight.empty) and int(daylight["quality"].max()) <= 1
 
 
@@ -733,6 +738,43 @@ def _compact_dial_uri(
     return f"data:image/svg+xml;base64,{b64}"
 
 
+#: How far back the board reaches for hindcast cells: the same day the wind
+#: timeline and the panel window open onto (focus_spot_timeline past_days=1).
+_HINDCAST_HOURS = 24
+
+
+def _hindcast_cells(spot_id: str, forecast_start: pd.Timestamp) -> pd.DataFrame:
+    """Board cells for the hours before the forecast, from the prediction log.
+
+    Several scheduled runs can speak about the same hour, so the latest logged
+    prediction wins. Clamped to the panel's hindcast reach and to hours
+    strictly before the forecast, so the two sources never overlap.
+    """
+    history = _prediction_history_cached()
+    if history.empty:
+        return pd.DataFrame()
+    rows = history[history["spot_id"] == spot_id].copy()
+    if rows.empty:
+        return pd.DataFrame()
+    rows["forecast_time"] = pd.to_datetime(rows["forecast_time"], utc=True)
+    reach = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=_HINDCAST_HOURS)
+    rows = rows[(rows["forecast_time"] >= reach) & (rows["forecast_time"] < forecast_start)]
+    if rows.empty:
+        return pd.DataFrame()
+    rows = rows.sort_values("prediction_timestamp").drop_duplicates(
+        "forecast_time", keep="last"
+    )
+    quality = rows["quality_index"].astype(float)
+    return pd.DataFrame(
+        {
+            "time": rows["forecast_time"],
+            "quality": [max(1, quality_bucket(q)) for q in quality],
+            "hour_quality": quality.to_numpy(),
+            "is_hindcast": True,
+        }
+    )
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def all_spots_quality_grid(
     spot_ids: tuple[str, ...],
@@ -780,6 +822,17 @@ def all_spots_quality_grid(
                 "hour_quality": [float(r["quality_index"]) for r in forecast_rows],
             }
         )
+        frame["is_hindcast"] = False
+
+        # The stretch before the forecast used to hold no cells at all, which
+        # read as a board that failed to draw. The logged past predictions are
+        # the same idea as the forecast cells -- what the console said about an
+        # hour -- so they fill that stretch, clamped to the panel's own
+        # hindcast reach and deduplicated to the latest word per hour.
+        hindcast = _hindcast_cells(spot_id, frame["time"].min())
+        if not hindcast.empty:
+            frame = pd.concat([hindcast, frame], ignore_index=True)
+
         frame["spot_id"] = spot_id
         frame["hour"] = frame["time"].dt.floor("h")
 
@@ -929,11 +982,11 @@ def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
     return rows.loc[delta.idxmin()]
 
 
-#: How far the panel opens before the forecast does. Every heatmap cell is a
-#: prediction, so the board has none in this stretch; what it holds is the
-#: record the coverage strip grades and the wind that actually blew. The cost
-#: is real -- the extra day compresses every cell to its right -- and it buys
-#: the only place an observed hour can appear at all.
+#: How far the panel opens before the forecast does. This stretch holds the
+#: record the coverage strip grades, the wind that actually blew, and the
+#: board's hindcast cells -- the console's own logged predictions for those
+#: hours. The cost is real -- the extra day compresses every cell to its
+#: right -- and it buys the only place an observed hour can appear at all.
 _PANEL_PAST_HOURS = 24
 
 
@@ -961,7 +1014,17 @@ def _panel_x_domain(
     with neither there is no panel to draw.
     """
     if not heat_grid.empty:
-        grid_start = heat_grid["time"].min()
+        # The window is anchored on the FORECAST start: hindcast cells live
+        # inside the past stretch the anchor opens, and letting them move the
+        # anchor would double-extend the window.
+        forecast_cells = (
+            heat_grid[~heat_grid["is_hindcast"]]
+            if "is_hindcast" in heat_grid.columns
+            else heat_grid
+        )
+        grid_start = (forecast_cells if not forecast_cells.empty else heat_grid)[
+            "time"
+        ].min()
         if observed_from is None:
             return [grid_start, heat_grid["time_end"].max()]
         reach = grid_start - pd.Timedelta(hours=_PANEL_PAST_HOURS)
@@ -1851,9 +1914,10 @@ def _board_view(
     )
     layers = [cells]
 
-    # The window opens before the forecast does and every cell is a prediction,
-    # so the board has none in that stretch. A wash says hindcast, where a bare
-    # gap would read as a board that failed to draw.
+    # The window opens before the forecast does. Hindcast cells fill that
+    # stretch from the prediction log, but an hour no run ever spoke about has
+    # no cell; the wash says hindcast there, where a bare gap would read as a
+    # board that failed to draw.
     if not heat_grid.empty and panel.domain_start < heat_grid["time"].min():
         layers.append(
             alt.Chart(
@@ -2315,7 +2379,11 @@ def render_rider_console(
         # wind-map slider options (R6) all read the same hours. Empty grid ->
         # no window; the panel falls back to its own extent.
         if not heat_grid.empty:
-            pred_hours = sorted(heat_grid["time"].drop_duplicates())
+            # Slider options stay forecast-only: the control asks "which
+            # forecast hour", and a hindcast cell is not an answer to that.
+            pred_hours = sorted(
+                heat_grid.loc[~heat_grid["is_hindcast"], "time"].drop_duplicates()
+            )
         timeline_frame = focus_spot_timeline(focus_spot_id)
         min_kts = _minimum_rideable_kts()
         accuracy = all_spots_accuracy(
