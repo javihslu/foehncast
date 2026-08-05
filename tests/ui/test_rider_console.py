@@ -391,9 +391,10 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     assert len(rerun_calls) == 3
 
 
-def test_panel_x_domain_is_the_grid_extent() -> None:
-    # Every view in the panel shares one domain, and it is the heat grid's own
-    # extent: its cells are rects, so reaching further back would compress them.
+def test_panel_x_domain_opens_before_the_forecast() -> None:
+    # Every view in the panel shares one domain: the heat grid's extent, opened
+    # a day early. Nothing can be observed in the future, so a window that began
+    # with the forecast could hold no measurement at all.
     tz = "Europe/Zurich"
     times = pd.date_range("2026-07-12T07:00:00", periods=14, freq="h", tz=tz)
     grid = pd.DataFrame({"time": times, "time_end": times + pd.Timedelta(hours=1)})
@@ -401,7 +402,10 @@ def test_panel_x_domain_is_the_grid_extent() -> None:
 
     domain = rc._panel_x_domain(grid, timeline)
 
-    assert domain == [times[0], times[-1] + pd.Timedelta(hours=1)]
+    assert domain == [
+        times[0] - pd.Timedelta(hours=rc._PANEL_PAST_HOURS),
+        times[-1] + pd.Timedelta(hours=1),
+    ]
     # One clock: both edges carry the display timezone, never a stray UTC edge
     # mixed with Europe/Zurich data (#51).
     assert str(domain[0].tz) == tz and str(domain[1].tz) == tz
@@ -542,15 +546,16 @@ def test_night_bands_align_to_hourly_daylight_cells() -> None:
     assert {h for h in hours if not day[h]} == covered
 
 
-def test_heatmap_tick_count_scales_with_window() -> None:
+def test_heatmap_tick_count_keeps_the_labels_apart() -> None:
     start = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
-    # The live ~14 h serving horizon reads on a 2 h rhythm; the old constant 9
-    # was one density for every window.
+    budget = rc._PANEL_PLOT_WIDTH // rc._MIN_TICK_SPACING_PX
+    # The live window is a day of record plus two of forecast, and every rhythm
+    # has to leave its labels room, so no window asks for more than fit.
+    for hours in (14, 24, 48, 72, 96, 168):
+        count = rc._heatmap_tick_count(start, start + pd.Timedelta(hours=hours))
+        assert 2 <= count <= budget, hours
+    # The short serving horizon still reads on a 2 h rhythm.
     assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=14)) == 8
-    # A 48 h window keeps the original 6 h rhythm (9 ticks).
-    assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=48)) == 9
-    # Multi-day boards thin out to 12 h spacing.
-    assert rc._heatmap_tick_count(start, start + pd.Timedelta(days=7)) == 15
     # Degenerate windows still hint at least two ticks.
     assert rc._heatmap_tick_count(start, start + pd.Timedelta(minutes=30)) == 2
 
@@ -1535,3 +1540,95 @@ def test_the_coverage_legend_names_every_class(
     assert "every hour in this window is predicted only" in flat
     # An empty record draws no strip, so the key makes no claim about it.
     assert "every hour" not in rc._coverage_legend_html(pd.DataFrame())
+
+
+def test_the_board_marks_the_stretch_before_the_forecast() -> None:
+    # The window opens before the forecast and every cell is a prediction, so
+    # that stretch has none: a wash says hindcast, and the light along the wind
+    # plot covers the whole window rather than only the series.
+    grid, timeline, accuracy, hours = _panel_frames()
+    domain = [hours[0] - pd.Timedelta(hours=6), hours[-1] + pd.Timedelta(hours=1)]
+    chart, _ = rc._time_panel(
+        grid,
+        _PANEL_SPOTS,
+        accuracy,
+        timeline,
+        46.45,
+        9.79,
+        domain,
+        hours[3],
+        None,
+        16.0,
+        focus_spot="Sils",
+    )
+    spec = chart.to_dict()
+    views = _panel_views(spec)
+
+    wash = [
+        layer
+        for layer in views["board"]["layer"]
+        if layer["mark"]["type"] == "rect"
+        and layer["encoding"].get("x", {}).get("field") == "x"
+    ]
+    assert len(wash) == 1
+    rows = spec["datasets"][wash[0]["data"]["name"]]
+    assert len(rows) == 1 and pd.Timestamp(rows[0]["x2"]) == hours[0]
+
+    solar = next(
+        layer for layer in views["wind"]["layer"] if layer["mark"]["type"] == "area"
+    )
+    lit = spec["datasets"][solar["data"]["name"]]
+    assert pd.Timestamp(lit[0]["time"]) <= domain[0]
+
+
+def test_a_dial_pick_survives_the_board_re_reporting_its_last_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The board reports its last click on every rerun. A pick made from the
+    # dials is newer, so the stale cell must not carry its spot back -- not
+    # even when the hour it clamps to has moved on with the window.
+    hours = list(pd.date_range("2026-07-12T06:00", periods=4, freq="h", tz="UTC"))
+    state = {
+        "heat_spot_applied": "silvaplana",
+        "heat_hour_applied": hours[0],
+        "rider_focus_spot": "sils",
+    }
+    monkeypatch.setattr(rc.st, "session_state", state)
+    monkeypatch.setattr(rc.st, "rerun", lambda scope=None: None)
+
+    rc._sync_slider_to_heatmap_click(hours[1], "silvaplana", hours)
+
+    assert state["rider_focus_spot"] == "sils"
+    # The hour half still applies: it is the board's own, and nothing else
+    # claimed it.
+    assert state["heat_hour_applied"] == hours[1]
+
+    # A cell naming a spot the board has not applied is a new intent, and moves
+    # the focus as it always did.
+    rc._sync_slider_to_heatmap_click(hours[2], "urnersee", hours)
+    assert state["rider_focus_spot"] == "urnersee"
+    assert state["heat_spot_applied"] == "urnersee"
+
+
+def test_a_dial_pick_moves_the_spot_and_leaves_the_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hour = pd.Timestamp("2026-07-12T09:00", tz="UTC")
+    state = {
+        "rider_focus_spot": "sils",
+        "wind_map_hour": hour,
+        "heat_spot_applied": "silvaplana",
+    }
+    reruns: list[str] = []
+    monkeypatch.setattr(rc.st, "session_state", state)
+    monkeypatch.setattr(rc.st, "rerun", lambda scope=None: reruns.append(scope))
+
+    rc._focus_spot("urnersee")
+
+    assert state["rider_focus_spot"] == "urnersee"
+    # A dial says which place, never which hour, so the pinned time stays put
+    # and only the row outline moves.
+    assert state["wind_map_hour"] == hour
+    # The board's own mirror is left alone, or its stale cell would fight this.
+    assert state["heat_spot_applied"] == "silvaplana"
+    assert reruns == ["app"]

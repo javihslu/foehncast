@@ -88,21 +88,27 @@ _WIND_HEIGHT_PX = 240
 _RULER_AXIS_BAND_PX = 38
 
 
+#: Narrowest a ruler label may sit from its neighbour. The ruler prints the
+#: clock over the date, and a hint denser than the strip can hold drops labels
+#: rather than shrinking them.
+_MIN_TICK_SPACING_PX = 46
+
+
 def _heatmap_tick_count(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> int:
     """Tick-count hint scaled to the pinned window, at least 2.
 
-    2 h rhythm up to a day (the serving horizon is ~14 h), 6 h up to three
-    days, 12 h beyond, so hourly cells stay mappable on short windows and a
-    multi-day board is not flooded with hour labels.
+    The rhythm is the finest step a reader expects on a clock that still leaves
+    every label its room, measured against the width the panel actually has
+    rather than against the window alone. Bands keyed to the window could not
+    know the labels had stopped fitting when the window grew by a day to open
+    onto the record.
     """
     hours = (domain_end - domain_start).total_seconds() / 3600
-    if hours <= 24:
-        spacing = 2
-    elif hours <= 72:
-        spacing = 6
-    else:
-        spacing = 12
-    return max(2, round(hours / spacing) + 1)
+    budget = max(2, _PANEL_PLOT_WIDTH // _MIN_TICK_SPACING_PX)
+    for spacing in (1, 2, 3, 4, 6, 8, 12, 24):
+        if hours / spacing + 1 <= budget:
+            return max(2, round(hours / spacing) + 1)
+    return max(2, round(hours / 24) + 1)
 
 
 # Two lines per tick: the clock time always, and the date on the second line
@@ -935,19 +941,28 @@ def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
     return rows.loc[delta.idxmin()]
 
 
+#: How far the panel opens before the forecast does. Every heatmap cell is a
+#: prediction, so the board has none in this stretch; what it holds is the
+#: record the coverage strip grades and the wind that actually blew. The cost
+#: is real -- the extra day compresses every cell to its right -- and it buys
+#: the only place an observed hour can appear at all.
+_PANEL_PAST_HOURS = 24
+
+
 def _panel_x_domain(
     heat_grid: pd.DataFrame, timeline_frame: pd.DataFrame
 ) -> list[pd.Timestamp] | None:
     """The one x domain every view in the time panel is pinned to.
 
-    The heatmap's own extent wins. Its cells are rects, so widening the domain
-    to reach further back would compress every one of them -- the bug the
-    pinned domain exists to prevent -- and the wind series simply clips to it
-    instead. With no grid the wind timeline's own extent stands in; with
-    neither there is no panel to draw.
+    It opens _PANEL_PAST_HOURS before the heatmap does and ends where the
+    heatmap ends. Nothing can be observed in the future, so a window that began
+    with the forecast could never contain a measurement, and the strip between
+    the plots had only prediction to show. With no grid the wind timeline's own
+    extent stands in; with neither there is no panel to draw.
     """
     if not heat_grid.empty:
-        return [heat_grid["time"].min(), heat_grid["time_end"].max()]
+        start = heat_grid["time"].min() - pd.Timedelta(hours=_PANEL_PAST_HOURS)
+        return [start, heat_grid["time_end"].max()]
     if not timeline_frame.empty:
         return [timeline_frame["time"].min(), timeline_frame["time"].max()]
     return None
@@ -1030,8 +1045,11 @@ def _sync_slider_to_heatmap_click(
     this same script run. But a fragment rerun of the console does not
     re-run the map fragment, so an actual change also needs an explicit
     app-scope rerun. Guarded by heat_hour_applied and heat_spot_applied -- a
-    run that already applied this exact click does not write or rerun
-    again, which is what keeps this from looping. ``options`` is the slider's
+    run that already applied this exact click does not write or rerun again,
+    which is what keeps this from looping, and the spot half moves only when
+    the cell names one the board has not applied yet, so a pick made elsewhere
+    since is not overwritten by the click the chart keeps reporting.
+    ``options`` is the slider's
     prediction-window hour list, so the clamped hour is always a valid option.
     A click on empty panel space carries no spot, so it passes None and moves
     the pinned time alone.
@@ -1053,7 +1071,12 @@ def _sync_slider_to_heatmap_click(
         # forced rerun below reaches it -- otherwise it would fire a second,
         # redundant app rerun for the same change.
         st.session_state["wind_map_hour_seen"] = clamped
-    if clicked_spot_id is not None:
+    # Only a cell the board has not already applied may move the focus. The
+    # chart re-reports its last click on every rerun, so writing the focus
+    # whenever anything changed let a stale cell carry its spot back over a
+    # pick made since -- from a comparison dial, or a dial on the map -- as
+    # soon as the hour it clamps to moved with the rolling window.
+    if spot_changed:
         st.session_state["rider_focus_spot"] = clicked_spot_id
         st.session_state["heat_spot_applied"] = clicked_spot_id
     st.rerun(scope="app")
@@ -1889,6 +1912,23 @@ def _board_view(
     )
     layers = [cells]
 
+    # The window opens before the forecast does and every cell is a prediction,
+    # so the board has none in that stretch. A wash says hindcast, where a bare
+    # gap would read as a board that failed to draw.
+    if not heat_grid.empty and panel.domain_start < heat_grid["time"].min():
+        layers.append(
+            alt.Chart(
+                pd.DataFrame(
+                    {
+                        "x": [panel.domain_start],
+                        "x2": [heat_grid["time"].min()],
+                    }
+                )
+            )
+            .mark_rect(color=pal.grid, opacity=0.45, clip=True)
+            .encode(x=_panel_x(panel, "x"), x2=alt.X2("x2:T"))
+        )
+
     # Dangerous hours, painted over their own cell. The fill below cannot carry
     # this: a conditional encoding falls back to ONE constant, which night
     # already claims, and the ramp floors these hours at level 1 -- the same
@@ -2065,8 +2105,10 @@ def _wind_view(
 
     # Solar-elevation curve along the chart bottom, pre-scaled into wind-speed
     # units so it shares the axis without a second scale.
+    # Spanning the panel's window rather than the series' own, so the stretch
+    # before the forecast is lit and shaded like the rest of the plot.
     strip_times = pd.date_range(
-        frame["time"].min().floor("h"), frame["time"].max().ceil("h"), freq="30min"
+        panel.domain_start.floor("h"), panel.domain_end.ceil("h"), freq="30min"
     )
     elevation = solar_elevation_deg(spot_lat, spot_lon, strip_times).clip(lower=0.0)
     peak = float(elevation.max()) or 1.0
@@ -2149,7 +2191,7 @@ def _wind_view(
 
     layers = [
         _night_rect(
-            frame["time"].min(), frame["time"].max(), spot_lat, spot_lon, panel.x_scale
+            panel.domain_start, panel.domain_end, spot_lat, spot_lon, panel.x_scale
         ),
         solar_area,
         # Night hours render dimmed underneath; daylight at full strength.
