@@ -1305,3 +1305,56 @@ def test_the_selector_takes_the_colour_of_what_the_hour_holds(
     assert pin_colours(hours[5]) == {LIGHT.reading}
     assert outline_stroke(hours[5]) == LIGHT.reading
     assert LIGHT.idle != LIGHT.reading
+
+
+def test_the_rideable_line_is_a_light_green_not_a_selection_colour() -> None:
+    # Orange and red both read as selection marks next to the pinned hour, so
+    # the threshold takes a light green -- and not the saturated one the NOW
+    # rule wears, or the two would trade places at a glance.
+    spec, _ = _build_panel(None)
+    wind = _panel_views(spec)["wind"]
+
+    line = next(
+        layer
+        for layer in wind["layer"]
+        if layer["mark"].get("type") == "rule"
+        and layer["mark"].get("strokeDash") == [4, 4]
+    )
+    assert line["mark"]["color"] == rc._light_green(LIGHT)
+    assert line["mark"]["color"] not in (LIGHT.reading, LIGHT.danger, LIGHT.band)
+    # The ramp's anchor flips between modes, so the lightest step does too.
+    assert rc._light_green(LIGHT) == LIGHT.quality[0]
+    assert rc._light_green(DARK) == DARK.quality[3]
+
+
+def test_the_wind_hover_names_the_day_the_hour_and_the_readings() -> None:
+    # The bubble used to carry the date alone. It now names the day and the
+    # hour and prints every series drawn there, with the measured quality
+    # beside the predicted one where the record holds it.
+    spec, _ = _build_panel(None, focus_spot="Sils")
+    wind = _panel_views(spec)["wind"]
+
+    hits = wind["layer"][-1]
+    assert hits["mark"]["type"] == "rect" and hits["mark"]["opacity"] == 0
+    titles = [tip["title"] for tip in hits["encoding"]["tooltip"]]
+    assert titles[:2] == ["Date", "Time"]
+    assert "Wind 10 m (km/h)" in titles
+    assert "Gusts 10 m (km/h)" in titles
+    assert "Observed quality (1-5)" in titles
+
+    hours = _panel_frames()[3]
+    first = spec["datasets"][hits["data"]["name"]][0]
+    assert first["day"] == hours[0].strftime("%a %d %b")
+    assert first["clock"] == hours[0].strftime("%H:%M")
+    assert first["10m"] == 20.0
+
+
+def test_dial_tiles_can_be_picked_and_hovered() -> None:
+    summary = rc._dial_summary(23.0, 31.0, 220.0)
+    assert "23 km/h" in summary and "gusting 31" in summary and "220" in summary
+
+    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary)
+    # A drawn block can only raise a hover bubble through its title.
+    assert f'title="Silvaplana — {summary}"' in tile
+    # A gustless reading says nothing about gusts rather than printing a zero.
+    assert "gusting" not in rc._dial_summary(23.0, None, 220.0)

@@ -229,6 +229,18 @@ def _heatmap_gap(pal: Palette) -> str:
     )
 
 
+def _light_green(pal: Palette) -> str:
+    """The lightest step of the mode's quality ramp.
+
+    The rideable threshold used to wear the danger red, which read as one more
+    selection mark beside the reading orange. It takes a light green instead,
+    clearly apart from the saturated green the NOW rule wears. The ramp's
+    anchor flips between modes -- level 1 sits nearest the surface -- so the
+    lightest step is the first in light mode and the last in dark.
+    """
+    return pal.quality[0] if pal.name == "light" else pal.quality[3]
+
+
 def _quality_fill(pal: Palette) -> alt.Condition:
     """Continuous fill for a heatmap cell: the hour's own quality, one hue.
 
@@ -1128,11 +1140,19 @@ def _render_selection_bubble(row: pd.Series) -> None:
     )
 
 
-def _dial_tile_html(name: str, dial_svg: str, selected: bool) -> str:
+def _dial_summary(wind: float, gust: float | None, direction: float) -> str:
+    """One line of wind for a dial's hover bubble: speed, gust and bearing."""
+    gusting = "" if gust is None or pd.isna(gust) else f", gusting {gust:.0f}"
+    return f"{wind:.0f} km/h{gusting}, {_compass(direction)} ({direction:.0f}°)"
+
+
+def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "") -> str:
     """One tile of the comparison grid: a compact dial with the spot's name.
 
     The selected spot wears the reading-orange border and the accent-text name;
     the rest keep a transparent border so every tile holds the same footprint.
+    The summary rides on the tile's title, which is the only hover bubble a
+    block of drawn HTML can raise without a component of its own.
     """
     pal = active()
     border = pal.reading if selected else "transparent"
@@ -1141,13 +1161,30 @@ def _dial_tile_html(name: str, dial_svg: str, selected: bool) -> str:
         if selected
         else "color:var(--muted);font-weight:600"
     )
+    hover = f"{name} — {summary}" if summary else name
     return (
-        f'<div style="border:2px solid {border};border-radius:12px;'
+        f'<div title="{hover}" style="border:2px solid {border};border-radius:12px;'
         'padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
         f"{dial_svg}"
         f'<div style="text-align:center;font-family:Manrope,sans-serif;'
         f'font-size:0.72rem;{name_style}">{name}</div></div>'
     )
+
+
+def _focus_spot(spot_id: str) -> None:
+    """Move the console's focus to a spot picked in the comparison grid.
+
+    Mirrors the heatmap click: the console renders before the switcher and the
+    map are instantiated later in the same script run, so writing the state
+    here is legal, but the map is its own fragment and only an app-scope rerun
+    reaches it. heat_spot_applied is deliberately left alone -- it mirrors the
+    board's last applied click, which the chart re-reports on every rerun, so
+    moving it here would set that stale selection fighting this pick.
+    """
+    if st.session_state.get("rider_focus_spot") == spot_id:
+        return
+    st.session_state["rider_focus_spot"] = spot_id
+    st.rerun(scope="app")
 
 
 def _render_dial_grid(
@@ -1160,6 +1197,8 @@ def _render_dial_grid(
 
     All spots at one instant, so the selected spot's wind reads against its
     alternatives; the highlight marks which one the details below describe.
+    Each tile carries a button, since a page cannot hear a click on an SVG it
+    drew itself, and its own wind summary as a hover bubble.
     """
     spots_cfg = {s["id"]: s for s in get_spots()}
     st.markdown(
@@ -1193,15 +1232,25 @@ def _render_dial_grid(
                 detail="compact",
                 is_day=day,
             )
+            summary = _dial_summary(wind, gust, direction)
+            picked = spot_id == selected_spot_id
             st.markdown(
-                _dial_tile_html(cfg["name"], svg, spot_id == selected_spot_id),
+                _dial_tile_html(cfg["name"], svg, picked, summary),
                 unsafe_allow_html=True,
             )
+            if st.button(
+                "Select",
+                key=f"dial_pick_{spot_id}",
+                help=f"{cfg['name']} — {summary}",
+                disabled=picked,
+            ):
+                _focus_spot(spot_id)
     st.caption(
         "Each dial is that spot's wind at the selected hour: the dot's bearing "
         "is where the wind blows toward, its distance from the centre is speed "
         "(to 30 kn), and inside the teal band is a session. The orange frame "
-        "marks the selected spot."
+        "marks the selected spot; hover a dial for its wind at this hour, or "
+        "select another to switch the console to it."
     )
 
 
@@ -1225,6 +1274,7 @@ class _Panel:
     sun: pd.DataFrame = field(default_factory=pd.DataFrame)
     hour_verdicts: pd.DataFrame = field(default_factory=pd.DataFrame)
     hour_coverage: pd.DataFrame = field(default_factory=pd.DataFrame)
+    focus_accuracy: pd.DataFrame = field(default_factory=pd.DataFrame)
     observed_selection: bool = False
 
 
@@ -1266,6 +1316,74 @@ def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
         alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
         alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
     ]
+
+
+_WIND_SERIES_TITLES = {
+    "10m": "Wind 10 m (km/h)",
+    "80m": "Wind 80 m (km/h)",
+    "120m": "Wind 120 m (km/h)",
+    "gusts": "Gusts 10 m (km/h)",
+}
+
+
+def _wind_hit_frame(panel: _Panel, frame: pd.DataFrame) -> pd.DataFrame:
+    """The wind plot's hit target: one row per hour, carrying that hour's readings.
+
+    The hover bubble reads this row, so it can name the day and the hour and
+    print every series drawn at it rather than the bare timestamp it sits on.
+    Everything joins on the UTC hour, since the spine runs in the panel's
+    display timezone and the timeline in its own.
+    """
+    hits = panel.spine.assign(
+        hour=_utc_hours(panel.spine["time"]),
+        day=pd.DatetimeIndex(panel.spine["time"]).strftime("%a %d %b"),
+        clock=pd.DatetimeIndex(panel.spine["time"]).strftime("%H:%M"),
+    )
+    wide = frame.pivot_table(
+        index="time", columns="elevation", values="wind_speed", aggfunc="mean"
+    )
+    wide.index = _utc_hours(wide.index)
+    hits = hits.merge(
+        wide[~wide.index.duplicated()], left_on="hour", right_index=True, how="left"
+    )
+    # The console holds no measured WIND -- the plot's series are all forecast
+    # -- so the observed half of an hour is its quality index, which is the one
+    # measured number the record does carry.
+    if not panel.focus_accuracy.empty:
+        graded = panel.focus_accuracy.set_index(
+            _utc_hours(panel.focus_accuracy["time"])
+        )
+        graded = graded[~graded.index.duplicated()]
+        hits["predicted_quality"] = hits["hour"].map(graded["predicted"])
+        hits["observed_quality"] = hits["hour"].map(graded["observed"])
+    return hits.drop(columns="hour")
+
+
+def _wind_tooltip(hits: pd.DataFrame) -> list[alt.Tooltip]:
+    """Hover bubble for the wind plot: the day, the hour, and the readings.
+
+    The quality rows only appear for an hour the record actually holds, so a
+    measured hour shows the observed index beside the predicted one and an
+    unmeasured one says nothing it cannot back up.
+    """
+    tooltip = [
+        alt.Tooltip(field="day", type="nominal", title="Date"),
+        alt.Tooltip(field="clock", type="nominal", title="Time"),
+    ]
+    tooltip += [
+        alt.Tooltip(field=series, type="quantitative", title=title, format=".0f")
+        for series, title in _WIND_SERIES_TITLES.items()
+        if series in hits.columns
+    ]
+    tooltip += [
+        alt.Tooltip(field=column, type="quantitative", title=title, format=".2f")
+        for column, title in (
+            ("predicted_quality", "Predicted quality (1-5)"),
+            ("observed_quality", "Observed quality (1-5)"),
+        )
+        if column in hits.columns
+    ]
+    return tooltip
 
 
 def _hour_verdicts(accuracy: pd.DataFrame) -> pd.DataFrame:
@@ -1862,9 +1980,12 @@ def _wind_view(
         )
         .encode(x=_panel_x(panel), y="solar:Q")
     )
+    # The line is a light green and its label the text-grade green beside it:
+    # the label is text on the page surface and has to clear the 4.5:1 floor,
+    # which the ramp's light end does not.
     threshold = (
         alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
-        .mark_rule(color=pal.danger, strokeDash=[4, 4], strokeWidth=1.5)
+        .mark_rule(color=_light_green(pal), strokeDash=[4, 4], strokeWidth=2)
         .encode(y="y:Q")
     )
     threshold_label = (
@@ -1874,7 +1995,7 @@ def _wind_view(
             )
         )
         .mark_text(
-            align="left", baseline="bottom", dx=6, dy=-3, color=pal.danger, fontSize=10
+            align="left", baseline="bottom", dx=6, dy=-3, color=pal.ok, fontSize=10
         )
         .encode(y="y:Q", text="label:N")
     )
@@ -1906,11 +2027,18 @@ def _wind_view(
 
     # Hit layer, on top and invisible: it gives the wind plot the same hourly
     # hover and click targets the board's cells give, so a click on empty space
-    # still pins a time. A rect on a continuous x must declare x2.
+    # still pins a time. It is also the top mark, so it is the one that answers
+    # the pointer, which is why the hour's readings ride on it. A rect on a
+    # continuous x must declare x2.
+    hit_frame = _wind_hit_frame(panel, frame)
     hits = (
-        alt.Chart(panel.spine)
+        alt.Chart(hit_frame)
         .mark_rect(opacity=0)
-        .encode(x=_panel_x(panel), x2="time_end:T")
+        .encode(
+            x=_panel_x(panel),
+            x2="time_end:T",
+            tooltip=_wind_tooltip(hit_frame),
+        )
         .add_params(panel.hover_wind, panel.pin_time)
     )
 
@@ -1978,6 +2106,7 @@ def _time_panel(
         sun=_sun_frame(domain_start, domain_end, spot_lat, spot_lon),
         hour_verdicts=_hour_verdicts(accuracy),
         hour_coverage=_hour_coverage(accuracy),
+        focus_accuracy=focus_accuracy,
         observed_selection=_hour_is_observed(focus_accuracy, pinned),
         cell=alt.selection_point(
             name="cell", fields=["spot", "time"], on="click", empty=False
