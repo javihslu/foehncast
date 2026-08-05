@@ -22,6 +22,9 @@ Usage:
 
     # Skip DVC push (e.g. when MinIO is down)
     uv run python scripts/backfill-history.py --no-push
+
+    # Also curate the last two days of analysed hours (no training, no push)
+    uv run python scripts/backfill-history.py --recent-days 2 --no-train --no-push
 """
 
 from __future__ import annotations
@@ -42,6 +45,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from foehncast.config import get_rider_config, get_spots  # noqa: E402
 from foehncast.feature_pipeline.engineer import engineer_features  # noqa: E402
+from foehncast.feature_pipeline.ingest import fetch_forecast  # noqa: E402
 from foehncast.feature_pipeline.validate import run_validation  # noqa: E402
 from foehncast.monitoring.prediction_log import (  # noqa: E402
     read_prediction_history,
@@ -91,6 +95,15 @@ def _parse_args() -> argparse.Namespace:
             "%Y-%m-%d"
         ),
         help="End date (YYYY-MM-DD). Default: 7 days ago.",
+    )
+    parser.add_argument(
+        "--recent-days",
+        type=int,
+        default=0,
+        help=(
+            "Also curate the last N days of analysed hours from the forecast "
+            "endpoint, closing the archive's publishing lag. 0 means do not."
+        ),
     )
     parser.add_argument(
         "--dataset",
@@ -226,6 +239,63 @@ def _fetch_spot_archive(
 
     logger.info("%s: %d rows engineered", spot_id, len(feature_df))
     return feature_df
+
+
+def _fetch_spot_recent(spot: dict, days: int) -> pd.DataFrame | None:
+    """Fetch and engineer the recent hours the archive has not published yet."""
+    spot_id = spot["id"]
+    logger.info("Fetching %s (last %d days of analysed hours)...", spot_id, days)
+
+    try:
+        raw_df = fetch_forecast(spot["lat"], spot["lon"], past_days=days)
+    except Exception:
+        logger.exception("Failed to fetch %s", spot_id)
+        return None
+
+    # An hour that has not happened yet is a forecast, not an observation.
+    raw_df = raw_df[raw_df.index < pd.Timestamp.now(tz=raw_df.index.tz).floor("h")]
+
+    if raw_df.empty:
+        logger.warning("%s: empty response, skipping", spot_id)
+        return None
+
+    feature_df = engineer_features(
+        raw_df,
+        shore_orientation_deg=spot.get("shore_orientation_deg", 0),
+    )
+
+    validation = run_validation(feature_df, spot_id)
+    if not validation.is_valid:
+        logger.warning(
+            "%s: validation failed (schema=%s, completeness=%s, range=%s)",
+            spot_id,
+            validation.schema_valid,
+            validation.completeness_valid,
+            validation.range_valid,
+        )
+        # Still write — recent data may have minor gaps.
+        logger.info("%s: writing despite validation warnings", spot_id)
+
+    logger.info("%s: %d recent rows engineered", spot_id, len(feature_df))
+    return feature_df
+
+
+def _merge_curated(
+    archive_df: pd.DataFrame | None, recent_df: pd.DataFrame | None
+) -> pd.DataFrame | None:
+    """One curated frame per spot: the archive, extended by the recent hours.
+
+    The archive is analysed rather than modelled, so where both cover an hour
+    its row is the one kept and the recent frame only fills what the archive
+    has not published yet. Columns follow the archive's, so turning the option
+    on does not change the dataset's schema.
+    """
+    frames = [df for df in (archive_df, recent_df) if df is not None and not df.empty]
+    if not frames:
+        return None
+    merged = pd.concat(frames).sort_index()
+    merged = merged[~merged.index.duplicated(keep="first")]
+    return merged.reindex(columns=frames[0].columns)
 
 
 def _generate_prediction_events(
@@ -431,7 +501,14 @@ def main() -> None:
         if i > 0:
             time.sleep(_API_PAUSE_SECONDS)
 
-        feature_df = _fetch_spot_archive(spot, args.start, args.end)
+        archive_df = _fetch_spot_archive(spot, args.start, args.end)
+
+        recent_df = None
+        if args.recent_days > 0:
+            time.sleep(_API_PAUSE_SECONDS)
+            recent_df = _fetch_spot_recent(spot, args.recent_days)
+
+        feature_df = _merge_curated(archive_df, recent_df)
         if feature_df is None:
             continue
 

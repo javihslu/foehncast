@@ -400,12 +400,21 @@ def test_panel_x_domain_opens_before_the_forecast() -> None:
     grid = pd.DataFrame({"time": times, "time_end": times + pd.Timedelta(hours=1)})
     timeline = pd.DataFrame({"time": times[2:6]})
 
-    domain = rc._panel_x_domain(grid, timeline)
+    reach = times[0] - pd.Timedelta(hours=rc._PANEL_PAST_HOURS)
+    domain = rc._panel_x_domain(grid, timeline, reach - pd.Timedelta(hours=5))
 
-    assert domain == [
-        times[0] - pd.Timedelta(hours=rc._PANEL_PAST_HOURS),
+    assert domain == [reach, times[-1] + pd.Timedelta(hours=1)]
+    # Nothing measured yet -> the window simply starts with the forecast,
+    # rather than opening onto a stretch with no data in it.
+    assert rc._panel_x_domain(grid, timeline) == [
+        times[0],
         times[-1] + pd.Timedelta(hours=1),
     ]
+    # A record that reaches back only a little opens the window only that far.
+    partial = times[0] - pd.Timedelta(hours=3)
+    assert rc._panel_x_domain(grid, timeline, partial)[0] == partial
+    # A record that starts inside the forecast never pushes the window forward.
+    assert rc._panel_x_domain(grid, timeline, times[4])[0] == times[0]
     # One clock: both edges carry the display timezone, never a stray UTC edge
     # mixed with Europe/Zurich data (#51).
     assert str(domain[0].tz) == tz and str(domain[1].tz) == tz
@@ -1230,8 +1239,8 @@ def test_now_and_the_sun_are_marked_across_the_panel(
     assert start <= frame["time"].iloc[0] <= end + pd.Timedelta(hours=6)
 
 
-def test_hour_coverage_classes_the_record_and_its_error() -> None:
-    """Each hour reports which halves exist, and the gap where both do."""
+def test_hour_coverage_fills_a_lane_per_half_of_the_record() -> None:
+    """Two lanes: predicted, observed, and both when an hour holds both."""
     hours = pd.date_range("2026-07-12T06:00", periods=3, freq="h", tz="Europe/Zurich")
     accuracy = pd.DataFrame(
         {
@@ -1247,25 +1256,26 @@ def test_hour_coverage_classes_the_record_and_its_error() -> None:
 
     band = rc._hour_coverage(accuracy)
 
-    assert band["coverage"].tolist() == ["matched", "predicted"]
-    assert band["holds"].tolist() == ["Predicted and observed", "Predicted only"]
-    assert band["predicted"].tolist() == [2, 1]
-    assert band["observed"].tolist() == [1, 0]
-    assert band["error"].tolist()[0] == pytest.approx(0.2)
-    # The strip spans the hour it grades, and a small gap shades lighter than
-    # the miss threshold would.
+    # The first hour holds both halves, so it fills both lanes; the second was
+    # only predicted, so the observed lane simply has no rect there.
+    assert sorted(band.loc[band["time"] == hours[0], "lane"]) == [
+        "Observed",
+        "Predicted",
+    ]
+    assert band.loc[band["time"] == hours[1], "lane"].tolist() == ["Predicted"]
+    assert band["predicted_spots"].max() == 2
+    # The counts ride along for the tooltip, on every lane of the hour.
+    assert set(band.loc[band["time"] == hours[0], "observed_spots"]) == {1}
+    # Each rect spans the hour it describes.
     assert (band["time_end"] - band["time"]).unique() == pd.Timedelta(hours=1)
-    # An hour with only one half of the record is drawn at full strength; the
-    # ramp is reserved for the compared hours, where it sizes the gap.
-    assert band["shade"].min() >= 0.75
-    assert band["shade"].iloc[0] == pytest.approx(0.8)
-    assert band["shade"].iloc[1] == pytest.approx(1.0)
+    # Nothing grades a forecast here any more.
+    assert "shade" not in band.columns and "coverage" not in band.columns
 
 
 def test_the_coverage_strip_sits_between_the_plots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A colour-coded hour strip, with the error in its tooltip."""
+    """Two lanes between the plots, named on the same edge the board uses."""
     monkeypatch.setattr(rc, "active", lambda: LIGHT)
     spec, _ = _build_panel(None)
     views = spec["vconcat"]
@@ -1275,49 +1285,22 @@ def test_the_coverage_strip_sits_between_the_plots(
     assert views.index(strip) == views.index(_panel_views(spec)["wind"]) - 1
     assert strip["height"] == rc._COVERAGE_HEIGHT_PX
 
-    band = strip["layer"][0]
-    scale = band["encoding"]["color"]["scale"]
-    assert scale["domain"] == ["predicted", "observed", "matched", "missed"]
-    # Four hues, not four greys: a predicted hour and a measured one cannot be
-    # left to differ by shade alone.
-    assert len(set(scale["range"])) == 4
-    assert scale["range"][0] == LIGHT.reading
-    assert scale["range"][1] == LIGHT.night
-    # The rect spans its hour, and the error rides in the shade and the tooltip.
-    assert band["encoding"]["x2"]["field"] == "time_end"
-    assert band["encoding"]["opacity"]["field"] == "shade"
-    titles = [tip["title"] for tip in band["encoding"]["tooltip"]]
-    assert "Record" in titles and "Quality error" in titles
-
-
-def test_the_selector_takes_the_colour_of_what_the_hour_holds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Reading orange says forecast. A measured hour is not a forecast, so it
-    # takes the neutral role instead of borrowing the same orange.
-    monkeypatch.setattr(rc, "active", lambda: LIGHT)
-    hours = _panel_frames()[3]
-
-    def pin_colours(pinned: pd.Timestamp) -> set[str]:
-        spec, _ = _build_panel(pinned, focus_spot="Sils")
-        return {
-            layer["mark"]["color"]
-            for view in spec["vconcat"]
-            for layer in view["layer"]
-            if layer["mark"].get("type") == "rule"
-            and layer["encoding"].get("x", {}).get("field") == "time_mid"
-        }
-
-    def outline_stroke(pinned: pd.Timestamp) -> str:
-        spec, _ = _build_panel(pinned, focus_spot="Sils")
-        return _row_outlines(_panel_views(spec)["board"])[0]["mark"]["stroke"]
-
-    # The fixture observed Sils at hours[2] and nothing at hours[5].
-    assert pin_colours(hours[2]) == {LIGHT.idle}
-    assert outline_stroke(hours[2]) == LIGHT.idle
-    assert pin_colours(hours[5]) == {LIGHT.reading}
-    assert outline_stroke(hours[5]) == LIGHT.reading
-    assert LIGHT.idle != LIGHT.reading
+    lanes = strip["layer"][:2]
+    # One layer per lane at a constant colour: orange is the forecast
+    # everywhere in this console, and the record takes the neutral slate,
+    # never the violet that already means night.
+    assert [layer["mark"]["color"] for layer in lanes] == [LIGHT.reading, LIGHT.idle]
+    assert LIGHT.night not in [layer["mark"]["color"] for layer in lanes]
+    for layer in lanes:
+        assert layer["encoding"]["y"]["field"] == "lane"
+        assert layer["encoding"]["y"]["scale"]["domain"] == ["Predicted", "Observed"]
+        assert layer["encoding"]["y"]["axis"]["orient"] == "right"
+        assert layer["encoding"]["x2"]["field"] == "time_end"
+        # No shade, and no verdict words.
+        assert "opacity" not in layer["encoding"]
+        assert "color" not in layer["encoding"]
+    titles = [tip["title"] for tip in lanes[0]["encoding"]["tooltip"]]
+    assert titles == ["Hour", "Spots predicted", "Spots observed"]
 
 
 def test_the_rideable_line_is_a_light_green_not_a_selection_colour() -> None:
@@ -1517,29 +1500,26 @@ def test_dial_overlay_css_hooks_the_tile_containers() -> None:
     assert "width: auto !important" in css.split("st-key-dial_pick_", 1)[1]
 
 
-def test_the_coverage_legend_names_every_class(
+def test_the_coverage_legend_names_the_two_lanes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # The hues carry no meaning without a key, and the strip is often one
-    # colour, which looks broken unless something says why.
+    # Two chips a first-time viewer can parse, and a word when a lane is empty
+    # for the whole window, which is the ordinary state of a forecast.
     monkeypatch.setattr(rc, "active", lambda: LIGHT)
 
-    mixed = rc._coverage_legend_html(
-        pd.DataFrame({"coverage": ["predicted", "matched"]})
-    )
-    for label in ("Predicted only", "Observed only", "Matched", "Missed"):
-        assert label in mixed
-    for hue in (LIGHT.reading, LIGHT.night, LIGHT.band, LIGHT.danger):
-        assert hue in mixed
-    # More than one class on the strip: it speaks for itself.
-    assert "every hour" not in mixed
+    both = rc._coverage_legend_html(pd.DataFrame({"lane": ["Predicted", "Observed"]}))
+    assert "Coverage" in both
+    assert "Predicted" in both and "Observed" in both
+    assert LIGHT.reading in both and LIGHT.idle in both
+    # No verdict vocabulary survives anywhere in the key.
+    for word in ("Matched", "Missed", "Record for each hour"):
+        assert word not in both
+    assert "nothing" not in both
 
-    flat = rc._coverage_legend_html(
-        pd.DataFrame({"coverage": ["predicted", "predicted"]})
-    )
-    assert "every hour in this window is predicted only" in flat
+    only_forecast = rc._coverage_legend_html(pd.DataFrame({"lane": ["Predicted"]}))
+    assert "nothing observed in this window" in only_forecast
     # An empty record draws no strip, so the key makes no claim about it.
-    assert "every hour" not in rc._coverage_legend_html(pd.DataFrame())
+    assert "nothing" not in rc._coverage_legend_html(pd.DataFrame())
 
 
 def test_the_board_marks_the_stretch_before_the_forecast() -> None:
@@ -1632,3 +1612,18 @@ def test_a_dial_pick_moves_the_spot_and_leaves_the_hour(
     # The board's own mirror is left alone, or its stale cell would fight this.
     assert state["heat_spot_applied"] == "silvaplana"
     assert reruns == ["app"]
+
+
+def test_earliest_observed_ignores_hours_with_no_measurement() -> None:
+    hours = pd.date_range("2026-07-12T06:00", periods=3, freq="h", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "time": hours,
+            "observed": [float("nan"), 3.0, 4.0],
+        }
+    )
+
+    assert rc._earliest_observed(accuracy) == hours[1]
+    # Nothing measured at all, and an empty frame, both say so.
+    assert rc._earliest_observed(accuracy.assign(observed=float("nan"))) is None
+    assert rc._earliest_observed(pd.DataFrame()) is None
