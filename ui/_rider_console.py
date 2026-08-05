@@ -1170,9 +1170,12 @@ def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "")
 
     The selected spot wears the reading-orange border and the accent-text name;
     the rest keep a transparent border so every tile holds the same footprint.
-    The tile is drawn plain and its button is stretched over it by the styles,
-    so the summary rides on the title as well: that is what a viewer sees if
-    the overlay ever fails to cover the tile.
+    The styles stretch a transparent button over the whole tile, so the pointer
+    never reaches the tile itself and a title attribute would never open: the
+    wind summary is drawn as a bubble inside the tile instead, hidden until the
+    tile is hovered. The bubble sits out of flow, so revealing it cannot resize
+    the tile the button has to cover. The title stays as the fallback for a
+    viewer whose styles did not load.
     """
     pal = active()
     border = pal.reading if selected else "transparent"
@@ -1182,12 +1185,14 @@ def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "")
         else "color:var(--muted);font-weight:600"
     )
     hover = f"{name} — {summary}" if summary else name
+    tip = f'<div class="fc-dialtip">{summary}</div>' if summary else ""
     return (
-        f'<div title="{hover}" style="border:2px solid {border};border-radius:12px;'
-        'padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
+        f'<div class="fc-dialtile" title="{hover}" '
+        f'style="position:relative;border:2px solid {border};'
+        'border-radius:12px;padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
         f"{dial_svg}"
         f'<div style="text-align:center;font-family:Manrope,sans-serif;'
-        f'font-size:0.72rem;{name_style}">{name}</div></div>'
+        f'font-size:0.72rem;{name_style}">{name}</div>{tip}</div>'
     )
 
 
@@ -1260,8 +1265,7 @@ def _render_dial_grid(
             # carries st-key-dial_pick_<id>, so the rule needs no positional
             # selector. The button keeps a real label for screen readers and
             # for the case where the styles do not load; the styles paint it
-            # transparent. Its help text is the hover bubble, since the overlay
-            # sits above the tile and takes the pointer.
+            # transparent and stretch it over the tile.
             with st.container(key=f"dialtile_{spot_id}"):
                 st.markdown(
                     _dial_tile_html(
@@ -1272,11 +1276,12 @@ def _render_dial_grid(
                     ),
                     unsafe_allow_html=True,
                 )
-                if st.button(
-                    cfg["name"],
-                    key=f"dial_pick_{spot_id}",
-                    help=f"{cfg['name']} — {summary}",
-                ):
+                # No help text: it wraps the button in a tooltip span that keeps
+                # its own line box and right-aligns the button inside the
+                # overlay, and it renders a second button subtree whose wrapper
+                # then answers the pointer instead of the button. Both are why
+                # the tile did not click. The tile draws its own bubble.
+                if st.button(cfg["name"], key=f"dial_pick_{spot_id}"):
                     _focus_spot(spot_id)
     st.caption(
         "Each dial is that spot's wind at the selected hour: the dot's bearing "

@@ -1365,7 +1365,14 @@ def test_dial_tiles_can_be_picked_and_hovered() -> None:
     # The tile is a plain block: a link would have navigated, reloading the
     # page and losing the session, so the control is a button stretched over it.
     assert "<a " not in tile and "href" not in tile
+    # The styles hang the hover effect and the bubble on these two classes, and
+    # the bubble carries the summary, since the overlay takes the pointer and
+    # the title can never open.
+    assert 'class="fc-dialtile"' in tile
+    assert f'<div class="fc-dialtip">{summary}</div>' in tile
     assert f'title="Silvaplana — {summary}"' in tile
+    # No summary, no bubble to open.
+    assert "fc-dialtip" not in rc._dial_tile_html("Sils", "<svg/>", False)
     # A gustless reading says nothing about gusts rather than printing a zero.
     assert "gusting" not in rc._dial_summary(23.0, None, 220.0)
 
@@ -1479,7 +1486,11 @@ def test_a_dial_click_switches_the_focused_spot(
     # the spot's wind as the hover bubble.
     assert buttons[0]["key"] == "dial_pick_sils"
     assert buttons[0]["label"] == "Sils"
-    assert "23 km/h" in str(buttons[0]["help"])
+    # Help text would wrap the button in a tooltip span that shrinks it inside
+    # the overlay and renders a second subtree over it; the tile's own bubble
+    # carries the summary instead.
+    assert "help" not in buttons[0]
+    assert "23 km/h" in next(html for html in drawn if "fc-dialtip" in html)
     # Nothing of the link route survives.
     tile = next(html for html in drawn if "<svg/>" in html)
     assert "<a " not in tile and "href" not in tile
@@ -1494,4 +1505,8 @@ def test_dial_overlay_css_hooks_the_tile_containers() -> None:
     css = _styles._CSS
     assert "st-key-dialtile_" in css
     assert "st-key-dial_pick_" in css
-    assert "inset: 0" in css.split("st-key-dialtile_", 1)[1]
+    # The tile's own classes carry the hover lift and the wind bubble.
+    assert "fc-dialtile" in css and "fc-dialtip" in css
+    # Without this the element container keeps its fit-content width, and the
+    # hit area shrinks to a strip beside the dial.
+    assert "width: auto !important" in css.split("st-key-dial_pick_", 1)[1]
