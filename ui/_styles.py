@@ -395,6 +395,92 @@ _CSS = """
     outline-offset: 2px;
   }
 
+  /* The console's comparison dials are buttons too: a transparent st.button is
+     stretched across each tile so the dial itself switches the focused spot. A
+     link would navigate, which reloads the page and loses the session; a widget
+     click reruns the script in place. The st-key-<key> classes are the hook, so
+     nothing here depends on where Streamlit puts the element. */
+  div[class*="st-key-dialtile_"] {
+    position: relative;
+  }
+  /* Streamlit sizes a widget's element container to fit its content, and an
+     explicit width beats the left and right insets: that is what left the hit
+     area a narrow strip beside the dial instead of covering it. */
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto !important;
+    height: auto !important;
+    z-index: 5;
+  }
+  /* Only the button's own chain is stretched. Widening every div inside put a
+     wrapper over the button, and it answered the pointer instead. */
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"]
+    div[data-testid="stButton"],
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] button {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] button {
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: transparent !important;
+    cursor: pointer;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"] button p {
+    color: transparent !important;
+  }
+  div[class*="st-key-dialtile_"] div[class*="st-key-dial_pick_"]
+    button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Hovering has to say the dial is a control, and the overlay owns the
+     pointer, so the effect keys off the container the two share: the border
+     takes the reading orange, the tile lifts, and the wind summary opens as a
+     bubble.
+     The bubble is out of flow and deaf to the pointer, so it can neither
+     resize the tile nor swallow the click. Selection is the border alone, so a
+     hovered tile is told from the selected one by the lift and the bubble. */
+  .fc-dialtile {
+    transition: transform 0.15s ease, box-shadow 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .fc-dialtile .fc-dialtip {
+    display: none;
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    bottom: 20px;
+    padding: 0.2rem 0.35rem;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    font-family: Manrope, sans-serif;
+    font-size: 0.64rem;
+    line-height: 1.3;
+    text-align: center;
+    pointer-events: none;
+    z-index: 6;
+  }
+  div[class*="st-key-dialtile_"]:hover .fc-dialtile {
+    border-color: var(--warm) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 14px rgba(7, 37, 42, 0.18);
+  }
+  div[class*="st-key-dialtile_"]:hover .fc-dialtip {
+    display: block;
+  }
+
   .fc-ring,
   .fc-ring-arc,
   .fc-disc,
