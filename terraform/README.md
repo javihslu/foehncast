@@ -149,7 +149,11 @@ See [../docs/site/system/configuration-and-contracts.md](../docs/site/system/con
 
 `GCP_CLOUD_RUN_SERVICE` stays unset until Terraform has actually provisioned the Cloud Run service.
 
-Cloud Build triggers handle image publishing on merge to `main` with path-based filters. Each trigger builds an immutable `sha-<commit>` tagged image and pushes it to Artifact Registry. Cloud Run startup and liveness probes verify each new revision and automatically roll back unhealthy deployments. Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables.
+Cloud Build triggers handle image publishing on merge to `main` with path-based filters. Each trigger builds an immutable `sha-<commit>` tagged image, pushes it to Artifact Registry, and deploys it to the matching Cloud Run service or job with a `git-sha` label recording the commit it was built from. Cloud Run startup and liveness probes verify each new revision and automatically roll back unhealthy deployments.
+
+Terraform remains the source of truth for the service baseline such as service account, scaling, ingress, and environment variables. It deliberately does not own the running image: every Cloud Run service and job sets `lifecycle { ignore_changes }` on its container image, so `cloud_run_image`, `cloud_run_ui_image`, and `cloud_run_mlflow_image` only seed the first revision Terraform creates. Without that, any later apply would revert every service and job to the bootstrap `:latest` tag and silently un-deploy the newest code.
+
+To check which commit a service is serving, read the label back with `gcloud run services describe foehncast-serve --region europe-west6 --format='value(metadata.labels.git-sha)'`. To roll a service back, deploy the wanted `sha-<commit>` image with `gcloud run deploy` rather than editing a Terraform variable.
 
 ## GitHub Actions Terraform Path
 

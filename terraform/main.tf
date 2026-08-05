@@ -8,14 +8,18 @@ locals {
   }
   artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
-  cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  cloud_run_ui_image                = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
-  cloud_run_mlflow_image            = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
-  feast_registry_uri                = "gs://${var.artifact_bucket_name}/feast/registry.db"
-  feast_staging_uri                 = "gs://${var.artifact_bucket_name}/feast/staging"
-  feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
-  prediction_event_dataset_id       = "foehncast_monitoring"
-  prediction_event_table_id         = "prediction_events"
+  # These images only seed a service or job the first time Terraform creates it.
+  # Cloud Build then deploys an immutable sha-<commit> image on every merge, so
+  # each Cloud Run resource below ignores changes to its image field. Without
+  # that, an apply would roll every running revision back to this bootstrap tag.
+  cloud_run_image             = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  cloud_run_ui_image          = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
+  cloud_run_mlflow_image      = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
+  feast_registry_uri          = "gs://${var.artifact_bucket_name}/feast/registry.db"
+  feast_staging_uri           = "gs://${var.artifact_bucket_name}/feast/staging"
+  feast_bigquery_table        = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
+  prediction_event_dataset_id = "foehncast_monitoring"
+  prediction_event_table_id   = "prediction_events"
   # When MLflow is deployed on Cloud Run, use its URL; otherwise fall back to
   # the explicit variable (e.g. an external MLflow server).
   mlflow_tracking_uri = (
@@ -743,6 +747,10 @@ resource "google_cloud_run_v2_service" "app" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_service.required,
     google_firestore_database.feast_online_store,
@@ -935,6 +943,10 @@ resource "google_cloud_run_v2_service" "mlflow" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_service.required,
     google_sql_database.mlflow,
@@ -1059,6 +1071,10 @@ resource "google_cloud_run_v2_service" "ui" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_service.required,
     google_firestore_database.feast_online_store,
@@ -1119,6 +1135,10 @@ resource "google_cloud_run_v2_job" "feature_pipeline" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -1157,6 +1177,10 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
         }
       }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
   }
 
   depends_on = [google_project_service.required]
@@ -1199,6 +1223,10 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -1237,6 +1265,10 @@ resource "google_cloud_run_v2_job" "drift_detection" {
         }
       }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
   }
 
   depends_on = [google_project_service.required]
