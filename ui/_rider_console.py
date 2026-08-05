@@ -23,7 +23,7 @@ from foehncast.inference_pipeline.dashboard import (
     quality_bucket,
     quality_label,
 )
-from foehncast.solar import is_daylight_hour, solar_elevation_deg
+from foehncast.solar import is_daylight_hour, night_intervals, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
 from _dial_tokens import dial_tokens, rgb_to_hex
@@ -76,8 +76,15 @@ def _minimum_rideable_kts() -> float:
 # and the two rulers aligned column for column.
 _PANEL_PLOT_WIDTH = 480
 _PANEL_SPACING_PX = 6
-_RULER_HEIGHT_PX = 14
+_RULER_HEIGHT_PX = 22
 _WIND_HEIGHT_PX = 240
+
+# An axis is drawn OUTSIDE the view it belongs to, and the panel lays its views
+# out flush, which leaves that band out of the layout. So the panel has to
+# reserve it as padding: with the 6 px the other edges use, both rulers' labels
+# fell off the canvas and the panel had no readable time scale at all. Two
+# label lines plus the tick need this much.
+_RULER_AXIS_BAND_PX = 38
 
 
 def _heatmap_tick_count(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> int:
@@ -97,12 +104,15 @@ def _heatmap_tick_count(domain_start: pd.Timestamp, domain_end: pd.Timestamp) ->
     return max(2, round(hours / spacing) + 1)
 
 
-# Midnight ticks render the weekday + day-of-month, the rest just the hour, so
-# the day boundary reads off the ruler without a second axis row.
+# Two lines per tick: the clock time always, and the date on the second line
+# whenever the tick opens a new day. An array returned from labelExpr is what
+# Vega renders as multiple label lines. The window's first day is usually
+# already under way, so it has no midnight tick and takes its date from
+# _day_label_frame instead.
 _RULER_LABEL_EXPR = (
-    "timeFormat(datum.value, '%H') == '00' "
-    "? timeFormat(datum.value, '%a %d') "
-    ": timeFormat(datum.value, '%H')"
+    "[timeFormat(datum.value, '%H:%M'), "
+    "timeFormat(datum.value, '%H:%M') == '00:00' "
+    "? timeFormat(datum.value, '%a %d %b') : '']"
 )
 
 
@@ -128,6 +138,43 @@ def _ruler_axis(
         tickSize=5,
         title=None,
     )
+
+
+def _day_label_frame(domain_start: pd.Timestamp) -> pd.DataFrame:
+    """The date of the window's first day, printed inside the ruler.
+
+    Every later day announces itself on the axis, whose midnight tick carries
+    the date on its second label line. The first day is usually already under
+    way when the window opens, so without this its date would never be printed.
+    """
+    if domain_start == domain_start.floor("D"):
+        return pd.DataFrame(columns=["time", "label"])
+    return pd.DataFrame(
+        {"time": [domain_start], "label": [domain_start.strftime("%a %d %b")]}
+    )
+
+
+def _sun_frame(
+    domain_start: pd.Timestamp,
+    domain_end: pd.Timestamp,
+    lat: float,
+    lon: float,
+) -> pd.DataFrame:
+    """Sunrise and sunset instants inside the window, one pair per day.
+
+    Read from the same dusk-to-dawn intervals the wind plot's night bands come
+    from (solar.night_intervals): a night starts at sunset and ends at sunrise.
+    The bands quantize those edges to whole hourly cells so the two plots agree
+    column for column; a sun mark is a time rather than a cell, so it keeps the
+    exact instant and can sit inside the last night cell.
+    """
+    rows = [
+        {"time": t, "event": event, "label": f"{event} {t:%a %d %b %H:%M}"}
+        for dusk, dawn in night_intervals(lat, lon, domain_start, domain_end)
+        for t, event in ((dusk, "Sunset"), (dawn, "Sunrise"))
+    ]
+    frame = pd.DataFrame(rows, columns=["time", "event", "label"])
+    return frame[(frame["time"] >= domain_start) & (frame["time"] <= domain_end)]
 
 
 # One-hue ramp for the ordered elevation series; gusts differ by dash too.
@@ -1140,11 +1187,13 @@ class _Panel:
     pal: Palette
     pinned: pd.Timestamp | None
     focus_spot: str | None
+    now: pd.Timestamp | None
     cell: alt.Parameter
     hover_board: alt.Parameter
     hover_row: alt.Parameter
     hover_wind: alt.Parameter
     pin_time: alt.Parameter
+    sun: pd.DataFrame = field(default_factory=pd.DataFrame)
     hour_verdicts: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
@@ -1297,6 +1346,55 @@ def _pin_rule(panel: _Panel) -> alt.Chart:
     )
 
 
+def _now_rule(panel: _Panel) -> alt.Chart:
+    """The current instant, in the one saturated green every view marks it with.
+
+    Drawn in both plots and on both rulers so "now" reads as a single line down
+    the whole panel. It is also the boundary the board used to mark with a
+    dashed grey rule: left of it the record is hindcast, right of it forecast.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"time": [panel.now]}))
+        .mark_rule(color=panel.pal.band, strokeWidth=2, clip=True)
+        .encode(x=_panel_x(panel))
+    )
+
+
+def _now_label(panel: _Panel) -> alt.Chart:
+    """The word beside the NOW rule, so the green line is never read as a series."""
+    return (
+        alt.Chart(pd.DataFrame({"time": [panel.now], "label": ["NOW"]}))
+        .mark_text(
+            color=panel.pal.band,
+            fontSize=10,
+            fontWeight=700,
+            align="left",
+            baseline="middle",
+            dx=4,
+            clip=True,
+        )
+        .encode(x=_panel_x(panel), text="label:N")
+    )
+
+
+def _sun_marks(panel: _Panel) -> list[alt.Chart]:
+    """Sunrise and sunset ticks on the ruler: one hue, told apart by dash.
+
+    A colour encoding would need a scale of its own beside the verdict tint's,
+    so each event is a layer at a constant colour instead. Sunrise is solid,
+    sunset dashed, and both name themselves in the tooltip.
+    """
+
+    def mark(event: str, dash: list[int]) -> alt.Chart:
+        return (
+            alt.Chart(panel.sun[panel.sun["event"] == event])
+            .mark_rule(color=panel.pal.sun, strokeWidth=1.5, strokeDash=dash, clip=True)
+            .encode(x=_panel_x(panel), tooltip=[alt.Tooltip("label:N", title="Sun")])
+        )
+
+    return [mark("Sunrise", [1, 0]), mark("Sunset", [3, 2])]
+
+
 def _focus_row_rule(panel: _Panel, rank_order: list[str]) -> alt.Chart:
     """The location half of the selector: an orange rule on the focused spot's row."""
     return (
@@ -1328,48 +1426,64 @@ def _board_y_axis(pal: Palette, focus_spot: str | None) -> alt.Axis:
 
 
 def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
-    """One ruler edge: the shared time axis, plus the pinned label when there is one.
+    """One ruler edge: the shared time axis, and what is worth reading off it.
 
-    The label is accent_text rather than the reading orange the rule wears: it
-    is text on the page surface, so it has to clear the 4.5:1 floor, which the
-    plain mark orange does not.
+    The axis carries the clock and the date; the strip itself carries the
+    verdict tint, the sun marks, the NOW rule and the pinned hour's label. Only
+    the axis-bearing layer may declare an axis and every sibling nulls its own,
+    or vega-lite has two of them to merge across the layer.
+
+    The pin label is accent_text rather than the reading orange the rule wears:
+    it is text on the page surface, so it has to clear the 4.5:1 floor, which
+    the plain mark orange does not.
     """
     axis = _ruler_axis(orient, panel.domain_start, panel.domain_end)
-    ruler = (
+    layers = [
         alt.Chart(panel.spine)
         .mark_rule(opacity=0)
         .encode(x=alt.X("time:T", axis=axis, scale=panel.x_scale))
-    )
-    # The ruler carries the axis, so it stays the first layer: a sibling that
-    # left its own axis implicit would leave vega-lite nothing to merge.
-    graded = [] if panel.hour_verdicts.empty else [_verdict_band(panel)]
-    if panel.pinned is None:
-        if not graded:
-            return ruler.properties(height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH)
-        return alt.layer(ruler, *graded).properties(
-            height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
+    ]
+    if not panel.hour_verdicts.empty:
+        layers.append(_verdict_band(panel))
+    day = _day_label_frame(panel.domain_start)
+    if not day.empty:
+        layers.append(
+            alt.Chart(day)
+            .mark_text(
+                color=panel.pal.ink_secondary,
+                fontSize=10,
+                align="left",
+                baseline="middle",
+                dx=3,
+                clip=True,
+            )
+            .encode(x=_panel_x(panel), text="label:N")
         )
-    pin = _pin_frame(panel.pinned)
-    tick = (
-        alt.Chart(pin)
-        .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
-        .encode(x=alt.X("time_mid:T", scale=panel.x_scale))
-    )
-    label = (
-        alt.Chart(pin)
-        # No font family: the ruler's own labels take the chart default, and a
-        # family the renderer does not have drops the glyphs silently.
-        .mark_text(
-            color=panel.pal.accent_text,
-            fontSize=11,
-            fontWeight=700,
-            align="left",
-            baseline="middle",
-            dx=5,
+    layers.extend(_sun_marks(panel))
+    if panel.now is not None:
+        layers.extend([_now_rule(panel), _now_label(panel)])
+    if panel.pinned is not None:
+        pin = _pin_frame(panel.pinned)
+        layers.append(
+            alt.Chart(pin)
+            .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+            .encode(x=_panel_x(panel, "time_mid"))
         )
-        .encode(x=alt.X("time_mid:T", scale=panel.x_scale), text="label:N")
-    )
-    return alt.layer(ruler, *graded, tick, label).properties(
+        layers.append(
+            alt.Chart(pin)
+            # No font family: the ruler's own labels take the chart default, and
+            # a family the renderer does not have drops the glyphs silently.
+            .mark_text(
+                color=panel.pal.accent_text,
+                fontSize=11,
+                fontWeight=700,
+                align="left",
+                baseline="middle",
+                dx=5,
+            )
+            .encode(x=_panel_x(panel, "time_mid"), text="label:N")
+        )
+    return alt.layer(*layers).properties(
         height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
     )
 
@@ -1378,7 +1492,6 @@ def _board_view(
     panel: _Panel,
     heat_grid: pd.DataFrame,
     rank_order: list[str],
-    now: pd.Timestamp,
 ) -> alt.LayerChart:
     """The session-quality board, without an x axis of its own.
 
@@ -1434,15 +1547,10 @@ def _board_view(
             )
         )
 
-    # Where the record stops being hindcast and starts being forecast.
-    if panel.domain_start <= now <= panel.domain_end:
-        layers.append(
-            alt.Chart(pd.DataFrame({"x": [now]}))
-            .mark_rule(
-                color=pal.ink_secondary, strokeWidth=1.5, strokeDash=[5, 3], clip=True
-            )
-            .encode(x=_panel_x(panel, "x"))
-        )
+    # Where the record stops being hindcast and starts being forecast, in the
+    # green the whole panel marks the present with.
+    if panel.now is not None:
+        layers.append(_now_rule(panel))
 
     # The horizontal half of the crosshair: the hovered row, which on this board
     # is a spot rather than a value.
@@ -1624,6 +1732,7 @@ def _wind_view(
         wind_layer(frame[frame["is_day"]], dim=False),
         threshold,
         threshold_label,
+        *([_now_rule(panel)] if panel.now is not None else []),
         _hover_rule(panel, panel.hover_board),
         _hover_rule(panel, panel.hover_wind),
         *value_marks(panel.hover_board),
@@ -1668,6 +1777,8 @@ def _time_panel(
         pal=pal,
         pinned=pinned,
         focus_spot=focus_spot,
+        now=now if domain_start <= now <= domain_end else None,
+        sun=_sun_frame(domain_start, domain_end, spot_lat, spot_lon),
         hour_verdicts=_hour_verdicts(accuracy),
         cell=alt.selection_point(
             name="cell", fields=["spot", "time"], on="click", empty=False
@@ -1701,7 +1812,7 @@ def _time_panel(
     views = [_ruler_view(panel, "top")]
     modes: list[str] = []
     if not heat_grid.empty:
-        views.append(_board_view(panel, heat_grid, rank_order, now))
+        views.append(_board_view(panel, heat_grid, rank_order))
         modes.append("cell")
     if not timeline_frame.empty:
         views.append(_wind_view(panel, timeline_frame, spot_lat, spot_lon, min_kts))
@@ -1713,11 +1824,17 @@ def _time_panel(
         .properties(
             background="transparent",
             # The y axes sit on the right, so the plot's left edge has no
-            # gutter: a midnight "%a %d" ruler label near that edge
-            # center-anchors past it and clips. The left padding buys the
-            # half-label of room (a padding OBJECT zeroes any side left
-            # unspecified, hence all four).
-            padding={"left": 26, "top": 6, "right": 6, "bottom": 6},
+            # gutter: a midnight ruler label near that edge center-anchors past
+            # it and clips. The left padding buys the half-label of room. Top
+            # and bottom hold the two rulers' axis bands, which the flush
+            # layout leaves out of the view boxes (a padding OBJECT zeroes any
+            # side left unspecified, hence all four).
+            padding={
+                "left": 26,
+                "top": _RULER_AXIS_BAND_PX,
+                "right": 6,
+                "bottom": _RULER_AXIS_BAND_PX,
+            },
         )
         .configure_view(strokeWidth=0, fill=None)
         .configure_axis(
@@ -1879,7 +1996,9 @@ def render_rider_console(
                 st.caption(
                     "Click anywhere in the panel to pin a time; the orange rule "
                     "and the label on both rulers mark it, and the horizontal "
-                    "orange rule tracks the focused spot. The green band along "
+                    "orange rule tracks the focused spot. Both rulers carry the "
+                    "clock and the date, a green NOW rule, and amber ticks at "
+                    "sunrise (solid) and sunset (dashed). The green band along "
                     "the wind plot traces solar elevation, scaled to the "
                     "wind-speed axis."
                 )

@@ -709,6 +709,24 @@ def _x_channels(node: object) -> list[dict]:
     return found
 
 
+def _panel_views(spec: dict) -> dict[str, dict]:
+    """The panel's views by role, so adding one does not renumber the rest."""
+    views = spec["vconcat"]
+    named = {"top": views[0], "bottom": views[-1]}
+    for view in views[1:-1]:
+        layers = view["layer"]
+        if any(layer["mark"]["type"] == "line" for layer in layers):
+            named["wind"] = view
+        elif any(
+            layer.get("encoding", {}).get("y", {}).get("field") == "spot"
+            for layer in layers
+        ):
+            named["board"] = view
+        else:
+            named["coverage"] = view
+    return named
+
+
 def test_time_panel_is_one_composite_on_one_domain() -> None:
     """Board and wind plot share a domain exactly, and only the rulers carry an axis."""
     hours = _panel_frames()[3]
@@ -742,7 +760,8 @@ def test_heat_cells_declare_where_they_end() -> None:
     # mark_rect on a continuous x must set x2, or a later cell paints over the
     # ones before it. The wind plot's invisible hit layer is a rect too.
     spec, _ = _build_panel(None)
-    board, wind = spec["vconcat"][1], spec["vconcat"][2]
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
     cells = board["layer"][0]
     assert cells["mark"]["type"] == "rect"
     assert cells["encoding"]["x2"]["field"] == "time_end"
@@ -776,7 +795,8 @@ def test_hour_verdicts_collapse_spots_and_keep_the_counts() -> None:
 def test_the_verdict_is_a_tint_on_the_ruler_not_a_mark_on_the_board() -> None:
     """Accuracy reads off the time axis; the board is left to the quality cells."""
     spec, _ = _build_panel(None)
-    top, board, bottom = spec["vconcat"][0], spec["vconcat"][1], spec["vconcat"][3]
+    views = _panel_views(spec)
+    top, board, bottom = views["top"], views["board"], views["bottom"]
 
     for ruler in (top, bottom):
         tint = next(
@@ -813,7 +833,8 @@ def test_crosshair_spans_both_plots_and_the_hovered_row() -> None:
     # line follows the pointer across the whole panel; the board also carries
     # the horizontal half, which on a board of spots is the hovered row.
     spec, _ = _build_panel(None)
-    board, wind = spec["vconcat"][1], spec["vconcat"][2]
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
 
     def filters(view: dict) -> list[str]:
         return [
@@ -841,7 +862,7 @@ def test_focused_spot_wears_the_location_half_of_the_selector(
     """The focused spot gets an orange row rule and an accented axis label."""
     monkeypatch.setattr(rc, "active", lambda: LIGHT)
     spec, _ = _build_panel(None, focus_spot="Sils")
-    board = spec["vconcat"][1]
+    board = _panel_views(spec)["board"]
 
     row = next(
         layer
@@ -866,7 +887,7 @@ def test_focused_spot_wears_the_location_half_of_the_selector(
 def test_unfocused_panel_draws_no_row_rule() -> None:
     """Without a focus spot the board carries only the hover row rule."""
     spec, _ = _build_panel(None)
-    board = spec["vconcat"][1]
+    board = _panel_views(spec)["board"]
     plain_row_rules = [
         layer
         for layer in board["layer"]
@@ -896,7 +917,9 @@ def test_pinned_time_is_labelled_on_both_rulers(
         assert marks["text"]["color"] == palette.accent_text
     assert LIGHT.accent_text != LIGHT.reading
 
-    label_data = spec["datasets"][spec["vconcat"][0]["layer"][2]["data"]["name"]]
+    top = spec["vconcat"][0]
+    label_layer = [v for v in top["layer"] if v["mark"]["type"] == "text"][-1]
+    label_data = spec["datasets"][label_layer["data"]["name"]]
     assert label_data[0]["label"] == hours[4].strftime("%a %d %b %H:00")
 
 
@@ -1040,7 +1063,8 @@ def test_hourly_marks_sit_mid_cell() -> None:
     # cell's middle rather than on its left edge.
     hours = _panel_frames()[3]
     spec, _ = _build_panel(hours[4])
-    board, wind = spec["vconcat"][1], spec["vconcat"][2]
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
 
     lines = [v for v in wind["layer"] if v["mark"]["type"] == "line"]
     assert lines and all(v["encoding"]["x"]["field"] == "time_mid" for v in lines)
@@ -1074,7 +1098,7 @@ def test_hover_readout_shows_each_series_value() -> None:
     # either hover param; the old horizontal rule only marked the 10 m
     # reading's position without saying what it was.
     spec, _ = _build_panel(None)
-    wind = spec["vconcat"][2]
+    wind = _panel_views(spec)["wind"]
 
     texts = [
         v for v in wind["layer"] if v["mark"]["type"] == "text" and v.get("transform")
@@ -1105,3 +1129,71 @@ def test_dial_tile_highlights_only_the_selected_spot() -> None:
     assert LIGHT.reading in selected and LIGHT.accent_text in selected
     assert "transparent" in other and LIGHT.reading not in other
     assert "<svg/>" in selected and "Sils" in other
+
+
+def test_the_rulers_axis_band_is_reserved_by_the_panel_padding() -> None:
+    # The views are laid out flush and an axis is drawn outside the view it
+    # belongs to, so without padding held back for it the panel's only time
+    # scale is clipped off the canvas.
+    spec, _ = _build_panel(None)
+
+    assert spec["padding"]["top"] == rc._RULER_AXIS_BAND_PX
+    assert spec["padding"]["bottom"] == rc._RULER_AXIS_BAND_PX
+    assert rc._RULER_AXIS_BAND_PX >= 30
+
+    for ruler in (spec["vconcat"][0], spec["vconcat"][-1]):
+        axes = [x.get("axis", "implicit") for x in _x_channels(ruler)]
+        # Exactly one layer draws the axis; every sibling nulls its own.
+        assert sum(isinstance(a, dict) for a in axes) == 1
+        assert all(a is None for a in axes if not isinstance(a, dict))
+
+
+def test_ruler_labels_print_the_clock_and_the_date() -> None:
+    # Each tick prints the time; the tick that opens a day adds the date on a
+    # second line, and the window's first day gets its date inside the ruler.
+    expr = rc._RULER_LABEL_EXPR
+    assert expr.startswith("[timeFormat(datum.value, '%H:%M')")
+    assert "'%a %d %b'" in expr
+
+    start = pd.Timestamp("2026-07-12T06:00:00", tz="Europe/Zurich")
+    assert rc._day_label_frame(start)["label"].tolist() == [start.strftime("%a %d %b")]
+    # A window that opens at midnight already has the date on its first tick.
+    assert rc._day_label_frame(start.floor("D")).empty
+
+
+def test_now_and_the_sun_are_marked_across_the_panel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    spec, _ = _build_panel(None)
+    views = _panel_views(spec)
+
+    def rules(view: dict, color: str) -> list[dict]:
+        return [
+            layer
+            for layer in view["layer"]
+            if layer["mark"].get("type") == "rule"
+            and layer["mark"].get("color") == color
+        ]
+
+    # One green NOW rule in each plot and on each ruler.
+    for role in ("top", "board", "wind", "bottom"):
+        assert len(rules(views[role], LIGHT.band)) == 1
+    # Sunrise and sunset ride on the rulers, solid and dashed in the sun hue.
+    for role in ("top", "bottom"):
+        sun = rules(views[role], LIGHT.sun)
+        assert [layer["mark"]["strokeDash"] for layer in sun] == [[1, 0], [3, 2]]
+
+    # The panel's own window runs 06:00 to 18:00 in July, so it holds no sun
+    # event at all: the frame keeps its columns and stays empty.
+    hours = _panel_frames()[3]
+    start, end = hours[0], hours[-1] + pd.Timedelta(hours=1)
+    frame = rc._sun_frame(start, end, 46.45, 9.79)
+    assert frame["event"].tolist() == []
+
+    # Widened past dusk, the sunset that closes the day shows up, at the exact
+    # instant and in the window's zone rather than quantized to an hour.
+    frame = rc._sun_frame(start, end + pd.Timedelta(hours=6), 46.45, 9.79)
+    assert frame["event"].tolist() == ["Sunset"]
+    assert frame["time"].iloc[0].tzinfo is not None
+    assert start <= frame["time"].iloc[0] <= end + pd.Timedelta(hours=6)
