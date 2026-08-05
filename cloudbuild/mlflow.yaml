@@ -41,6 +41,7 @@ steps:
       - ${_SERVICE_NAME}
       - --image=${_IMAGE_REPOSITORY}:sha-${_COMMIT_SHA}
       - --region=${_REGION}
+      - --update-labels=git-sha=${_COMMIT_SHA}
       - --quiet
 
 options:
