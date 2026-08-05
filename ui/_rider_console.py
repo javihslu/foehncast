@@ -77,7 +77,7 @@ def _minimum_rideable_kts() -> float:
 _PANEL_PLOT_WIDTH = 480
 _PANEL_SPACING_PX = 6
 _RULER_HEIGHT_PX = 22
-_COVERAGE_HEIGHT_PX = 14
+_COVERAGE_HEIGHT_PX = 18
 _WIND_HEIGHT_PX = 240
 
 # An axis is drawn OUTSIDE the view it belongs to, and the panel lays its views
@@ -321,6 +321,50 @@ def _quality_legend_html() -> str:
         "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
         'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
         f"Session quality (1-5) 1{strip}5{night}</p>"
+    )
+
+
+_COVERAGE_CLASS_LABELS = (
+    ("predicted", "Predicted only"),
+    ("observed", "Observed only"),
+    ("matched", "Matched"),
+    ("missed", "Missed"),
+)
+
+
+def _coverage_legend_html(hour_coverage: pd.DataFrame) -> str:
+    """Key for the strip between the plots, and what this window actually holds.
+
+    Four hues mean nothing to a first-time viewer without a key, and the strip
+    is often one colour: a forecast window is all prediction until measurements
+    reach it, and the archive they come from lags. A flat bar with nothing to
+    read it by looks broken, so when the window holds a single class the key
+    says which one in words. Drawn in HTML beside the board's own legend, since
+    a Vega legend would have to sit inside one of the panel's flush views.
+    """
+    pal = active()
+    hues = {
+        "predicted": pal.reading,
+        "observed": pal.night,
+        "matched": pal.band,
+        "missed": pal.danger,
+    }
+    chips = "".join(
+        _LEGEND_CHIP.format(swatch=f"background:{hues[key]}", level=label)
+        for key, label in _COVERAGE_CLASS_LABELS
+    )
+    present = set(hour_coverage["coverage"]) if not hour_coverage.empty else set()
+    note = ""
+    if len(present) == 1:
+        label = dict(_COVERAGE_CLASS_LABELS)[present.pop()].lower()
+        note = (
+            '<span style="color:var(--muted);font-weight:400">'
+            f" — every hour in this window is {label}</span>"
+        )
+    return (
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
+        f"Record for each hour{chips}{note}</p>"
     )
 
 
@@ -1495,12 +1539,15 @@ def _hour_coverage(accuracy: pd.DataFrame) -> pd.DataFrame:
     grouped.loc[both, "coverage"] = grouped.loc[both, "error"].map(
         lambda e: "missed" if e > _ACCURACY_MISS_THRESHOLD else "matched"
     )
-    # The class says whether the hour was called right, the shade by how much,
-    # so a near miss and a wild one do not paint the same. The floor is high:
-    # under it the segments washed out and the strip read as one flat track.
-    grouped["shade"] = (
-        0.75 + 0.25 * (grouped["error"] / _ACCURACY_MISS_THRESHOLD).clip(upper=1.0)
-    ).fillna(0.75)
+    # An hour holding one half of the record has nothing to shade, so it is
+    # drawn at full strength; the ramp is reserved for the hours that were
+    # compared, where it says by how much, so a near miss and a wild one do not
+    # paint the same. Drawn any fainter, the pure classes washed into the track.
+    grouped["shade"] = 1.0
+    compared = grouped["coverage"].isin(["matched", "missed"])
+    grouped.loc[compared, "shade"] = 0.75 + 0.25 * (
+        grouped.loc[compared, "error"] / _ACCURACY_MISS_THRESHOLD
+    ).clip(upper=1.0)
     return grouped[columns]
 
 
@@ -2355,6 +2402,9 @@ def render_rider_console(
                     ),
                     unsafe_allow_html=True,
                 )
+            coverage = _hour_coverage(accuracy)
+            if not coverage.empty:
+                st.markdown(_coverage_legend_html(coverage), unsafe_allow_html=True)
             if _flat_week(heat_grid):
                 st.markdown(_FLAT_WEEK_CHIP, unsafe_allow_html=True)
 

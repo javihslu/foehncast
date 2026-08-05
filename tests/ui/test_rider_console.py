@@ -1250,11 +1250,11 @@ def test_hour_coverage_classes_the_record_and_its_error() -> None:
     # The strip spans the hour it grades, and a small gap shades lighter than
     # the miss threshold would.
     assert (band["time_end"] - band["time"]).unique() == pd.Timedelta(hours=1)
-    # No segment fades into the track, and a compared hour still shades by the
-    # size of its gap.
+    # An hour with only one half of the record is drawn at full strength; the
+    # ramp is reserved for the compared hours, where it sizes the gap.
     assert band["shade"].min() >= 0.75
     assert band["shade"].iloc[0] == pytest.approx(0.8)
-    assert band["shade"].iloc[1] == pytest.approx(0.75)
+    assert band["shade"].iloc[1] == pytest.approx(1.0)
 
 
 def test_the_coverage_strip_sits_between_the_plots(
@@ -1510,3 +1510,28 @@ def test_dial_overlay_css_hooks_the_tile_containers() -> None:
     # Without this the element container keeps its fit-content width, and the
     # hit area shrinks to a strip beside the dial.
     assert "width: auto !important" in css.split("st-key-dial_pick_", 1)[1]
+
+
+def test_the_coverage_legend_names_every_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The hues carry no meaning without a key, and the strip is often one
+    # colour, which looks broken unless something says why.
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+
+    mixed = rc._coverage_legend_html(
+        pd.DataFrame({"coverage": ["predicted", "matched"]})
+    )
+    for label in ("Predicted only", "Observed only", "Matched", "Missed"):
+        assert label in mixed
+    for hue in (LIGHT.reading, LIGHT.night, LIGHT.band, LIGHT.danger):
+        assert hue in mixed
+    # More than one class on the strip: it speaks for itself.
+    assert "every hour" not in mixed
+
+    flat = rc._coverage_legend_html(
+        pd.DataFrame({"coverage": ["predicted", "predicted"]})
+    )
+    assert "every hour in this window is predicted only" in flat
+    # An empty record draws no strip, so the key makes no claim about it.
+    assert "every hour" not in rc._coverage_legend_html(pd.DataFrame())
