@@ -1,6 +1,6 @@
 # Quick Start
 
-Two options: run everything **locally with Docker**, or try the **live demo** (zero setup).
+Two options: run everything **locally with Docker**, or read about the **hosted demo** below (deployed on demand, not always online).
 
 ## Option 1: Run Locally
 
