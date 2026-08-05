@@ -1358,3 +1358,23 @@ def test_dial_tiles_can_be_picked_and_hovered() -> None:
     assert f'title="Silvaplana — {summary}"' in tile
     # A gustless reading says nothing about gusts rather than printing a zero.
     assert "gusting" not in rc._dial_summary(23.0, None, 220.0)
+
+
+def test_the_details_follow_the_focused_spot_not_a_stale_click() -> None:
+    # Picking a spot from the comparison dials moves the focus while the board
+    # goes on reporting its last click, so the panel has to follow the newer of
+    # the two or it would describe a spot the console no longer shows.
+    grid, _, _, hours = _panel_frames()
+    clicked = grid[(grid["spot"] == "Silvaplana") & (grid["time"] == hours[2])].iloc[0]
+
+    kept = rc._detail_row(clicked, grid, "silvaplana", hours[2])
+    assert kept["spot_id"] == "silvaplana"
+
+    # Focus moved elsewhere: the stale pick gives way to the pinned hour at the
+    # spot now in focus.
+    followed = rc._detail_row(clicked, grid, "sils", hours[2])
+    assert followed["spot_id"] == "sils"
+    assert followed["time"] == hours[2]
+
+    # Nothing picked and nothing pinned leaves the panel on its hint.
+    assert rc._detail_row(None, grid, "sils", None) is None

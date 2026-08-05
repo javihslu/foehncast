@@ -1117,6 +1117,25 @@ def _default_detail_row(
     return rows.loc[delta.idxmin()]
 
 
+def _detail_row(
+    selected: pd.Series | None,
+    grid: pd.DataFrame,
+    spot_id: str | None,
+    pinned: pd.Timestamp | None,
+) -> pd.Series | None:
+    """The row the details panel describes: the pick, but only for the focused spot.
+
+    A board click sets both halves of the selection at once, so the two
+    normally agree. They part when the focus moves by another route -- a dial
+    in the comparison grid, one on the map -- while the board goes on reporting
+    its last click on every rerun. The focus is the newer intent, so the panel
+    follows it and falls back to the pinned hour there.
+    """
+    if selected is not None and str(selected["spot_id"]) == spot_id:
+        return selected
+    return _default_detail_row(grid, spot_id, pinned)
+
+
 def _render_selection_bubble(row: pd.Series) -> None:
     """Metrics bubble for the selected spot and hour, beside the wind plot."""
     spot_id = str(row["spot_id"])
@@ -2354,11 +2373,7 @@ def render_rider_console(
                 if clicked is not None:
                     _sync_slider_to_heatmap_click(clicked, None, pred_hours)
             with detail_col:
-                detail = (
-                    selected
-                    if selected is not None
-                    else _default_detail_row(heat_grid, focus_spot_id, pinned)
-                )
+                detail = _detail_row(selected, heat_grid, focus_spot_id, pinned)
                 # The comparison grid sits beside the board, the bubble below it
                 # beside the wind plot; both follow the selected spot and hour.
                 dial_hour = (
