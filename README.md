@@ -46,7 +46,7 @@ cd foehncast
 
 The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, the app, and the rider console) and runs a smoke test. No cloud credentials are needed.
 
-The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than a cloud deployment trained on a year of history. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers.
+The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than a cloud deployment trained on a year of history. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers. Add `--recent-days 7` to also curate the days the Open-Meteo archive has not published yet, which gives the console's coverage strip observed hours to set its predictions against.
 
 After bootstrap, you get:
 
