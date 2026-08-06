@@ -31,7 +31,11 @@ def write_svgs() -> list[pathlib.Path]:
     for name, kwargs in {
         "foehncast-mark": {"animate": False, "sky_fraction": 0.62},
         "foehncast-mark-animated": {"animate": True, "sky_fraction": 0.62},
-        "foehncast-mark-night": {"animate": True, "sky_fraction": 0.45, "is_day": False},
+        "foehncast-mark-night": {
+            "animate": True,
+            "sky_fraction": 0.45,
+            "is_day": False,
+        },
     }.items():
         path = ASSETS / f"{name}.svg"
         path.write_text(logo_svg(size_px=256, **kwargs) + "\n")
@@ -64,7 +68,12 @@ async def write_gif() -> pathlib.Path:
 
     out = ASSETS / "foehncast-mark.gif"
     frames[0].save(
-        out, save_all=True, append_images=frames[1:], duration=GIF_MS, loop=0, optimize=True
+        out,
+        save_all=True,
+        append_images=frames[1:],
+        duration=GIF_MS,
+        loop=0,
+        optimize=True,
     )
     for i in range(FRAME_COUNT):
         (ASSETS / f".frame-{i}.png").unlink(missing_ok=True)
@@ -73,7 +82,9 @@ async def write_gif() -> pathlib.Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gif", action="store_true", help="also build the animated GIF")
+    parser.add_argument(
+        "--gif", action="store_true", help="also build the animated GIF"
+    )
     args = parser.parse_args()
 
     for path in write_svgs():
