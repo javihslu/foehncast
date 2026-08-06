@@ -1111,24 +1111,25 @@ def _sync_slider_to_heatmap_click(
 ) -> None:
     """Push a panel click's hour, and its spot when it had one, onto session state.
 
-    Writing "wind_map_hour" and "rider_focus_spot" here is legal: the console
-    renders before the slider and switcher buttons are instantiated later in
-    this same script run. But a fragment rerun of the console does not
-    re-run the map fragment, so an actual change also needs an explicit
-    app-scope rerun. Guarded by heat_hour_applied and heat_spot_applied -- a
-    run that already applied this exact click does not write or rerun again,
-    which is what keeps this from looping, and the spot half moves only when
-    the cell names one the board has not applied yet, so a pick made elsewhere
-    since is not overwritten by the click the chart keeps reporting.
-    ``options`` is the slider's
-    prediction-window hour list, so the clamped hour is always a valid option.
-    A click on empty panel space carries no spot, so it passes None and moves
-    the pinned time alone.
+    Writing "panel_pin_hour", "wind_map_hour", and "rider_focus_spot" here is
+    legal: the console renders before the slider and switcher buttons are
+    instantiated later in this same script run. But a fragment rerun of the
+    console does not re-run the map fragment, so an actual change also needs
+    an explicit app-scope rerun. Guarded by heat_hour_applied and
+    heat_spot_applied -- a run that already applied this exact click does not
+    write or rerun again, which is what keeps this from looping, and the spot
+    half moves only when the cell names one the board has not applied yet, so
+    a pick made elsewhere since is not overwritten by the click the chart
+    keeps reporting.
+
+    The panel's own pin takes the clicked hour verbatim, past or future, so a
+    hindcast click pins the hour it names. The map slider answers "which
+    forecast hour" only: a click inside the prediction window moves it to the
+    clamped option, a hindcast click leaves it where it is rather than yanking
+    it to the nearest forecast hour. A click on empty panel space carries no
+    spot, so it passes None and moves the pinned time alone.
     """
-    clamped = _clamp_to_slider_option(clicked_time, options)
-    hour_changed = (
-        clamped is not None and st.session_state.get("heat_hour_applied") != clamped
-    )
+    hour_changed = st.session_state.get("heat_hour_applied") != clicked_time
     spot_changed = (
         clicked_spot_id is not None
         and st.session_state.get("heat_spot_applied") != clicked_spot_id
@@ -1136,12 +1137,21 @@ def _sync_slider_to_heatmap_click(
     if not hour_changed and not spot_changed:
         return
     if hour_changed:
-        st.session_state["wind_map_hour"] = clamped
-        st.session_state["heat_hour_applied"] = clamped
-        # Pre-sync the map's own mirror so its guard is already quiet once the
-        # forced rerun below reaches it -- otherwise it would fire a second,
-        # redundant app rerun for the same change.
-        st.session_state["wind_map_hour_seen"] = clamped
+        st.session_state["panel_pin_hour"] = clicked_time
+        st.session_state["heat_hour_applied"] = clicked_time
+        clamped = _clamp_to_slider_option(clicked_time, options)
+        # The clamp doubles as the forecast test: a prediction-window click
+        # lands on its own option, a hindcast click lands hours away from it.
+        forecast_click = (
+            clamped is not None
+            and abs((_as_utc(clamped) - _as_utc(clicked_time)).total_seconds()) <= 1800
+        )
+        if forecast_click:
+            st.session_state["wind_map_hour"] = clamped
+            # Pre-sync the map's own mirror so its guard is already quiet once
+            # the forced rerun below reaches it -- otherwise it would fire a
+            # second, redundant app rerun for the same change.
+            st.session_state["wind_map_hour_seen"] = clamped
     # Only a cell the board has not already applied may move the focus. The
     # chart re-reports its last click on every rerun, so writing the focus
     # whenever anything changed let a stale cell carry its spot back over a
@@ -1151,6 +1161,11 @@ def _sync_slider_to_heatmap_click(
         st.session_state["rider_focus_spot"] = clicked_spot_id
         st.session_state["heat_spot_applied"] = clicked_spot_id
     st.rerun(scope="app")
+
+
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """The instant in UTC, so tz-mismatched comparisons stay honest."""
+    return ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
 
 def _spot_hour_wind(
@@ -2438,7 +2453,13 @@ def render_rider_console(
             st.info("No forecast window available for this spot right now.")
         else:
             pinned = _pinned_panel_time(
-                st.session_state.get("wind_map_hour"), domain[0], domain[1]
+                # A panel click's own pin wins, past hours included; the map
+                # slider's hour is the fallback (and what a slider drag
+                # restores when it clears the click pin).
+                st.session_state.get("panel_pin_hour")
+                or st.session_state.get("wind_map_hour"),
+                domain[0],
+                domain[1],
             )
             st.subheader("All spots — session quality")
             st.markdown(_quality_legend_html(), unsafe_allow_html=True)

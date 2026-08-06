@@ -360,6 +360,7 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     for key in (
         "heat_hour_applied",
         "heat_spot_applied",
+        "panel_pin_hour",
         "wind_map_hour",
         "wind_map_hour_seen",
         "rider_focus_spot",
@@ -389,6 +390,40 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     # Same hour again, still no spot: nothing changed, so nothing reruns.
     rc._sync_slider_to_heatmap_click(times[1], None, options)
     assert len(rerun_calls) == 3
+
+
+def test_sync_slider_to_heatmap_click_pins_a_past_hour_without_moving_the_slider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A hindcast click must pin the panel at the hour it names and leave the
+    # forecast-only map slider alone; clamping the click to the slider options
+    # silently moved the pin to the nearest forecast hour instead.
+    future = list(pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h"))
+    past = future[0] - pd.Timedelta(hours=20)
+    state: dict[str, object] = {
+        "wind_map_hour": future[1],
+        "wind_map_hour_seen": future[1],
+    }
+    monkeypatch.setattr(rc.st, "session_state", state)
+    reruns: list[dict[str, object]] = []
+    monkeypatch.setattr(rc.st, "rerun", lambda **kw: reruns.append(kw))
+
+    rc._sync_slider_to_heatmap_click(past, None, future)
+    assert state["panel_pin_hour"] == past
+    assert state["heat_hour_applied"] == past
+    assert state["wind_map_hour"] == future[1]  # untouched
+    assert len(reruns) == 1
+
+    # The chart re-reporting the same past click stays guarded: no rerun.
+    rc._sync_slider_to_heatmap_click(past, None, future)
+    assert len(reruns) == 1
+
+    # A forecast click still moves both the pin and the slider.
+    rc._sync_slider_to_heatmap_click(future[2], None, future)
+    assert state["panel_pin_hour"] == future[2]
+    assert state["wind_map_hour"] == future[2]
+    assert state["wind_map_hour_seen"] == future[2]
+    assert len(reruns) == 2
 
 
 def test_panel_x_domain_opens_before_the_forecast() -> None:

@@ -184,3 +184,32 @@ def test_destination_bearing_zero_moves_north() -> None:
     assert dest[1] > lat
     assert dest[0] == pytest.approx(lon)
     assert dest[1] == pytest.approx(lat + 10.0 / 110.574)
+
+
+def test_spot_wind_frame_fetches_past_days_for_hindcast_dials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The console panel opens about a day before the forecast starts, and its
+    # dials read this frame for those hours, so the fetch must ask for them.
+    calls: list[dict[str, object]] = []
+
+    def fake_fetch(lat: float, lon: float, **kwargs: object) -> pd.DataFrame:
+        calls.append(kwargs)
+        return pd.DataFrame(
+            {
+                "wind_speed_10m": [20.0],
+                "wind_direction_10m": [210.0],
+                "wind_gusts_10m": [28.0],
+            },
+            index=pd.date_range("2026-08-05T09:00:00Z", periods=1, freq="h"),
+        )
+
+    spot = {"id": "silvaplana", "name": "Silvaplana", "lat": 46.45, "lon": 9.79}
+    monkeypatch.setattr(wm, "get_spots", lambda: [spot])
+    monkeypatch.setattr(wm, "fetch_forecast", fake_fetch)
+    wm._spot_wind_frame.clear()
+
+    frame = wm._spot_wind_frame("silvaplana")
+
+    assert not frame.empty
+    assert calls == [{"past_days": wm._PAST_DAYS, "forecast_hours": wm._FORECAST_HOURS}]
