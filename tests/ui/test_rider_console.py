@@ -47,6 +47,7 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
 
     monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
     monkeypatch.setattr(rc, "_spot_wind_frame", fake_wind_frame)
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     predictions = [
         {
@@ -95,6 +96,7 @@ def test_each_cell_carries_its_own_hourly_quality(
     times = pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h")
     monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     hourly_quality = [4.2, 3.1, 1.5]
     predictions = [
@@ -135,6 +137,7 @@ def test_night_hours_never_render_as_a_quality_level(
     """
     monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     # A full day, so the window straddles sunrise and sunset, and a quality that
     # would otherwise bucket to the top of the ramp on every single hour.
@@ -194,6 +197,7 @@ def test_dangerous_hours_are_flagged_from_the_wind_not_the_level(
 
     monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
     monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     predictions = [
         {
@@ -255,6 +259,7 @@ def test_dangerous_hour_still_reads_as_dangerous_on_the_rendered_cell(
 
     monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
     monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     predictions = [
         {
@@ -1310,7 +1315,7 @@ def test_hour_coverage_fills_a_lane_per_half_of_the_record() -> None:
 def test_the_coverage_strip_sits_between_the_plots(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two lanes between the plots, named on the same edge the board uses."""
+    """Two lanes between the plots, each named inside its own segments."""
     monkeypatch.setattr(rc, "active", lambda: LIGHT)
     spec, _ = _build_panel(None)
     views = spec["vconcat"]
@@ -1329,11 +1334,18 @@ def test_the_coverage_strip_sits_between_the_plots(
     for layer in lanes:
         assert layer["encoding"]["y"]["field"] == "lane"
         assert layer["encoding"]["y"]["scale"]["domain"] == ["Predicted", "Observed"]
-        assert layer["encoding"]["y"]["axis"]["orient"] == "right"
+        # The lane names live inside the strip, so there is no spine axis.
+        assert layer["encoding"]["y"]["axis"] is None
         assert layer["encoding"]["x2"]["field"] == "time_end"
         # No shade, and no verdict words.
         assert "opacity" not in layer["encoding"]
         assert "color" not in layer["encoding"]
+    # The label layer: one text mark per lane, drawn on the segment itself.
+    label = strip["layer"][2]
+    assert label["mark"]["type"] == "text"
+    assert label["mark"]["color"] == LIGHT.surface
+    assert label["encoding"]["text"]["field"] == "lane"
+    assert label["encoding"]["y"]["field"] == "lane"
     titles = [tip["title"] for tip in lanes[0]["encoding"]["tooltip"]]
     assert titles == ["Hour", "Spots predicted", "Spots observed"]
 
@@ -1687,6 +1699,7 @@ def test_grid_fills_hindcast_from_prediction_log(
     monkeypatch.setattr(rc, "_prediction_history_cached", lambda: history)
     monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
     monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     predictions = [
         {
@@ -1710,6 +1723,132 @@ def test_grid_fills_hindcast_from_prediction_log(
     # The panel window is anchored on the forecast start, not the hindcast.
     domain = rc._panel_x_domain(grid, pd.DataFrame())
     assert domain[0] == forecast_times[0].tz_convert("Europe/Zurich")
+
+
+def test_initial_pinned_falls_back_to_now_on_first_load() -> None:
+    # No stored pick yet: the panel opens on the current hour, so the details
+    # panel shows the focused spot's cell instead of the empty hint.
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    options = list(pd.date_range(now - pd.Timedelta(hours=1), periods=4, freq="h"))
+    domain = [options[0], options[-1]]
+
+    pinned = rc._initial_pinned(None, domain, now, options)
+    assert pinned == min(options, key=lambda o: abs((o - now).total_seconds()))
+
+
+def test_initial_pinned_keeps_a_stored_pick() -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    options = list(pd.date_range(now, periods=4, freq="h"))
+    domain = [options[0], options[-1]]
+
+    assert rc._initial_pinned(options[2], domain, now, options) == options[2]
+
+
+def test_fresh_panel_click_unmasks_a_wind_click_after_a_cell_pick() -> None:
+    # The sticky cell param re-reports its pick on every rerun; a later
+    # wind-plot click must still route as a time-only pin.
+    cell = ("silvaplana", "2026-08-06 10:00:00+00:00")
+    pin = pd.Timestamp("2026-08-06T11:00:00Z")
+
+    assert rc._fresh_panel_click(cell, None, None, None) == "cell"
+    assert rc._fresh_panel_click(cell, pin, cell, None) == "pin"
+    assert rc._fresh_panel_click(cell, pin, cell, pin) is None
+    # A tie means restored state, not one click: the richer pick wins.
+    assert rc._fresh_panel_click(cell, pin, None, None) == "cell"
+
+
+def test_observed_hindcast_cells_clamps_to_the_reach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    inside = now - pd.Timedelta(hours=5)
+    outside = now - pd.Timedelta(hours=48)
+    timeline = pd.DataFrame(
+        {
+            "time": [inside, outside, now + pd.Timedelta(hours=6)],
+            "quality_index": [3.4, 4.9, 2.0],
+            "series": ["Observed"] * 3,
+        }
+    )
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: timeline)
+
+    cells = rc._observed_hindcast_cells("silvaplana", now, "[]")
+    assert cells["time"].tolist() == [inside]
+    assert cells["is_hindcast"].all()
+    assert cells["hour_quality"].iloc[0] == 3.4
+
+    empty = pd.DataFrame(columns=["time", "quality_index", "series"])
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: empty)
+    assert rc._observed_hindcast_cells("silvaplana", now, "[]").empty
+
+
+def test_grid_prefers_observed_hours_over_logged_predictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    forecast_times = pd.date_range(now, periods=3, freq="h")
+    shared = now - pd.Timedelta(hours=2)
+    pred_only = now - pd.Timedelta(hours=3)
+
+    history = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"] * 2,
+            "forecast_time": [shared, pred_only],
+            "quality_index": [1.2, 2.8],
+            "prediction_timestamp": [now - pd.Timedelta(hours=3)] * 2,
+        }
+    )
+    timeline = pd.DataFrame(
+        {
+            "time": [shared],
+            "quality_index": [4.6],
+            "series": ["Observed"],
+        }
+    )
+    monkeypatch.setattr(rc, "_prediction_history_cached", lambda: history)
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: timeline)
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": 1.5} for t in forecast_times
+            ],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",), json.dumps(predictions), "Europe/Zurich", json.dumps([]), False
+    )
+
+    hind = grid[grid["is_hindcast"]]
+    assert len(hind) == 2
+    # Measured beats called for the hour both sources cover.
+    winner = hind[hind["time"] == shared.tz_convert("Europe/Zurich")]
+    assert winner["hour_quality"].iloc[0] == 4.6
+    # A predicted-only hour still fills from the log.
+    filler = hind[hind["time"] == pred_only.tz_convert("Europe/Zurich")]
+    assert filler["hour_quality"].iloc[0] == 2.8
+
+
+def test_coverage_label_anchors_sit_on_covered_hours() -> None:
+    coverage = pd.DataFrame(
+        {
+            "lane": ["Predicted", "Predicted", "Observed"],
+            "time": pd.to_datetime(
+                ["2026-08-06T08:00:00Z", "2026-08-06T12:00:00Z", "2026-08-06T06:00:00Z"]
+            ),
+        }
+    )
+    anchors = rc._coverage_label_anchors(coverage)
+    assert set(anchors["lane"]) == {"Predicted", "Observed"}
+    at = dict(zip(anchors["lane"], anchors["at"]))
+    # The anchor is one of the lane's own covered hours, never a gap.
+    assert at["Predicted"] in set(coverage[coverage["lane"] == "Predicted"]["time"])
+    assert at["Observed"] == pd.Timestamp("2026-08-06T06:00:00Z")
+
+    assert rc._coverage_label_anchors(pd.DataFrame()).empty
 
 
 def test_flat_week_ignores_windy_hindcast() -> None:

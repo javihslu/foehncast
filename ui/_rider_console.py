@@ -777,6 +777,38 @@ def _hindcast_cells(spot_id: str, forecast_start: pd.Timestamp) -> pd.DataFrame:
     )
 
 
+def _observed_hindcast_cells(
+    spot_id: str, forecast_start: pd.Timestamp, predictions_json: str
+) -> pd.DataFrame:
+    """Board cells from measured data for the hours before the forecast.
+
+    The prediction log only holds hours a scheduled run actually scored, so a
+    stretch with observations but no logged predictions stayed blank even
+    though the record knows what the wind did. The observed half is the more
+    reliable one -- measured, not called -- so it wins any hour both sources
+    cover. Same clamps as _hindcast_cells, so the forecast is never overlapped
+    and the reach matches the panel's. The timeline call is the cached one the
+    accuracy frame already made for this spot, never a new fetch.
+    """
+    timeline = spot_quality_timeline(spot_id, predictions_json)
+    rows = timeline[timeline["series"] == "Observed"]
+    if rows.empty:
+        return pd.DataFrame()
+    reach = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=_HINDCAST_HOURS)
+    rows = rows[(rows["time"] >= reach) & (rows["time"] < forecast_start)]
+    if rows.empty:
+        return pd.DataFrame()
+    quality = rows["quality_index"].astype(float)
+    return pd.DataFrame(
+        {
+            "time": rows["time"],
+            "quality": [max(1, quality_bucket(q)) for q in quality],
+            "hour_quality": quality.to_numpy(),
+            "is_hindcast": True,
+        }
+    )
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def all_spots_quality_grid(
     spot_ids: tuple[str, ...],
@@ -832,6 +864,17 @@ def all_spots_quality_grid(
         # hour -- so they fill that stretch, clamped to the panel's own
         # hindcast reach and deduplicated to the latest word per hour.
         hindcast = _hindcast_cells(spot_id, frame["time"].min())
+        observed = _observed_hindcast_cells(
+            spot_id, frame["time"].min(), predictions_json
+        )
+        if not observed.empty:
+            # Measured hours outrank logged predictions for the same hour, so
+            # the observed frame leads and the dedupe keeps it.
+            merged = pd.concat([observed, hindcast], ignore_index=True)
+            merged["_hour_key"] = merged["time"].dt.floor("h")
+            hindcast = merged.drop_duplicates("_hour_key", keep="first").drop(
+                columns="_hour_key"
+            )
         if not hindcast.empty:
             frame = pd.concat([hindcast, frame], ignore_index=True)
 
@@ -1086,6 +1129,46 @@ def _pinned_panel_time(
         else stored
     )
     return pinned if domain_start <= pinned <= domain_end else None
+
+
+def _initial_pinned(
+    stored: pd.Timestamp | None,
+    domain: list[pd.Timestamp],
+    now: pd.Timestamp,
+    options: list[pd.Timestamp],
+) -> pd.Timestamp | None:
+    """The panel's pinned hour on first paint: the stored pick, else now.
+
+    Without the fallback the details panel opened on its empty hint until the
+    first click, even though the dials beside it already defaulted to the
+    current hour. A local fallback only -- writing the map's slider key here
+    would move the slider without its owner running.
+    """
+    pinned = _pinned_panel_time(stored, domain[0], domain[1])
+    return pinned if pinned is not None else _clamp_to_slider_option(now, options)
+
+
+def _fresh_panel_click(
+    cell_key: tuple[str, str] | None,
+    pin: pd.Timestamp | None,
+    seen_cell: tuple[str, str] | None,
+    seen_pin: pd.Timestamp | None,
+) -> str | None:
+    """Which panel pick is new this run: "cell", "pin", or None.
+
+    Both selection params keep re-reporting their last pick on every rerun
+    (empty=False makes them sticky), so the latest click is the param whose
+    value moved. Routing on "a cell is selected" instead masked every
+    wind-plot click made after the first board cell. A re-click of the exact
+    pick a param already holds reports no change and is dropped -- the same
+    limit the old applied-hour guard had. The cell wins a tie: it is the
+    richer pick (spot and hour), and a single click lands in one plot only.
+    """
+    if cell_key is not None and cell_key != seen_cell:
+        return "cell"
+    if pin is not None and pin != seen_pin:
+        return "pin"
+    return None
 
 
 def _pinned_time_from_event(event: Any, tz: Any) -> pd.Timestamp | None:
@@ -2004,13 +2087,29 @@ def _board_view(
     )
 
 
+def _coverage_label_anchors(hour_coverage: pd.DataFrame) -> pd.DataFrame:
+    """One anchor hour per coverage lane, for the labels inside the strip.
+
+    The middle covered hour by position is itself covered, so the label lands
+    on a filled segment rather than floating over a gap.
+    """
+    if hour_coverage.empty:
+        return pd.DataFrame(columns=["lane", "at"])
+
+    def _middle(times: pd.Series) -> pd.Timestamp:
+        ordered = times.sort_values().reset_index(drop=True)
+        return ordered.iloc[len(ordered) // 2]
+
+    return hour_coverage.groupby("lane")["time"].apply(_middle).reset_index(name="at")
+
+
 def _coverage_view(panel: _Panel) -> alt.LayerChart:
     """The strip between the plots: two lanes saying what the record holds.
 
     One lane for the forecast and one for the measurement, each filled only
     where that half exists, so an hour holding both fills both lanes and there
-    is no third thing to name. The lanes are labelled on the same right-hand
-    edge the board names its spots on. Nothing here grades the forecast, so the
+    is no third thing to name. The lane names sit inside their own segments,
+    not on a spine of their own. Nothing here grades the forecast, so the
     strip carries no verdict and no shading -- the ruler's tint keeps that job.
 
     Each lane is its own layer at a constant colour, the way the sun marks are
@@ -2022,7 +2121,7 @@ def _coverage_view(panel: _Panel) -> alt.LayerChart:
         "lane:N",
         title=None,
         scale=alt.Scale(domain=list(_COVERAGE_LANES)),
-        axis=alt.Axis(orient="right", labelFontSize=10, ticks=False, domain=False),
+        axis=None,
     )
     tooltip = [
         alt.Tooltip("time:T", title="Hour", format="%a %d %b %H:00"),
@@ -2040,6 +2139,19 @@ def _coverage_view(panel: _Panel) -> alt.LayerChart:
         )
         for lane, hue in zip(_COVERAGE_LANES, (pal.reading, pal.idle), strict=True)
     ]
+    anchors = _coverage_label_anchors(panel.hour_coverage)
+    if not anchors.empty:
+        # The surface colour is the one both lane hues were picked to stand
+        # out against, so it is the one that reads on top of either.
+        layers.append(
+            alt.Chart(anchors)
+            .mark_text(fontSize=9, fontWeight="bold", color=pal.surface)
+            .encode(
+                x=_panel_x(panel, "at"),
+                y=lane_y,
+                text="lane:N",
+            )
+        )
     if panel.now is not None:
         layers.append(
             alt.Chart(pd.DataFrame({"time": [panel.now]}))
@@ -2452,14 +2564,15 @@ def render_rider_console(
         if domain is None:
             st.info("No forecast window available for this spot right now.")
         else:
-            pinned = _pinned_panel_time(
+            pinned = _initial_pinned(
                 # A panel click's own pin wins, past hours included; the map
                 # slider's hour is the fallback (and what a slider drag
                 # restores when it clears the click pin).
                 st.session_state.get("panel_pin_hour")
                 or st.session_state.get("wind_map_hour"),
-                domain[0],
-                domain[1],
+                domain,
+                now,
+                pred_hours,
             )
             st.subheader("All spots — session quality")
             st.markdown(_quality_legend_html(), unsafe_allow_html=True)
@@ -2519,16 +2632,28 @@ def render_rider_console(
             selected = (
                 _selected_heat_cell(event, heat_grid) if not heat_grid.empty else None
             )
-            if selected is not None:
+            clicked = _pinned_time_from_event(event, domain[0].tz)
+            cell_key = (
+                (str(selected["spot_id"]), str(selected["time"]))
+                if selected is not None
+                else None
+            )
+            route = _fresh_panel_click(
+                cell_key,
+                clicked,
+                st.session_state.get("panel_cell_seen"),
+                st.session_state.get("panel_pin_seen"),
+            )
+            st.session_state["panel_cell_seen"] = cell_key
+            st.session_state["panel_pin_seen"] = clicked
+            if route == "cell":
                 # A cell carries both halves of the pick: the hour and the spot.
                 _sync_slider_to_heatmap_click(
                     selected["time"], str(selected["spot_id"]), pred_hours
                 )
-            else:
+            elif route == "pin":
                 # Empty panel space carries only the hour.
-                clicked = _pinned_time_from_event(event, domain[0].tz)
-                if clicked is not None:
-                    _sync_slider_to_heatmap_click(clicked, None, pred_hours)
+                _sync_slider_to_heatmap_click(clicked, None, pred_hours)
             with detail_col:
                 detail = _detail_row(selected, heat_grid, focus_spot_id, pinned)
                 # The comparison grid sits beside the board, the bubble below it
