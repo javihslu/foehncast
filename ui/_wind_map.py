@@ -24,6 +24,9 @@ from _theme import active
 
 _KN_TO_KMH = 1.852
 _FORECAST_HOURS = 48
+#: Recent hours fetched alongside the forecast so the console's hindcast
+#: stretch (about a day) has wind for its dials too.
+_PAST_DAYS = 2
 
 _COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
@@ -39,11 +42,18 @@ _IDEAL_HALF_ANGLE_DEG = 45.0
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _spot_wind_frame(spot_id: str) -> pd.DataFrame:
-    """Hourly 10 m wind speed, direction, and gusts for one spot."""
+    """Hourly 10 m wind speed, direction, and gusts for one spot.
+
+    Includes _PAST_DAYS of recent hours: the console panel opens about a day
+    before the forecast starts, and its dials and cell tooltips read this same
+    frame for those hindcast hours.
+    """
     spot = next((s for s in get_spots() if s["id"] == spot_id), None)
     if spot is None:
         return pd.DataFrame()
-    frame = fetch_forecast(spot["lat"], spot["lon"], forecast_hours=_FORECAST_HOURS)
+    frame = fetch_forecast(
+        spot["lat"], spot["lon"], past_days=_PAST_DAYS, forecast_hours=_FORECAST_HOURS
+    )
     cols = ["wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"]
     if frame.empty or any(c not in frame.columns for c in cols):
         return pd.DataFrame()
@@ -380,7 +390,10 @@ def _render_map_fragment(
     hour = st.select_slider(
         "Forecast hour",
         options=options,
-        value=_clamp_to_slider_option(wind_times[0], options) or options[0],
+        # Default to now: with past days in the wind frame, index[0] sits days
+        # back and would open the map on a hindcast hour.
+        value=_clamp_to_slider_option(pd.Timestamp.now(tz=wind_times.tz), options)
+        or options[0],
         format_func=lambda t: t.strftime("%a %H:%M"),
         key="wind_map_hour",
     )
@@ -393,6 +406,9 @@ def _render_map_fragment(
     st.session_state.setdefault("wind_map_hour_seen", hour)
     if st.session_state["wind_map_hour_seen"] != hour:
         st.session_state["wind_map_hour_seen"] = hour
+        # A slider drag is a new pin intent: drop the panel's own click pin so
+        # the console falls back to the slider's hour on the app rerun.
+        st.session_state.pop("panel_pin_hour", None)
         st.rerun(scope="app")
 
     spots_cfg = {s["id"]: s for s in get_spots()}
