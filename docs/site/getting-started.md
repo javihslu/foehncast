@@ -1,6 +1,6 @@
 # Quick Start
 
-Two options: run everything **locally with Docker**, or try the **live demo** (zero setup).
+Two options: run everything **locally with Docker**, or read about the **hosted demo** below (deployed on demand, not always online).
 
 ## Option 1: Run Locally
 
@@ -46,12 +46,13 @@ curl -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
-## Option 2: Hosted Demo (offline)
+## Option 2: Hosted Demo
 
-The GCP Cloud Run deployment ran for the course duration and has been taken
-down to avoid idle cost. The local stack above provides the same system, and
-the [Cloud Deployment](system/cloud-architecture.md) page documents how to
-deploy your own copy with Terraform.
+A GCP Cloud Run deployment of the same system runs when one is hosted; it may
+be taken down between demo periods to avoid idle cost. The local stack above
+always provides the full system, and the
+[Cloud Deployment](system/cloud-architecture.md) page documents how to deploy
+your own copy with Terraform.
 
 ## For Maintainers
 

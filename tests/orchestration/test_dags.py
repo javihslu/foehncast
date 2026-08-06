@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -292,6 +293,17 @@ def test_runtime_release_dag_accepts_manual_handoff_requests(
         "dag_run_id": "{{ run_id }}",
         "dag_id": "runtime_release",
     }
+
+
+def test_inference_dag_retries_a_flaky_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loading the champion model is an HTTP call, so one 500 must not end the run."""
+    module, operators = _load_dag_module(monkeypatch, "dags/inference_dag.py")
+
+    assert [operator.kwargs["task_id"] for operator in operators] == ["run_inference"]
+    assert module.dag.kwargs["default_args"]["retries"] == 2
+    assert module.dag.kwargs["default_args"]["retry_delay"] == timedelta(minutes=1)
 
 
 def test_drift_dag_defaults_to_twelve_hour_schedule(

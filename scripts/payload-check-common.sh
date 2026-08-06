@@ -6,7 +6,10 @@ payload_check_require_pattern() {
   local pattern="$3"
   local description="$4"
 
-  if ! printf '%s' "$payload" | grep -Eq "$pattern"; then
+  # A here-string rather than a pipe: grep -q exits on the first match, which
+  # SIGPIPEs the writer of a payload larger than the pipe buffer, and pipefail
+  # would then report a successful match as a failure.
+  if ! grep -Eq "$pattern" <<<"$payload"; then
     echo "${failure_prefix}: expected ${description}." >&2
     printf '%s\n' "$payload" >&2
     return 1

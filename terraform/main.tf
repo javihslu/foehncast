@@ -8,14 +8,18 @@ locals {
   }
   artifact_registry_host            = "${var.region}-docker.pkg.dev"
   artifact_registry_repository_path = "${local.artifact_registry_host}/${var.project_id}/${var.artifact_registry_repository_id}"
-  cloud_run_image                   = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
-  cloud_run_ui_image                = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
-  cloud_run_mlflow_image            = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
-  feast_registry_uri                = "gs://${var.artifact_bucket_name}/feast/registry.db"
-  feast_staging_uri                 = "gs://${var.artifact_bucket_name}/feast/staging"
-  feast_bigquery_table              = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
-  prediction_event_dataset_id       = "foehncast_monitoring"
-  prediction_event_table_id         = "prediction_events"
+  # These images only seed a service or job the first time Terraform creates it.
+  # Cloud Build then deploys an immutable sha-<commit> image on every merge, so
+  # each Cloud Run resource below ignores changes to its image field. Without
+  # that, an apply would roll every running revision back to this bootstrap tag.
+  cloud_run_image             = var.cloud_run_image != "" ? var.cloud_run_image : "${local.artifact_registry_repository_path}/foehncast-app:latest"
+  cloud_run_ui_image          = var.cloud_run_ui_image != "" ? var.cloud_run_ui_image : "${local.artifact_registry_repository_path}/foehncast-ui:latest"
+  cloud_run_mlflow_image      = var.cloud_run_mlflow_image != "" ? var.cloud_run_mlflow_image : "${local.artifact_registry_repository_path}/foehncast-mlflow:latest"
+  feast_registry_uri          = "gs://${var.artifact_bucket_name}/feast/registry.db"
+  feast_staging_uri           = "gs://${var.artifact_bucket_name}/feast/staging"
+  feast_bigquery_table        = "${var.project_id}.${var.bigquery_dataset_id}.${var.bigquery_feature_table_id}"
+  prediction_event_dataset_id = "foehncast_monitoring"
+  prediction_event_table_id   = "prediction_events"
   # When MLflow is deployed on Cloud Run, use its URL; otherwise fall back to
   # the explicit variable (e.g. an external MLflow server).
   mlflow_tracking_uri = (
@@ -728,12 +732,18 @@ resource "google_cloud_run_v2_service" "app" {
         timeout_seconds       = 5
       }
 
+      # /metrics can answer slowly while a long request saturates the worker;
+      # the default 4s timeout with 3 strikes killed healthy instances roughly
+      # once a minute (2026-08-06). Tolerate slow scrapes, still kill a wedged
+      # process after ~2.5 min of sustained failure.
       liveness_probe {
         http_get {
           path = "/metrics"
           port = var.cloud_run_container_port
         }
-        period_seconds = 30
+        period_seconds    = 30
+        timeout_seconds   = 15
+        failure_threshold = 5
       }
     }
   }
@@ -741,6 +751,10 @@ resource "google_cloud_run_v2_service" "app" {
   traffic {
     percent = 100
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
   }
 
   depends_on = [
@@ -935,6 +949,10 @@ resource "google_cloud_run_v2_service" "mlflow" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_service.required,
     google_sql_database.mlflow,
@@ -968,6 +986,17 @@ resource "google_cloud_run_v2_service" "ui" {
   template {
     service_account = google_service_account.cloud_run_runtime.email
     timeout         = "300s"
+
+    # Streamlit keeps session state and its st.cache_data entries in the memory
+    # of whichever instance served the websocket. Without affinity a reconnect
+    # can land elsewhere, dropping the session and replaying the script against
+    # a cold cache, which reads as the console being slow.
+    session_affinity = true
+
+    # A Streamlit session is served from one process, so the Cloud Run default
+    # queues concurrent visitors behind a single interpreter instead of scaling
+    # out. Keep the per-instance ceiling low.
+    max_instance_request_concurrency = 20
 
     scaling {
       min_instance_count = 1
@@ -1048,6 +1077,10 @@ resource "google_cloud_run_v2_service" "ui" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
   }
 
+  lifecycle {
+    ignore_changes = [template[0].containers[0].image]
+  }
+
   depends_on = [
     google_project_service.required,
     google_firestore_database.feast_online_store,
@@ -1108,6 +1141,10 @@ resource "google_cloud_run_v2_job" "feature_pipeline" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -1146,6 +1183,10 @@ resource "google_cloud_run_v2_job" "training_pipeline" {
         }
       }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
   }
 
   depends_on = [google_project_service.required]
@@ -1188,6 +1229,10 @@ resource "google_cloud_run_v2_job" "inference_pipeline" {
     }
   }
 
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -1226,6 +1271,10 @@ resource "google_cloud_run_v2_job" "drift_detection" {
         }
       }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].template[0].containers[0].image]
   }
 
   depends_on = [google_project_service.required]

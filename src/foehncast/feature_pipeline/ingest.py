@@ -142,10 +142,14 @@ def fetch_forecast(
     }
     if forecast_hours is not None:
         params["forecast_hours"] = forecast_hours
+        if past_days > 0:
+            # The API silently ignores past_days next to forecast_hours; the
+            # granular counterpart of forecast_hours is past_hours.
+            params["past_hours"] = past_days * 24
     else:
         params["forecast_days"] = cfg["forecast_days"]
-    if past_days > 0:
-        params["past_days"] = past_days
+        if past_days > 0:
+            params["past_days"] = past_days
     data = _get(cfg["forecast_url"], params)
     return _hourly_to_dataframe(data, timezone=cfg["timezone"])
 

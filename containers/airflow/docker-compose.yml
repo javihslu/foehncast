@@ -19,9 +19,6 @@ x-airflow-runtime-env: &airflow-runtime-env
   PYTHONPATH: /workspace/src
 
 x-airflow-common: &airflow-common
-  build:
-    context: ../..
-    dockerfile: containers/airflow/Dockerfile
   image: ${FOEHNCAST_AIRFLOW_IMAGE:-foehncast-airflow:local}
   working_dir: /workspace
   depends_on:
@@ -65,6 +62,9 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    build:
+      context: ../..
+      dockerfile: containers/airflow/Dockerfile
     container_name: airflow-init
     environment:
       <<: *airflow-runtime-env

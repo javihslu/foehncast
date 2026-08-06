@@ -10,6 +10,10 @@ x-objectstore-runtime-env: &objectstore-runtime-env
   AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin123}
 
 x-feast-runtime-env: &feast-runtime-env
+  # Pin Feast to local mode so a cloud-mode .env cannot redirect the registry
+  # to GCS (same guard as the model-registry MLFLOW_ARTIFACT_DESTINATION pin).
+  FOEHNCAST_FEAST_SOURCE: local
+  FOEHNCAST_FEAST_REGISTRY: ""
   FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_PROJECT_ID:-foehncast-local}
   FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_NAMESPACE:-}
   FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE: ${FOEHNCAST_FEAST_LOCAL_DATASTORE_DATABASE:-}
@@ -17,6 +21,15 @@ x-feast-runtime-env: &feast-runtime-env
 
 services:
   app:
+    depends_on:
+      objectstore-init:
+        condition: service_healthy
+      feast-online-store:
+        condition: service_healthy
+    environment:
+      <<: [*objectstore-runtime-env, *feast-runtime-env]
+
+  ui:
     depends_on:
       objectstore-init:
         condition: service_healthy
@@ -55,4 +68,7 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin123}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
       MLFLOW_S3_ENDPOINT_URL: http://objectstore:9000
-      MLFLOW_ARTIFACT_DESTINATION: ${MLFLOW_ARTIFACT_DESTINATION:-s3://${STORAGE_S3_BUCKET:-foehncast-data}/mlflow/artifacts}
+      # Pinned, not interpolated: this overlay is the MinIO-backed local stack,
+      # and a cloud .env in the project dir would otherwise point the local
+      # registry at GCS, where its artifact proxy answers 500s.
+      MLFLOW_ARTIFACT_DESTINATION: s3://${STORAGE_S3_BUCKET:-foehncast-data}/mlflow/artifacts

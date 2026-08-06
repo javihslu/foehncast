@@ -46,6 +46,8 @@ cd foehncast
 
 The script starts the local stack (Airflow, MLflow, MinIO, Prometheus, the app, and the rider console) and runs a smoke test. No cloud credentials are needed.
 
+The bootstrap seeds about a week of history so it finishes quickly. A model trained on that much data predicts nearly the same quality for every spot, so the local console looks flatter than a cloud deployment trained on a year of history. For comparable results, run `uv run python scripts/backfill-history.py` once the stack is up, then restart the `app` and `ui` containers. Add `--recent-days 7` to also curate the days the Open-Meteo archive has not published yet, which gives the console's coverage strip observed hours to set its predictions against.
+
 After bootstrap, you get:
 
 | Service | URL |
@@ -64,6 +66,25 @@ curl -X POST http://127.0.0.1:8000/rank \
   -d '{"spot_ids":["silvaplana","urnersee"]}'
 ```
 
+### Render the console without Docker
+
+UI work and visual checks do not need the stack. The console reads a stored
+prediction snapshot before it falls back to live inference, so installing one is
+enough to render every panel on the host:
+
+```bash
+make ui-local
+```
+
+That writes a snapshot and starts Streamlit on `http://127.0.0.1:8501`. Wind and
+drive times still come from the live Open-Meteo and OSRM APIs; Airflow, MLflow,
+MinIO, and the serving container are not involved. With the stack up, `uv run
+python scripts/ui_fixture.py --capture` records real predictions once so later
+offline runs replay them instead of a synthetic curve.
+
+Fixture snapshots are labelled as such, and the console shows a banner saying the
+numbers are not a forecast. Use the full stack for anything that has to be true.
+
 ### The rider console
 
 <p align="center">
@@ -72,7 +93,7 @@ curl -X POST http://127.0.0.1:8000/rank \
   <em>Session-quality heatmap across six spots; a selected cell drives the wind dial and metrics, with the serving champion model in the sidebar.</em>
 </p>
 
-During the course the full stack also ran on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. The cloud deployment was taken down after grading to stop incurring cost; everything reproduces locally with the bootstrap script above.
+The full stack also runs on GCP Cloud Run, deployed by Terraform (see [terraform/](terraform/)); the console renders identically there by design. A hosted demo is deployed from the same Terraform when one is running; deployments are temporary and taken down to avoid idle cost. Everything reproduces locally with the bootstrap script above.
 
 ### Reproducible pipelines (DVC)
 
@@ -95,7 +116,7 @@ make coverage      # coverage report
 
 ## Cloud Deployment
 
-The system also ran on GCP Cloud Run during the course; that deployment was taken down after grading. This section documents the architecture as deployed, and [terraform/](terraform/) remains deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
+The system runs on GCP Cloud Run. A hosted demo (console plus inference API) is deployed from [terraform/](terraform/) when one is running; deployments are temporary and taken down to avoid idle cost. This section documents the architecture as deployed, and the same Terraform is deployable for your own copy. Contributors do not need cloud access; Docker is enough to run everything locally.
 
 ```mermaid
 flowchart LR
@@ -156,5 +177,5 @@ FoehnCast itself is released under the [MIT License](LICENSE).
 - [Getting started](https://javihslu.github.io/foehncast/getting-started/)
 - [Architecture](https://javihslu.github.io/foehncast/system/architecture/)
 - [Cloud deployment](https://javihslu.github.io/foehncast/system/cloud-architecture/)
-- Terraform operator detail: `terraform/README.md`
-- Container detail: `containers/README.md`
+- [Terraform operator detail](terraform/README.md) - platform inputs, bootstrap, and teardown
+- [Container detail](containers/README.md) - the service images and their build contexts

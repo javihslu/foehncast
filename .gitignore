@@ -12,7 +12,7 @@ build/
 venv/
 .state/
 
-# IDE
+# IDE and local tooling
 .vscode/
 .idea/
 *.swp

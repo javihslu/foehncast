@@ -57,6 +57,18 @@ def is_daylight(lat: float, lon: float, times: pd.DatetimeIndex) -> pd.Series:
     return daylight.rename("is_daylight")
 
 
+def is_daylight_hour(
+    lat: float, lon: float, hour_starts: pd.DatetimeIndex
+) -> pd.Series:
+    """Daylight flag for hourly cells [H, H+1), judged at the cell midpoint.
+
+    One rule for every hourly surface (heatmap cells, dimmed line segments,
+    night bands, map dials) so their night hours land on the same cell edges.
+    """
+    daylight = is_daylight(lat, lon, hour_starts + pd.Timedelta(minutes=30))
+    return pd.Series(daylight.to_numpy(), index=hour_starts, name="is_daylight")
+
+
 def night_intervals(
     lat: float,
     lon: float,

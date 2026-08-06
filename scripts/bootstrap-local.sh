@@ -156,6 +156,7 @@ BOOTSTRAP_SERVICES=(
   airflow-scheduler
   airflow-triggerer
   app
+  ui
   statsd
   prometheus
 )
@@ -269,20 +270,16 @@ verify_airflow_api_health() {
     ""
 }
 
-stop_ci_smoke_airflow_orchestration_services() {
-  if [[ "$CI_SMOKE" != "true" ]]; then
-    return
-  fi
-
-  echo "Stopping background Airflow orchestration services for isolated feature DAG smoke..."
+stop_airflow_orchestration_services() {
+  # `airflow dags test` executes the run in-process. Leaving the scheduler up
+  # lets it claim the same task instances, and whichever executor loses the race
+  # gets "invalid state" and deadlocks the run. Stop them on every path, not
+  # only under --ci-smoke, or the documented one-command install fails at random.
+  echo "Stopping background Airflow orchestration services so the feature DAG test runs alone..."
   compose stop airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null
 }
 
-restart_ci_smoke_airflow_orchestration_services() {
-  if [[ "$CI_SMOKE" != "true" ]]; then
-    return
-  fi
-
+restart_airflow_orchestration_services() {
   echo "Restarting background Airflow orchestration services for asset-triggered training..."
   compose up -d airflow-dag-processor airflow-scheduler airflow-triggerer >/dev/null
   wait_for_service_health airflow-dag-processor 90 2
@@ -342,6 +339,7 @@ if [[ "$resolved_objectstore_console_port" != "$OBJECTSTORE_CONSOLE_PORT" ]]; th
 fi
 
 export OBJECTSTORE_PORT="$resolved_objectstore_port"
+set_env_value STORAGE_S3_ENDPOINT "http://127.0.0.1:${resolved_objectstore_port}"
 export OBJECTSTORE_CONSOLE_PORT="$resolved_objectstore_console_port"
 export STORAGE_S3_BUCKET="${STORAGE_S3_BUCKET:-$OBJECTSTORE_BUCKET}"
 export STORAGE_S3_ENDPOINT="${STORAGE_S3_ENDPOINT:-http://${OBJECTSTORE_BIND_HOST}:${OBJECTSTORE_PORT}}"
@@ -390,16 +388,16 @@ echo "Waiting for Airflow API server health..."
 verify_airflow_api_health 60 2
 
 echo "Running feature pipeline for ${FEATURE_DATE}..."
+stop_airflow_orchestration_services
 if [[ "$CI_SMOKE" == "true" ]]; then
-  stop_ci_smoke_airflow_orchestration_services
   compose exec -T \
     -e FOEHNCAST_INGEST_FIXTURE_DIR="$CI_SMOKE_INGEST_FIXTURE_DIR" \
     airflow-webserver \
     airflow dags test feature_pipeline "$FEATURE_DATE"
-  restart_ci_smoke_airflow_orchestration_services
 else
   compose exec -T airflow-webserver airflow dags test feature_pipeline "$FEATURE_DATE"
 fi
+restart_airflow_orchestration_services
 
 echo "Waiting for asset-triggered training pipeline..."
 wait_for_airflow_dag_run_state training_pipeline success asset_triggered 120 2

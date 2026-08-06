@@ -292,7 +292,10 @@ mlflow:
 
 # Inference settings
 inference:
-  max_horizon_hours: 14
+  # Two days, so a visitor arriving in the evening still sees a full day of
+  # daylight ahead. Ranking drops night hours, and a shorter window can leave
+  # nothing rideable in it.
+  max_horizon_hours: 48
   ranking_weights:
     quality_index: 0.6
     ride_drive_ratio: 0.3

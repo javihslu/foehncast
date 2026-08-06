@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 import logging
 import secrets
+import threading
+import time
 from typing import Any, Literal
 
 from fastapi import (
@@ -170,7 +172,37 @@ _SYNTHETIC_UP_METRICS = (
 )
 
 
+# Every PromQL query rebuilds this payload, and in cloud each renderer reads a
+# retained state file from GCS, so an uncached rebuild costs seconds. One short
+# TTL collapses a burst of queries (and all concurrent visitors) onto a single
+# rebuild; Prometheus scrapes on a far longer interval, so nothing observable
+# goes stale.
+_METRICS_TTL_SECONDS = 10.0
+_metrics_cache: tuple[float, bytes] | None = None
+_metrics_cache_lock = threading.Lock()
+
+
 def _metrics_payload() -> bytes:
+    """Return the metrics payload, rebuilding it at most once per TTL window."""
+    global _metrics_cache
+
+    now = time.monotonic()
+    cached = _metrics_cache
+    if cached is not None and now - cached[0] < _METRICS_TTL_SECONDS:
+        return cached[1]
+
+    with _metrics_cache_lock:
+        # Another thread may have rebuilt it while this one waited for the lock.
+        cached = _metrics_cache
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < _METRICS_TTL_SECONDS:
+            return cached[1]
+        payload = _build_metrics_payload()
+        _metrics_cache = (now, payload)
+        return payload
+
+
+def _build_metrics_payload() -> bytes:
     # A synthetic ``up`` series for this app only: if this endpoint answers,
     # the app is up. Health of other services is Prometheus's own job.
     return (
@@ -334,6 +366,11 @@ def create_app() -> FastAPI:
 
     @app.get("/pipeline/capabilities")
     def pipeline_capabilities() -> dict[str, list[str]]:
+        # No configured control token means /pipeline/run rejects everything, so
+        # report no capabilities and let clients hide the trigger controls
+        # instead of offering buttons that can only fail.
+        if not env_value("FOEHNCAST_CONTROL_TOKEN"):
+            return {"pipelines": []}
         return {"pipelines": _orchestrator_or_503().capabilities()}
 
     @app.get("/pipeline/runs")

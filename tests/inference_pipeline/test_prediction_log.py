@@ -812,3 +812,60 @@ def test_emit_prediction_drift_metrics_returns_none_when_no_forecast_rows(
     )
 
     assert report is None
+
+
+def test_write_prediction_events_appends_to_durable_jsonl_history(
+    tmp_path: Path,
+) -> None:
+    event_path = tmp_path / "prediction-events.jsonl"
+
+    prediction_log.write_prediction_events(
+        [
+            {
+                "prediction_timestamp": (_NOW - timedelta(days=30)).isoformat(),
+                "forecast_time": (_NOW - timedelta(days=29)).isoformat(),
+                "quality_index": 3.0,
+                "endpoint": "backfill",
+                "model_version": "2",
+                "spot_id": "silvaplana",
+                "spot_name": "Silvaplana",
+                "requested_spot_ids": ["silvaplana"],
+            }
+        ],
+        event_path=event_path,
+    )
+
+    frame = prediction_log.read_prediction_event_log(event_path)
+
+    assert len(frame) == 1
+    assert list(frame["endpoint"]) == ["backfill"]
+    assert list(frame["spot_id"]) == ["silvaplana"]
+
+
+def test_write_prediction_events_uses_bigquery_when_backend_is_bigquery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    written: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        prediction_log,
+        "_write_prediction_events_bigquery",
+        lambda storage_config, rows: written.extend(rows),
+    )
+    _patch_prediction_event_bigquery_storage_config(monkeypatch)
+
+    prediction_log.write_prediction_events(
+        [
+            {
+                "prediction_timestamp": (_NOW - timedelta(days=30)).isoformat(),
+                "forecast_time": (_NOW - timedelta(days=29)).isoformat(),
+                "quality_index": 3.0,
+                "endpoint": "backfill",
+                "model_version": "2",
+                "spot_id": "silvaplana",
+                "spot_name": "Silvaplana",
+                "requested_spot_ids": ["silvaplana"],
+            }
+        ]
+    )
+
+    assert [row["endpoint"] for row in written] == ["backfill"]

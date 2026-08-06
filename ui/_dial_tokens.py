@@ -1,30 +1,52 @@
-"""Shared color tokens for the wind dial.
+"""Dial colours, resolved from the active theme rather than hard-coded.
 
-The regional map (ui/_wind_map.py) and a later small SVG dial both read these,
-so the two renderings stay in visual sync. Dial geometry (radius, max kn, wedge
-angle) is map-specific and stays in _wind_map.py.
+The dial draws three marks that can sit next to each other -- the ideal band,
+the reading dot, and the night recolour of that dot -- so the three are held to
+the all-pairs colour-vision and contrast gates in _theme, per mode. Geometry
+constants that do not change with theme stay here.
 """
 
 from __future__ import annotations
 
-# Ink for chrome outlines and text.
-INK = [7, 37, 42]
+from dataclasses import dataclass
 
-# Status colors, shared by the needle and the legend chips.
-RIDEABLE = [10, 163, 146]
-NEAR = [255, 122, 38]
-# "Too light" wind: a dark slate that clears 3:1 on the light Carto Positron
-# basemap (assumed land tone ~#e8e6e0), replacing the old pale grey that
-# vanished on the muted map.
-LIGHT_WIND = [78, 92, 104]
+from _theme import Palette, active
 
-# Light warm-grey casing drawn under needles, rings, and ticks so a mark stays
-# legible where it crosses the basemap or another mark (the surface-ring idea).
-HALO = [244, 241, 234]
-
-# Ideal-wedge alphas: a readable teal wash under a full-opacity teal edge.
+# Ideal-wedge alphas: a readable wash under a full-opacity edge.
 WEDGE_FILL_ALPHA = 110
 WEDGE_OUTLINE_ALPHA = 255
+
+
+@dataclass(frozen=True)
+class DialTokens:
+    """One theme's dial colours, as [R, G, B] lists for pydeck."""
+
+    ink: list[int]
+    halo: list[int]  # casing drawn under a mark so it survives any background
+    band: list[int]
+    reading: list[int]
+    night: list[int]
+
+    @property
+    def hex(self) -> dict[str, str]:
+        return {
+            "ink": rgb_to_hex(self.ink),
+            "halo": rgb_to_hex(self.halo),
+            "band": rgb_to_hex(self.band),
+            "reading": rgb_to_hex(self.reading),
+            "night": rgb_to_hex(self.night),
+        }
+
+
+def dial_tokens(pal: Palette | None = None) -> DialTokens:
+    pal = pal or active()
+    return DialTokens(
+        ink=pal.rgb(pal.ink),
+        halo=pal.rgb(pal.casing),
+        band=pal.rgb(pal.band),
+        reading=pal.rgb(pal.reading),
+        night=pal.rgb(pal.night),
+    )
 
 
 def rgb_to_hex(rgb: list[int]) -> str:

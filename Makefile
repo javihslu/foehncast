@@ -1,10 +1,12 @@
-.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
+.PHONY: help install install-docs install-feast lock lint format test coverage test-feature check dvc-validate alerts-check docs-build docs-serve bootstrap-local smoke-local-evaluator bootstrap-gcp terraform-remote smoke-bootstrap-only cloud-triggers cloud-data cloud-verify cloud-parity ui-fixture ui-local compose-up compose-down compose-ps compose-logs dev-build dev-rebuild dev-shell notebook-server notebook-stop feast-prepare notebook-review-compare
 
 ROOT_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 DATASET ?= train
 JUPYTER_TOKEN ?= foehncast-local
 TF_REMOTE_ARGS ?= plan
 SMOKE_BOOTSTRAP_ARGS ?=
+PARITY_BASELINE_URL ?= http://127.0.0.1:8000
+PARITY_ARGS ?=
 NOTEBOOK_REVIEW_BACKEND ?= s3
 NOTEBOOK_REVIEW_DIR ?=
 LOCAL_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.objectstore.yml
@@ -70,7 +72,7 @@ cloud-triggers:  ## Setup Cloud Build triggers via Developer Connect (one browse
 	cd $(ROOT_DIR) && ./scripts/setup-cloud-triggers.sh
 
 cloud-data:  ## Backfill 1yr historical data to BigQuery (requires gcloud ADC)
-	cd $(ROOT_DIR) && set -a && . ./.env && set +a && STORAGE_BACKEND=bigquery uv run python scripts/backfill-history.py --no-push
+	cd $(ROOT_DIR) && set -a && . ./.env && set +a && STORAGE_BACKEND=bigquery uv run python scripts/backfill-history.py --no-push --no-train
 
 cloud-verify:  ## Verify Cloud Run services are healthy and BigQuery has data
 	@echo "Checking Cloud Run inference API..."
@@ -80,11 +82,23 @@ cloud-verify:  ## Verify Cloud Run services are healthy and BigQuery has data
 	@bq query --project_id="$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)" --use_legacy_sql=false \
 		'SELECT spot_id, COUNT(*) as row_count FROM `'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw project_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_dataset_id)"'.'"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw bigquery_feature_table_id)"'` GROUP BY spot_id ORDER BY spot_id'
 
+cloud-parity:  ## Compare local and cloud APIs; needs PARITY_ARGS='--start YYYY-MM-DD --end YYYY-MM-DD'
+	cd $(ROOT_DIR) && uv run python scripts/compare-deployments.py \
+		$(PARITY_BASELINE_URL) \
+		"$$(terraform -chdir=$(ROOT_DIR)/terraform output -raw cloud_run_service_url)" \
+		$(PARITY_ARGS)
+
 terraform-remote:  ## Trigger the remote Terraform workflow with TF_REMOTE_ARGS='<command> [flags]'
 	cd $(ROOT_DIR) && ./scripts/terraform-remote.sh $(TF_REMOTE_ARGS)
 
 smoke-bootstrap-only:  ## Run the disposable bootstrap-only smoke driver with SMOKE_BOOTSTRAP_ARGS='--repo owner/repo'
 	cd $(ROOT_DIR) && ./scripts/smoke-bootstrap-only.sh $(SMOKE_BOOTSTRAP_ARGS)
+
+ui-fixture:  ## Install a prediction snapshot so the console renders without the stack
+	cd $(ROOT_DIR) && uv run python scripts/ui_fixture.py
+
+ui-local: ui-fixture  ## Render the rider console on the host, no Docker required
+	cd $(ROOT_DIR) && uv run streamlit run ui/app.py
 
 compose-up:  ## Start the default local runtime stack
 	cd $(ROOT_DIR) && $(LOCAL_COMPOSE) up -d

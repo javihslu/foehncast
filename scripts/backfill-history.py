@@ -3,9 +3,10 @@
 
 Fetches 1 year of archive data from Open-Meteo for all configured spots,
 engineers features through the standard pipeline, writes curated parquet
-files to both local DVC-tracked storage and the S3 feature store, generates
-synthetic prediction events, and optionally trains + registers a new model
-in MLflow.
+files to both local DVC-tracked storage and the S3 feature store, seeds
+synthetic prediction events into the durable prediction-event history
+(BigQuery when ``STORAGE_BACKEND=bigquery``, the JSONL event log otherwise),
+and optionally trains + registers a new model in MLflow.
 
 Export the storage and GCP variables first (for example ``set -a; source .env``).
 
@@ -21,6 +22,9 @@ Usage:
 
     # Skip DVC push (e.g. when MinIO is down)
     uv run python scripts/backfill-history.py --no-push
+
+    # Also curate the last two days of analysed hours (no training, no push)
+    uv run python scripts/backfill-history.py --recent-days 2 --no-train --no-push
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -41,7 +46,12 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 
 from foehncast.config import get_rider_config, get_spots  # noqa: E402
 from foehncast.feature_pipeline.engineer import engineer_features  # noqa: E402
+from foehncast.feature_pipeline.ingest import fetch_forecast  # noqa: E402
 from foehncast.feature_pipeline.validate import run_validation  # noqa: E402
+from foehncast.monitoring.prediction_log import (  # noqa: E402
+    read_prediction_history,
+    write_prediction_events,
+)
 from foehncast.training_pipeline.label import compute_quality_index  # noqa: E402
 
 logging.basicConfig(
@@ -55,6 +65,11 @@ logger = logging.getLogger(__name__)
 _ARCHIVE_LAG_DAYS = 7
 _PREDICTION_EVENT_INTERVAL_HOURS = 6  # Simulate predictions every 6 h.
 _API_PAUSE_SECONDS = 1.5  # Be polite to the free API.
+
+# Duplicate suppression has to see every stored row, not just the rows inside
+# the monitoring retention window that readers apply by default.
+_HISTORY_SCAN_MAX_ROWS = 1_000_000
+_HISTORY_SCAN_RETENTION_DAYS = 36_500
 
 # Archive API only provides surface-level data. Upper-level wind and
 # convective indices must be approximated.
@@ -81,6 +96,15 @@ def _parse_args() -> argparse.Namespace:
             "%Y-%m-%d"
         ),
         help="End date (YYYY-MM-DD). Default: 7 days ago.",
+    )
+    parser.add_argument(
+        "--recent-days",
+        type=int,
+        default=0,
+        help=(
+            "Also curate the last N days of analysed hours from the forecast "
+            "endpoint, closing the archive's publishing lag. 0 means do not."
+        ),
     )
     parser.add_argument(
         "--dataset",
@@ -218,6 +242,63 @@ def _fetch_spot_archive(
     return feature_df
 
 
+def _fetch_spot_recent(spot: dict, days: int) -> pd.DataFrame | None:
+    """Fetch and engineer the recent hours the archive has not published yet."""
+    spot_id = spot["id"]
+    logger.info("Fetching %s (last %d days of analysed hours)...", spot_id, days)
+
+    try:
+        raw_df = fetch_forecast(spot["lat"], spot["lon"], past_days=days)
+    except Exception:
+        logger.exception("Failed to fetch %s", spot_id)
+        return None
+
+    # An hour that has not happened yet is a forecast, not an observation.
+    raw_df = raw_df[raw_df.index < pd.Timestamp.now(tz=raw_df.index.tz).floor("h")]
+
+    if raw_df.empty:
+        logger.warning("%s: empty response, skipping", spot_id)
+        return None
+
+    feature_df = engineer_features(
+        raw_df,
+        shore_orientation_deg=spot.get("shore_orientation_deg", 0),
+    )
+
+    validation = run_validation(feature_df, spot_id)
+    if not validation.is_valid:
+        logger.warning(
+            "%s: validation failed (schema=%s, completeness=%s, range=%s)",
+            spot_id,
+            validation.schema_valid,
+            validation.completeness_valid,
+            validation.range_valid,
+        )
+        # Still write — recent data may have minor gaps.
+        logger.info("%s: writing despite validation warnings", spot_id)
+
+    logger.info("%s: %d recent rows engineered", spot_id, len(feature_df))
+    return feature_df
+
+
+def _merge_curated(
+    archive_df: pd.DataFrame | None, recent_df: pd.DataFrame | None
+) -> pd.DataFrame | None:
+    """One curated frame per spot: the archive, extended by the recent hours.
+
+    The archive is analysed rather than modelled, so where both cover an hour
+    its row is the one kept and the recent frame only fills what the archive
+    has not published yet. Columns follow the archive's, so turning the option
+    on does not change the dataset's schema.
+    """
+    frames = [df for df in (archive_df, recent_df) if df is not None and not df.empty]
+    if not frames:
+        return None
+    merged = pd.concat(frames).sort_index()
+    merged = merged[~merged.index.duplicated(keep="first")]
+    return merged.reindex(columns=frames[0].columns)
+
+
 def _generate_prediction_events(
     spot: dict,
     feature_df: pd.DataFrame,
@@ -252,7 +333,7 @@ def _generate_prediction_events(
             continue
 
         forecast_time = quality.index[idx]
-        qi = int(quality.iloc[idx])
+        qi = float(quality.iloc[idx])
 
         events.append(
             {
@@ -270,14 +351,50 @@ def _generate_prediction_events(
     return events
 
 
-def _write_prediction_events(events: list[dict], event_path: Path) -> None:
-    """Append synthetic prediction events to the durable JSONL log."""
-    event_path.parent.mkdir(parents=True, exist_ok=True)
+def _event_key(spot_id: object, forecast_time: object) -> tuple[str, str]:
+    """Natural key of a prediction event, normalized to UTC."""
+    return str(spot_id), pd.to_datetime(forecast_time, utc=True).isoformat()
 
-    # Read existing events to avoid duplicates.
+
+def _stored_event_keys() -> set[tuple[str, str]]:
+    """Keys already present in the durable prediction-event history."""
+    history = read_prediction_history(
+        max_rows=_HISTORY_SCAN_MAX_ROWS,
+        retention_days=_HISTORY_SCAN_RETENTION_DAYS,
+    )
+    if history.empty:
+        return set()
+
+    return {
+        _event_key(row.spot_id, row.forecast_time)
+        for row in history.itertuples(index=False)
+    }
+
+
+def _write_prediction_events(events: list[dict]) -> None:
+    """Seed synthetic events into the history the monitoring jobs read."""
+    stored = _stored_event_keys()
+    new_events = [
+        event
+        for event in events
+        if _event_key(event["spot_id"], event["forecast_time"]) not in stored
+    ]
+
+    if not new_events:
+        logger.info("No new prediction events to write (all duplicates)")
+        return
+
+    write_prediction_events(new_events)
+    logger.info("Seeded %d synthetic prediction events", len(new_events))
+
+
+def _write_working_log(events: list[dict], log_path: Path) -> None:
+    """Append synthetic events to the local bounded working log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     existing_keys: set[tuple[str, str]] = set()
-    if event_path.exists():
-        with event_path.open("r", encoding="utf-8") as fh:
+    if log_path.exists():
+        with log_path.open("r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -295,16 +412,13 @@ def _write_prediction_events(events: list[dict], event_path: Path) -> None:
     ]
 
     if not new_events:
-        logger.info("No new prediction events to write (all duplicates)")
         return
 
-    with event_path.open("a", encoding="utf-8") as fh:
+    with log_path.open("a", encoding="utf-8") as fh:
         for event in new_events:
             fh.write(json.dumps(event, sort_keys=True) + "\n")
 
-    logger.info(
-        "Wrote %d synthetic prediction events to %s", len(new_events), event_path
-    )
+    logger.info("Wrote %d synthetic prediction events to %s", len(new_events), log_path)
 
 
 def _write_to_feature_store(spots: list[dict], output_dir: Path) -> None:
@@ -364,14 +478,31 @@ def _dvc_push() -> None:
         )
 
 
+def _default_objectstore_credentials() -> None:
+    """Fill AWS credentials from the objectstore values, the way bootstrap does.
+
+    Sourcing .env alone leaves AWS_ACCESS_KEY_ID unset, and the S3 writers
+    fail with NoCredentialsError even though the objectstore keys are right
+    there. Explicit AWS values always win.
+    """
+    pairs = (
+        ("AWS_ACCESS_KEY_ID", "OBJECTSTORE_ACCESS_KEY"),
+        ("AWS_SECRET_ACCESS_KEY", "OBJECTSTORE_SECRET_KEY"),
+        ("MLFLOW_S3_ENDPOINT_URL", "STORAGE_S3_ENDPOINT"),
+    )
+    for target, source in pairs:
+        if not os.environ.get(target) and os.environ.get(source):
+            os.environ[target] = os.environ[source]
+
+
 def main() -> None:
+    _default_objectstore_credentials()
     args = _parse_args()
     spots = get_spots()
     rider_config = get_rider_config()
     output_dir = _PROJECT_ROOT / "data" / args.dataset
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    event_path = _PROJECT_ROOT / ".state" / "monitoring" / "prediction-events.jsonl"
     working_log_path = _PROJECT_ROOT / ".state" / "monitoring" / "prediction-log.jsonl"
 
     logger.info(
@@ -389,7 +520,14 @@ def main() -> None:
         if i > 0:
             time.sleep(_API_PAUSE_SECONDS)
 
-        feature_df = _fetch_spot_archive(spot, args.start, args.end)
+        archive_df = _fetch_spot_archive(spot, args.start, args.end)
+
+        recent_df = None
+        if args.recent_days > 0:
+            time.sleep(_API_PAUSE_SECONDS)
+            recent_df = _fetch_spot_recent(spot, args.recent_days)
+
+        feature_df = _merge_curated(archive_df, recent_df)
         if feature_df is None:
             continue
 
@@ -413,8 +551,8 @@ def main() -> None:
 
     # Write synthetic prediction events.
     if all_events and not args.no_predictions:
-        _write_prediction_events(all_events, event_path)
-        _write_prediction_events(all_events, working_log_path)
+        _write_prediction_events(all_events)
+        _write_working_log(all_events, working_log_path)
 
     # Write to S3 feature store.
     _write_to_feature_store(spots, output_dir)
@@ -436,7 +574,14 @@ def main() -> None:
 
     logger.info("")
     logger.info("Backfill complete. Rebuild containers to pick up changes:")
-    logger.info("  docker compose build app ui && docker compose up -d app ui")
+    logger.info(
+        "  docker compose -f docker-compose.yml -f docker-compose.objectstore.yml"
+        " build app ui"
+    )
+    logger.info(
+        "  docker compose -f docker-compose.yml -f docker-compose.objectstore.yml"
+        " up -d app ui"
+    )
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
-"""Rider console: quality timeline, wind chart, spot switcher, ranked grid."""
+"""Rider console: session-quality board, wind chart, spot switcher, ranked grid."""
 
 from __future__ import annotations
 
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from typing import Any
 
 import altair as alt
@@ -19,19 +20,20 @@ from foehncast.config import (
 )
 from foehncast.feature_pipeline.ingest import fetch_forecast
 from foehncast.inference_pipeline.dashboard import (
-    _RIDEABLE_QUALITY_THRESHOLD,
     quality_bucket,
     quality_label,
 )
-from foehncast.solar import is_daylight, night_intervals, solar_elevation_deg
+from foehncast.solar import is_daylight_hour, night_intervals, solar_elevation_deg
 
 from _dial_svg import wind_dial_svg
-from _dial_tokens import INK, rgb_to_hex
+from _dial_tokens import dial_tokens, rgb_to_hex
+from _theme import Palette, active, is_dark, palette, tint
 from _wind_map import (
     _KN_TO_KMH,
     _clamp_to_slider_option,
     _compass,
     _spot_wind_frame,
+    dangerous_kts,
     render_wind_map,
 )
 
@@ -67,61 +69,126 @@ def _minimum_rideable_kts() -> float:
     return float(cfg["default_min_kts"])
 
 
-# Day-granularity time axis: one tick per day, weekday + day-of-month labels.
-_DAY_AXIS = alt.Axis(
-    format="%a %d",
-    tickCount={"interval": "day", "step": 1},
-    labelAngle=0,
-    grid=False,
-)
+# Geometry of the unified time panel. Its views are layered, which Streamlit
+# reads as a nested composition: such charts render at their natural size
+# instead of stretching to the column, so the plot width is fixed here and
+# every view in the vconcat repeats it, which is also what keeps the two plots
+# and the two rulers aligned column for column.
+_PANEL_PLOT_WIDTH = 480
+_PANEL_SPACING_PX = 6
+_RULER_HEIGHT_PX = 22
+_COVERAGE_HEIGHT_PX = 26
+_WIND_HEIGHT_PX = 240
+
+# An axis is drawn OUTSIDE the view it belongs to, and the panel lays its views
+# out flush, which leaves that band out of the layout. So the panel has to
+# reserve it as padding: with the 6 px the other edges use, both rulers' labels
+# fell off the canvas and the panel had no readable time scale at all. Two
+# label lines plus the tick need this much.
+_RULER_AXIS_BAND_PX = 38
+
+
+#: Narrowest a ruler label may sit from its neighbour. The ruler prints the
+#: clock over the date, and a hint denser than the strip can hold drops labels
+#: rather than shrinking them.
+_MIN_TICK_SPACING_PX = 46
 
 
 def _heatmap_tick_count(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> int:
     """Tick-count hint scaled to the pinned window, at least 2.
 
-    2 h rhythm up to a day (the serving horizon is ~14 h), 6 h up to three
-    days, 12 h beyond, so hourly cells stay mappable on short windows and a
-    multi-day board is not flooded with hour labels.
+    The rhythm is the finest step a reader expects on a clock that still leaves
+    every label its room, measured against the width the panel actually has
+    rather than against the window alone. Bands keyed to the window could not
+    know the labels had stopped fitting when the window grew by a day to open
+    onto the record.
     """
     hours = (domain_end - domain_start).total_seconds() / 3600
-    if hours <= 24:
-        spacing = 2
-    elif hours <= 72:
-        spacing = 6
-    else:
-        spacing = 12
-    return max(2, round(hours / spacing) + 1)
+    budget = max(2, _PANEL_PLOT_WIDTH // _MIN_TICK_SPACING_PX)
+    for spacing in (1, 2, 3, 4, 6, 8, 12, 24):
+        if hours / spacing + 1 <= budget:
+            return max(2, round(hours / spacing) + 1)
+    return max(2, round(hours / 24) + 1)
 
 
-def _heatmap_x_axis(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> alt.Axis:
-    """Heatmap x-axis derived from the pinned window: 12 h tick spacing.
+# Two lines per tick: the clock time always, and the date on the second line
+# whenever the tick opens a new day. An array returned from labelExpr is what
+# Vega renders as multiple label lines. The window's first day is usually
+# already under way, so it has no midnight tick and takes its date from
+# _day_label_frame instead.
+_RULER_LABEL_EXPR = (
+    "[timeFormat(datum.value, '%H:%M'), "
+    "timeFormat(datum.value, '%H:%M') == '00:00' "
+    "? timeFormat(datum.value, '%a %d %b') : '']"
+)
 
-    Midnight ticks render the weekday + day-of-month, the rest just the hour,
-    so the day boundary still reads without a second axis row. The tickCount
-    must stay numeric: the {"interval": ...} form crashes the bundled Vega on
-    this layered, domain-pinned chart (verified live on Streamlit 1.57).
+
+def _ruler_axis(
+    orient: str, domain_start: pd.Timestamp, domain_end: pd.Timestamp
+) -> alt.Axis:
+    """One edge of the panel's time ruler: ticks and labels, no grid.
+
+    The plots inside the panel carry no x axis of their own; this axis is drawn
+    once above and once below them, so the whole panel reads as a measured
+    strip. The tickCount must stay numeric: the {"interval": ...} form crashes
+    the bundled Vega on these layered, domain-pinned views (verified live on
+    Streamlit 1.57).
     """
     return alt.Axis(
+        orient=orient,
         tickCount=_heatmap_tick_count(domain_start, domain_end),
-        labelExpr=(
-            "timeFormat(datum.value, '%H') == '00' "
-            "? timeFormat(datum.value, '%a %d') "
-            ": timeFormat(datum.value, '%H')"
-        ),
+        labelExpr=_RULER_LABEL_EXPR,
         labelAngle=0,
         grid=False,
-        labelFontSize=13,
+        labelFontSize=12,
+        labelPadding=3,
+        tickSize=5,
         title=None,
     )
 
 
+def _day_label_frame(domain_start: pd.Timestamp) -> pd.DataFrame:
+    """The date of the window's first day, printed inside the ruler.
+
+    Every later day announces itself on the axis, whose midnight tick carries
+    the date on its second label line. The first day is usually already under
+    way when the window opens, so without this its date would never be printed.
+    """
+    if domain_start == domain_start.floor("D"):
+        return pd.DataFrame(columns=["time", "label"])
+    return pd.DataFrame(
+        {"time": [domain_start], "label": [domain_start.strftime("%a %d %b")]}
+    )
+
+
+def _sun_frame(
+    domain_start: pd.Timestamp,
+    domain_end: pd.Timestamp,
+    lat: float,
+    lon: float,
+) -> pd.DataFrame:
+    """Sunrise and sunset instants inside the window, one pair per day.
+
+    Read from the same dusk-to-dawn intervals the wind plot's night bands come
+    from (solar.night_intervals): a night starts at sunset and ends at sunrise.
+    The bands quantize those edges to whole hourly cells so the two plots agree
+    column for column; a sun mark is a time rather than a cell, so it keeps the
+    exact instant and can sit inside the last night cell.
+    """
+    rows = [
+        {"time": t, "event": event, "label": f"{event} {t:%a %d %b %H:%M}"}
+        for dusk, dawn in night_intervals(lat, lon, domain_start, domain_end)
+        for t, event in ((dusk, "Sunset"), (dawn, "Sunrise"))
+    ]
+    frame = pd.DataFrame(rows, columns=["time", "event", "label"])
+    return frame[(frame["time"] >= domain_start) & (frame["time"] <= domain_end)]
+
+
 # One-hue ramp for the ordered elevation series; gusts differ by dash too.
-_ELEVATION_COLORS = {
-    "10m": "#5fa7a1",
-    "80m": "#20837c",
-    "120m": "#0b5e60",
-    "gusts": "#3b5a5a",
-}
+# Values live in _theme so the dark mode gets its own validated steps.
+def _elevation_colors(pal: Palette) -> dict[str, str]:
+    return dict(zip(("10m", "80m", "120m", "gusts"), pal.series, strict=True))
+
 
 # Ordinal 4-step teal ramp for the all-spots session-quality heatmap, covering
 # levels 2-5 (light to dark). Level 1 gets no ramp color at all: the dataviz
@@ -130,28 +197,108 @@ _ELEVATION_COLORS = {
 # "transparent" in the color scale (in-domain, so it still renders its stroke
 # and hit-tests). This four-step range passes: monotone lightness, visible
 # step gaps, 2.18:1 light end, 2 deg hue spread.
-_QUALITY_RAMP = ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
+# (values in _theme.Palette.quality, per mode)
 
-# Hairline between heatmap cells. Faint ink rather than the page surface tone:
-# level-1 cells are fill-free, and a surface-toned stroke would vanish on the
-# surface -- this keeps the flat-week "outline board" visible while reading as
-# normal gridwork between filled cells.
-_HEATMAP_GAP = "rgba(7, 37, 42, 0.16)"
+# Night cells sit OFF the quality ramp entirely. A cell whose hour has the sun
+# below the horizon carries no rideable level, so painting it in any ramp step
+# would claim a session that cannot happen. Dimming a ramp step is not an option
+# either: a dimmed level 5 lands at the lightness of level 2 or 3 and reads as a
+# weaker but real session.
+#
+# The hue is picked, not eyeballed. Run against the ramp with the dataviz
+# validator (--pairs all, light surface #eaf3ef), this is the only candidate that
+# PASSES colorblind separation: worst pair vs any ramp step is dE 9.5 (protan),
+# 10.3 (tritan). Mid-lightness greys and violets all failed — under deuteranopia
+# they collapse onto the ramp (a grey #9aa6ac sits dE 1.0 from level 2, i.e.
+# indistinguishable). Lightness, not hue, is what survives CVD, so night has to
+# leave the ramp's lightness range. It goes to the LIGHT end deliberately: the
+# residual confusion is night-vs-level-1 ("nothing happening"), which still reads
+# as don't-go, whereas a dark night tone risks being mistaken for level 5.
+# Contrast vs surface is 1.5:1, which the validator flags as needing relief in
+# another channel — hence the legend chip and the tooltip's Daylight row, so
+# night is never signalled by color alone.
+# (value in _theme.Palette.night_fill, per mode)
+
+
+def _heatmap_gap(pal: Palette) -> str:
+    """Hairline between heatmap cells: faint ink, not the surface tone.
+
+    Level-1 cells are fill-free, so a surface-toned stroke would vanish and the
+    flat-week "outline board" with it. Faint ink keeps the gridwork visible in
+    either mode while still reading as a gap between filled cells.
+    """
+    r, g, b = pal.rgb(pal.ink)
+    return (
+        f"rgba({r}, {g}, {b}, 0.16)"
+        if pal.name == "light"
+        else f"rgba({r}, {g}, {b}, 0.28)"
+    )
+
+
+def _light_green(pal: Palette) -> str:
+    """The lightest step of the mode's quality ramp.
+
+    The rideable threshold used to wear the danger red, which read as one more
+    selection mark beside the reading orange. It takes a light green instead,
+    clearly apart from the saturated green the NOW rule wears. The ramp's
+    anchor flips between modes -- level 1 sits nearest the surface -- so the
+    lightest step is the first in light mode and the last in dark.
+    """
+    return pal.quality[0] if pal.name == "light" else pal.quality[3]
+
+
+def _quality_fill(pal: Palette) -> alt.Condition:
+    """Continuous fill for a heatmap cell: the hour's own quality, one hue.
+
+    The ramp keeps the two properties the discrete scale existed to protect.
+    The low anchor is the first validated step at zero alpha, so a level-1 hour
+    still renders as the bare surface -- a fill that pale cannot clear the
+    light-end floor -- and the fade through the hue reads as "barely" rather
+    than claiming a session. Night never enters the scale: it takes the
+    off-ramp night_fill outright, or a windy 02:00 would paint the same green
+    as a rideable afternoon. clamp pins out-of-range values to the anchors.
+    """
+    return alt.condition(
+        "datum.is_day",
+        alt.Color(
+            "hour_quality:Q",
+            scale=alt.Scale(
+                domain=[1, 2, 3, 4, 5],
+                range=[tint(pal.quality[0], 0.0), *pal.quality],
+                clamp=True,
+            ),
+            legend=None,
+        ),
+        alt.value(pal.night_fill),
+    )
+
 
 # Notice chip shown when the whole window is level 1: the outline board is
 # real data (a quiet week), not a render failure, and the chip says so.
 _FLAT_WEEK_CHIP = (
     '<span style="display:inline-block;font-family:Manrope,sans-serif;'
-    "font-size:0.72rem;color:#39544f;background:rgba(210, 226, 220, 0.6);"
-    "border:1px solid rgba(7, 37, 42, 0.18);border-radius:999px;"
+    "font-size:0.72rem;color:var(--muted);background:var(--panel);"
+    "border:1px solid var(--line);border-radius:999px;"
     'padding:0.1rem 0.6rem;margin:0.15rem 0 0.35rem">'
-    "Quiet week — no spot rises above level 1 in this window</span>"
+    "Quiet week — no spot rises above level 1 in daylight this window</span>"
 )
 
 
 def _flat_week(heat_grid: pd.DataFrame) -> bool:
-    """True when the window has data but no cell rises above quality level 1."""
-    return (not heat_grid.empty) and int(heat_grid["quality"].max()) <= 1
+    """True when the window has daylight but no daylight cell rises above level 1.
+
+    Night cells are excluded: they render off-ramp, so a strong 02:00 would
+    otherwise suppress the quiet-week chip on a board with nothing rideable in it.
+    """
+    if heat_grid.empty:
+        return False
+    cells = heat_grid
+    # The chip claims "this window" about the forecast; a windy yesterday on
+    # the board's hindcast stretch is not a counterexample.
+    if "is_hindcast" in cells.columns:
+        cells = cells[~cells["is_hindcast"]]
+    daylight = cells[cells["is_day"]]
+    return (not daylight.empty) and int(daylight["quality"].max()) <= 1
 
 
 _LEGEND_CHIP = (
@@ -162,24 +309,87 @@ _LEGEND_CHIP = (
 
 
 def _quality_legend_html() -> str:
-    """Manual chip row for the heatmap legend, level 1 through 5.
+    """Manual legend for the heatmap: a gradient strip plus the night swatch.
 
-    The Vega legend would render level 1 as a transparent (invisible) swatch,
-    since the color scale maps it to "transparent". Built by hand instead,
-    mirroring the wind map's chip row (_wind_map.render_wind_map): chip 1 is
-    an outline-only swatch, chips 2-5 use the validated ramp.
+    The fill is a continuous ramp on the hour's own quality, so the legend is a
+    strip through the validated anchors -- fading to the bare surface at the
+    level-1 end, where a fill that pale could not clear the light-end floor --
+    rather than one chip per level. A Vega legend cannot draw the zero-alpha
+    fade, so this is built by hand, mirroring the wind map's chip row
+    (_wind_map.render_wind_map).
     """
-    swatches = ["border:1px solid rgba(7, 37, 42, 0.4)"] + [
-        f"background:{color}" for color in _QUALITY_RAMP
-    ]
-    chips = "".join(
-        _LEGEND_CHIP.format(swatch=swatch, level=level)
-        for level, swatch in zip((1, 2, 3, 4, 5), swatches, strict=True)
+    ramp = ", ".join([tint(active().quality[0], 0.0), *active().quality])
+    strip = (
+        '<span style="display:inline-block;width:3.6rem;height:0.7rem;'
+        "border-radius:2px;border:1px solid var(--line);"
+        f"background:linear-gradient(90deg, {ramp});"
+        'margin:0 0.3rem 0 0.9rem;vertical-align:-0.05rem"></span>'
+    )
+    night = _LEGEND_CHIP.format(
+        swatch=f"background:{active().night_fill}", level="Night"
     )
     return (
-        "<p style=\"color:#07252a;font-family:'Manrope',sans-serif;"
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
         'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
-        f"Session quality (1-5){chips}</p>"
+        f"Session quality (1-5) 1{strip}5{night}</p>"
+    )
+
+
+#: The strip's two lanes, in the order they stack and the legend prints them.
+_COVERAGE_LANES = ("Predicted", "Observed")
+
+
+def _coverage_legend_html(hour_coverage: pd.DataFrame) -> str:
+    """Key for the coverage strip: which lane is which, and what is missing.
+
+    Two chips in the lanes' own colours and order. When a lane is empty for the
+    whole window the key says so in words: a window with only a forecast in it
+    is the ordinary state of things, not a fault, and should not read as one.
+    """
+    pal = active()
+    hues = dict(zip(_COVERAGE_LANES, (pal.reading, pal.idle), strict=True))
+    chips = "".join(
+        _LEGEND_CHIP.format(swatch=f"background:{hues[lane]}", level=lane)
+        for lane in _COVERAGE_LANES
+    )
+    filled = set(hour_coverage["lane"]) if not hour_coverage.empty else set()
+    missing = [lane for lane in _COVERAGE_LANES if lane not in filled]
+    note = ""
+    if filled and missing:
+        note = (
+            '<span style="color:var(--muted);font-weight:400">'
+            f" — nothing {missing[0].lower()} in this window</span>"
+        )
+    return (
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
+        f"Coverage{chips}{note}</p>"
+    )
+
+
+def _elevation_legend_html(timeline_frame: pd.DataFrame, title: str) -> str:
+    """Series key for the wind plot, drawn in HTML rather than by Vega.
+
+    A Vega legend would have to sit inside one of the panel's views, and the
+    panel lays its views out flush so their time axes align -- anything drawn
+    outside a view's plot area lands on its neighbour. So the key moves out of
+    the composite entirely, and carries the title the wind plot used to have.
+    """
+    colors = _elevation_colors(active())
+    present = [e for e in colors if e in set(timeline_frame["elevation"])]
+    chips = []
+    for name in present:
+        dash = "dashed" if name == "gusts" else "solid"
+        chips.append(
+            '<span style="display:inline-block;width:1.5rem;'
+            f"border-top:3px {dash} {colors[name]};"
+            'margin:0 0.35rem 0 0.9rem;vertical-align:0.28rem"></span>'
+            f"{name}"
+        )
+    return (
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.5rem 0">'
+        f"{title}{''.join(chips)}</p>"
     )
 
 
@@ -189,7 +399,11 @@ _HEATMAP_ROW_PX = 30
 
 # Compact wind dial embedded per heatmap cell as a base64 data URI; small since
 # it renders inside a hover bubble. Spot-level metric columns the tooltip pulls
-# from ranked_spots, constant per spot but carried on every cell row.
+# from ranked_spots, constant per spot but carried on every cell row -- so each
+# one has to be LABELLED as a spot figure, or an hourly tooltip implies the
+# number describes that hour. "score" is gone from here: it is the spot's
+# ranking number, it cannot vary by hour by construction, and the cell's own
+# hour_quality is what an hourly tooltip should show.
 _TOOLTIP_DIAL_PX = 120
 _SPOT_METRIC_KEYS = (
     "quality_label",
@@ -198,16 +412,34 @@ _SPOT_METRIC_KEYS = (
     "drive_minutes",
     "session_hours",
     "ride_drive_ratio",
-    "score",
 )
 
 
 def _night_bands(
     t_min: pd.Timestamp, t_max: pd.Timestamp, lat: float, lon: float
 ) -> pd.DataFrame:
-    """Dusk-to-dawn rectangles for the spot, from real solar geometry."""
-    intervals = night_intervals(lat, lon, t_min, t_max)
-    return pd.DataFrame([{"x": lo, "x2": hi} for lo, hi in intervals])
+    """Night rectangles for the spot, quantized to the panel's hourly cells.
+
+    Built from the same per-hour daylight rule the heatmap cells use
+    (is_daylight_hour), so the wash and the night cells start and end on the
+    same column edges. Exact sunrise/sunset instants would sit up to an hour
+    inside a cell and read as the two plots disagreeing about the night.
+    """
+    hours = pd.date_range(t_min.floor("h"), t_max.ceil("h"), freq="h", inclusive="left")
+    if hours.empty:
+        return pd.DataFrame(columns=["x", "x2"])
+    day = is_daylight_hour(lat, lon, hours).to_numpy()
+    spans: list[dict[str, pd.Timestamp]] = []
+    open_i: int | None = None
+    for i, lit in enumerate(day):
+        if not lit and open_i is None:
+            open_i = i
+        if lit and open_i is not None:
+            spans.append({"x": hours[open_i], "x2": hours[i]})
+            open_i = None
+    if open_i is not None:
+        spans.append({"x": hours[open_i], "x2": hours[-1] + pd.Timedelta(hours=1)})
+    return pd.DataFrame(spans)
 
 
 def _night_rect(
@@ -217,15 +449,19 @@ def _night_rect(
     lon: float,
     x_scale: Any = alt.Undefined,
 ) -> alt.Chart:
-    """Altair layer obscuring night hours with a dark wash.
+    """Altair layer obscuring night hours with the off-ramp night hue.
 
+    Same night_fill the heatmap's night cells carry, at wash opacity so the
+    wind series still read across it -- one night hue across both plots.
     Clipped and sharing the caller's pinned x scale so a night band reaching
     past the shared domain neither draws outside the plot nor stretches it.
+    The axis is suppressed like every other layer in the panel: the two rulers
+    are the only time axis.
     """
     return (
         alt.Chart(_night_bands(t_min, t_max, lat, lon))
-        .mark_rect(color="#07252a", opacity=0.28, clip=True)
-        .encode(x=alt.X("x:T", scale=x_scale), x2="x2:T")
+        .mark_rect(color=active().night_fill, opacity=0.4, clip=True)
+        .encode(x=alt.X("x:T", axis=None, scale=x_scale), x2="x2:T")
     )
 
 
@@ -330,7 +566,13 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
                         "series": "Observed",
                     }
                 )
-                frames.append(obs_frame)
+                # The archive is requested by date, so the response runs to the
+                # end of the current day and its trailing hours have not
+                # happened yet. Nothing can be observed in the future, so drop
+                # them rather than drawing them as measurements.
+                obs_frame = obs_frame[obs_frame["time"] <= now]
+                if not obs_frame.empty:
+                    frames.append(obs_frame)
     except Exception:
         pass
 
@@ -353,6 +595,88 @@ def spot_quality_timeline(spot_id: str, predictions_json: str) -> pd.DataFrame:
     combined = pd.concat(frames, ignore_index=True)
     combined["time"] = pd.to_datetime(combined["time"], utc=True)
     return combined.sort_values("time")
+
+
+#: How far the predicted quality may sit from the observed one before the hour
+#: counts as a miss. The index runs 0-5, so a whole band is the honest cut.
+_ACCURACY_MISS_THRESHOLD = 1.0
+
+#: Columns of the per-spot, per-hour accuracy frame. "coverage" says which
+#: halves of the record the hour holds; delta and verdict exist only where it
+#: holds both.
+_ACCURACY_COLUMNS = (
+    "spot_id",
+    "time",
+    "predicted",
+    "observed",
+    "coverage",
+    "delta",
+    "verdict",
+)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def all_spots_accuracy(
+    spot_ids: tuple[str, ...], predictions_json: str
+) -> pd.DataFrame:
+    """Per spot and hour, what the record holds: a prediction, an observation, or both.
+
+    Reuses the per-spot timeline the ride-quality panel used to draw, so this
+    introduces no call the console was not already making -- it makes it for
+    every spot rather than only the focused one. Both layers are cached for
+    half an hour, which is what keeps that widening affordable.
+
+    Only an hour carrying BOTH halves can be graded, so delta and verdict are
+    set there and left null everywhere else. The unpaired hours still ride
+    along: "predicted and never measured" is exactly what the coverage band
+    exists to show.
+    """
+    frames: list[pd.DataFrame] = []
+    for spot_id in spot_ids:
+        timeline = spot_quality_timeline(spot_id, predictions_json)
+        if timeline.empty:
+            continue
+        wide = timeline.pivot_table(
+            index="time", columns="series", values="quality_index", aggfunc="mean"
+        )
+        # A forward forecast and a logged past prediction are both predictions;
+        # where an hour has each, the logged one wins, since it is what the
+        # console actually said while the session could still be ridden.
+        predicted = pd.Series(float("nan"), index=wide.index)
+        for column in ("Forecast", "Predicted (past)"):
+            if column in wide.columns:
+                predicted = wide[column].combine_first(predicted)
+        observed = (
+            wide["Observed"]
+            if "Observed" in wide.columns
+            else pd.Series(float("nan"), index=wide.index)
+        )
+        frames.append(
+            pd.DataFrame(
+                {
+                    "spot_id": spot_id,
+                    "time": wide.index,
+                    "predicted": predicted.to_numpy(),
+                    "observed": observed.to_numpy(),
+                }
+            )
+        )
+    if not frames:
+        return pd.DataFrame(columns=list(_ACCURACY_COLUMNS))
+    out = pd.concat(frames, ignore_index=True)
+    out = out[out[["predicted", "observed"]].notna().any(axis=1)].reset_index(drop=True)
+    out["coverage"] = "both"
+    out.loc[out["observed"].isna(), "coverage"] = "predicted"
+    out.loc[out["predicted"].isna(), "coverage"] = "observed"
+    out["delta"] = (out["predicted"] - out["observed"]).abs()
+    out["verdict"] = out["delta"].map(
+        lambda d: (
+            None
+            if pd.isna(d)
+            else ("missed" if d > _ACCURACY_MISS_THRESHOLD else "matched")
+        )
+    )
+    return out[list(_ACCURACY_COLUMNS)]
 
 
 def prewarm_spot_caches(spot_ids: list[str], predictions_json: str) -> None:
@@ -386,11 +710,15 @@ def _compact_dial_uri(
     gust_kmh: float | None,
     shore_deg: float,
     min_kts: float,
+    is_day: bool = True,
+    pal: Palette | None = None,
 ) -> str:
     """Base64 SVG data URI of the compact wind dial for one cell, or "".
 
     Empty when wind or direction is missing so the tooltip just drops the image.
     The base64 alphabet has no raw ``&`` or ``<``, so the URI is tooltip-safe.
+    The palette is passed in rather than resolved here, since the caller caches
+    the result and has to key on the mode.
     """
     if direction is None or wind_kmh is None or pd.isna(direction) or pd.isna(wind_kmh):
         return ""
@@ -403,9 +731,82 @@ def _compact_dial_uri(
         min_kts=min_kts,
         size_px=_TOOLTIP_DIAL_PX,
         detail="compact",
+        is_day=is_day,
+        pal=pal,
     )
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
     return f"data:image/svg+xml;base64,{b64}"
+
+
+#: How far back the board reaches for hindcast cells: the same day the wind
+#: timeline and the panel window open onto (focus_spot_timeline past_days=1).
+_HINDCAST_HOURS = 24
+
+
+def _hindcast_cells(spot_id: str, forecast_start: pd.Timestamp) -> pd.DataFrame:
+    """Board cells for the hours before the forecast, from the prediction log.
+
+    Several scheduled runs can speak about the same hour, so the latest logged
+    prediction wins. Clamped to the panel's hindcast reach and to hours
+    strictly before the forecast, so the two sources never overlap.
+    """
+    history = _prediction_history_cached()
+    if history.empty:
+        return pd.DataFrame()
+    rows = history[history["spot_id"] == spot_id].copy()
+    if rows.empty:
+        return pd.DataFrame()
+    rows["forecast_time"] = pd.to_datetime(rows["forecast_time"], utc=True)
+    reach = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=_HINDCAST_HOURS)
+    rows = rows[
+        (rows["forecast_time"] >= reach) & (rows["forecast_time"] < forecast_start)
+    ]
+    if rows.empty:
+        return pd.DataFrame()
+    rows = rows.sort_values("prediction_timestamp").drop_duplicates(
+        "forecast_time", keep="last"
+    )
+    quality = rows["quality_index"].astype(float)
+    return pd.DataFrame(
+        {
+            "time": rows["forecast_time"],
+            "quality": [max(1, quality_bucket(q)) for q in quality],
+            "hour_quality": quality.to_numpy(),
+            "is_hindcast": True,
+        }
+    )
+
+
+def _observed_hindcast_cells(
+    spot_id: str, forecast_start: pd.Timestamp, predictions_json: str
+) -> pd.DataFrame:
+    """Board cells from measured data for the hours before the forecast.
+
+    The prediction log only holds hours a scheduled run actually scored, so a
+    stretch with observations but no logged predictions stayed blank even
+    though the record knows what the wind did. The observed half is the more
+    reliable one -- measured, not called -- so it wins any hour both sources
+    cover. Same clamps as _hindcast_cells, so the forecast is never overlapped
+    and the reach matches the panel's. The timeline call is the cached one the
+    accuracy frame already made for this spot, never a new fetch.
+    """
+    timeline = spot_quality_timeline(spot_id, predictions_json)
+    rows = timeline[timeline["series"] == "Observed"]
+    if rows.empty:
+        return pd.DataFrame()
+    reach = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=_HINDCAST_HOURS)
+    rows = rows[(rows["time"] >= reach) & (rows["time"] < forecast_start)]
+    if rows.empty:
+        return pd.DataFrame()
+    quality = rows["quality_index"].astype(float)
+    return pd.DataFrame(
+        {
+            "time": rows["time"],
+            "quality": [max(1, quality_bucket(q)) for q in quality],
+            "hour_quality": quality.to_numpy(),
+            "is_hindcast": True,
+        }
+    )
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -414,8 +815,14 @@ def all_spots_quality_grid(
     predictions_json: str,
     display_tz: str,
     ranked_json: str,
+    dark: bool,
 ) -> pd.DataFrame:
     """Hourly quality band (1-5) per spot over the forecast window, with tooltip payload.
+
+    dark is an argument rather than read inside, so the cache keys on it. The
+    frame carries theme-resolved dial SVGs and the cache is process-global, so
+    resolving the mode in here would serve one viewer the other mode's dials
+    for the rest of the TTL.
 
     Quality reuses the ranked predictions already in dashboard_data (the /rank
     flow computed them), so nothing re-runs inference. Wind and gusts come from
@@ -429,6 +836,7 @@ def all_spots_quality_grid(
     meta_by_spot = {m["spot_id"]: m for m in json.loads(ranked_json)}
     spots_cfg = {s["id"]: s for s in get_spots()}
     min_kts = _minimum_rideable_kts()
+    pal = palette(dark)
 
     frames: list[pd.DataFrame] = []
     for spot_id in spot_ids:
@@ -442,10 +850,50 @@ def all_spots_quality_grid(
                 "quality": [
                     max(1, quality_bucket(r["quality_index"])) for r in forecast_rows
                 ],
+                # The cell's OWN quality, kept alongside its bucket. The tooltip
+                # used to show the spot-level ranking score here, which is
+                # constant across the row and so could not describe an hour.
+                "hour_quality": [float(r["quality_index"]) for r in forecast_rows],
             }
         )
+        frame["is_hindcast"] = False
+
+        # The stretch before the forecast used to hold no cells at all, which
+        # read as a board that failed to draw. The logged past predictions are
+        # the same idea as the forecast cells -- what the console said about an
+        # hour -- so they fill that stretch, clamped to the panel's own
+        # hindcast reach and deduplicated to the latest word per hour.
+        hindcast = _hindcast_cells(spot_id, frame["time"].min())
+        observed = _observed_hindcast_cells(
+            spot_id, frame["time"].min(), predictions_json
+        )
+        if not observed.empty:
+            # Measured hours outrank logged predictions for the same hour, so
+            # the observed frame leads and the dedupe keeps it.
+            merged = pd.concat([observed, hindcast], ignore_index=True)
+            merged["_hour_key"] = merged["time"].dt.floor("h")
+            hindcast = merged.drop_duplicates("_hour_key", keep="first").drop(
+                columns="_hour_key"
+            )
+        if not hindcast.empty:
+            frame = pd.concat([hindcast, frame], ignore_index=True)
+
         frame["spot_id"] = spot_id
         frame["hour"] = frame["time"].dt.floor("h")
+
+        # Daylight is per spot, per hour: rank_spots already drops dark hours
+        # from the score, but every hour still gets a cell here, so the grid has
+        # to carry its own flag or it paints unrideable darkness as a session.
+        # The hourly-cell rule (midpoint) keeps these cells on the wind plot's
+        # night-band edges.
+        cfg = spots_cfg.get(spot_id)
+        frame["is_day"] = (
+            is_daylight_hour(
+                float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex(frame["hour"])
+            ).to_numpy()
+            if cfg
+            else True
+        )
 
         # Merge 10 m wind and gusts from the warmed focus timeline (long form),
         # joined on the UTC hour so tz differences never misalign. Missing wind
@@ -487,6 +935,36 @@ def all_spots_quality_grid(
     if "direction" not in grid.columns:
         grid["direction"] = pd.NA
 
+    # "daylight" carries the day/night fact in words for the tooltip, so night
+    # never rests on color alone; the fill encoding (_quality_fill) reads
+    # is_day directly and never lets a dark hour onto the ramp.
+    grid["daylight"] = grid["is_day"].map(
+        {True: "Day", False: "Night — sun below horizon"}
+    )
+
+    # Danger is the other fact the quality level cannot carry. _score_row marks
+    # an hour class 0 when it is too windy to ride, but quality_bucket sends
+    # ANY index <= 0.5 to class 0, so a dangerous hour and a dead-calm one are
+    # indistinguishable once the model has scored them. The cell therefore
+    # reads the wind itself, against the same ceilings the labeling model uses.
+    # Unknown wind stays False: absence of data is not safety, but a warning
+    # with nothing behind it is worse than none, and the words below say which
+    # case a cell is in.
+    max_speed_kn, max_gust_kn = dangerous_kts()
+
+    def _kn(column: str) -> pd.Series:
+        if column not in grid.columns:
+            return pd.Series(float("nan"), index=grid.index)
+        return pd.to_numeric(grid[column], errors="coerce") / _KN_TO_KMH
+
+    wind_kn, gust_kn = _kn("wind"), _kn("gust")
+    grid["is_dangerous"] = (wind_kn > max_speed_kn) | (gust_kn > max_gust_kn)
+    grid["safety"] = "Within the safe limits"
+    grid.loc[wind_kn.isna() & gust_kn.isna(), "safety"] = "No wind reading"
+    grid.loc[grid["is_dangerous"], "safety"] = (
+        f"Too strong — over {max_speed_kn:.0f} kn or gusting over {max_gust_kn:.0f} kn"
+    )
+
     # Tooltip payload, built once here so the fragment's reruns only serialize.
     # Header is "SpotName - Ddd HH:00" in local time; the dial is a compact
     # base64 SVG; metrics come straight from the ranked cards (constant per spot).
@@ -503,12 +981,13 @@ def all_spots_quality_grid(
     wind_vals = grid["wind"].to_numpy() if "wind" in grid.columns else [None] * n
     gust_vals = grid["gust"].to_numpy() if "gust" in grid.columns else [None] * n
     grid["dial"] = [
-        _compact_dial_uri(d, w, g, s, min_kts)
-        for d, w, g, s in zip(
+        _compact_dial_uri(d, w, g, s, min_kts, bool(day), pal)
+        for d, w, g, s, day in zip(
             grid["direction"].to_numpy(),
             wind_vals,
             gust_vals,
             shore.to_numpy(),
+            grid["is_day"].to_numpy(),
             strict=True,
         )
     ]
@@ -548,69 +1027,244 @@ def _selected_heat_cell(event: Any, grid: pd.DataFrame) -> pd.Series | None:
     return rows.loc[delta.idxmin()]
 
 
-def _timeseries_x_domain(
-    prediction_end: pd.Timestamp | None, now: pd.Timestamp
-) -> list[pd.Timestamp] | None:
-    """Shared x domain for the two time-series charts: [now - 24h, prediction end].
+#: How far the panel opens before the forecast does. This stretch holds the
+#: record the coverage strip grades, the wind that actually blew, and the
+#: board's hindcast cells -- the console's own logged predictions for those
+#: hours. The cost is real -- the extra day compresses every cell to its
+#: right -- and it buys the only place an observed hour can appear at all.
+_PANEL_PAST_HOURS = 24
 
-    The right edge is the heatmap grid's last hour (its pinned domain's right
-    edge), so the two charts and the heatmap all read one clock (R5); the
-    quality chart's older history clips out of frame. None when there is no
-    prediction window to bound the axis.
-    """
-    if prediction_end is None:
+
+def _earliest_observed(accuracy: pd.DataFrame) -> pd.Timestamp | None:
+    """The oldest hour the record actually holds a measurement for."""
+    if accuracy.empty or "observed" not in accuracy.columns:
         return None
-    return [now - pd.Timedelta(hours=24), prediction_end]
+    measured = accuracy.loc[accuracy["observed"].notna(), "time"]
+    return None if measured.empty else measured.min()
+
+
+def _panel_x_domain(
+    heat_grid: pd.DataFrame,
+    timeline_frame: pd.DataFrame,
+    observed_from: pd.Timestamp | None = None,
+) -> list[pd.Timestamp] | None:
+    """The one x domain every view in the time panel is pinned to.
+
+    It opens _PANEL_PAST_HOURS before the heatmap does, but never earlier than
+    the oldest hour the record holds a measurement for: an empty stretch is a
+    hole rather than a hindcast, and a stack with nothing measured yet should
+    simply start where the forecast starts. Nothing can be observed in the
+    future, so a window that began with the forecast could never contain a
+    measurement at all. With no grid the wind timeline's own extent stands in;
+    with neither there is no panel to draw.
+    """
+    if not heat_grid.empty:
+        # The window is anchored on the FORECAST start: hindcast cells live
+        # inside the past stretch the anchor opens, and letting them move the
+        # anchor would double-extend the window.
+        forecast_cells = (
+            heat_grid[~heat_grid["is_hindcast"]]
+            if "is_hindcast" in heat_grid.columns
+            else heat_grid
+        )
+        grid_start = (forecast_cells if not forecast_cells.empty else heat_grid)[
+            "time"
+        ].min()
+        if observed_from is None:
+            return [grid_start, heat_grid["time_end"].max()]
+        reach = grid_start - pd.Timedelta(hours=_PANEL_PAST_HOURS)
+        return [
+            min(max(reach, observed_from), grid_start),
+            heat_grid["time_end"].max(),
+        ]
+    if not timeline_frame.empty:
+        return [timeline_frame["time"].min(), timeline_frame["time"].max()]
+    return None
+
+
+def _epoch_ms(times: Any) -> list[int]:
+    """Epoch milliseconds for a series of timestamps.
+
+    The panel's hover and click params match on this integer rather than on the
+    timestamp, so a rule drawn from one dataset can be driven by a pointer over
+    another without leaning on temporal equality across datasets.
+    """
+    return [int(pd.Timestamp(t).value // 1_000_000) for t in times]
+
+
+def _time_spine(domain_start: pd.Timestamp, domain_end: pd.Timestamp) -> pd.DataFrame:
+    """One row per hour of the panel window: its shared hit target and ruler data.
+
+    t_mid is the centre of the hour cell. The board draws an hour as a rect
+    spanning it, so anything that marks "this hour" as a point -- the crosshair,
+    the pin, a series reading -- sits at the middle, not on the cell's left edge.
+    """
+    hours = pd.date_range(
+        domain_start.floor("h"), domain_end.ceil("h"), freq="h", inclusive="left"
+    )
+    return pd.DataFrame(
+        {
+            "time": hours,
+            "time_end": hours + pd.Timedelta(hours=1),
+            "t_mid": hours + pd.Timedelta(minutes=30),
+            "t_ms": _epoch_ms(hours),
+        }
+    )
+
+
+def _pinned_panel_time(
+    stored: pd.Timestamp | None, domain_start: pd.Timestamp, domain_end: pd.Timestamp
+) -> pd.Timestamp | None:
+    """The session's pinned hour in the panel's timezone, or None when outside it.
+
+    Same guard the old map-hour rule used: an hour past the window is skipped
+    rather than drawn, so the domain stays pinned.
+    """
+    if stored is None:
+        return None
+    tz = domain_start.tz
+    pinned = (
+        stored.tz_convert(tz)
+        if tz is not None and stored.tzinfo is not None
+        else stored
+    )
+    return pinned if domain_start <= pinned <= domain_end else None
+
+
+def _initial_pinned(
+    stored: pd.Timestamp | None,
+    domain: list[pd.Timestamp],
+    now: pd.Timestamp,
+    options: list[pd.Timestamp],
+) -> pd.Timestamp | None:
+    """The panel's pinned hour on first paint: the stored pick, else now.
+
+    Without the fallback the details panel opened on its empty hint until the
+    first click, even though the dials beside it already defaulted to the
+    current hour. A local fallback only -- writing the map's slider key here
+    would move the slider without its owner running.
+    """
+    pinned = _pinned_panel_time(stored, domain[0], domain[1])
+    return pinned if pinned is not None else _clamp_to_slider_option(now, options)
+
+
+def _fresh_panel_click(
+    cell_key: tuple[str, str] | None,
+    pin: pd.Timestamp | None,
+    seen_cell: tuple[str, str] | None,
+    seen_pin: pd.Timestamp | None,
+) -> str | None:
+    """Which panel pick is new this run: "cell", "pin", or None.
+
+    Both selection params keep re-reporting their last pick on every rerun
+    (empty=False makes them sticky), so the latest click is the param whose
+    value moved. Routing on "a cell is selected" instead masked every
+    wind-plot click made after the first board cell. A re-click of the exact
+    pick a param already holds reports no change and is dropped -- the same
+    limit the old applied-hour guard had. The cell wins a tie: it is the
+    richer pick (spot and hour), and a single click lands in one plot only.
+    """
+    if cell_key is not None and cell_key != seen_cell:
+        return "cell"
+    if pin is not None and pin != seen_pin:
+        return "pin"
+    return None
+
+
+def _pinned_time_from_event(event: Any, tz: Any) -> pd.Timestamp | None:
+    """Map a click in the panel's empty space back to its hour.
+
+    The wind plot's hit layer covers the whole time range, so a click that hits
+    no heatmap cell still pins a time; it selects the hour's epoch milliseconds,
+    which Streamlit hands back unchanged.
+    """
+    raw = getattr(event, "selection", None)
+    points = raw.get("pin_time", []) if hasattr(raw, "get") else []
+    if not points:
+        return None
+    t_ms = points[0].get("t_ms")
+    if t_ms is None:
+        return None
+    stamp = pd.Timestamp(int(t_ms), unit="ms", tz="UTC")
+    return stamp.tz_convert(tz) if tz is not None else stamp.tz_localize(None)
 
 
 def _sync_slider_to_heatmap_click(
-    clicked_time: pd.Timestamp, clicked_spot_id: str, options: list[pd.Timestamp]
+    clicked_time: pd.Timestamp, clicked_spot_id: str | None, options: list[pd.Timestamp]
 ) -> None:
-    """Push a heatmap click's hour and spot onto shared session-state keys.
+    """Push a panel click's hour, and its spot when it had one, onto session state.
 
-    Writing "wind_map_hour" and "rider_focus_spot" here is legal: the console
-    renders before the slider and switcher buttons are instantiated later in
-    this same script run. But a fragment rerun of the console does not
-    re-run the map fragment, so an actual change also needs an explicit
-    app-scope rerun. Guarded by heat_hour_applied and heat_spot_applied -- a
-    run that already applied this exact click does not write or rerun
-    again, which is what keeps this from looping. ``options`` is the slider's
-    prediction-window hour list, so the clamped hour is always a valid option.
+    Writing "panel_pin_hour", "wind_map_hour", and "rider_focus_spot" here is
+    legal: the console renders before the slider and switcher buttons are
+    instantiated later in this same script run. But a fragment rerun of the
+    console does not re-run the map fragment, so an actual change also needs
+    an explicit app-scope rerun. Guarded by heat_hour_applied and
+    heat_spot_applied -- a run that already applied this exact click does not
+    write or rerun again, which is what keeps this from looping, and the spot
+    half moves only when the cell names one the board has not applied yet, so
+    a pick made elsewhere since is not overwritten by the click the chart
+    keeps reporting.
+
+    The panel's own pin takes the clicked hour verbatim, past or future, so a
+    hindcast click pins the hour it names. The map slider answers "which
+    forecast hour" only: a click inside the prediction window moves it to the
+    clamped option, a hindcast click leaves it where it is rather than yanking
+    it to the nearest forecast hour. A click on empty panel space carries no
+    spot, so it passes None and moves the pinned time alone.
     """
-    clamped = _clamp_to_slider_option(clicked_time, options)
-    hour_changed = (
-        clamped is not None and st.session_state.get("heat_hour_applied") != clamped
+    hour_changed = st.session_state.get("heat_hour_applied") != clicked_time
+    spot_changed = (
+        clicked_spot_id is not None
+        and st.session_state.get("heat_spot_applied") != clicked_spot_id
     )
-    spot_changed = st.session_state.get("heat_spot_applied") != clicked_spot_id
     if not hour_changed and not spot_changed:
         return
     if hour_changed:
-        st.session_state["wind_map_hour"] = clamped
-        st.session_state["heat_hour_applied"] = clamped
-        # Pre-sync the map's own mirror so its guard is already quiet once the
-        # forced rerun below reaches it -- otherwise it would fire a second,
-        # redundant app rerun for the same change.
-        st.session_state["wind_map_hour_seen"] = clamped
-    st.session_state["rider_focus_spot"] = clicked_spot_id
-    st.session_state["heat_spot_applied"] = clicked_spot_id
+        st.session_state["panel_pin_hour"] = clicked_time
+        st.session_state["heat_hour_applied"] = clicked_time
+        clamped = _clamp_to_slider_option(clicked_time, options)
+        # The clamp doubles as the forecast test: a prediction-window click
+        # lands on its own option, a hindcast click lands hours away from it.
+        forecast_click = (
+            clamped is not None
+            and abs((_as_utc(clamped) - _as_utc(clicked_time)).total_seconds()) <= 1800
+        )
+        if forecast_click:
+            st.session_state["wind_map_hour"] = clamped
+            # Pre-sync the map's own mirror so its guard is already quiet once
+            # the forced rerun below reaches it -- otherwise it would fire a
+            # second, redundant app rerun for the same change.
+            st.session_state["wind_map_hour_seen"] = clamped
+    # Only a cell the board has not already applied may move the focus. The
+    # chart re-reports its last click on every rerun, so writing the focus
+    # whenever anything changed let a stale cell carry its spot back over a
+    # pick made since -- from a comparison dial, or a dial on the map -- as
+    # soon as the hour it clamps to moved with the rolling window.
+    if spot_changed:
+        st.session_state["rider_focus_spot"] = clicked_spot_id
+        st.session_state["heat_spot_applied"] = clicked_spot_id
     st.rerun(scope="app")
 
 
-def _selection_wind(
-    row: pd.Series,
-) -> tuple[float | None, float | None, float | None]:
-    """Numeric wind, gust, and direction for the picked cell.
+def _as_utc(ts: pd.Timestamp) -> pd.Timestamp:
+    """The instant in UTC, so tz-mismatched comparisons stay honest."""
+    return ts.tz_convert("UTC") if ts.tzinfo else ts.tz_localize("UTC")
 
-    Reuses the map's cached per-spot frame (no new fetch) so the dial matches
-    the map; the grid's own direction column is display text. Nearest hour in
-    UTC, within 90 minutes.
+
+def _spot_hour_wind(
+    spot_id: str, time: pd.Timestamp
+) -> tuple[float | None, float | None, float | None]:
+    """Numeric wind, gust, and direction for one spot at one hour.
+
+    Reuses the map's cached per-spot frame (no new fetch) so the dials match
+    the map. Nearest hour in UTC, within 90 minutes.
     """
-    frame = _spot_wind_frame(str(row["spot_id"]))
+    frame = _spot_wind_frame(spot_id)
     if frame.empty:
         return None, None, None
     idx = frame.index
     idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
-    target = row["time"].tz_convert("UTC")
+    target = time.tz_convert("UTC") if time.tzinfo else time.tz_localize("UTC")
     pos = int(idx.get_indexer(pd.DatetimeIndex([target]), method="nearest")[0])
     if pos < 0 or abs((idx[pos] - target).total_seconds()) > 5400:
         return None, None, None
@@ -622,9 +1276,16 @@ def _selection_wind(
     )
 
 
+def _selection_wind(
+    row: pd.Series,
+) -> tuple[float | None, float | None, float | None]:
+    """Wind, gust, and direction for the picked grid row."""
+    return _spot_hour_wind(str(row["spot_id"]), row["time"])
+
+
 _BUBBLE_ROW = (
     '<div style="display:flex;justify-content:space-between;gap:1rem">'
-    '<span style="color:#5f6f7f">{label}</span><strong>{value}</strong></div>'
+    '<span style="color:var(--muted)">{label}</span><strong>{value}</strong></div>'
 )
 
 
@@ -635,13 +1296,23 @@ def _selection_bubble_html(
     wind: float | None,
     gust: float | None,
     direction: float | None,
+    is_day: bool = True,
+    is_dangerous: bool = False,
 ) -> str:
     """Rounded metrics bubble for the selection row."""
-    rows = [
-        _BUBBLE_ROW.format(
-            label="Quality", value=f"{quality}/5 ({quality_label(float(quality))})"
-        )
-    ]
+    # The quality scale bottoms out at 1 here, so a dangerous hour would
+    # otherwise read "1/5 (Too Light)" -- the exact opposite of the fact. The
+    # level is still shown, because it is what the board painted, but the word
+    # comes from the wind rather than from the floored level.
+    label = "Too strong" if is_dangerous else quality_label(float(quality))
+    rows = [_BUBBLE_ROW.format(label="Quality", value=f"{quality}/5 ({label})")]
+    if is_dangerous:
+        rows.append(_BUBBLE_ROW.format(label="Safety", value="Over the safe limit"))
+    # A dark hour still has a wind forecast, and the quality row above still
+    # reports it. Say plainly that it is not a session so the number is read as
+    # weather rather than as a recommendation.
+    if not is_day:
+        rows.append(_BUBBLE_ROW.format(label="Daylight", value="Night — no session"))
     if wind is not None and not pd.isna(wind):
         rows.append(_BUBBLE_ROW.format(label="Wind", value=f"{wind:.0f} km/h"))
     if gust is not None and not pd.isna(gust):
@@ -653,50 +1324,1130 @@ def _selection_bubble_html(
             )
         )
     return (
-        '<div style="background:rgba(255, 255, 255, 0.55);'
-        "border:1px solid rgba(7, 37, 42, 0.12);border-radius:14px;"
+        '<div style="background:var(--panel);'
+        "border:1px solid var(--line);border-radius:14px;"
         "padding:0.7rem 0.9rem;font-family:Manrope,sans-serif;"
-        'font-size:0.85rem;color:#07252a">'
+        'font-size:0.85rem;color:var(--ink)">'
         f'<div style="font-weight:700">{spot_name}</div>'
-        f'<div style="color:#5f6f7f;font-size:0.75rem;margin-bottom:0.45rem">'
+        f'<div style="color:var(--muted);font-size:0.75rem;margin-bottom:0.45rem">'
         f"{local_time}</div>" + "".join(rows) + "</div>"
     )
 
 
-def _render_selection_row(row: pd.Series, min_kts: float) -> None:
-    """Compact wind dial plus metrics bubble beside the heatmap."""
+def _default_detail_row(
+    grid: pd.DataFrame, spot_id: str | None, pinned: pd.Timestamp | None
+) -> pd.Series | None:
+    """What the details panel shows before anything has been clicked.
+
+    The panel is permanent, so it opens on the pinned hour at the focused spot
+    rather than on an empty column. None when there is no pinned hour yet, and
+    the panel shows its hint instead.
+    """
+    if grid.empty or spot_id is None or pinned is None:
+        return None
+    rows = grid[grid["spot_id"] == spot_id]
+    if rows.empty:
+        return None
+    target = pinned.tz_convert("UTC") if pinned.tzinfo else pinned.tz_localize("UTC")
+    delta = (rows["time"].dt.tz_convert("UTC") - target).abs()
+    return rows.loc[delta.idxmin()]
+
+
+def _detail_row(
+    selected: pd.Series | None,
+    grid: pd.DataFrame,
+    spot_id: str | None,
+    pinned: pd.Timestamp | None,
+) -> pd.Series | None:
+    """The row the details panel describes: the pick, but only for the focused spot.
+
+    A board click sets both halves of the selection at once, so the two
+    normally agree. They part when the focus moves by another route -- a dial
+    in the comparison grid, one on the map -- while the board goes on reporting
+    its last click on every rerun. The focus is the newer intent, so the panel
+    follows it and falls back to the pinned hour there.
+    """
+    if selected is not None and str(selected["spot_id"]) == spot_id:
+        return selected
+    return _default_detail_row(grid, spot_id, pinned)
+
+
+def _render_selection_bubble(row: pd.Series) -> None:
+    """Metrics bubble for the selected spot and hour, beside the wind plot."""
     spot_id = str(row["spot_id"])
     spot_cfg = next((s for s in get_spots() if s["id"] == spot_id), None)
     spot_name = spot_cfg["name"] if spot_cfg else str(row.get("spot", spot_id))
     local_time = row["time"].strftime("%a %d %b %H:%M")
     wind, gust, direction = _selection_wind(row)
+    st.markdown(
+        _selection_bubble_html(
+            spot_name,
+            local_time,
+            int(row["quality"]),
+            wind,
+            gust,
+            direction,
+            bool(row.get("is_day", True)),
+            # D1: a dangerous hour reads "Too strong", never a quality label.
+            bool(row.get("is_dangerous", False)),
+        ),
+        unsafe_allow_html=True,
+    )
 
-    have_wind = wind is not None and not pd.isna(wind)
-    have_dir = direction is not None and not pd.isna(direction)
-    dial_col, bubble_col = st.columns([2, 3])
-    with dial_col:
-        if have_wind and have_dir:
-            shore = float(spot_cfg["shore_orientation_deg"]) if spot_cfg else 0.0
-            st.markdown(
-                wind_dial_svg(
-                    direction_deg=direction,
-                    speed_kn=wind / _KN_TO_KMH,
-                    gust_kn=(gust or 0.0) / _KN_TO_KMH,
-                    shore_orientation_deg=shore,
-                    min_kts=min_kts,
-                ),
-                unsafe_allow_html=True,
+
+def _dial_summary(wind: float, gust: float | None, direction: float) -> str:
+    """One line of wind for a dial's hover bubble: speed, gust and bearing."""
+    gusting = "" if gust is None or pd.isna(gust) else f", gusting {gust:.0f}"
+    return f"{wind:.0f} km/h{gusting}, {_compass(direction)} ({direction:.0f}°)"
+
+
+def _dial_tile_html(name: str, dial_svg: str, selected: bool, summary: str = "") -> str:
+    """One tile of the comparison grid: a compact dial with the spot's name.
+
+    The selected spot wears the reading-orange border and the accent-text name;
+    the rest keep a transparent border so every tile holds the same footprint.
+    The styles stretch a transparent button over the whole tile, so the pointer
+    never reaches the tile itself and a title attribute would never open: the
+    wind summary is drawn as a bubble inside the tile instead, hidden until the
+    tile is hovered. The bubble sits out of flow, so revealing it cannot resize
+    the tile the button has to cover. The title stays as the fallback for a
+    viewer whose styles did not load.
+    """
+    pal = active()
+    border = pal.reading if selected else "transparent"
+    name_style = (
+        f"color:{pal.accent_text};font-weight:700"
+        if selected
+        else "color:var(--muted);font-weight:600"
+    )
+    hover = f"{name} — {summary}" if summary else name
+    tip = f'<div class="fc-dialtip">{summary}</div>' if summary else ""
+    return (
+        f'<div class="fc-dialtile" title="{hover}" '
+        f'style="position:relative;border:2px solid {border};'
+        'border-radius:12px;padding:0.25rem 0.1rem 0.1rem;margin-bottom:0.3rem">'
+        f"{dial_svg}"
+        f'<div style="text-align:center;font-family:Manrope,sans-serif;'
+        f'font-size:0.72rem;{name_style}">{name}</div>{tip}</div>'
+    )
+
+
+def _focus_spot(spot_id: str) -> None:
+    """Move the console's focus to a spot picked in the comparison grid.
+
+    Mirrors the heatmap click: the console renders before the switcher and the
+    map are instantiated later in the same script run, so writing the state
+    here is legal, but the map is its own fragment and only an app-scope rerun
+    reaches it. heat_spot_applied is deliberately left alone -- it mirrors the
+    board's last applied click, which the chart re-reports on every rerun, so
+    moving it here would set that stale selection fighting this pick.
+    """
+    if st.session_state.get("rider_focus_spot") == spot_id:
+        return
+    st.session_state["rider_focus_spot"] = spot_id
+    st.rerun(scope="app")
+
+
+def _render_dial_grid(
+    spot_ids: list[str],
+    selected_spot_id: str | None,
+    hour: pd.Timestamp,
+    min_kts: float,
+) -> None:
+    """Wind dials for every ranked spot at the selected hour, beside the board.
+
+    All spots at one instant, so the selected spot's wind reads against its
+    alternatives; the highlight marks which one the details below describe.
+    Each tile is itself the control that switches to its spot: a transparent
+    button is stretched across it by the styles, the same way the sidebar's
+    freshness dials work. A widget click reruns the script in place, where a
+    link would reload the page and take the session with it.
+    """
+    spots_cfg = {s["id"]: s for s in get_spots()}
+    st.markdown(
+        "<p style=\"color:var(--ink);font-family:'Manrope',sans-serif;"
+        'font-size:0.8rem;font-weight:600;margin:0 0 0.4rem 0">'
+        f"All spots — {hour.strftime('%a %d %b %H:%M')}</p>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(3)
+    for i, spot_id in enumerate(spot_ids):
+        cfg = spots_cfg.get(spot_id)
+        if cfg is None:
+            continue
+        wind, gust, direction = _spot_hour_wind(spot_id, hour)
+        with cols[i % 3]:
+            if wind is None or direction is None:
+                st.caption(f"{cfg['name']}: no wind data")
+                continue
+            day = bool(
+                is_daylight_hour(
+                    float(cfg["lat"]), float(cfg["lon"]), pd.DatetimeIndex([hour])
+                ).to_numpy()[0]
             )
-            st.caption("Needle points downwind; length is speed (to 30 kn).")
-        else:
-            st.caption("Wind or direction unavailable for this hour — dial hidden.")
-    with bubble_col:
-        st.markdown(
-            _selection_bubble_html(
-                spot_name, local_time, int(row["quality"]), wind, gust, direction
-            ),
-            unsafe_allow_html=True,
+            svg = wind_dial_svg(
+                direction_deg=direction,
+                speed_kn=wind / _KN_TO_KMH,
+                gust_kn=(gust or 0.0) / _KN_TO_KMH,
+                shore_orientation_deg=float(cfg["shore_orientation_deg"]),
+                min_kts=min_kts,
+                size_px=92,
+                detail="compact",
+                is_day=day,
+            )
+            summary = _dial_summary(wind, gust, direction)
+            # The wrapper is what the styles hang the overlay on: st.container
+            # stamps st-key-dialtile_<id> on it and the button's own container
+            # carries st-key-dial_pick_<id>, so the rule needs no positional
+            # selector. The button keeps a real label for screen readers and
+            # for the case where the styles do not load; the styles paint it
+            # transparent and stretch it over the tile.
+            with st.container(key=f"dialtile_{spot_id}"):
+                st.markdown(
+                    _dial_tile_html(
+                        cfg["name"],
+                        svg,
+                        spot_id == selected_spot_id,
+                        summary,
+                    ),
+                    unsafe_allow_html=True,
+                )
+                # No help text: it wraps the button in a tooltip span that keeps
+                # its own line box and right-aligns the button inside the
+                # overlay, and it renders a second button subtree whose wrapper
+                # then answers the pointer instead of the button. Both are why
+                # the tile did not click. The tile draws its own bubble.
+                if st.button(cfg["name"], key=f"dial_pick_{spot_id}"):
+                    _focus_spot(spot_id)
+    st.caption(
+        "Each dial is that spot's wind at the selected hour: the dot's bearing "
+        "is where the wind blows toward, its distance from the centre is speed "
+        "(to 30 kn), and inside the teal band is a session. The orange frame "
+        "marks the selected spot; hover a dial for its wind at this hour, or "
+        "click one to switch the console to it."
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class _Panel:
+    """What every view in the time panel shares: one clock, one palette, one pointer."""
+
+    spine: pd.DataFrame
+    x_scale: alt.Scale
+    domain_start: pd.Timestamp
+    domain_end: pd.Timestamp
+    pal: Palette
+    pinned: pd.Timestamp | None
+    focus_spot: str | None
+    now: pd.Timestamp | None
+    cell: alt.Parameter
+    hover_board: alt.Parameter
+    hover_row: alt.Parameter
+    hover_wind: alt.Parameter
+    pin_time: alt.Parameter
+    sun: pd.DataFrame = field(default_factory=pd.DataFrame)
+    hour_verdicts: pd.DataFrame = field(default_factory=pd.DataFrame)
+    hour_coverage: pd.DataFrame = field(default_factory=pd.DataFrame)
+    focus_accuracy: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+
+def _heat_tooltip(heat_grid: pd.DataFrame) -> list[alt.Tooltip]:
+    """Hover bubble for a heatmap cell.
+
+    The deployed vega-tooltip renders the field titled "title" as the bubble
+    header and the one titled "image" as an <img>; in vega-lite the tooltip
+    datum key is the field title, so those titles are load bearing. The rest are
+    label:value rows in this order.
+    """
+    tooltip = [
+        alt.Tooltip("header:N", title="title"),
+        alt.Tooltip("dial:N", title="image"),
+        alt.Tooltip("quality:O", title="Quality (1-5)"),
+        alt.Tooltip("daylight:N", title="Daylight"),
+    ]
+    # The quality level cannot say "too much wind" -- it floors at 1, and the
+    # danger class shares its number with a dead-calm hour. So the tooltip says
+    # it in words, and says plainly when there is no wind reading to judge.
+    if "safety" in heat_grid.columns:
+        tooltip.append(alt.Tooltip("safety:N", title="Safety"))
+    if "wind" in heat_grid.columns:
+        tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
+    if "gust" in heat_grid.columns:
+        tooltip.append(alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f"))
+    return tooltip + [
+        alt.Tooltip("direction:N", title="Direction"),
+        alt.Tooltip("hour_quality:Q", title="Quality this hour", format=".2f"),
+        alt.Tooltip("quality_index:Q", title="Peak quality (spot)", format=".2f"),
+        # The label names the spot's best daylight hour, so it is titled for
+        # that peak and kept beside it. Called plain "Signal" next to the
+        # hourly figure it read as this cell's own verdict.
+        alt.Tooltip("quality_label:N", title="Peak signal (spot)"),
+        # Daylight-scoped upstream (dashboard counts rideable & daylight), so
+        # the label says so rather than implying a round-the-clock count.
+        alt.Tooltip("rideable_hours:Q", title="Rideable hrs (day)", format=".0f"),
+        alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
+        alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
+        alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
+    ]
+
+
+_WIND_SERIES_TITLES = {
+    "10m": "Wind 10 m (km/h)",
+    "80m": "Wind 80 m (km/h)",
+    "120m": "Wind 120 m (km/h)",
+    "gusts": "Gusts 10 m (km/h)",
+}
+
+
+def _wind_hit_frame(panel: _Panel, frame: pd.DataFrame) -> pd.DataFrame:
+    """The wind plot's hit target: one row per hour, carrying that hour's readings.
+
+    The hover bubble reads this row, so it can name the day and the hour and
+    print every series drawn at it rather than the bare timestamp it sits on.
+    Everything joins on the UTC hour, since the spine runs in the panel's
+    display timezone and the timeline in its own.
+    """
+    hits = panel.spine.assign(
+        hour=_utc_hours(panel.spine["time"]),
+        day=pd.DatetimeIndex(panel.spine["time"]).strftime("%a %d %b"),
+        clock=pd.DatetimeIndex(panel.spine["time"]).strftime("%H:%M"),
+    )
+    wide = frame.pivot_table(
+        index="time", columns="elevation", values="wind_speed", aggfunc="mean"
+    )
+    wide.index = _utc_hours(wide.index)
+    hits = hits.merge(
+        wide[~wide.index.duplicated()], left_on="hour", right_index=True, how="left"
+    )
+    # The console holds no measured WIND -- the plot's series are all forecast
+    # -- so the observed half of an hour is its quality index, which is the one
+    # measured number the record does carry.
+    if not panel.focus_accuracy.empty:
+        graded = panel.focus_accuracy.set_index(
+            _utc_hours(panel.focus_accuracy["time"])
         )
+        graded = graded[~graded.index.duplicated()]
+        hits["predicted_quality"] = hits["hour"].map(graded["predicted"])
+        hits["observed_quality"] = hits["hour"].map(graded["observed"])
+    return hits.drop(columns="hour")
+
+
+def _wind_tooltip(hits: pd.DataFrame) -> list[alt.Tooltip]:
+    """Hover bubble for the wind plot: the day, the hour, and the readings.
+
+    The quality rows only appear for an hour the record actually holds, so a
+    measured hour shows the observed index beside the predicted one and an
+    unmeasured one says nothing it cannot back up.
+    """
+    tooltip = [
+        alt.Tooltip(field="day", type="nominal", title="Date"),
+        alt.Tooltip(field="clock", type="nominal", title="Time"),
+    ]
+    tooltip += [
+        alt.Tooltip(field=series, type="quantitative", title=title, format=".0f")
+        for series, title in _WIND_SERIES_TITLES.items()
+        if series in hits.columns
+    ]
+    tooltip += [
+        alt.Tooltip(field=column, type="quantitative", title=title, format=".2f")
+        for column, title in (
+            ("predicted_quality", "Predicted quality (1-5)"),
+            ("observed_quality", "Observed quality (1-5)"),
+        )
+        if column in hits.columns
+    ]
+    return tooltip
+
+
+def _hour_verdicts(accuracy: pd.DataFrame) -> pd.DataFrame:
+    """Per-hour accuracy, collapsed across spots, for the ruler's tint.
+
+    The board carries one verdict per spot AND hour; the ruler has only the
+    hour, so an hour reads as missed when any spot's forecast missed it. The
+    counts ride along in the tooltip, which is where the per-spot detail that
+    the collapse drops comes back.
+    """
+    graded = (
+        accuracy[accuracy["verdict"].notna()]
+        if "verdict" in accuracy.columns
+        else accuracy
+    )
+    if graded.empty:
+        return pd.DataFrame(
+            columns=["time", "time_end", "missed", "pairs", "worst", "verdict"]
+        )
+    grouped = graded.groupby("time", as_index=False).agg(
+        missed=("verdict", lambda v: int((v == "missed").sum())),
+        pairs=("verdict", "size"),
+        worst=("delta", "max"),
+    )
+    grouped["time_end"] = grouped["time"] + pd.Timedelta(hours=1)
+    grouped["verdict"] = grouped["missed"].map(
+        lambda n: "missed" if n > 0 else "matched"
+    )
+    return grouped
+
+
+def _hour_coverage(accuracy: pd.DataFrame) -> pd.DataFrame:
+    """Per hour and lane, whether that half of the record exists.
+
+    Two lanes rather than a class per combination: an hour the console
+    predicted fills the forecast lane, an hour that was measured fills the
+    observed lane, and an hour holding both fills both, which is a thing a
+    reader can see rather than a word they have to learn. The board's rows are
+    spots and these are hours, so a lane fills as soon as any spot holds that
+    half, and the counts ride along for the tooltip. Nothing here grades a
+    forecast: that is the ruler's tint.
+    """
+    columns = ["time", "time_end", "lane", "predicted_spots", "observed_spots"]
+    if accuracy.empty:
+        return pd.DataFrame(columns=columns)
+    marked = accuracy.assign(
+        has_predicted=accuracy["coverage"].isin(["predicted", "both"]),
+        has_observed=accuracy["coverage"].isin(["observed", "both"]),
+    )
+    hours = marked.groupby("time", as_index=False).agg(
+        predicted_spots=("has_predicted", "sum"),
+        observed_spots=("has_observed", "sum"),
+    )
+    hours["time_end"] = hours["time"] + pd.Timedelta(hours=1)
+    lanes = [
+        hours[hours[column] > 0].assign(lane=lane)
+        for lane, column in zip(
+            _COVERAGE_LANES, ("predicted_spots", "observed_spots"), strict=True
+        )
+    ]
+    return pd.concat(lanes, ignore_index=True)[columns]
+
+
+def _verdict_band(panel: _Panel) -> alt.Chart:
+    """The hour's verdict as a tint on the time ruler.
+
+    Colour and opacity move together: a matched hour is a quiet wash of the
+    secondary ink, a missed one a solid danger tint, so the miss reads on a
+    greyscale print too rather than resting on hue alone.
+    """
+    return (
+        alt.Chart(panel.hour_verdicts)
+        .mark_rect(clip=True)
+        .encode(
+            x=_panel_x(panel),
+            x2=alt.X2("time_end:T"),
+            color=alt.Color(
+                "verdict:N",
+                scale=alt.Scale(
+                    domain=["matched", "missed"],
+                    range=[panel.pal.ink_secondary, panel.pal.danger],
+                ),
+                legend=None,
+            ),
+            opacity=alt.condition(
+                alt.datum.verdict == "missed", alt.value(0.85), alt.value(0.3)
+            ),
+            tooltip=[
+                alt.Tooltip("time:T", title="Hour", format="%a %H:00"),
+                alt.Tooltip("missed:Q", title="Spots missed", format=".0f"),
+                alt.Tooltip("pairs:Q", title="Spots compared", format=".0f"),
+                alt.Tooltip("worst:Q", title="Worst miss", format=".2f"),
+            ],
+        )
+    )
+
+
+def _pin_frame(pinned: pd.Timestamp) -> pd.DataFrame:
+    """The pinned hour and the day+time label the rulers print beside it.
+
+    time_mid centres the pin in its hour cell, matching the spine's t_mid.
+    """
+    return pd.DataFrame(
+        {
+            "time": [pinned],
+            "time_mid": [pinned + pd.Timedelta(minutes=30)],
+            "label": [pinned.strftime("%a %d %b %H:00")],
+        }
+    )
+
+
+def _utc_hours(times: Any) -> pd.DatetimeIndex:
+    """The hour each timestamp falls in, in UTC.
+
+    The panel runs in the display timezone and the timelines in UTC, so
+    anything joining the two matches on this rather than on the timestamps.
+    """
+    index = pd.DatetimeIndex(times)
+    index = index.tz_localize("UTC") if index.tz is None else index.tz_convert("UTC")
+    return index.floor("h")
+
+
+def _panel_x(panel: _Panel, field: str = "time") -> alt.X:
+    """The panel's x channel: the shared domain, and no axis of the layer's own.
+
+    Every layer inside a plot has to suppress its axis, not just the one that
+    would have drawn it. A layer that leaves the axis implicit next to a sibling
+    that nulls it leaves vega-lite with nothing to merge, and the whole spec
+    fails to compile.
+    """
+    return alt.X(f"{field}:T", axis=None, scale=panel.x_scale)
+
+
+def _hover_rule(panel: _Panel, param: alt.Parameter) -> alt.Chart:
+    """Vertical crosshair at the hovered hour, drawn from the shared spine.
+
+    Both plots draw a rule for both hover params, so the line spans the whole
+    panel wherever the pointer is; the param that is not under the pointer
+    filters to no rows and draws nothing.
+    """
+    return (
+        alt.Chart(panel.spine)
+        .mark_rule(
+            color=panel.pal.ink_secondary, strokeWidth=1, opacity=0.85, clip=True
+        )
+        .encode(x=_panel_x(panel, "t_mid"))
+        .transform_filter(param)
+    )
+
+
+def _pin_rule(panel: _Panel) -> alt.Chart:
+    """The pinned time selector: a reading-orange rule bisecting the pinned cell."""
+    return (
+        alt.Chart(_pin_frame(panel.pinned))
+        .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+        .encode(x=_panel_x(panel, "time_mid"))
+    )
+
+
+def _now_rule(panel: _Panel) -> alt.Chart:
+    """The current instant, in the one saturated green every view marks it with.
+
+    Drawn in both plots and on both rulers so "now" reads as a single line down
+    the whole panel. It is also the boundary the board used to mark with a
+    dashed grey rule: left of it the record is hindcast, right of it forecast.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"time": [panel.now]}))
+        .mark_rule(color=panel.pal.band, strokeWidth=2, clip=True)
+        .encode(x=_panel_x(panel))
+    )
+
+
+def _now_label(panel: _Panel) -> alt.Chart:
+    """The word beside the NOW rule, so the green line is never read as a series.
+
+    It prints at the top of the wind plot rather than on a ruler. The rulers
+    already carry the day label, the pinned hour's label and the sun ticks, and
+    a forecast window opens near the present, so the word landed on top of the
+    date every time.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"time": [panel.now], "label": ["NOW"]}))
+        .mark_text(
+            color=panel.pal.band,
+            fontSize=10,
+            fontWeight=700,
+            align="left",
+            baseline="top",
+            dx=4,
+            dy=2,
+            clip=True,
+        )
+        .encode(x=_panel_x(panel), y=alt.value(0), text="label:N")
+    )
+
+
+def _sun_marks(panel: _Panel) -> list[alt.Chart]:
+    """Sunrise and sunset ticks on the ruler: one hue, told apart by dash.
+
+    A colour encoding would need a scale of its own beside the verdict tint's,
+    so each event is a layer at a constant colour instead. Sunrise is solid,
+    sunset dashed, and both name themselves in the tooltip.
+    """
+
+    def mark(event: str, dash: list[int]) -> alt.Chart:
+        return (
+            alt.Chart(panel.sun[panel.sun["event"] == event])
+            .mark_rule(color=panel.pal.sun, strokeWidth=1.5, strokeDash=dash, clip=True)
+            .encode(x=_panel_x(panel), tooltip=[alt.Tooltip("label:N", title="Sun")])
+        )
+
+    return [mark("Sunrise", [1, 0]), mark("Sunset", [3, 2])]
+
+
+def _focus_row_outline(panel: _Panel, rank_order: list[str]) -> alt.Chart:
+    """The location half of the selector: the focused spot's row, outlined.
+
+    The pinned hour draws a vertical rule, but a row is a band rather than an
+    instant, so its counterpart is the band's own border: the cells inside keep
+    their quality fill and stay readable under it.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"spot": [panel.focus_spot]}))
+        .mark_rect(fillOpacity=0, stroke=panel.pal.reading, strokeWidth=2, clip=True)
+        .encode(y=alt.Y("spot:N", sort=rank_order))
+    )
+
+
+def _board_y_axis(pal: Palette, focus_spot: str | None) -> alt.Axis:
+    """The board's spot axis, printing the focused spot's name in the accent.
+
+    accent_text rather than the mark orange for the same reason the ruler label
+    wears it: an axis label is text on the page surface, so it has to clear the
+    4.5:1 floor the plain mark orange misses in light mode.
+    """
+    if focus_spot is None:
+        return alt.Axis(orient="right", labelFontSize=13)
+    test = f"datum.value === {json.dumps(focus_spot)}"
+    return alt.Axis(
+        orient="right",
+        labelFontSize=13,
+        labelColor={
+            "condition": {"test": test, "value": pal.accent_text},
+            "value": pal.ink,
+        },
+        labelFontWeight={"condition": {"test": test, "value": 700}, "value": 400},
+    )
+
+
+def _ruler_view(panel: _Panel, orient: str) -> alt.Chart:
+    """One ruler edge: the shared time axis, and what is worth reading off it.
+
+    The axis carries the clock and the date; the strip itself carries the
+    verdict tint, the sun marks, the NOW rule and the pinned hour's label. Only
+    the axis-bearing layer may declare an axis and every sibling nulls its own,
+    or vega-lite has two of them to merge across the layer.
+
+    The pin label is accent_text rather than the reading orange the rule wears:
+    it is text on the page surface, so it has to clear the 4.5:1 floor, which
+    the plain mark orange does not.
+    """
+    axis = _ruler_axis(orient, panel.domain_start, panel.domain_end)
+    layers = [
+        alt.Chart(panel.spine)
+        .mark_rule(opacity=0)
+        .encode(x=alt.X("time:T", axis=axis, scale=panel.x_scale))
+    ]
+    if not panel.hour_verdicts.empty:
+        layers.append(_verdict_band(panel))
+    day = _day_label_frame(panel.domain_start)
+    if not day.empty:
+        layers.append(
+            alt.Chart(day)
+            # Hugging the strip's top half, with the pinned hour's label in the
+            # bottom one: the two print at the same edge when the window opens
+            # on the pinned hour, and stacking is what keeps both readable.
+            .mark_text(
+                color=panel.pal.ink_secondary,
+                fontSize=10,
+                align="left",
+                baseline="middle",
+                dx=3,
+                dy=-5,
+                clip=True,
+            )
+            .encode(x=_panel_x(panel), text="label:N")
+        )
+    layers.extend(_sun_marks(panel))
+    if panel.now is not None:
+        layers.append(_now_rule(panel))
+    if panel.pinned is not None:
+        pin = _pin_frame(panel.pinned)
+        layers.append(
+            alt.Chart(pin)
+            .mark_rule(color=panel.pal.reading, strokeWidth=2, clip=True)
+            .encode(x=_panel_x(panel, "time_mid"))
+        )
+        layers.append(
+            alt.Chart(pin)
+            # No font family: the ruler's own labels take the chart default, and
+            # a family the renderer does not have drops the glyphs silently.
+            .mark_text(
+                color=panel.pal.accent_text,
+                fontSize=11,
+                fontWeight=700,
+                align="left",
+                baseline="middle",
+                dx=5,
+                dy=6,
+            )
+            .encode(x=_panel_x(panel, "time_mid"), text="label:N")
+        )
+    return alt.layer(*layers).properties(
+        height=_RULER_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
+    )
+
+
+def _board_view(
+    panel: _Panel,
+    heat_grid: pd.DataFrame,
+    rank_order: list[str],
+) -> alt.LayerChart:
+    """The session-quality board, without an x axis of its own.
+
+    Cells are rects on a continuous x, so each one has to declare where it ends
+    (x2) or a later cell paints over its neighbours.
+    """
+    pal = panel.pal
+    tok = dial_tokens(pal)
+    cells = (
+        alt.Chart(heat_grid)
+        .mark_rect()
+        .encode(
+            x=_panel_x(panel),
+            x2="time_end:T",
+            y=alt.Y(
+                "spot:N",
+                title=None,
+                sort=rank_order,
+                axis=_board_y_axis(pal, panel.focus_spot),
+            ),
+            # The cell's own quality drives the fill continuously; night cells
+            # leave the ramp entirely. See _quality_fill.
+            color=_quality_fill(pal),
+            # Selected cell gets a full-opacity ink stroke; the rest keep the
+            # hairline surface gap, so the pick is unmistakable.
+            stroke=alt.condition(
+                panel.cell, alt.value(rgb_to_hex(tok.ink)), alt.value(_heatmap_gap(pal))
+            ),
+            strokeWidth=alt.condition(panel.cell, alt.value(2.5), alt.value(1.0)),
+            tooltip=_heat_tooltip(heat_grid),
+        )
+        .add_params(panel.cell, panel.hover_board, panel.hover_row)
+    )
+    layers = [cells]
+
+    # The window opens before the forecast does. Hindcast cells fill that
+    # stretch from the prediction log, but an hour no run ever spoke about has
+    # no cell; the wash says hindcast there, where a bare gap would read as a
+    # board that failed to draw.
+    if not heat_grid.empty and panel.domain_start < heat_grid["time"].min():
+        layers.append(
+            alt.Chart(
+                pd.DataFrame(
+                    {
+                        "x": [panel.domain_start],
+                        "x2": [heat_grid["time"].min()],
+                    }
+                )
+            )
+            .mark_rect(color=pal.grid, opacity=0.45, clip=True)
+            .encode(x=_panel_x(panel, "x"), x2=alt.X2("x2:T"))
+        )
+
+    # Dangerous hours, painted over their own cell. The fill below cannot carry
+    # this: a conditional encoding falls back to ONE constant, which night
+    # already claims, and the ramp floors these hours at level 1 -- the same
+    # bare surface a dead-calm hour gets. Drawn as its own layer so the danger
+    # colour is exact rather than a step on the quality ramp. It repeats the
+    # tooltip because the top mark is the one that answers the pointer.
+    if "is_dangerous" in heat_grid.columns and bool(heat_grid["is_dangerous"].any()):
+        layers.append(
+            alt.Chart(heat_grid)
+            .mark_rect()
+            .transform_filter("datum.is_dangerous")
+            .encode(
+                x=_panel_x(panel),
+                x2="time_end:T",
+                y=alt.Y("spot:N", title=None, sort=rank_order, axis=None),
+                color=alt.value(pal.danger),
+                tooltip=_heat_tooltip(heat_grid),
+            )
+        )
+
+    # Where the record stops being hindcast and starts being forecast, in the
+    # green the whole panel marks the present with.
+    if panel.now is not None:
+        layers.append(_now_rule(panel))
+
+    # The horizontal half of the crosshair: the hovered row, which on this board
+    # is a spot rather than a value.
+    layers.append(
+        alt.Chart(pd.DataFrame({"spot": rank_order}))
+        .mark_rule(color=pal.ink_secondary, strokeWidth=1, opacity=0.85, clip=True)
+        .encode(y=alt.Y("spot:N", sort=rank_order))
+        .transform_filter(panel.hover_row)
+    )
+    layers.append(_hover_rule(panel, panel.hover_board))
+    layers.append(_hover_rule(panel, panel.hover_wind))
+    # The selection crosshair: the focused spot's row crossing the pinned hour,
+    # both in the same reading orange.
+    if panel.focus_spot in rank_order:
+        layers.append(_focus_row_outline(panel, rank_order))
+    if panel.pinned is not None:
+        layers.append(_pin_rule(panel))
+
+    # Layered charts SHARE the colour and shape scales by default, so
+    # "matched"/"missed" would be looked up in the cells' own quality ramp,
+    # miss, and paint as undefined -- marks present in the DOM and invisible on
+    # screen. Same trap the level-1 note in _quality_fill describes.
+    return (
+        alt.layer(*layers)
+        .resolve_scale(color="independent", shape="independent")
+        .properties(
+            height=_HEATMAP_ROW_PX * max(len(rank_order), 1), width=_PANEL_PLOT_WIDTH
+        )
+    )
+
+
+def _coverage_label_anchors(hour_coverage: pd.DataFrame) -> pd.DataFrame:
+    """One anchor hour per coverage lane, for the labels inside the strip.
+
+    The middle covered hour by position is itself covered, so the label lands
+    on a filled segment rather than floating over a gap.
+    """
+    if hour_coverage.empty:
+        return pd.DataFrame(columns=["lane", "at"])
+
+    def _middle(times: pd.Series) -> pd.Timestamp:
+        ordered = times.sort_values().reset_index(drop=True)
+        return ordered.iloc[len(ordered) // 2]
+
+    return hour_coverage.groupby("lane")["time"].apply(_middle).reset_index(name="at")
+
+
+def _coverage_view(panel: _Panel) -> alt.LayerChart:
+    """The strip between the plots: two lanes saying what the record holds.
+
+    One lane for the forecast and one for the measurement, each filled only
+    where that half exists, so an hour holding both fills both lanes and there
+    is no third thing to name. The lane names sit inside their own segments,
+    not on a spine of their own. Nothing here grades the forecast, so the
+    strip carries no verdict and no shading -- the ruler's tint keeps that job.
+
+    Each lane is its own layer at a constant colour, the way the sun marks are
+    drawn: with the lane field driving both the position and a colour scale,
+    the two hues came out swapped on the page.
+    """
+    pal = panel.pal
+    lane_y = alt.Y(
+        "lane:N",
+        title=None,
+        scale=alt.Scale(domain=list(_COVERAGE_LANES)),
+        axis=None,
+    )
+    tooltip = [
+        alt.Tooltip("time:T", title="Hour", format="%a %d %b %H:00"),
+        alt.Tooltip("predicted_spots:Q", title="Spots predicted", format=".0f"),
+        alt.Tooltip("observed_spots:Q", title="Spots observed", format=".0f"),
+    ]
+    layers = [
+        alt.Chart(panel.hour_coverage[panel.hour_coverage["lane"] == lane])
+        .mark_rect(color=hue, clip=True)
+        .encode(
+            x=_panel_x(panel),
+            x2=alt.X2("time_end:T"),
+            y=lane_y,
+            tooltip=tooltip,
+        )
+        for lane, hue in zip(_COVERAGE_LANES, (pal.reading, pal.idle), strict=True)
+    ]
+    anchors = _coverage_label_anchors(panel.hour_coverage)
+    if not anchors.empty:
+        # The surface colour is the one both lane hues were picked to stand
+        # out against, so it is the one that reads on top of either.
+        layers.append(
+            alt.Chart(anchors)
+            .mark_text(fontSize=9, fontWeight="bold", color=pal.surface)
+            .encode(
+                x=_panel_x(panel, "at"),
+                y=lane_y,
+                text="lane:N",
+            )
+        )
+    if panel.now is not None:
+        layers.append(
+            alt.Chart(pd.DataFrame({"time": [panel.now]}))
+            .mark_rule(color=pal.casing, strokeWidth=5, clip=True)
+            .encode(x=_panel_x(panel))
+        )
+        layers.append(_now_rule(panel))
+    return alt.layer(*layers).properties(
+        height=_COVERAGE_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
+    )
+
+
+def _wind_view(
+    panel: _Panel,
+    timeline_frame: pd.DataFrame,
+    spot_lat: float,
+    spot_lon: float,
+    min_kts: float,
+) -> alt.LayerChart:
+    """The wind and gust plot, on the board's clock and carrying the panel's hit layer."""
+    pal = panel.pal
+    # A sample at H:00 borders the cells [H-1, H) and [H, H+1); it draws at
+    # full strength when either neighbour is a daylight cell, so the bright
+    # line runs edge-to-edge of the day region and meets the night wash
+    # exactly where the heatmap's night cells begin.
+    hours = pd.DatetimeIndex(timeline_frame["time"]).floor("h")
+    cell_day = is_daylight_hour(spot_lat, spot_lon, hours).to_numpy()
+    prev_day = is_daylight_hour(
+        spot_lat, spot_lon, hours - pd.Timedelta(hours=1)
+    ).to_numpy()
+    frame = timeline_frame.assign(
+        is_day=cell_day | prev_day,
+        t_ms=_epoch_ms(timeline_frame["time"]),
+        # An hourly value is drawn at the middle of its hour, where the board
+        # draws that hour's cell, so the two plots align column for column.
+        time_mid=timeline_frame["time"] + pd.Timedelta(minutes=30),
+    )
+    threshold_kmh = min_kts * _KN_TO_KMH
+    elevations = [
+        e for e in ("10m", "80m", "120m", "gusts") if e in set(frame["elevation"])
+    ]
+    colors = _elevation_colors(pal)
+    color_scale = alt.Scale(domain=elevations, range=[colors[e] for e in elevations])
+
+    def wind_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
+        return (
+            alt.Chart(data)
+            .mark_line(
+                interpolate="monotone",
+                strokeWidth=1.6 if dim else 2.2,
+                opacity=0.3 if dim else 1.0,
+                clip=True,
+            )
+            .encode(
+                x=_panel_x(panel, "time_mid"),
+                y=alt.Y(
+                    "wind_speed:Q",
+                    title="Wind speed (km/h)",
+                    axis=alt.Axis(orient="right", labelFontSize=13),
+                ),
+                color=alt.Color(
+                    "elevation:N",
+                    scale=color_scale,
+                    # The key is drawn in HTML above the panel: see
+                    # _elevation_legend_html.
+                    legend=None,
+                ),
+                strokeDash=alt.StrokeDash(
+                    "elevation:N",
+                    scale=alt.Scale(
+                        domain=elevations,
+                        range=[[5, 4] if e == "gusts" else [1, 0] for e in elevations],
+                    ),
+                    legend=None,
+                ),
+            )
+        )
+
+    # Solar-elevation curve along the chart bottom, pre-scaled into wind-speed
+    # units so it shares the axis without a second scale.
+    # Spanning the panel's window rather than the series' own, so the stretch
+    # before the forecast is lit and shaded like the rest of the plot.
+    strip_times = pd.date_range(
+        panel.domain_start.floor("h"), panel.domain_end.ceil("h"), freq="30min"
+    )
+    elevation = solar_elevation_deg(spot_lat, spot_lon, strip_times).clip(lower=0.0)
+    peak = float(elevation.max()) or 1.0
+    band_kmh = 0.12 * max(float(frame["wind_speed"].max()), threshold_kmh)
+    solar_area = (
+        alt.Chart(
+            pd.DataFrame(
+                {"time": strip_times, "solar": elevation.to_numpy() / peak * band_kmh}
+            )
+        )
+        .mark_area(
+            color=pal.quality[2],
+            opacity=0.22,
+            line={"color": pal.quality[2], "strokeWidth": 1.0},
+            clip=True,
+        )
+        .encode(x=_panel_x(panel), y="solar:Q")
+    )
+    # The line is a light green and its label the text-grade green beside it:
+    # the label is text on the page surface and has to clear the 4.5:1 floor,
+    # which the ramp's light end does not.
+    threshold = (
+        alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
+        .mark_rule(color=_light_green(pal), strokeDash=[4, 4], strokeWidth=2)
+        .encode(y="y:Q")
+    )
+    threshold_label = (
+        alt.Chart(
+            pd.DataFrame(
+                {"y": [threshold_kmh], "label": [f"{int(min_kts)} kn rideable"]}
+            )
+        )
+        .mark_text(
+            align="left", baseline="bottom", dx=6, dy=-3, color=pal.ok, fontSize=10
+        )
+        .encode(y="y:Q", text="label:N")
+    )
+
+    # At the hovered hour every series shows its own number: a dot on the line
+    # and the value beside it. This replaces the old horizontal rule, which
+    # only marked the 10 m reading's position without saying what it was.
+    def value_marks(param: alt.Parameter) -> list[alt.Chart]:
+        base = alt.Chart(frame).transform_filter(param)
+        points = base.mark_point(filled=True, size=45, clip=True).encode(
+            x=_panel_x(panel, "time_mid"),
+            y=alt.Y("wind_speed:Q"),
+            color=alt.Color("elevation:N", scale=color_scale, legend=None),
+        )
+        labels = base.mark_text(
+            align="left",
+            baseline="middle",
+            dx=7,
+            fontSize=11,
+            fontWeight=700,
+            clip=True,
+        ).encode(
+            x=_panel_x(panel, "time_mid"),
+            y=alt.Y("wind_speed:Q"),
+            text=alt.Text("wind_speed:Q", format=".0f"),
+            color=alt.Color("elevation:N", scale=color_scale, legend=None),
+        )
+        return [points, labels]
+
+    # Hit layer, on top and invisible: it gives the wind plot the same hourly
+    # hover and click targets the board's cells give, so a click on empty space
+    # still pins a time. It is also the top mark, so it is the one that answers
+    # the pointer, which is why the hour's readings ride on it. A rect on a
+    # continuous x must declare x2.
+    hit_frame = _wind_hit_frame(panel, frame)
+    hits = (
+        alt.Chart(hit_frame)
+        .mark_rect(opacity=0)
+        .encode(
+            x=_panel_x(panel),
+            x2="time_end:T",
+            tooltip=_wind_tooltip(hit_frame),
+        )
+        .add_params(panel.hover_wind, panel.pin_time)
+    )
+
+    layers = [
+        _night_rect(
+            panel.domain_start, panel.domain_end, spot_lat, spot_lon, panel.x_scale
+        ),
+        solar_area,
+        # Night hours render dimmed underneath; daylight at full strength.
+        wind_layer(frame, dim=True),
+        wind_layer(frame[frame["is_day"]], dim=False),
+        threshold,
+        threshold_label,
+        *([_now_rule(panel), _now_label(panel)] if panel.now is not None else []),
+        _hover_rule(panel, panel.hover_board),
+        _hover_rule(panel, panel.hover_wind),
+        *value_marks(panel.hover_board),
+        *value_marks(panel.hover_wind),
+    ]
+    if panel.pinned is not None:
+        layers.append(_pin_rule(panel))
+    layers.append(hits)
+    return alt.layer(*layers).properties(
+        height=_WIND_HEIGHT_PX, width=_PANEL_PLOT_WIDTH
+    )
+
+
+def _time_panel(
+    heat_grid: pd.DataFrame,
+    rank_order: list[str],
+    accuracy: pd.DataFrame,
+    timeline_frame: pd.DataFrame,
+    spot_lat: float,
+    spot_lon: float,
+    domain: list[pd.Timestamp],
+    now: pd.Timestamp,
+    pinned: pd.Timestamp | None,
+    min_kts: float,
+    focus_spot: str | None = None,
+) -> tuple[alt.VConcatChart, list[str]]:
+    """The board and the wind plot as one strip, ruled top and bottom.
+
+    Both plots are pinned to the same x domain and the same hourly spine, so
+    their columns line up and one crosshair reads across both. Returns the
+    composite and the names of the selection params Streamlit should listen to
+    -- the hover params must stay out of that list, or every pointer move would
+    rerun the app.
+    """
+    pal = active()
+    domain_start, domain_end = domain[0], domain[1]
+    focus_accuracy = (
+        accuracy[accuracy["spot"] == focus_spot]
+        if focus_spot is not None and not accuracy.empty
+        else pd.DataFrame(columns=list(_ACCURACY_COLUMNS))
+    )
+    panel = _Panel(
+        spine=_time_spine(domain_start, domain_end),
+        x_scale=alt.Scale(domain=domain, nice=False),
+        domain_start=domain_start,
+        domain_end=domain_end,
+        pal=pal,
+        pinned=pinned,
+        focus_spot=focus_spot,
+        now=now if domain_start <= now <= domain_end else None,
+        sun=_sun_frame(domain_start, domain_end, spot_lat, spot_lon),
+        hour_verdicts=_hour_verdicts(accuracy),
+        hour_coverage=_hour_coverage(accuracy),
+        focus_accuracy=focus_accuracy,
+        cell=alt.selection_point(
+            name="cell", fields=["spot", "time"], on="click", empty=False
+        ),
+        hover_board=alt.selection_point(
+            name="hover_board",
+            fields=["t_ms"],
+            on="pointerover",
+            clear="pointerout",
+            empty=False,
+        ),
+        hover_row=alt.selection_point(
+            name="hover_row",
+            fields=["spot"],
+            on="pointerover",
+            clear="pointerout",
+            empty=False,
+        ),
+        hover_wind=alt.selection_point(
+            name="hover_wind",
+            fields=["t_ms"],
+            on="pointerover",
+            clear="pointerout",
+            empty=False,
+        ),
+        pin_time=alt.selection_point(
+            name="pin_time", fields=["t_ms"], on="click", empty=False
+        ),
+    )
+
+    views = [_ruler_view(panel, "top")]
+    modes: list[str] = []
+    if not heat_grid.empty:
+        views.append(_board_view(panel, heat_grid, rank_order))
+        modes.append("cell")
+    if not panel.hour_coverage.empty:
+        views.append(_coverage_view(panel))
+    if not timeline_frame.empty:
+        views.append(_wind_view(panel, timeline_frame, spot_lat, spot_lon, min_kts))
+        modes.append("pin_time")
+    views.append(_ruler_view(panel, "bottom"))
+
+    return (
+        alt.vconcat(*views, spacing=_PANEL_SPACING_PX, bounds="flush")
+        .properties(
+            background="transparent",
+            # The y axes sit on the right, so the plot's left edge has no
+            # gutter: a midnight ruler label near that edge center-anchors past
+            # it and clips. The left padding buys the half-label of room. Top
+            # and bottom hold the two rulers' axis bands, which the flush
+            # layout leaves out of the view boxes (a padding OBJECT zeroes any
+            # side left unspecified, hence all four).
+            padding={
+                "left": 26,
+                "top": _RULER_AXIS_BAND_PX,
+                "right": 6,
+                "bottom": _RULER_AXIS_BAND_PX,
+            },
+        )
+        .configure_view(strokeWidth=0, fill=None)
+        .configure_axis(
+            domainColor=pal.ink_secondary,
+            gridColor=pal.grid,
+            labelColor=pal.ink,
+            titleColor=pal.ink,
+        ),
+        modes,
+    )
 
 
 @st.fragment
@@ -729,8 +2480,9 @@ def render_rider_console(
         predictions_list = dashboard_data.get("predictions", [])
 
         # All-spots session-quality heatmap: every ranked spot on one grid so
-        # they compare at a glance, best spot on the top row. No night shading
-        # here - daylight is already baked into the score.
+        # they compare at a glance, best spot on the top row. Daylight is baked
+        # into the SCORE that orders the rows, but each cell is its own hour, so
+        # cells carry the flag themselves and dark hours render off-ramp.
         ranked_meta = [
             {
                 "spot_id": s["spot_id"],
@@ -749,477 +2501,199 @@ def render_rider_console(
             json.dumps(predictions_list, default=str),
             display_tz,
             json.dumps(ranked_meta),
+            is_dark(),
         )
         # ONE CLOCK: derive the prediction window once from the grid so the
-        # heatmap's pinned x domain, both time-series domains (R5), and the
+        # panel's pinned x domain -- both plots and both rulers -- and the
         # wind-map slider options (R6) all read the same hours. Empty grid ->
-        # no window; the charts and slider fall back to their own extents.
+        # no window; the panel falls back to its own extent.
         if not heat_grid.empty:
-            pred_hours = sorted(heat_grid["time"].drop_duplicates())
-        prediction_end = heat_grid["time_end"].max() if not heat_grid.empty else None
-        # Evaluate "now" in the display timezone (prediction_end's tz) so the
-        # shared domain's left edge matches the Europe/Zurich data on the right.
+            # Slider options stay forecast-only: the control asks "which
+            # forecast hour", and a hindcast cell is not an answer to that.
+            pred_hours = sorted(
+                heat_grid.loc[~heat_grid["is_hindcast"], "time"].drop_duplicates()
+            )
+        timeline_frame = focus_spot_timeline(focus_spot_id)
+        min_kts = _minimum_rideable_kts()
+        accuracy = all_spots_accuracy(
+            tuple(spot["spot_id"] for spot in ranked_spots),
+            json.dumps(predictions_list, default=str),
+        )
+        if not accuracy.empty:
+            accuracy = accuracy.assign(
+                spot=accuracy["spot_id"].map(
+                    lambda sid: spot_lookup[sid]["name"] if sid in spot_lookup else sid
+                ),
+                # The ruler's tint and the coverage strip are rects spanning
+                # [H, H+1), so an hour has to stay on its own cell edge.
+                time=accuracy["time"].dt.tz_convert(display_tz),
+            )
+        # The window reaches back only as far as the record goes, so a stack
+        # with nothing measured yet never opens onto an empty stretch.
+        domain = _panel_x_domain(
+            heat_grid, timeline_frame, _earliest_observed(accuracy)
+        )
+        # Evaluate "now" in the display timezone (the window's own tz) so the
+        # hindcast boundary lands where the Europe/Zurich data says it should.
         now = (
-            pd.Timestamp.now(tz=prediction_end.tz)
-            if prediction_end is not None
+            pd.Timestamp.now(tz=domain[1].tz)
+            if domain is not None
             else pd.Timestamp.now(tz="UTC")
         )
-        ts_domain = _timeseries_x_domain(prediction_end, now)
-        x_scale = (
-            alt.Scale(domain=ts_domain, nice=False)
-            if ts_domain is not None
-            else alt.Undefined
-        )
+
+        rank_order = [
+            spot_lookup[s["spot_id"]]["name"]
+            for s in ranked_spots
+            if s["spot_id"] in spot_lookup
+        ]
         if not heat_grid.empty:
             heat_grid = heat_grid.assign(
-                spot=heat_grid["spot_id"].map(lambda sid: spot_lookup[sid]["name"])
+                spot=heat_grid["spot_id"].map(lambda sid: spot_lookup[sid]["name"]),
+                # Epoch milliseconds: what the panel's hover and click params
+                # match on, so a rule drawn from the spine can be driven by a
+                # pointer over a cell.
+                t_ms=_epoch_ms(heat_grid["time"]),
             )
-            rank_order = [
-                spot_lookup[s["spot_id"]]["name"]
-                for s in ranked_spots
-                if s["spot_id"] in spot_lookup
-            ]
-            # The deployed vega-tooltip renders the field titled "title" as the
-            # bubble header and the one titled "image" as an <img>; in vega-lite
-            # the tooltip datum key is the field title, so those titles are load
-            # bearing. The rest are label:value rows in this order.
-            tooltip = [
-                alt.Tooltip("header:N", title="title"),
-                alt.Tooltip("dial:N", title="image"),
-                alt.Tooltip("quality:O", title="Quality (1-5)"),
-            ]
-            if "wind" in heat_grid.columns:
-                tooltip.append(alt.Tooltip("wind:Q", title="Wind (km/h)", format=".0f"))
-            if "gust" in heat_grid.columns:
-                tooltip.append(
-                    alt.Tooltip("gust:Q", title="Gusts (km/h)", format=".0f")
-                )
-            tooltip += [
-                alt.Tooltip("direction:N", title="Direction"),
-                alt.Tooltip("quality_label:N", title="Signal"),
-                alt.Tooltip("quality_index:Q", title="Peak quality", format=".2f"),
-                alt.Tooltip("rideable_hours:Q", title="Rideable hrs", format=".0f"),
-                alt.Tooltip("drive_minutes:Q", title="Drive min", format=".1f"),
-                alt.Tooltip("session_hours:Q", title="Session hrs", format=".1f"),
-                alt.Tooltip("ride_drive_ratio:Q", title="Ride/drive", format=".2f"),
-                alt.Tooltip("score:Q", title="Score", format=".3f"),
+        if not accuracy.empty and domain is not None:
+            accuracy = accuracy[
+                (accuracy["time"] >= domain[0])
+                & (accuracy["time"] <= domain[1])
+                & accuracy["spot"].isin(rank_order)
             ]
 
+        if domain is None:
+            st.info("No forecast window available for this spot right now.")
+        else:
+            pinned = _initial_pinned(
+                # A panel click's own pin wins, past hours included; the map
+                # slider's hour is the fallback (and what a slider drag
+                # restores when it clears the click pin).
+                st.session_state.get("panel_pin_hour")
+                or st.session_state.get("wind_map_hour"),
+                domain,
+                now,
+                pred_hours,
+            )
             st.subheader("All spots — session quality")
             st.markdown(_quality_legend_html(), unsafe_allow_html=True)
+            if not timeline_frame.empty:
+                st.markdown(
+                    _elevation_legend_html(
+                        timeline_frame,
+                        f"Wind & gusts — {spot_label(spot_lookup, focus_spot_id)}",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            coverage = _hour_coverage(accuracy)
+            if not coverage.empty:
+                st.markdown(_coverage_legend_html(coverage), unsafe_allow_html=True)
             if _flat_week(heat_grid):
                 st.markdown(_FLAT_WEEK_CHIP, unsafe_allow_html=True)
-            cell_select = alt.selection_point(
-                name="cell", fields=["spot", "time"], on="click", empty=False
+
+            panel, modes = _time_panel(
+                heat_grid,
+                rank_order,
+                accuracy,
+                timeline_frame,
+                spot_lat,
+                spot_lon,
+                domain,
+                now,
+                pinned,
+                min_kts,
+                # The board's rows are spot NAMES, so the focused spot has to
+                # arrive in that form. The labelled "Name (id)" the switcher
+                # prints matched no row, which left both halves of the location
+                # selector -- the row outline and the accented axis label --
+                # drawing nothing at all.
+                focus_spot=spot_lookup[focus_spot_id]["name"],
             )
-            # Pin the x domain to the grid's own extent so no layered mark (the
-            # map-hour rule below) can ever stretch the band width -- this was
-            # the bug: an out-of-window slider hour widened the implicit
-            # domain and compressed every cell.
-            domain_start = heat_grid["time"].min()
-            domain_end = prediction_end
-            heatmap_layer = (
-                alt.Chart(heat_grid)
-                .mark_rect()
-                .encode(
-                    x=alt.X(
-                        "time:T",
-                        axis=_heatmap_x_axis(domain_start, domain_end),
-                        scale=alt.Scale(domain=[domain_start, domain_end], nice=False),
-                    ),
-                    x2="time_end:T",
-                    y=alt.Y(
-                        "spot:N",
-                        title=None,
-                        sort=rank_order,
-                        axis=alt.Axis(orient="right", labelFontSize=13),
-                    ),
-                    # Level 1 must stay INSIDE the scale domain: an out-of-domain
-                    # value gives Vega an undefined fill and the mark neither
-                    # renders nor hit-tests (a flat week then draws nothing at
-                    # all). "transparent" is a defined fill, so the cell keeps
-                    # its stroke and stays hover- and clickable.
-                    color=alt.Color(
-                        "quality:O",
-                        scale=alt.Scale(
-                            domain=[1, 2, 3, 4, 5],
-                            range=["transparent", *_QUALITY_RAMP],
-                        ),
-                        legend=None,
-                    ),
-                    # Selected cell gets a full-opacity ink stroke; the rest keep
-                    # the hairline surface gap, so the pick is unmistakable.
-                    stroke=alt.condition(
-                        cell_select, alt.value(rgb_to_hex(INK)), alt.value(_HEATMAP_GAP)
-                    ),
-                    strokeWidth=alt.condition(
-                        cell_select, alt.value(2.5), alt.value(1.0)
-                    ),
-                    tooltip=tooltip,
-                )
-                .add_params(cell_select)
-            )
-            # Direction (b) of the link: a rule at the map's current hour. A
-            # slider drag only reruns the map fragment, but that fragment
-            # forces an app-scope rerun on a real change (see
-            # _wind_map._render_map_fragment), so this fragment redraws too.
-            # The rule only layers when the hour falls inside the pinned x
-            # domain -- outside it, the domain stays fixed and the rule is
-            # just skipped rather than stretching the band (R6/J1).
-            map_hour = st.session_state.get("wind_map_hour")
-            heatmap = heatmap_layer
-            if map_hour is not None:
-                grid_tz = heat_grid["time"].dt.tz
-                rule_x = (
-                    map_hour.tz_convert(grid_tz)
-                    if grid_tz is not None and map_hour.tzinfo is not None
-                    else map_hour
-                )
-                if domain_start <= rule_x <= domain_end:
-                    highlight = (
-                        alt.Chart(pd.DataFrame({"x": [rule_x]}))
-                        .mark_rule(color=rgb_to_hex(INK), strokeWidth=2, opacity=0.55)
-                        .encode(x="x:T")
-                    )
-                    heatmap = heatmap_layer + highlight
-            heatmap = (
-                heatmap.properties(
-                    height=_HEATMAP_ROW_PX * max(len(rank_order), 1),
-                    background="transparent",
-                    # The y axis sits on the right, so the plot's left edge has
-                    # no gutter: a midnight "%a %d" label near that edge
-                    # center-anchors past it and clips. The left padding buys
-                    # the half-label of room (a padding OBJECT zeroes any side
-                    # left unspecified, hence all four).
-                    padding={"left": 26, "top": 5, "right": 5, "bottom": 5},
-                )
-                .configure_view(strokeWidth=0, fill=None)
-                .configure_axis(
-                    domainColor="#3b5a5a",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                )
-            )
-            # Selection row (#37): board left, dial + bubble to its right, so
-            # the first-sight section carries the picked cell's context inline.
-            board_col, side_col = st.columns([7, 5], gap="medium")
-            with board_col:
+            # The details panel holds its column whether or not a cell is
+            # picked, so the panel beside it never changes width.
+            panel_col, detail_col = st.columns([7, 5], gap="medium")
+            with panel_col:
                 event = st.altair_chart(
-                    heatmap,
-                    use_container_width=True,
+                    panel,
                     theme=None,
                     on_select="rerun",
-                    key="quality_heatmap_select",
+                    key="time_panel_select",
+                    selection_mode=modes,
                 )
-            selected = _selected_heat_cell(event, heat_grid)
-            if selected is not None:
+                st.caption(
+                    "Click anywhere in the panel to pin a time. The selector "
+                    "labels the pinned hour on both rulers and outlines the "
+                    "focused spot's row in orange. Both "
+                    "rulers carry the clock and the date, a green NOW rule, "
+                    "and amber ticks at sunrise (solid) and sunset (dashed). "
+                    "The strip between the plots says what the record holds "
+                    "for each hour. The green band along the wind plot traces "
+                    "solar elevation, scaled to the wind-speed axis."
+                )
+            selected = (
+                _selected_heat_cell(event, heat_grid) if not heat_grid.empty else None
+            )
+            clicked = _pinned_time_from_event(event, domain[0].tz)
+            cell_key = (
+                (str(selected["spot_id"]), str(selected["time"]))
+                if selected is not None
+                else None
+            )
+            route = _fresh_panel_click(
+                cell_key,
+                clicked,
+                st.session_state.get("panel_cell_seen"),
+                st.session_state.get("panel_pin_seen"),
+            )
+            st.session_state["panel_cell_seen"] = cell_key
+            st.session_state["panel_pin_seen"] = clicked
+            if route == "cell":
+                # A cell carries both halves of the pick: the hour and the spot.
                 _sync_slider_to_heatmap_click(
                     selected["time"], str(selected["spot_id"]), pred_hours
                 )
-            with side_col:
-                if selected is None:
-                    st.caption("Click a heatmap cell to inspect that spot and hour.")
+            elif route == "pin":
+                # Empty panel space carries only the hour.
+                _sync_slider_to_heatmap_click(clicked, None, pred_hours)
+            with detail_col:
+                detail = _detail_row(selected, heat_grid, focus_spot_id, pinned)
+                # The comparison grid sits beside the board, the bubble below it
+                # beside the wind plot; both follow the selected spot and hour.
+                dial_hour = (
+                    detail["time"]
+                    if detail is not None
+                    else pinned
+                    if pinned is not None
+                    else _clamp_to_slider_option(now, pred_hours)
+                )
+                ranked_ids = [s["spot_id"] for s in ranked_spots]
+                if dial_hour is not None and ranked_ids:
+                    _render_dial_grid(
+                        ranked_ids,
+                        str(detail["spot_id"]) if detail is not None else focus_spot_id,
+                        dial_hour,
+                        min_kts,
+                    )
+                if detail is None:
+                    st.caption(
+                        "Click a board cell to inspect that spot and hour, or "
+                        "anywhere else in the panel to pin a time."
+                    )
                 else:
-                    _render_selection_row(selected, _minimum_rideable_kts())
-
-        # Quality index timeline
-        quality_frame = spot_quality_timeline(
-            focus_spot_id, json.dumps(predictions_list, default=str)
-        )
-        if not quality_frame.empty:
-            quality_frame["time"] = quality_frame["time"].dt.tz_convert(display_tz)
-            quality_frame["is_day"] = is_daylight(
-                spot_lat, spot_lon, pd.DatetimeIndex(quality_frame["time"])
-            ).to_numpy()
-            st.subheader(f"Ride quality — {spot_label(spot_lookup, focus_spot_id)}")
-            q_tz = quality_frame["time"].dt.tz
-            q_now = (
-                pd.Timestamp.now(tz=q_tz)
-                if q_tz is not None
-                else pd.Timestamp.now(tz="UTC")
-            )
-            series_colors = {
-                "Predicted (past)": "#3b5a5a",
-                "Observed": "#0e8a86",
-                "Forecast": "#ff7a26",
-            }
-            series_present = [
-                s
-                for s in ["Predicted (past)", "Observed", "Forecast"]
-                if s in quality_frame["series"].unique()
-            ]
-
-            def q_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
-                return (
-                    alt.Chart(data)
-                    .mark_line(
-                        interpolate="monotone",
-                        strokeWidth=1.6 if dim else 2.2,
-                        point=not dim,
-                        opacity=0.3 if dim else 1.0,
-                        clip=True,
+                    _render_selection_bubble(detail)
+                if not accuracy.empty:
+                    hours = _hour_verdicts(accuracy)
+                    missed = int((hours["verdict"] == "missed").sum())
+                    st.caption(
+                        f"The time ruler is tinted left of the dashed line, "
+                        f"where past forecasts can be compared with a quality "
+                        f"index recomputed from archive data, which lags about "
+                        f"five days, so recent hours are provisional: a quiet "
+                        f"tint means every spot was called within "
+                        f"{_ACCURACY_MISS_THRESHOLD:.0f} quality band, a red "
+                        f"one means at least one spot missed "
+                        f"({missed} of {len(hours)} hours). Hover an hour for "
+                        f"the count."
                     )
-                    .encode(
-                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS, scale=x_scale),
-                        y=alt.Y(
-                            "quality_index:Q",
-                            title="Quality index",
-                            scale=alt.Scale(domain=[0, 5]),
-                        ),
-                        color=alt.Color(
-                            "series:N",
-                            scale=alt.Scale(
-                                domain=series_present,
-                                range=[series_colors[s] for s in series_present],
-                            ),
-                            # Same legend on both layers: the shared color scale
-                            # renders it once; None here would suppress it entirely.
-                            legend=alt.Legend(title="Series", orient="top"),
-                        ),
-                        strokeDash=alt.StrokeDash(
-                            "series:N",
-                            scale=alt.Scale(
-                                domain=series_present,
-                                range=[
-                                    [4, 4] if s == "Predicted (past)" else [1, 0]
-                                    for s in series_present
-                                ],
-                            ),
-                            legend=None,
-                        ),
-                    )
-                )
-
-            # Night hours render dimmed underneath; daylight at full strength.
-            q_lines = q_layer(quality_frame, dim=True) + q_layer(
-                quality_frame[quality_frame["is_day"]], dim=False
-            )
-            q_now_rule = (
-                alt.Chart(pd.DataFrame({"x": [q_now]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
-                .encode(x=alt.X("x:T", scale=x_scale))
-            )
-            q_threshold = (
-                alt.Chart(pd.DataFrame({"y": [_RIDEABLE_QUALITY_THRESHOLD]}))
-                .mark_rule(color="#0e8a86", strokeDash=[4, 4], strokeWidth=1.2)
-                .encode(y="y:Q")
-            )
-            q_threshold_label = (
-                alt.Chart(
-                    pd.DataFrame(
-                        {"y": [_RIDEABLE_QUALITY_THRESHOLD], "label": ["Rideable"]}
-                    )
-                )
-                .mark_text(
-                    align="left",
-                    baseline="bottom",
-                    dx=6,
-                    dy=-3,
-                    color="#0e8a86",
-                    fontSize=10,
-                )
-                .encode(y="y:Q", text="label:N")
-            )
-            q_night = _night_rect(
-                quality_frame["time"].min(),
-                quality_frame["time"].max(),
-                spot_lat,
-                spot_lon,
-                x_scale,
-            )
-            st.altair_chart(
-                (q_night + q_lines + q_threshold + q_threshold_label + q_now_rule)
-                .properties(height=180, background="transparent")
-                .configure_view(strokeWidth=0, fill=None)
-                .configure_axis(
-                    domainColor="#3b5a5a",
-                    gridColor="rgba(7, 37, 42, 0.10)",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFontSize=13,
-                )
-                .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFont="Manrope",
-                    titleFont="Manrope",
-                    labelFontSize=13,
-                    titleFontSize=12,
-                    labelFontWeight=600,
-                    titleFontWeight=700,
-                    symbolSize=140,
-                    symbolStrokeWidth=3,
-                ),
-                use_container_width=True,
-                theme=None,
-            )
-
-        # Wind and gust timeline (the features the model reads)
-        st.subheader(f"Wind & gusts — {spot_label(spot_lookup, focus_spot_id)}")
-        timeline_frame = focus_spot_timeline(focus_spot_id)
-        if timeline_frame.empty:
-            st.info("No timeline data available for this spot right now.")
-        else:
-            tz = timeline_frame["time"].dt.tz
-            now_ts = pd.Timestamp.now(tz=tz) if tz is not None else pd.Timestamp.now()
-            kn_to_kmh = 1.852
-            min_kts = _minimum_rideable_kts()
-            threshold_kmh = min_kts * kn_to_kmh
-            elevation_order = ["10m", "80m", "120m", "gusts"]
-            elevations_present = [
-                e for e in elevation_order if e in timeline_frame["elevation"].unique()
-            ]
-            timeline_frame["is_day"] = is_daylight(
-                spot_lat, spot_lon, pd.DatetimeIndex(timeline_frame["time"])
-            ).to_numpy()
-
-            night_rect = _night_rect(
-                timeline_frame["time"].min(),
-                timeline_frame["time"].max(),
-                spot_lat,
-                spot_lon,
-                x_scale,
-            )
-
-            def wind_layer(data: pd.DataFrame, dim: bool) -> alt.Chart:
-                return (
-                    alt.Chart(data)
-                    .mark_line(
-                        interpolate="monotone",
-                        strokeWidth=1.6 if dim else 2.2,
-                        opacity=0.3 if dim else 1.0,
-                        clip=True,
-                    )
-                    .encode(
-                        x=alt.X("time:T", title="Day", axis=_DAY_AXIS, scale=x_scale),
-                        y=alt.Y(
-                            "wind_speed:Q",
-                            title="Wind speed (km/h)",
-                        ),
-                        color=alt.Color(
-                            "elevation:N",
-                            scale=alt.Scale(
-                                domain=elevations_present,
-                                range=[
-                                    _ELEVATION_COLORS[e] for e in elevations_present
-                                ],
-                            ),
-                            legend=alt.Legend(title="Elevation", orient="top"),
-                        ),
-                        strokeDash=alt.StrokeDash(
-                            "elevation:N",
-                            scale=alt.Scale(
-                                domain=elevations_present,
-                                range=[
-                                    [5, 4] if e == "gusts" else [1, 0]
-                                    for e in elevations_present
-                                ],
-                            ),
-                            legend=None,
-                        ),
-                    )
-                )
-
-            # Night hours render dimmed underneath; daylight at full strength.
-            lines = wind_layer(timeline_frame, dim=True) + wind_layer(
-                timeline_frame[timeline_frame["is_day"]], dim=False
-            )
-            threshold = (
-                alt.Chart(pd.DataFrame({"y": [threshold_kmh]}))
-                .mark_rule(color="#c0392b", strokeDash=[4, 4], strokeWidth=1.5)
-                .encode(y="y:Q")
-            )
-            threshold_label = (
-                alt.Chart(
-                    pd.DataFrame(
-                        {
-                            "y": [threshold_kmh],
-                            "label": [f"{int(min_kts)} kn rideable"],
-                        }
-                    )
-                )
-                .mark_text(
-                    align="left",
-                    baseline="bottom",
-                    dx=6,
-                    dy=-3,
-                    color="#c0392b",
-                    fontSize=10,
-                )
-                .encode(y="y:Q", text="label:N")
-            )
-            now_rule = (
-                alt.Chart(pd.DataFrame({"x": [now_ts]}))
-                .mark_rule(color="#ff7a26", strokeWidth=2, clip=True)
-                .encode(x=alt.X("x:T", scale=x_scale))
-            )
-            # Solar-elevation curve along the chart bottom, pre-scaled into
-            # wind-speed units so it shares the axis without a second scale.
-            strip_times = pd.date_range(
-                timeline_frame["time"].min().floor("h"),
-                timeline_frame["time"].max().ceil("h"),
-                freq="30min",
-            )
-            elevation = solar_elevation_deg(spot_lat, spot_lon, strip_times).clip(
-                lower=0.0
-            )
-            peak = float(elevation.max()) or 1.0
-            band_kmh = 0.12 * max(
-                float(timeline_frame["wind_speed"].max()), threshold_kmh
-            )
-            solar_frame = pd.DataFrame(
-                {
-                    "time": strip_times,
-                    "solar": elevation.to_numpy() / peak * band_kmh,
-                }
-            )
-            solar_area = (
-                alt.Chart(solar_frame)
-                .mark_area(
-                    color="#1f5e44",
-                    opacity=0.22,
-                    line={"color": "#1f5e44", "strokeWidth": 1.0},
-                    clip=True,
-                )
-                .encode(x=alt.X("time:T", scale=x_scale), y="solar:Q")
-            )
-            st.altair_chart(
-                (
-                    night_rect
-                    + solar_area
-                    + lines
-                    + threshold
-                    + threshold_label
-                    + now_rule
-                )
-                .properties(height=300, background="transparent")
-                .configure_view(strokeWidth=0, fill=None)
-                .configure_axis(
-                    domainColor="#3b5a5a",
-                    gridColor="rgba(7, 37, 42, 0.10)",
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFontSize=13,
-                )
-                .configure_legend(
-                    labelColor="#07252a",
-                    titleColor="#07252a",
-                    labelFont="Manrope",
-                    titleFont="Manrope",
-                    labelFontSize=13,
-                    titleFontSize=12,
-                    labelFontWeight=600,
-                    titleFontWeight=700,
-                    symbolSize=140,
-                    symbolStrokeWidth=3,
-                ),
-                use_container_width=True,
-                theme=None,
-            )
-            st.caption(
-                "Green band along the chart bottom traces solar elevation "
-                "(daylight strength), scaled to the wind-speed axis."
-            )
 
     st.divider()
 

@@ -11,20 +11,22 @@ import streamlit as st
 
 from foehncast.config import get_labeling_config, get_rider_config, get_spots
 from foehncast.feature_pipeline.ingest import fetch_forecast
+from foehncast.solar import is_daylight_hour
 
 from _dial_tokens import (
-    HALO,
-    INK as _INK,
-    LIGHT_WIND as _COLOR_LIGHT,
-    NEAR as _COLOR_NEAR,
-    RIDEABLE as _COLOR_RIDEABLE,
     WEDGE_FILL_ALPHA,
     WEDGE_OUTLINE_ALPHA,
+    dial_tokens,
     rgb_to_hex as _rgb_to_hex,
 )
+from _hammock import hammock_data_uri
+from _theme import active
 
 _KN_TO_KMH = 1.852
 _FORECAST_HOURS = 48
+#: Recent hours fetched alongside the forecast so the console's hindcast
+#: stretch (about a day) has wind for its dials too.
+_PAST_DAYS = 2
 
 _COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
@@ -40,11 +42,18 @@ _IDEAL_HALF_ANGLE_DEG = 45.0
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _spot_wind_frame(spot_id: str) -> pd.DataFrame:
-    """Hourly 10 m wind speed, direction, and gusts for one spot."""
+    """Hourly 10 m wind speed, direction, and gusts for one spot.
+
+    Includes _PAST_DAYS of recent hours: the console panel opens about a day
+    before the forecast starts, and its dials and cell tooltips read this same
+    frame for those hindcast hours.
+    """
     spot = next((s for s in get_spots() if s["id"] == spot_id), None)
     if spot is None:
         return pd.DataFrame()
-    frame = fetch_forecast(spot["lat"], spot["lon"], forecast_hours=_FORECAST_HOURS)
+    frame = fetch_forecast(
+        spot["lat"], spot["lon"], past_days=_PAST_DAYS, forecast_hours=_FORECAST_HOURS
+    )
     cols = ["wind_speed_10m", "wind_direction_10m", "wind_gusts_10m"]
     if frame.empty or any(c not in frame.columns for c in cols):
         return pd.DataFrame()
@@ -92,12 +101,51 @@ def _arc(
     ]
 
 
-def _status(speed_kn: float, min_kts: float) -> tuple[list[int], str]:
+def ideal_band_kn() -> tuple[float, float]:
+    """The spot's ideal speed range, drawn as the radial extent of the wedge."""
+    band = get_labeling_config()["bands"]["perfect_storm"]
+    return float(band["min_kts"]), float(band["max_kts"])
+
+
+def dangerous_kts() -> tuple[float, float]:
+    """Speed and gust ceilings above which the labeling model calls an hour unsafe."""
+    cfg = get_labeling_config()["dangerous"]
+    return (
+        float(cfg["max_wind_speed_10m_kts"]),
+        float(cfg["max_wind_gusts_10m_kts"]),
+    )
+
+
+def _status(
+    speed_kn: float,
+    min_kts: float,
+    is_day: bool = True,
+    gust_kn: float | None = None,
+) -> str:
+    """Wording for the reading.
+
+    Only wording: the dot's position against the ideal band already answers
+    "is it windy enough", so strength does not need a hue of its own. Colour is
+    resolved at render time from the active theme, and the only thing that
+    changes it is darkness -- the one fact position cannot carry, since 20 kn
+    at 02:00 plots exactly where 20 kn at noon does.
+
+    The ceiling is the other fact position cannot carry. The dial's radius
+    saturates at its 30 kn scale, so 45 kn plots where 30 kn does, and without
+    this the word "Rideable" ran unbounded upward -- past the very thresholds
+    labeling.dangerous uses to mark an hour unsafe. Comparison is strict, like
+    _score_row's, so the two agree on the boundary.
+    """
+    if not is_day:
+        return "Night, not rideable"
+    max_speed_kn, max_gust_kn = dangerous_kts()
+    if speed_kn > max_speed_kn or (gust_kn is not None and gust_kn > max_gust_kn):
+        return "Too strong"
     if speed_kn >= min_kts:
-        return _COLOR_RIDEABLE, "Rideable"
+        return "Rideable"
     if speed_kn >= 0.7 * min_kts:
-        return _COLOR_NEAR, "Almost"
-    return _COLOR_LIGHT, "Too light"
+        return "Almost"
+    return "Too light"
 
 
 def _dial_base_records(
@@ -143,45 +191,46 @@ def _dial_base_records(
     }
 
 
-def _needle_records(
-    spot: dict[str, Any], row: pd.Series, min_kts: float
+def _reading_records(
+    spot: dict[str, Any], row: pd.Series, min_kts: float, is_day: bool = True
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Anchor plus needle and gust-tick segments for one spot at one hour."""
+    """Anchor (carrying the reading dot) plus the gust tick, for one spot-hour.
+
+    The dot sits at the exact forecast point in polar terms: downwind bearing,
+    radius earned by speed. No shaft is drawn -- an arrow says the same thing
+    twice and its head crowds the neighbouring dial at this zoom.
+    """
     speed_kn = float(row["wind_speed_10m"]) / _KN_TO_KMH
     gusts_kn = float(row["wind_gusts_10m"]) / _KN_TO_KMH
     direction = float(row["wind_direction_10m"])
-    color, status = _status(speed_kn, min_kts)
+    status = _status(speed_kn, min_kts, is_day, gust_kn=gusts_kn)
 
     lat, lon = float(spot["lat"]), float(spot["lon"])
     flow = (direction + 180.0) % 360.0
-    shaft_km = _dial_radius_km(speed_kn)
-    tip = _destination(lat, lon, flow, shaft_km)
-    head_km = max(shaft_km * 0.22, 0.9)
+    dot = _destination(lat, lon, flow, _dial_radius_km(speed_kn))
 
-    def _segment(start: list[float], end: list[float], width: float) -> dict[str, Any]:
-        return {
+    # Gust tick: same bearing, gust radius. The gap from the dot is gustiness.
+    gust_r = _dial_radius_km(gusts_kn)
+    start = _destination(lat, lon, flow - 6.0, gust_r)
+    end = _destination(lat, lon, flow + 6.0, gust_r)
+    segments = [
+        {
             "from_lon": start[0],
             "from_lat": start[1],
             "to_lon": end[0],
             "to_lat": end[1],
-            "color": color,
-            "width": width,
+            "is_day": bool(is_day),
+            "width": 2.0,
         }
-
-    segments = [
-        _segment([lon, lat], tip, 3.0),
-        _segment(tip, _destination(tip[1], tip[0], (flow + 152) % 360, head_km), 3.0),
-        _segment(tip, _destination(tip[1], tip[0], (flow - 152) % 360, head_km), 3.0),
-        _segment(
-            _destination(lat, lon, flow - 6.0, _dial_radius_km(gusts_kn)),
-            _destination(lat, lon, flow + 6.0, _dial_radius_km(gusts_kn)),
-            2.0,
-        ),
     ]
     label_pt = _destination(lat, lon, 180.0, _DIAL_RADIUS_KM * 1.32)
     anchor = {
+        "spot_id": spot["id"],
         "lat": lat,
         "lon": lon,
+        "dot_lon": dot[0],
+        "dot_lat": dot[1],
+        "is_day": bool(is_day),
         "label_lon": label_pt[0],
         "label_lat": label_pt[1],
         "speed_label": f"{speed_kn:.0f} kn",
@@ -207,10 +256,23 @@ def _hourly_map_records(
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for sid in spot_ids:
         frame = _spot_wind_frame(sid)
-        for ts, row in frame.iterrows():
+        if frame.empty:
+            continue
+        spot = spots_cfg[sid]
+        # Daylight per spot per hour, computed once for the frame rather than
+        # per row, so the slider can never land on a dark hour showing
+        # "Rideable". The hourly-cell rule keeps a dial's night state in step
+        # with the heatmap cell for the same hour.
+        index = pd.DatetimeIndex(frame.index)
+        if index.tz is None:
+            index = index.tz_localize("UTC")
+        lit = is_daylight_hour(
+            float(spot["lat"]), float(spot["lon"]), index.floor("h")
+        ).to_numpy()
+        for (ts, row), is_day in zip(frame.iterrows(), lit, strict=True):
             key = _to_utc(ts).isoformat()
             bucket = out.setdefault(key, {"anchors": [], "segments": []})
-            anchor, segments = _needle_records(spots_cfg[sid], row, min_kts)
+            anchor, segments = _reading_records(spot, row, min_kts, bool(is_day))
             bucket["anchors"].append(anchor)
             bucket["segments"].extend(segments)
     return out
@@ -235,6 +297,43 @@ def _lookup_hourly_records(
         return hourly[key]
     nearest = min(hourly, key=lambda k: abs((pd.Timestamp(k) - target).total_seconds()))
     return hourly[nearest]
+
+
+def _selected_dial_spot(event: Any) -> str | None:
+    """Spot id of the dial picked on the map, or None when nothing was picked.
+
+    Both dial layers carry the anchor records, so a click on either the origin
+    or the reading dot resolves to the same spot.
+    """
+    raw = getattr(event, "selection", None)
+    objects = getattr(raw, "objects", None)
+    if objects is None and hasattr(raw, "get"):
+        objects = raw.get("objects")
+    if not objects:
+        return None
+    for layer_id in ("dial-reading", "dial-origin"):
+        hits = objects.get(layer_id) or []
+        if hits:
+            picked = hits[0].get("spot_id")
+            return str(picked) if picked is not None else None
+    return None
+
+
+def _sync_focus_to_dial_click(spot_id: str | None) -> None:
+    """Focus the console on a clicked dial's spot, mirroring the heatmap click.
+
+    The console fragment rendered before this map in the same script run, so an
+    actual change needs an app-scope rerun. Guarded by map_spot_applied: the
+    chart re-reports its last selection on every rerun, and without the mirror
+    a stale pick would fight a focus change made elsewhere (heatmap click,
+    default fallback) and rerun forever.
+    """
+    if spot_id is None or st.session_state.get("map_spot_applied") == spot_id:
+        return
+    st.session_state["map_spot_applied"] = spot_id
+    if st.session_state.get("rider_focus_spot") != spot_id:
+        st.session_state["rider_focus_spot"] = spot_id
+        st.rerun(scope="app")
 
 
 def _clamp_to_slider_option(
@@ -291,7 +390,10 @@ def _render_map_fragment(
     hour = st.select_slider(
         "Forecast hour",
         options=options,
-        value=_clamp_to_slider_option(wind_times[0], options) or options[0],
+        # Default to now: with past days in the wind frame, index[0] sits days
+        # back and would open the map on a hindcast hour.
+        value=_clamp_to_slider_option(pd.Timestamp.now(tz=wind_times.tz), options)
+        or options[0],
         format_func=lambda t: t.strftime("%a %H:%M"),
         key="wind_map_hour",
     )
@@ -304,25 +406,45 @@ def _render_map_fragment(
     st.session_state.setdefault("wind_map_hour_seen", hour)
     if st.session_state["wind_map_hour_seen"] != hour:
         st.session_state["wind_map_hour_seen"] = hour
+        # A slider drag is a new pin intent: drop the panel's own click pin so
+        # the console falls back to the slider's hour on the app rerun.
+        st.session_state.pop("panel_pin_hour", None)
         st.rerun(scope="app")
 
     spots_cfg = {s["id"]: s for s in get_spots()}
     storm_band = get_labeling_config()["bands"]["perfect_storm"]
-    base = _dial_base_records(
-        [spots_cfg[sid] for sid in spot_ids],
-        (float(storm_band["min_kts"]), float(storm_band["max_kts"])),
-    )
+    base = _dial_base_records([spots_cfg[sid] for sid in spot_ids], ideal_band_kn())
     hourly = _hourly_map_records(tuple(spot_ids), min_kts)
     records = _lookup_hourly_records(hourly, hour)
     anchors, segments = records["anchors"], records["segments"]
 
+    # Colour is resolved here, not in the cached records: the geometry is
+    # theme-independent, so the cache key stays clean and a theme switch does
+    # not invalidate a single forecast lookup.
+    pal = active()
+    tok = dial_tokens(pal)
+    for row in (*anchors, *segments):
+        row["color"] = tok.reading if row["is_day"] else tok.night
+
     rider = get_rider_config()
+    home_lat, home_lon = float(rider["home_lat"]), float(rider["home_lon"])
+    # Label sits south of the pin: at this zoom a centred label lands on the
+    # hammock and on whatever town name the basemap already put there.
+    home_label = _destination(home_lat, home_lon, 180.0, 9.0)
     home = [
         {
-            "lat": float(rider["home_lat"]),
-            "lon": float(rider["home_lon"]),
+            "lat": home_lat,
+            "lon": home_lon,
             "name": "Rider home",
             "tooltip": "Rider home",
+            "label_lon": home_label[0],
+            "label_lat": home_label[1],
+            "icon": {
+                "url": hammock_data_uri(),
+                "width": 48,
+                "height": 48,
+                "anchorY": 24,
+            },
         }
     ]
 
@@ -331,7 +453,9 @@ def _render_map_fragment(
 
     # Light casing under every needle so it reads on the muted basemap and where
     # needles cross rings or each other; the status-colored needle draws on top.
-    halo = [{**s, "color": [*HALO, 215], "width": s["width"] + 3.0} for s in segments]
+    halo = [
+        {**s, "color": [*tok.halo, 215], "width": s["width"] + 3.0} for s in segments
+    ]
     layers = [
         # Rings: recessive reference chrome. A faint light halo lifts them off
         # the muted basemap without letting the grid compete with the needles.
@@ -339,7 +463,7 @@ def _render_map_fragment(
             "PathLayer",
             data=base["rings"],
             get_path="path",
-            get_color=[*HALO, 110],
+            get_color=[*tok.halo, 110],
             get_width=90,
             width_min_pixels=2.5,
         ),
@@ -347,7 +471,7 @@ def _render_map_fragment(
             "PathLayer",
             data=base["rings"],
             get_path="path",
-            get_color=[*_INK, 55],
+            get_color=[*tok.ink, 55],
             get_width=60,
             width_min_pixels=1.3,
         ),
@@ -357,9 +481,9 @@ def _render_map_fragment(
             "PolygonLayer",
             data=base["wedges"],
             get_polygon="polygon",
-            get_fill_color=[*_COLOR_RIDEABLE, WEDGE_FILL_ALPHA],
+            get_fill_color=[*tok.band, WEDGE_FILL_ALPHA],
             stroked=True,
-            get_line_color=[*_COLOR_RIDEABLE, WEDGE_OUTLINE_ALPHA],
+            get_line_color=[*tok.band, WEDGE_OUTLINE_ALPHA],
             get_line_width=80,
             line_width_min_pixels=2,
         ),
@@ -369,7 +493,7 @@ def _render_map_fragment(
             data=base["ticks"],
             get_source_position="[from_lon, from_lat]",
             get_target_position="[to_lon, to_lat]",
-            get_color=[*HALO, 150],
+            get_color=[*tok.halo, 150],
             get_width=3.5,
         ),
         pdk.Layer(
@@ -377,7 +501,7 @@ def _render_map_fragment(
             data=base["ticks"],
             get_source_position="[from_lon, from_lat]",
             get_target_position="[to_lon, to_lat]",
-            get_color=[*_INK, 140],
+            get_color=[*tok.ink, 140],
             get_width=2.0,
         ),
     ]
@@ -392,41 +516,75 @@ def _render_map_fragment(
         )
         for data in (halo, segments)
     ]
+    # Dial origin: recessive now that it is only the zero point of the scale.
+    layers.append(
+        pdk.Layer(
+            "ScatterplotLayer",
+            id="dial-origin",
+            data=anchors,
+            get_position="[lon, lat]",
+            get_fill_color=[*tok.ink, 150],
+            get_radius=700,
+            pickable=True,
+            stroked=False,
+        )
+    )
+    # The reading: one dot at the exact (direction, speed) point, over a light
+    # casing so it stays legible where it lands on the teal band or a ring.
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
             data=anchors,
-            get_position="[lon, lat]",
-            get_fill_color=[*_INK, 235],
-            get_radius=1200,
-            pickable=True,
-            stroked=True,
-            get_line_color=[252, 252, 251, 255],
-            line_width_min_pixels=1,
+            get_position="[dot_lon, dot_lat]",
+            get_fill_color=[*tok.halo, 230],
+            get_radius=2100,
         )
     )
     layers.append(
         pdk.Layer(
             "ScatterplotLayer",
-            data=home,
-            get_position="[lon, lat]",
-            get_fill_color=[255, 122, 38, 240],
-            get_radius=2200,
+            id="dial-reading",
+            data=anchors,
+            get_position="[dot_lon, dot_lat]",
+            get_fill_color="color",
+            get_radius=1500,
             pickable=True,
             stroked=True,
-            get_line_color=[*_INK, 255],
+            get_line_color=[*tok.ink, 120],
             line_width_min_pixels=1,
+        )
+    )
+    layers.append(
+        pdk.Layer(
+            "IconLayer",
+            data=home,
+            get_position="[lon, lat]",
+            get_icon="icon",
+            get_size=46,
+            size_units="'pixels'",
+            pickable=True,
         )
     )
     layers.append(
         pdk.Layer(
             "TextLayer",
-            data=base["names"] + home,
+            data=base["names"],
             get_position="[lon, lat]",
             get_text="name",
             get_size=14,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             get_alignment_baseline="'bottom'",
+        )
+    )
+    layers.append(
+        pdk.Layer(
+            "TextLayer",
+            data=home,
+            get_position="[label_lon, label_lat]",
+            get_text="name",
+            get_size=14,
+            get_color=[*tok.ink, 255],
+            get_alignment_baseline="'top'",
         )
     )
     layers.append(
@@ -436,12 +594,12 @@ def _render_map_fragment(
             get_position="[lon, lat]",
             get_text="label",
             get_size=13,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             font_weight="bold",
             # pydeck 0.9.2 forwards these deck.gl TextLayer props: a light
             # background pill keeps the cardinal "N" legible over any tone.
             background=True,
-            get_background_color=[*HALO, 205],
+            get_background_color=[*tok.halo, 205],
             background_padding=[3, 2],
         )
     )
@@ -452,7 +610,7 @@ def _render_map_fragment(
             get_position="[label_lon, label_lat]",
             get_text="speed_label",
             get_size=12,
-            get_color=[*_INK, 255],
+            get_color=[*tok.ink, 255],
             get_alignment_baseline="'top'",
         )
     )
@@ -466,24 +624,38 @@ def _render_map_fragment(
     deck = pdk.Deck(
         layers=layers,
         initial_view_state=view,
-        map_style="light",
+        # The basemap follows the theme: dark-mode marks were measured against
+        # the dark surface, so on a light basemap they would sit below the
+        # contrast floor the palette guarantees.
+        map_style="dark" if pal.name == "dark" else "light",
         tooltip={"text": "{tooltip}"},
     )
-    st.pydeck_chart(deck, use_container_width=True, height=620)
+    event = st.pydeck_chart(
+        deck,
+        use_container_width=True,
+        height=620,
+        on_select="rerun",
+        selection_mode="single-object",
+        key="wind_map_select",
+    )
+    _sync_focus_to_dial_click(_selected_dial_spot(event))
 
     chip = (
         '<span style="display:inline-block;width:0.7rem;height:0.7rem;'
         'border-radius:2px;background:{};margin:0 0.3rem 0 0.9rem"></span>{}'
     )
     st.markdown(
-        '<p style="color:#07252a;font-size:0.85rem;margin-top:0.2rem">'
-        "Rings mark 10/20/30 kn; the teal wedge is the spot's ideal window "
-        "(direction &plusmn;45&deg;, "
-        f"{storm_band['min_kts']:.0f}&ndash;{storm_band['max_kts']:.0f} kn). "
-        "Needles point downwind, length is speed, the short tick marks gusts."
-        + chip.format(_rgb_to_hex(_COLOR_RIDEABLE), f"Rideable (&ge; {min_kts:.0f} kn)")
-        + chip.format(_rgb_to_hex(_COLOR_NEAR), "Almost")
-        + chip.format(_rgb_to_hex(_COLOR_LIGHT), "Too light")
+        '<p style="color:var(--ink);font-size:0.85rem;margin-top:0.2rem">'
+        "Rings mark 10/20/30 kn. The dot is this hour's wind: bearing is the "
+        "direction it blows toward, distance from the centre is its speed, and "
+        "the short tick beyond it marks gusts. A dot inside the teal band is a "
+        "session &mdash; that band is the spot's ideal window (direction "
+        f"&plusmn;45&deg;, {storm_band['min_kts']:.0f}&ndash;"
+        f"{storm_band['max_kts']:.0f} kn). Click a dial to focus the console "
+        "on that spot."
+        + chip.format(_rgb_to_hex(tok.band), "Ideal window")
+        + chip.format(_rgb_to_hex(tok.reading), "This hour's wind")
+        + chip.format(_rgb_to_hex(tok.night), "Night (sun down)")
         + "</p>",
         unsafe_allow_html=True,
     )

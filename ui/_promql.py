@@ -25,7 +25,7 @@ def _query_prometheus(expr: str) -> dict[str, Any]:
         return json.load(resp)
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def prom_query(expr: str) -> float | None:
     """Run an instant PromQL query and return the scalar value, or *None*."""
     try:
@@ -43,7 +43,7 @@ def prom_query_batch(exprs: list[str]) -> list[float | None]:
         return list(pool.map(prom_query, exprs))
 
 
-@st.cache_data(ttl=15, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def prom_query_vector(expr: str) -> list[dict[str, Any]]:
     """Run an instant PromQL query and return the full vector result."""
     out: list[dict[str, Any]] = []

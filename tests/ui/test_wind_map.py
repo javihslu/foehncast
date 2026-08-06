@@ -15,6 +15,8 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _wind_map as wm  # noqa: E402
+from _dial_tokens import dial_tokens  # noqa: E402
+from _theme import DARK, LIGHT  # noqa: E402
 
 
 def test_hourly_map_records_resolve_via_utc_and_clamp(
@@ -67,10 +69,38 @@ def test_compass_maps_degrees_to_cardinal_labels() -> None:
 def test_status_thresholds_speed_against_minimum() -> None:
     min_kts = 15.0
 
-    assert wm._status(20.0, min_kts) == (wm._COLOR_RIDEABLE, "Rideable")
-    assert wm._status(15.0, min_kts) == (wm._COLOR_RIDEABLE, "Rideable")
-    assert wm._status(11.0, min_kts) == (wm._COLOR_NEAR, "Almost")  # >= 0.7 * min_kts
-    assert wm._status(5.0, min_kts) == (wm._COLOR_LIGHT, "Too light")
+    # Wording still grades the wind; the dot's hue does not, because its
+    # position against the ideal band already carries strength.
+    assert wm._status(20.0, min_kts) == "Rideable"
+    assert wm._status(15.0, min_kts) == "Rideable"
+    assert wm._status(11.0, min_kts) == "Almost"  # >= 0.7 * min
+    assert wm._status(5.0, min_kts) == "Too light"
+
+
+def test_status_never_calls_a_dark_hour_rideable() -> None:
+    # Wind at 02:00 is real and still gets a dot, but it is not a session:
+    # darkness outranks every speed threshold.
+    assert wm._status(40.0, 15.0, is_day=False) == "Night, not rideable"
+
+
+def test_status_stops_calling_dangerous_wind_rideable() -> None:
+    # The dial's radius saturates at 30 kn, so position cannot say "too much".
+    # Above the labeling thresholds the word has to, or the console recommends
+    # a session in conditions its own model marks unsafe.
+    max_speed_kn, max_gust_kn = wm.dangerous_kts()
+
+    assert wm._status(max_speed_kn + 5.0, 15.0) == "Too strong"
+    assert wm._status(max_speed_kn, 15.0) == "Rideable"  # strict, like _score_row
+    assert wm._status(25.0, 15.0, gust_kn=max_gust_kn + 5.0) == "Too strong"
+    assert wm._status(25.0, 15.0, gust_kn=max_gust_kn) == "Rideable"
+
+
+def test_night_recolors_the_dot_in_both_themes() -> None:
+    # Darkness is the one fact the dot's position cannot show, so it is the
+    # only thing that changes the dot's colour -- in either theme.
+    for pal in (LIGHT, DARK):
+        tok = dial_tokens(pal)
+        assert tok.night != tok.reading
 
 
 def test_to_utc_localizes_naive_and_converts_aware() -> None:
@@ -86,18 +116,22 @@ def test_to_utc_localizes_naive_and_converts_aware() -> None:
     assert converted.hour == 9
 
 
-def test_needle_records_returns_anchor_and_four_segments() -> None:
-    spot = {"name": "Silvaplana", "lat": 46.45, "lon": 9.79}
+def test_reading_records_place_the_dot_at_the_exact_forecast_point() -> None:
+    spot = {"id": "silvaplana", "name": "Silvaplana", "lat": 46.45, "lon": 9.79}
     row = pd.Series(
         {"wind_speed_10m": 40.0, "wind_gusts_10m": 55.0, "wind_direction_10m": 200.0}
     )
     min_kts = 15.0
 
-    anchor, segments = wm._needle_records(spot, row, min_kts)
+    anchor, segments = wm._reading_records(spot, row, min_kts)
 
     assert set(anchor) == {
+        "spot_id",
         "lat",
         "lon",
+        "dot_lon",
+        "dot_lat",
+        "is_day",
         "label_lon",
         "label_lat",
         "speed_label",
@@ -106,33 +140,31 @@ def test_needle_records_returns_anchor_and_four_segments() -> None:
     assert anchor["lat"] == spot["lat"]
     assert anchor["lon"] == spot["lon"]
 
-    assert len(segments) == 4
-    for seg in segments:
-        assert set(seg) == {
-            "from_lon",
-            "from_lat",
-            "to_lon",
-            "to_lat",
-            "color",
-            "width",
-        }
-
-    # The needle shaft starts at the spot itself and points along the
-    # downwind bearing (direction + 180, always in [0, 360) by construction).
-    shaft = segments[0]
-    assert shaft["from_lon"] == spot["lon"]
-    assert shaft["from_lat"] == spot["lat"]
+    # The dot sits on the downwind bearing (direction + 180, in [0, 360) by
+    # construction) at the radius its speed earns -- no shaft is drawn.
     speed_kn = 40.0 / wm._KN_TO_KMH
     flow = (200.0 + 180.0) % 360.0
     assert 0.0 <= flow < 360.0
-    expected_tip = wm._destination(
+    expected = wm._destination(
         spot["lat"], spot["lon"], flow, wm._dial_radius_km(speed_kn)
     )
-    assert shaft["to_lon"] == pytest.approx(expected_tip[0])
-    assert shaft["to_lat"] == pytest.approx(expected_tip[1])
+    assert anchor["dot_lon"] == pytest.approx(expected[0])
+    assert anchor["dot_lat"] == pytest.approx(expected[1])
+    # Records carry daylight, not colour: colour is resolved per theme at
+    # render time, so a cached forecast lookup survives a theme switch.
+    assert anchor["is_day"] is True
 
-    # 40 km/h (~22 kn) clears a 15 kn minimum -> rideable status color.
-    assert shaft["color"] == wm._COLOR_RIDEABLE
+    # Only the gust tick remains a drawn segment.
+    assert len(segments) == 1
+    assert set(segments[0]) == {
+        "from_lon",
+        "from_lat",
+        "to_lon",
+        "to_lat",
+        "is_day",
+        "width",
+    }
+
     assert anchor["speed_label"] == f"{speed_kn:.0f} kn"
     assert "from S" in anchor["tooltip"]
     assert anchor["tooltip"].endswith("Rideable")
@@ -152,3 +184,32 @@ def test_destination_bearing_zero_moves_north() -> None:
     assert dest[1] > lat
     assert dest[0] == pytest.approx(lon)
     assert dest[1] == pytest.approx(lat + 10.0 / 110.574)
+
+
+def test_spot_wind_frame_fetches_past_days_for_hindcast_dials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The console panel opens about a day before the forecast starts, and its
+    # dials read this frame for those hours, so the fetch must ask for them.
+    calls: list[dict[str, object]] = []
+
+    def fake_fetch(lat: float, lon: float, **kwargs: object) -> pd.DataFrame:
+        calls.append(kwargs)
+        return pd.DataFrame(
+            {
+                "wind_speed_10m": [20.0],
+                "wind_direction_10m": [210.0],
+                "wind_gusts_10m": [28.0],
+            },
+            index=pd.date_range("2026-08-05T09:00:00Z", periods=1, freq="h"),
+        )
+
+    spot = {"id": "silvaplana", "name": "Silvaplana", "lat": 46.45, "lon": 9.79}
+    monkeypatch.setattr(wm, "get_spots", lambda: [spot])
+    monkeypatch.setattr(wm, "fetch_forecast", fake_fetch)
+    wm._spot_wind_frame.clear()
+
+    frame = wm._spot_wind_frame("silvaplana")
+
+    assert not frame.empty
+    assert calls == [{"past_days": wm._PAST_DAYS, "forecast_hours": wm._FORECAST_HOURS}]

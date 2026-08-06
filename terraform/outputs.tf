@@ -134,8 +134,8 @@ output "configured_cloud_run_memory" {
 }
 
 output "mlflow_tracking_uri" {
-  description = "Configured MLflow tracking URI used by the Cloud Run inference service."
-  value       = var.mlflow_tracking_uri
+  description = "Effective MLflow tracking URI used by the Cloud Run inference service. Resolves to the provisioned Cloud Run MLflow URL when that target is enabled, so operator tooling reads the same value the runtime does."
+  value       = local.mlflow_tracking_uri
 }
 
 output "cloud_run_service_name" {

@@ -7,6 +7,7 @@ import pathlib
 import sys
 import types
 
+import altair as alt
 import pandas as pd
 import pytest
 
@@ -17,12 +18,16 @@ if str(_UI) not in sys.path:
     sys.path.insert(0, str(_UI))
 
 import _rider_console as rc  # noqa: E402
+import _styles  # noqa: E402
+from _theme import DARK, LIGHT  # noqa: E402
 
 
 def test_quality_ramp_matches_validated_hexes() -> None:
     # Levels 2-5 only: level 1 is fill-free (see _quality_legend_html), not
     # part of the color scale's range at all.
-    assert rc._QUALITY_RAMP == ["#63b3a4", "#2f9384", "#0f7263", "#084c42"]
+    assert LIGHT.quality == ("#63b3a4", "#2f9384", "#0f7263", "#084c42")
+    # Dark is its own validated set, not a flip of the light one.
+    assert DARK.quality == ("#276553", "#21826a", "#2b9e81", "#3dbb9a")
 
 
 def test_all_spots_quality_grid_adds_tooltip_columns(
@@ -42,6 +47,7 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
 
     monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
     monkeypatch.setattr(rc, "_spot_wind_frame", fake_wind_frame)
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
 
     predictions = [
         {
@@ -70,13 +76,280 @@ def test_all_spots_quality_grid_adds_tooltip_columns(
         json.dumps(predictions),
         "Europe/Zurich",
         json.dumps(ranked),
+        False,
     )
 
-    new_columns = ("header", "dial", "direction", "quality_label", "score")
+    new_columns = ("header", "dial", "direction", "quality_label", "hour_quality")
     for col in new_columns:
         assert col in grid.columns
     assert grid["dial"].iloc[0].startswith("data:image/svg+xml;base64,")
     assert grid["header"].iloc[0].startswith("Silvaplana - ")
+    # The spot's ranking score is constant across the row, so it cannot
+    # describe an hour and must not ride on the cells.
+    assert "score" not in grid.columns
+
+
+def test_each_cell_carries_its_own_hourly_quality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hourly tooltip figure has to vary by hour, or it is claiming too much."""
+    times = pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h")
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
+
+    hourly_quality = [4.2, 3.1, 1.5]
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": q}
+                for t, q in zip(times, hourly_quality)
+            ],
+        }
+    ]
+    ranked = [
+        {"spot_id": "silvaplana", "quality_label": "Firing", "quality_index": 4.2}
+    ]
+
+    grid = rc.all_spots_quality_grid(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps(ranked),
+        False,
+    )
+
+    assert grid["hour_quality"].tolist() == hourly_quality
+    # The spot-level peak is the same on every cell; the hourly figure must not
+    # be a copy of it, which is exactly what the old "Score" field was.
+    assert grid["quality_index"].nunique() == 1
+    assert grid["hour_quality"].nunique() == 3
+
+
+def test_night_hours_never_render_as_a_quality_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No cell may carry a ramp level while the sun is below the horizon.
+
+    The grid used to bucket every forecast hour, so a windy 02:00 painted the
+    same green as a rideable afternoon.
+    """
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
+
+    # A full day, so the window straddles sunrise and sunset, and a quality that
+    # would otherwise bucket to the top of the ramp on every single hour.
+    times = pd.date_range("2026-01-15T00:00:00Z", periods=24, freq="h")
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+        False,
+    )
+
+    spot = next(s for s in rc.get_spots() if s["id"] == "silvaplana")
+    # Cells are judged at their midpoint (is_daylight_hour), so a cell counts
+    # as night when the sun is down at H+30 -- the same rule the wind plot's
+    # hourly night wash uses.
+    mid = pd.DatetimeIndex(grid["time"]) + pd.Timedelta(minutes=30)
+    elevation = rc.solar_elevation_deg(
+        float(spot["lat"]), float(spot["lon"]), mid
+    ).to_numpy()
+    dark = elevation <= -0.833
+    is_day = grid["is_day"].to_numpy()
+
+    # The window has to contain both, or the assertions below prove nothing.
+    assert dark.any() and (~dark).any()
+    assert not is_day[dark].any()
+    assert is_day[~dark].all()
+
+
+def test_dangerous_hours_are_flagged_from_the_wind_not_the_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Too much wind has to be readable, and the quality level cannot say it.
+
+    quality_bucket sends any index <= 0.5 to class 0, so the danger class and a
+    dead-calm hour share a number. The cell reads the wind against the same
+    ceilings the labeling model uses instead.
+    """
+    times = pd.date_range("2026-07-15T09:00:00Z", periods=3, freq="h")
+    max_speed_kn, max_gust_kn = rc.dangerous_kts()
+    # One hour over the speed ceiling, one over the gust ceiling, one ordinary.
+    winds_kmh = [(max_speed_kn + 10) * 1.852, 20.0 * 1.852, 18.0 * 1.852]
+    gusts_kmh = [(max_speed_kn + 15) * 1.852, (max_gust_kn + 5) * 1.852, 24.0 * 1.852]
+
+    def fake_timeline(spot_id: str, *args: object, **kwargs: object) -> pd.DataFrame:
+        rows = []
+        for t, w, g in zip(times, winds_kmh, gusts_kmh, strict=True):
+            rows.append({"time": t, "elevation": "10m", "wind_speed": w})
+            rows.append({"time": t, "elevation": "gusts", "wind_speed": g})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+        False,
+    ).sort_values("time")
+
+    assert grid["is_dangerous"].tolist() == [True, True, False]
+    # The word carries it, so the fact does not rest on the cell's colour.
+    assert grid["safety"].tolist()[2] == "Within the safe limits"
+    assert "Too strong" in grid["safety"].tolist()[0]
+    # The level itself is unchanged: it still floors at 1, which is precisely
+    # why the flag has to exist.
+    assert grid["quality"].min() >= 1
+
+
+def test_dangerous_cell_bubble_does_not_say_too_light() -> None:
+    # The floored level reads "1/5 (Too Light)" on an hour that is unrideable
+    # for the opposite reason. The bubble takes its word from the wind.
+    bubble = rc._selection_bubble_html(
+        "Silvaplana", "Mon 04 Aug 14:00", 1, 90.0, 110.0, 200.0, True, True
+    )
+    assert "Too Light" not in bubble
+    assert "Too strong" in bubble
+    assert "Over the safe limit" in bubble
+
+
+def test_dangerous_hour_still_reads_as_dangerous_on_the_rendered_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The danger class has to survive from the wind reading to the drawn cell.
+
+    Two steps in between can erase it: the level floors at 1, and night cells
+    leave the quality ramp for a single flat fill.
+    """
+    times = pd.date_range("2026-01-15T00:00:00Z", periods=24, freq="h")
+    max_speed_kn, max_gust_kn = rc.dangerous_kts()
+    # Too windy at 02:00 UTC (dark) and at 13:00 UTC (daylight), ordinary
+    # otherwise, so the flag has to track the wind rather than the hour.
+    windy = {2, 13}
+
+    def fake_timeline(spot_id: str, *args: object, **kwargs: object) -> pd.DataFrame:
+        rows = []
+        for i, t in enumerate(times):
+            over = i in windy
+            speed = (max_speed_kn + 10 if over else 18.0) * 1.852
+            gust = (max_gust_kn + 10 if over else 24.0) * 1.852
+            rows.append({"time": t, "elevation": "10m", "wind_speed": speed})
+            rows.append({"time": t, "elevation": "gusts", "wind_speed": gust})
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(rc, "focus_spot_timeline", fake_timeline)
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [{"time": t.isoformat(), "quality_index": 4.6} for t in times],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",),
+        json.dumps(predictions),
+        "Europe/Zurich",
+        json.dumps([{"spot_id": "silvaplana"}]),
+        False,
+    ).sort_values("time")
+
+    dangerous = grid[grid["is_dangerous"]]
+    assert len(dangerous) == len(windy)
+    # One of the two is a night hour: the night handling must not take it back.
+    assert set(dangerous["is_day"]) == {True, False}
+    # Nothing else on those cells says it. The level sits in the rideable band,
+    # and the night one is painted the same fill a dead-calm 02:00 gets.
+    assert dangerous["quality"].between(1, 5).all()
+
+    grid = grid.assign(spot="Silvaplana", t_ms=rc._epoch_ms(grid["time"]))
+    chart, _ = rc._time_panel(
+        grid,
+        ["Silvaplana"],
+        pd.DataFrame(),
+        fake_timeline("silvaplana"),
+        46.45,
+        9.79,
+        [grid["time"].min(), grid["time"].max() + pd.Timedelta(hours=1)],
+        grid["time"].iloc[0],
+        None,
+        16.0,
+    )
+    board = chart.to_dict()["vconcat"][1]
+    marks = [
+        i
+        for i, layer in enumerate(board["layer"])
+        if {"filter": "datum.is_dangerous"} in layer.get("transform", [])
+    ]
+    assert len(marks) == 1
+    danger_layer = board["layer"][marks[0]]
+    # Above the quality cells, so neither the ramp nor the night fill paints
+    # over it, and in its own colour rather than a step on the ramp.
+    assert marks[0] > 0
+    pal = rc.active()
+    assert danger_layer["encoding"]["color"]["value"] == pal.danger
+    assert pal.danger not in pal.quality and pal.danger != pal.night_fill
+
+
+def test_quality_fill_keeps_night_off_the_ramp() -> None:
+    """The fill encoding routes night to the off-ramp fill, day to the ramp.
+
+    The ramp itself is continuous on the hour's own quality, anchored so the
+    level-1 end fades to the bare surface, and clamped so an out-of-range
+    index can never produce an undefined fill (the flat-week bug).
+    """
+    chart = (
+        alt.Chart(pd.DataFrame({"is_day": [True], "hour_quality": [3.0]}))
+        .mark_rect()
+        .encode(color=rc._quality_fill(LIGHT))
+    )
+    enc = chart.to_dict()["encoding"]["color"]
+
+    assert enc["value"] == LIGHT.night_fill
+    condition = enc["condition"]
+    assert condition["test"] == "datum.is_day"
+    assert condition["field"] == "hour_quality"
+    scale = condition["scale"]
+    assert scale["domain"] == [1, 2, 3, 4, 5]
+    assert scale["range"][1:] == list(LIGHT.quality)
+    # The level-1 anchor is the first step at zero alpha: a fade, not a fill.
+    assert scale["range"][0].startswith("rgba(")
+    assert scale["range"][0].endswith(", 0.0)")
+    assert scale["clamp"] is True
+
+
+def test_night_is_labelled_not_just_colored() -> None:
+    # Contrast vs the page surface is only 1.5:1, so the state must also be
+    # carried in words: a legend chip and the selection bubble's own row.
+    assert LIGHT.night_fill not in LIGHT.quality
+    legend = rc._quality_legend_html()
+    assert "Night" in legend
+    assert LIGHT.night_fill in legend
+    bubble = rc._selection_bubble_html(
+        "Silvaplana", "Thu 15 Jan 02:00", 5, None, None, None, False
+    )
+    assert "Night" in bubble
 
 
 def test_sync_slider_to_heatmap_click_guards_repeat_cell(
@@ -92,6 +365,7 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     for key in (
         "heat_hour_applied",
         "heat_spot_applied",
+        "panel_pin_hour",
         "wind_map_hour",
         "wind_map_hour_seen",
         "rider_focus_spot",
@@ -112,38 +386,96 @@ def test_sync_slider_to_heatmap_click_guards_repeat_cell(
     assert rc.st.session_state["rider_focus_spot"] == "sils"
     assert len(rerun_calls) == 2
 
-
-def test_timeseries_x_domain_shared_endpoints() -> None:
-    # Given a heat grid, both time-series charts pin one shared domain running
-    # from 24 h before now to the grid's last hour (the heatmap's own right
-    # edge), so all three axes read one clock (R5).
-    times = pd.date_range("2026-07-12T07:00:00Z", periods=14, freq="h")
-    grid = pd.DataFrame({"time": times, "time_end": times + pd.Timedelta(hours=1)})
-    now = pd.Timestamp("2026-07-12T12:00:00Z")
-
-    prediction_end = grid["time_end"].max()
-    domain = rc._timeseries_x_domain(prediction_end, now)
-
-    assert domain == [now - pd.Timedelta(hours=24), prediction_end]
-    # Right edge equals the grid's last hour: the same value the heatmap's
-    # pinned domain uses, so the charts and heatmap cannot diverge.
-    assert domain[1] == grid["time_end"].max()
-    # No grid -> no pinned domain; the charts fall back to their own extent.
-    assert rc._timeseries_x_domain(None, now) is None
+    # A click on empty panel space carries no spot: it moves the pinned time
+    # and leaves the focused spot alone.
+    rc._sync_slider_to_heatmap_click(times[1], None, options)
+    assert rc.st.session_state["wind_map_hour"] == times[1]
+    assert rc.st.session_state["rider_focus_spot"] == "sils"
+    assert len(rerun_calls) == 3
+    # Same hour again, still no spot: nothing changed, so nothing reruns.
+    rc._sync_slider_to_heatmap_click(times[1], None, options)
+    assert len(rerun_calls) == 3
 
 
-def test_timeseries_x_domain_edges_share_end_tz() -> None:
-    # One clock: both domain edges must carry the prediction end's display
-    # timezone, never a stray UTC left edge mixed with Europe/Zurich data (#51).
+def test_sync_slider_to_heatmap_click_pins_a_past_hour_without_moving_the_slider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A hindcast click must pin the panel at the hour it names and leave the
+    # forecast-only map slider alone; clamping the click to the slider options
+    # silently moved the pin to the nearest forecast hour instead.
+    future = list(pd.date_range("2026-07-12T09:00:00Z", periods=3, freq="h"))
+    past = future[0] - pd.Timedelta(hours=20)
+    state: dict[str, object] = {
+        "wind_map_hour": future[1],
+        "wind_map_hour_seen": future[1],
+    }
+    monkeypatch.setattr(rc.st, "session_state", state)
+    reruns: list[dict[str, object]] = []
+    monkeypatch.setattr(rc.st, "rerun", lambda **kw: reruns.append(kw))
+
+    rc._sync_slider_to_heatmap_click(past, None, future)
+    assert state["panel_pin_hour"] == past
+    assert state["heat_hour_applied"] == past
+    assert state["wind_map_hour"] == future[1]  # untouched
+    assert len(reruns) == 1
+
+    # The chart re-reporting the same past click stays guarded: no rerun.
+    rc._sync_slider_to_heatmap_click(past, None, future)
+    assert len(reruns) == 1
+
+    # A forecast click still moves both the pin and the slider.
+    rc._sync_slider_to_heatmap_click(future[2], None, future)
+    assert state["panel_pin_hour"] == future[2]
+    assert state["wind_map_hour"] == future[2]
+    assert state["wind_map_hour_seen"] == future[2]
+    assert len(reruns) == 2
+
+
+def test_panel_x_domain_opens_before_the_forecast() -> None:
+    # Every view in the panel shares one domain: the heat grid's extent, opened
+    # a day early. Nothing can be observed in the future, so a window that began
+    # with the forecast could hold no measurement at all.
     tz = "Europe/Zurich"
-    prediction_end = pd.Timestamp("2026-07-12T20:00:00", tz=tz)
-    now = pd.Timestamp.now(tz=prediction_end.tz)
+    times = pd.date_range("2026-07-12T07:00:00", periods=14, freq="h", tz=tz)
+    grid = pd.DataFrame({"time": times, "time_end": times + pd.Timedelta(hours=1)})
+    timeline = pd.DataFrame({"time": times[2:6]})
 
-    domain = rc._timeseries_x_domain(prediction_end, now)
+    reach = times[0] - pd.Timedelta(hours=rc._PANEL_PAST_HOURS)
+    domain = rc._panel_x_domain(grid, timeline, reach - pd.Timedelta(hours=5))
 
-    assert domain is not None
-    assert str(domain[0].tz) == tz
-    assert str(domain[1].tz) == tz
+    assert domain == [reach, times[-1] + pd.Timedelta(hours=1)]
+    # Nothing measured yet -> the window simply starts with the forecast,
+    # rather than opening onto a stretch with no data in it.
+    assert rc._panel_x_domain(grid, timeline) == [
+        times[0],
+        times[-1] + pd.Timedelta(hours=1),
+    ]
+    # A record that reaches back only a little opens the window only that far.
+    partial = times[0] - pd.Timedelta(hours=3)
+    assert rc._panel_x_domain(grid, timeline, partial)[0] == partial
+    # A record that starts inside the forecast never pushes the window forward.
+    assert rc._panel_x_domain(grid, timeline, times[4])[0] == times[0]
+    # One clock: both edges carry the display timezone, never a stray UTC edge
+    # mixed with Europe/Zurich data (#51).
+    assert str(domain[0].tz) == tz and str(domain[1].tz) == tz
+    # No grid -> the wind timeline's own extent stands in, so the plot keeps a
+    # clock instead of vanishing.
+    assert rc._panel_x_domain(pd.DataFrame(), timeline) == [times[2], times[5]]
+    # Neither -> no panel at all.
+    assert rc._panel_x_domain(pd.DataFrame(), pd.DataFrame()) is None
+
+
+def test_time_spine_covers_every_hour_with_epoch_ids() -> None:
+    # The spine is the panel's shared hit target: one row per hour, each row
+    # carrying the epoch milliseconds the hover and click params match on.
+    start = pd.Timestamp("2026-07-12T06:00:00", tz="Europe/Zurich")
+    spine = rc._time_spine(start, start + pd.Timedelta(hours=5))
+
+    assert len(spine) == 5
+    assert spine["time"].iloc[0] == start
+    assert (spine["time_end"] - spine["time"] == pd.Timedelta(hours=1)).all()
+    assert spine["t_ms"].iloc[0] == int(start.timestamp() * 1000)
+    assert spine["t_ms"].is_monotonic_increasing
 
 
 def test_clamp_to_slider_option_snaps_stale_hour() -> None:
@@ -239,49 +571,66 @@ def test_minimum_rideable_kts_uses_light_threshold_below_weight_cutoff(
     assert rc._minimum_rideable_kts() == 16.0
 
 
-def test_night_bands_wraps_night_intervals_as_dataframe() -> None:
+def test_night_bands_align_to_hourly_daylight_cells() -> None:
     lat, lon = 46.45, 9.79
     t_min = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
     t_max = t_min + pd.Timedelta(hours=48)
 
     bands = rc._night_bands(t_min, t_max, lat, lon)
-    expected = rc.night_intervals(lat, lon, t_min, t_max)
+    hours = pd.date_range(t_min, t_max, freq="h", inclusive="left")
+    day = rc.is_daylight_hour(lat, lon, hours)
 
     assert list(bands.columns) == ["x", "x2"]
-    assert len(bands) == len(expected)
     assert len(bands) >= 1
-    for (_, row), (lo, hi) in zip(bands.iterrows(), expected, strict=True):
-        assert row["x"] == lo
-        assert row["x2"] == hi
+    covered: set[pd.Timestamp] = set()
+    for _, row in bands.iterrows():
         assert row["x"] < row["x2"]
+        # Edges sit on cell boundaries, where the heatmap's night cells sit.
+        assert row["x"] == row["x"].floor("h")
+        assert row["x2"] == row["x2"].floor("h")
+        covered.update(
+            pd.date_range(row["x"], row["x2"] - pd.Timedelta(hours=1), freq="h")
+        )
+    # The wash covers exactly the hours the heatmap rule calls night.
+    assert {h for h in hours if not day[h]} == covered
 
 
-def test_heatmap_tick_count_scales_with_window() -> None:
+def test_heatmap_tick_count_keeps_the_labels_apart() -> None:
     start = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
-    # The live ~14 h serving horizon reads on a 2 h rhythm; the old constant 9
-    # was one density for every window.
+    budget = rc._PANEL_PLOT_WIDTH // rc._MIN_TICK_SPACING_PX
+    # The live window is a day of record plus two of forecast, and every rhythm
+    # has to leave its labels room, so no window asks for more than fit.
+    for hours in (14, 24, 48, 72, 96, 168):
+        count = rc._heatmap_tick_count(start, start + pd.Timedelta(hours=hours))
+        assert 2 <= count <= budget, hours
+    # The short serving horizon still reads on a 2 h rhythm.
     assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=14)) == 8
-    # A 48 h window keeps the original 6 h rhythm (9 ticks).
-    assert rc._heatmap_tick_count(start, start + pd.Timedelta(hours=48)) == 9
-    # Multi-day boards thin out to 12 h spacing.
-    assert rc._heatmap_tick_count(start, start + pd.Timedelta(days=7)) == 15
     # Degenerate windows still hint at least two ticks.
     assert rc._heatmap_tick_count(start, start + pd.Timedelta(minutes=30)) == 2
 
 
-def test_heatmap_x_axis_uses_numeric_tick_count() -> None:
+def test_ruler_axis_uses_numeric_tick_count() -> None:
     # The {"interval": ...} tickCount form crashes the bundled Vega on the
-    # layered, domain-pinned heatmap, so the hint must stay a plain number.
+    # layered, domain-pinned panel, so the hint must stay a plain number.
     start = pd.Timestamp("2026-07-12T00:00:00", tz="Europe/Zurich")
-    axis = rc._heatmap_x_axis(start, start + pd.Timedelta(days=7))
+    axis = rc._ruler_axis("top", start, start + pd.Timedelta(days=7))
     assert isinstance(axis.tickCount, int)
+    assert axis.orient == "top"
+    # Ticks and labels only: the ruler is a measuring edge, not a grid.
+    assert axis.grid is False
+    assert axis.tickSize == 5
 
 
 def test_flat_week_detects_all_level_one_grid() -> None:
-    assert rc._flat_week(pd.DataFrame({"quality": [1, 1, 1]}))
-    assert not rc._flat_week(pd.DataFrame({"quality": [1, 3, 1]}))
+    day = [True, True, True]
+    assert rc._flat_week(pd.DataFrame({"quality": [1, 1, 1], "is_day": day}))
+    assert not rc._flat_week(pd.DataFrame({"quality": [1, 3, 1], "is_day": day}))
     # An empty grid is "no data", not a quiet week: the chip must not show.
-    assert not rc._flat_week(pd.DataFrame({"quality": []}))
+    assert not rc._flat_week(pd.DataFrame({"quality": [], "is_day": []}))
+    # A strong night hour is not a session, so it must not clear the chip.
+    assert rc._flat_week(
+        pd.DataFrame({"quality": [1, 5, 1], "is_day": [True, False, True]})
+    )
 
 
 def test_flat_week_chip_names_the_quiet_state() -> None:
@@ -325,18 +674,1189 @@ def test_selection_bubble_html_carries_panel_fields() -> None:
     assert "Wind" not in bare and "1/5" in bare
 
 
-def test_quality_legend_html_has_one_chip_per_ramp_step() -> None:
+_PANEL_SPOTS = ["Silvaplana", "Sils"]
+
+
+def _panel_frames() -> tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DatetimeIndex
+]:
+    """Synthetic heat grid, wind timeline and accuracy marks for panel tests."""
+    hours = pd.date_range(
+        "2026-07-12T06:00:00", periods=12, freq="h", tz="Europe/Zurich"
+    )
+    rows = [
+        {
+            "spot": spot,
+            "spot_id": spot.lower(),
+            "time": t,
+            "time_end": t + pd.Timedelta(hours=1),
+            "quality": 3,
+            "hour_quality": 3.0,
+            "is_day": True,
+            "daylight": "Day",
+            "header": f"{spot} - {t:%a %H:00}",
+            "dial": "",
+            "wind": 20.0,
+            "gust": 28.0,
+            "direction": "SW (220)",
+            "quality_label": "Firing",
+            "quality_index": 4.2,
+            "rideable_hours": 5,
+            "drive_minutes": 90.0,
+            "session_hours": 3.0,
+            "ride_drive_ratio": 1.4,
+        }
+        for spot in _PANEL_SPOTS
+        for t in hours
+    ]
+    grid = pd.DataFrame(rows)
+    grid["t_ms"] = rc._epoch_ms(grid["time"])
+    timeline = pd.DataFrame(
+        [
+            {"time": t, "elevation": e, "wind_speed": 20.0}
+            for e in ("10m", "gusts")
+            for t in hours
+        ]
+    )
+    accuracy = pd.DataFrame(
+        {
+            "spot": _PANEL_SPOTS,
+            "spot_id": [spot.lower() for spot in _PANEL_SPOTS],
+            "time": [hours[1], hours[2]],
+            "predicted": [3.0, 3.0],
+            "observed": [3.1, 4.6],
+            "coverage": ["both", "both"],
+            "delta": [0.1, 1.6],
+            "verdict": ["matched", "missed"],
+        }
+    )
+    return grid, timeline, accuracy, hours
+
+
+def _build_panel(
+    pinned: pd.Timestamp | None, focus_spot: str | None = None
+) -> tuple[dict, list[str]]:
+    grid, timeline, accuracy, hours = _panel_frames()
+    domain = [hours[0], hours[-1] + pd.Timedelta(hours=1)]
+    chart, modes = rc._time_panel(
+        grid,
+        _PANEL_SPOTS,
+        accuracy,
+        timeline,
+        46.45,
+        9.79,
+        domain,
+        hours[3],
+        pinned,
+        16.0,
+        focus_spot=focus_spot,
+    )
+    return chart.to_dict(), modes
+
+
+def _x_channels(node: object) -> list[dict]:
+    """Every x encoding in a view spec, layers included."""
+    found: list[dict] = []
+    if isinstance(node, dict):
+        encoding = node.get("encoding", {})
+        if "x" in encoding:
+            found.append(encoding["x"])
+        for child in node.get("layer", []):
+            found.extend(_x_channels(child))
+    return found
+
+
+def _panel_views(spec: dict) -> dict[str, dict]:
+    """The panel's views by role, so adding one does not renumber the rest."""
+    views = spec["vconcat"]
+    named = {"top": views[0], "bottom": views[-1]}
+    for view in views[1:-1]:
+        layers = view["layer"]
+        if any(layer["mark"]["type"] == "line" for layer in layers):
+            named["wind"] = view
+        elif any(
+            layer.get("encoding", {}).get("y", {}).get("field") == "spot"
+            for layer in layers
+        ):
+            named["board"] = view
+        else:
+            named["coverage"] = view
+    return named
+
+
+def _row_outlines(board: dict) -> list[dict]:
+    """The board's row-selector layers: a bordered rect with no fill."""
+    return [
+        layer
+        for layer in board["layer"]
+        if layer["mark"].get("type") == "rect" and layer["mark"].get("fillOpacity") == 0
+    ]
+
+
+def test_time_panel_is_one_composite_on_one_domain() -> None:
+    """Board and wind plot share a domain exactly, and only the rulers carry an axis."""
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+
+    views = spec["vconcat"]
+    assert len(views) == 5  # top ruler, board, coverage strip, wind, bottom ruler
+    # Views are laid out flush at one width, which is what makes the two plots
+    # line up column for column.
+    assert spec["bounds"] == "flush"
+    assert {v["width"] for v in views} == {rc._PANEL_PLOT_WIDTH}
+
+    domains = {str(x["scale"]["domain"]) for view in views for x in _x_channels(view)}
+    assert len(domains) == 1
+
+    # One time axis for the whole panel: the top and bottom rulers.
+    axes = [
+        x["axis"]
+        for view in views
+        for x in _x_channels(view)
+        if isinstance(x.get("axis"), dict)
+    ]
+    assert [a["orient"] for a in axes] == ["top", "bottom"]
+    # Every layer inside the plots and the coverage strip nulls its own x axis.
+    # A layer that left it implicit next to a sibling that nulled it would not
+    # compile.
+    for view in views[1:-1]:
+        assert all(x["axis"] is None for x in _x_channels(view))
+
+
+def test_heat_cells_declare_where_they_end() -> None:
+    # mark_rect on a continuous x must set x2, or a later cell paints over the
+    # ones before it. The wind plot's invisible hit layer is a rect too.
+    spec, _ = _build_panel(None)
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
+    cells = board["layer"][0]
+    assert cells["mark"]["type"] == "rect"
+    assert cells["encoding"]["x2"]["field"] == "time_end"
+    hits = wind["layer"][-1]
+    assert hits["mark"]["type"] == "rect" and hits["mark"]["opacity"] == 0
+    assert hits["encoding"]["x2"]["field"] == "time_end"
+
+
+def test_hour_verdicts_collapse_spots_and_keep_the_counts() -> None:
+    """One row per hour, missed as soon as any spot missed, counts preserved."""
+    hour = pd.Timestamp("2026-07-12T09:00:00", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "spot": ["Silvaplana", "Urnersee", "Silvaplana"],
+            "time": [hour, hour, hour + pd.Timedelta(hours=1)],
+            "delta": [0.2, 1.6, 0.1],
+            "verdict": ["matched", "missed", "matched"],
+        }
+    )
+
+    graded = rc._hour_verdicts(accuracy)
+
+    assert graded["verdict"].tolist() == ["missed", "matched"]
+    assert graded["missed"].tolist() == [1, 0]
+    assert graded["pairs"].tolist() == [2, 1]
+    assert graded["worst"].tolist() == [1.6, 0.1]
+    # The tint spans the hour it grades, so it has to say where that hour ends.
+    assert (graded["time_end"] - graded["time"]).unique() == pd.Timedelta(hours=1)
+
+
+def test_the_verdict_is_a_tint_on_the_ruler_not_a_mark_on_the_board() -> None:
+    """Accuracy reads off the time axis; the board is left to the quality cells."""
+    spec, _ = _build_panel(None)
+    views = _panel_views(spec)
+    top, board, bottom = views["top"], views["board"], views["bottom"]
+
+    for ruler in (top, bottom):
+        tint = next(
+            layer
+            for layer in ruler["layer"]
+            if layer["mark"]["type"] == "rect"
+            and layer["encoding"]["color"]["field"] == "verdict"
+        )
+        # A rect on a continuous x has to declare its end, and the tint must not
+        # draw an axis of its own beside the ruler that does.
+        assert tint["encoding"]["x2"]["field"] == "time_end"
+        assert tint["encoding"]["x"]["axis"] is None
+
+    assert not [
+        layer for layer in board["layer"] if layer["mark"]["type"] == "point"
+    ], "the board should carry no accuracy marks now the ruler is tinted"
+
+
+def test_panel_reruns_on_clicks_only_never_on_hover() -> None:
+    """Hover params stay client-side: listening to them would rerun on every move."""
+    spec, modes = _build_panel(None)
+
+    assert modes == ["cell", "pin_time"]
+    names = {p["name"] for p in spec["params"] if "select" in p}
+    assert {"hover_board", "hover_row", "hover_wind"} <= names
+    assert not {"hover_board", "hover_row", "hover_wind"} & set(modes)
+    # The pin param selects the hour, so a click on empty space still pins one.
+    pin = next(p for p in spec["params"] if p["name"] == "pin_time")
+    assert pin["select"] == {"type": "point", "fields": ["t_ms"], "on": "click"}
+
+
+def test_crosshair_spans_both_plots_and_the_hovered_row() -> None:
+    # The vertical rule is drawn in both plots for both hover params, so the
+    # line follows the pointer across the whole panel; the board also carries
+    # the horizontal half, which on a board of spots is the hovered row.
+    spec, _ = _build_panel(None)
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
+
+    def filters(view: dict) -> list[str]:
+        return [
+            layer["transform"][0]["filter"]["param"]
+            for layer in view["layer"]
+            if layer.get("transform")
+        ]
+
+    assert {"hover_board", "hover_wind"} <= set(filters(board))
+    assert {"hover_board", "hover_wind"} <= set(filters(wind))
+    assert "hover_row" in filters(board)
+    row_rule = next(
+        layer
+        for layer in board["layer"]
+        if layer.get("transform")
+        and layer["transform"][0]["filter"]["param"] == "hover_row"
+    )
+    assert row_rule["encoding"]["y"]["field"] == "spot"
+    assert "x" not in row_rule["encoding"]
+
+
+def test_focused_spot_wears_the_location_half_of_the_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The focused spot's row is outlined, and its axis label wears the accent."""
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    spec, _ = _build_panel(None, focus_spot="Sils")
+    board = _panel_views(spec)["board"]
+
+    row = next(
+        layer
+        for layer in board["layer"]
+        if layer["mark"].get("type") == "rect" and layer["mark"].get("fillOpacity") == 0
+    )
+    # A row is a band, so the selector is its border and the cells inside keep
+    # their fill; with no x encoding the outline spans the whole window.
+    assert row["mark"]["stroke"] == LIGHT.reading
+    assert "x" not in row["encoding"]
+    assert spec["datasets"][row["data"]["name"]] == [{"spot": "Sils"}]
+
+    # The axis label is text on the page surface, so it takes accent_text
+    # rather than the mark orange, and only for the focused spot's name.
+    axis = board["layer"][0]["encoding"]["y"]["axis"]
+    assert axis["labelColor"]["condition"]["test"] == 'datum.value === "Sils"'
+    assert axis["labelColor"]["condition"]["value"] == LIGHT.accent_text
+    assert axis["labelColor"]["value"] == LIGHT.ink
+    assert axis["labelFontWeight"]["condition"]["value"] == 700
+
+
+def test_unfocused_panel_draws_no_row_outline() -> None:
+    """Without a focus spot the board carries only the hover row rule."""
+    spec, _ = _build_panel(None)
+    board = _panel_views(spec)["board"]
+    assert _row_outlines(board) == []
+
+
+def test_the_row_selector_needs_the_spot_plain_name() -> None:
+    # The board's rows are spot names. The labelled "Name (id)" form the spot
+    # switcher prints matches no row, so the selector would draw nothing --
+    # which is exactly what the console used to hand it.
+    spec, _ = _build_panel(None, focus_spot="Sils (sils)")
+    assert _row_outlines(_panel_views(spec)["board"]) == []
+
+
+@pytest.mark.parametrize("palette", [LIGHT, DARK])
+def test_pinned_time_is_labelled_on_both_rulers(
+    monkeypatch: pytest.MonkeyPatch, palette: object
+) -> None:
+    """The pin is the time selector, so both ruler edges name the hour it holds."""
+    monkeypatch.setattr(rc, "active", lambda: palette)
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+
+    for ruler in (spec["vconcat"][0], spec["vconcat"][-1]):
+        marks = {layer["mark"]["type"]: layer["mark"] for layer in ruler["layer"]}
+        # The rule is a mark, so it wears the plain reading orange...
+        assert marks["rule"]["color"] == palette.reading
+        # ...and the label is text, so it takes the role that clears the 4.5:1
+        # floor. On the light surface that is a different hex from the mark
+        # orange (3.34:1 there); on the dark one the two roles coincide.
+        assert marks["text"]["color"] == palette.accent_text
+    assert LIGHT.accent_text != LIGHT.reading
+
+    top = spec["vconcat"][0]
+    label_layer = [v for v in top["layer"] if v["mark"]["type"] == "text"][-1]
+    label_data = spec["datasets"][label_layer["data"]["name"]]
+    assert label_data[0]["label"] == hours[4].strftime("%a %d %b %H:00")
+
+
+def test_pinned_panel_time_ignores_hours_outside_the_window() -> None:
+    start = pd.Timestamp("2026-07-12T06:00:00", tz="Europe/Zurich")
+    end = start + pd.Timedelta(hours=6)
+
+    assert rc._pinned_panel_time(start + pd.Timedelta(hours=2), start, end) == (
+        start + pd.Timedelta(hours=2)
+    )
+    # Past the window there is nothing to pin: skipped, so the domain stays put.
+    assert rc._pinned_panel_time(end + pd.Timedelta(hours=3), start, end) is None
+    assert rc._pinned_panel_time(None, start, end) is None
+    # A pin stored in another timezone reads as the same instant.
+    assert rc._pinned_panel_time(
+        (start + pd.Timedelta(hours=1)).tz_convert("UTC"), start, end
+    ) == start + pd.Timedelta(hours=1)
+
+
+def test_pinned_time_from_event_reads_the_click() -> None:
+    tz = "Europe/Zurich"
+    hour = pd.Timestamp("2026-07-12T09:00:00", tz=tz)
+    event = types.SimpleNamespace(
+        selection={"pin_time": [{"t_ms": int(hour.timestamp() * 1000)}]}
+    )
+
+    assert rc._pinned_time_from_event(event, tz) == hour
+    assert rc._pinned_time_from_event(types.SimpleNamespace(selection={}), tz) is None
+    assert rc._pinned_time_from_event(types.SimpleNamespace(), tz) is None
+
+
+def test_default_detail_row_opens_on_the_pinned_hour() -> None:
+    # The details panel is permanent, so with nothing clicked it shows the
+    # pinned hour at the focused spot rather than an empty column.
+    grid, _, _, hours = _panel_frames()
+
+    row = rc._default_detail_row(grid, "sils", hours[5])
+    assert row is not None
+    assert row["spot_id"] == "sils"
+    assert row["time"] == hours[5]
+
+    # Nothing pinned yet, or no such spot: the panel falls back to its hint.
+    assert rc._default_detail_row(grid, "sils", None) is None
+    assert rc._default_detail_row(grid, "not-a-spot", hours[5]) is None
+    assert rc._default_detail_row(pd.DataFrame(), "sils", hours[5]) is None
+
+
+def test_elevation_legend_names_the_series_it_draws() -> None:
+    _, timeline, _, _ = _panel_frames()
+    html = rc._elevation_legend_html(timeline, "Wind & gusts — Silvaplana")
+
+    assert "Wind & gusts — Silvaplana" in html
+    assert "10m" in html and "gusts" in html
+    # Gusts are told apart by pattern as well as hue.
+    assert "dashed" in html
+    # A series absent from the frame gets no chip.
+    assert "120m" not in html
+
+
+def test_time_panel_container_wears_a_crosshair_cursor() -> None:
+    # The panel reads as a measuring strip, so the pointer over it is a
+    # crosshair. The chart's Streamlit key is what the rule hangs off.
+    import _styles
+
+    assert "st-key-time_panel_select" in _styles._CSS
+    assert "cursor: crosshair" in _styles._CSS
+
+
+def test_quality_legend_html_draws_the_ramp_as_a_gradient() -> None:
     html = rc._quality_legend_html()
 
     assert "Session quality (1-5)" in html
-    # Level 1 is the outline-only swatch (no ramp fill).
-    assert (
-        "border:1px solid rgba(7, 37, 42, 0.4);margin:0 0.3rem 0 0.9rem;"
-        'vertical-align:-0.05rem"></span>1' in html
+    # One strip through the validated anchors, not a chip per level: the fill
+    # is continuous, so the legend is too.
+    assert "linear-gradient(90deg" in html
+    for color in LIGHT.quality:
+        assert color in html
+
+
+def test_compact_dial_uri_follows_the_palette_it_is_given() -> None:
+    # The cached grid bakes these URIs, so the mode has to arrive as an
+    # argument: resolving it inside would serve one viewer the other's dials.
+    args = (200.0, 25.0, 30.0, 45.0, 12.0, True)
+    assert rc._compact_dial_uri(*args, LIGHT) != rc._compact_dial_uri(*args, DARK)
+
+
+_ACCURACY_COLUMNS = [
+    "spot_id",
+    "time",
+    "predicted",
+    "observed",
+    "coverage",
+    "delta",
+    "verdict",
+]
+
+
+def _accuracy_timeline() -> pd.DataFrame:
+    """Long-form quality for one spot: three paired hours and one unpaired."""
+    times = pd.date_range("2026-07-17T06:00", periods=4, freq="h", tz="UTC")
+    rows = [
+        (times[0], 4.0, "Predicted (past)"),
+        (times[0], 4.0, "Observed"),
+        (times[1], 3.0, "Predicted (past)"),
+        (times[1], 4.0, "Observed"),
+        (times[2], 2.0, "Predicted (past)"),
+        (times[2], 4.5, "Observed"),
+        # Nothing observed this hour, so it says nothing about accuracy.
+        (times[3], 3.5, "Predicted (past)"),
+        (times[3], 3.5, "Forecast"),
+    ]
+    return pd.DataFrame(rows, columns=["time", "quality_index", "series"])
+
+
+def test_all_spots_accuracy_pairs_hours_and_grades_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        rc, "spot_quality_timeline", lambda *a, **k: _accuracy_timeline()
     )
-    # Levels 2-5 each carry their ramp color as the chip background.
-    for level, color in zip((2, 3, 4, 5), rc._QUALITY_RAMP, strict=True):
-        assert (
-            f"background:{color};margin:0 0.3rem 0 0.9rem;"
-            f'vertical-align:-0.05rem"></span>{level}'
-        ) in html
+    rc.all_spots_accuracy.clear()
+
+    frame = rc.all_spots_accuracy(("silvaplana",), "[]")
+
+    assert list(frame.columns) == _ACCURACY_COLUMNS
+    # Every hour survives, in time order: the three paired ones plus the hour
+    # that was only ever predicted, which is a coverage fact, not an accuracy one.
+    assert len(frame) == 4
+    assert frame["spot_id"].unique().tolist() == ["silvaplana"]
+    assert frame["coverage"].tolist() == ["both", "both", "both", "predicted"]
+    assert frame["delta"].tolist()[:3] == [0.0, 1.0, 2.5]
+    assert pd.isna(frame["delta"].iloc[3])
+    # A whole band is the cut, so one band off still counts as matched, and an
+    # hour with nothing to compare against is graded not at all.
+    assert frame["verdict"].tolist() == ["matched", "matched", "missed", None]
+
+
+def test_all_spots_accuracy_keeps_its_columns_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: pd.DataFrame())
+    rc.all_spots_accuracy.clear()
+
+    frame = rc.all_spots_accuracy(("silvaplana",), "[]")
+
+    assert frame.empty
+    assert list(frame.columns) == _ACCURACY_COLUMNS
+
+
+def test_hourly_marks_sit_mid_cell() -> None:
+    # The board draws an hour as a rect spanning it; the wind series, the
+    # crosshair, and the pin mark the same hour as a point, so they sit at the
+    # cell's middle rather than on its left edge.
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+    views = _panel_views(spec)
+    board, wind = views["board"], views["wind"]
+
+    lines = [v for v in wind["layer"] if v["mark"]["type"] == "line"]
+    assert lines and all(v["encoding"]["x"]["field"] == "time_mid" for v in lines)
+
+    hover_rules = [
+        v
+        for view in (board, wind)
+        for v in view["layer"]
+        if v["mark"]["type"] == "rule"
+        and v.get("transform")
+        and v["transform"][0]["filter"]["param"] in ("hover_board", "hover_wind")
+        and "x" in v["encoding"]
+    ]
+    assert hover_rules and all(
+        v["encoding"]["x"]["field"] == "t_mid" for v in hover_rules
+    )
+
+    pin_rules = [
+        v
+        for view in (board, wind)
+        for v in view["layer"]
+        if v["mark"]["type"] == "rule"
+        and not v.get("transform")
+        and v["encoding"].get("x", {}).get("field") == "time_mid"
+    ]
+    assert len(pin_rules) == 2  # one in each plot
+
+
+def test_hover_readout_shows_each_series_value() -> None:
+    # Hovering an hour prints every series' own number on the plot, driven by
+    # either hover param; the old horizontal rule only marked the 10 m
+    # reading's position without saying what it was.
+    spec, _ = _build_panel(None)
+    wind = _panel_views(spec)["wind"]
+
+    texts = [
+        v for v in wind["layer"] if v["mark"]["type"] == "text" and v.get("transform")
+    ]
+    assert {v["transform"][0]["filter"]["param"] for v in texts} == {
+        "hover_board",
+        "hover_wind",
+    }
+    for layer in texts:
+        assert layer["encoding"]["text"]["field"] == "wind_speed"
+        assert layer["encoding"]["text"]["format"] == ".0f"
+
+    # No y-only hover rule survives in the wind plot.
+    y_only = [
+        v
+        for v in wind["layer"]
+        if v["mark"]["type"] == "rule"
+        and v.get("transform")
+        and "x" not in v["encoding"]
+    ]
+    assert not y_only
+
+
+def test_dial_tile_highlights_only_the_selected_spot() -> None:
+    selected = rc._dial_tile_html("Silvaplana", "<svg/>", True)
+    other = rc._dial_tile_html("Sils", "<svg/>", False)
+
+    assert LIGHT.reading in selected and LIGHT.accent_text in selected
+    assert "transparent" in other and LIGHT.reading not in other
+    assert "<svg/>" in selected and "Sils" in other
+
+
+def test_the_rulers_axis_band_is_reserved_by_the_panel_padding() -> None:
+    # The views are laid out flush and an axis is drawn outside the view it
+    # belongs to, so without padding held back for it the panel's only time
+    # scale is clipped off the canvas.
+    spec, _ = _build_panel(None)
+
+    assert spec["padding"]["top"] == rc._RULER_AXIS_BAND_PX
+    assert spec["padding"]["bottom"] == rc._RULER_AXIS_BAND_PX
+    assert rc._RULER_AXIS_BAND_PX >= 30
+
+    for ruler in (spec["vconcat"][0], spec["vconcat"][-1]):
+        axes = [x.get("axis", "implicit") for x in _x_channels(ruler)]
+        # Exactly one layer draws the axis; every sibling nulls its own.
+        assert sum(isinstance(a, dict) for a in axes) == 1
+        assert all(a is None for a in axes if not isinstance(a, dict))
+
+
+def test_ruler_labels_print_the_clock_and_the_date() -> None:
+    # Each tick prints the time; the tick that opens a day adds the date on a
+    # second line, and the window's first day gets its date inside the ruler.
+    expr = rc._RULER_LABEL_EXPR
+    assert expr.startswith("[timeFormat(datum.value, '%H:%M')")
+    assert "'%a %d %b'" in expr
+
+    start = pd.Timestamp("2026-07-12T06:00:00", tz="Europe/Zurich")
+    assert rc._day_label_frame(start)["label"].tolist() == [start.strftime("%a %d %b")]
+    # A window that opens at midnight already has the date on its first tick.
+    assert rc._day_label_frame(start.floor("D")).empty
+
+
+def test_now_and_the_sun_are_marked_across_the_panel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    spec, _ = _build_panel(None)
+    views = _panel_views(spec)
+
+    def rules(view: dict, color: str) -> list[dict]:
+        return [
+            layer
+            for layer in view["layer"]
+            if layer["mark"].get("type") == "rule"
+            and layer["mark"].get("color") == color
+        ]
+
+    # One green NOW rule in each plot and on each ruler.
+    for role in ("top", "board", "wind", "bottom"):
+        assert len(rules(views[role], LIGHT.band)) == 1
+    # Sunrise and sunset ride on the rulers, solid and dashed in the sun hue.
+    for role in ("top", "bottom"):
+        sun = rules(views[role], LIGHT.sun)
+        assert [layer["mark"]["strokeDash"] for layer in sun] == [[1, 0], [3, 2]]
+
+    # The panel's own window runs 06:00 to 18:00 in July, so it holds no sun
+    # event at all: the frame keeps its columns and stays empty.
+    hours = _panel_frames()[3]
+    start, end = hours[0], hours[-1] + pd.Timedelta(hours=1)
+    frame = rc._sun_frame(start, end, 46.45, 9.79)
+    assert frame["event"].tolist() == []
+
+    # Widened past dusk, the sunset that closes the day shows up, at the exact
+    # instant and in the window's zone rather than quantized to an hour.
+    frame = rc._sun_frame(start, end + pd.Timedelta(hours=6), 46.45, 9.79)
+    assert frame["event"].tolist() == ["Sunset"]
+    assert frame["time"].iloc[0].tzinfo is not None
+    assert start <= frame["time"].iloc[0] <= end + pd.Timedelta(hours=6)
+
+
+def test_hour_coverage_fills_a_lane_per_half_of_the_record() -> None:
+    """Two lanes: predicted, observed, and both when an hour holds both."""
+    hours = pd.date_range("2026-07-12T06:00", periods=3, freq="h", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana", "sils", "silvaplana"],
+            "time": [hours[0], hours[0], hours[1]],
+            "predicted": [3.0, 4.0, 2.0],
+            "observed": [3.2, float("nan"), float("nan")],
+            "coverage": ["both", "predicted", "predicted"],
+            "delta": [0.2, float("nan"), float("nan")],
+            "verdict": ["matched", None, None],
+        }
+    )
+
+    band = rc._hour_coverage(accuracy)
+
+    # The first hour holds both halves, so it fills both lanes; the second was
+    # only predicted, so the observed lane simply has no rect there.
+    assert sorted(band.loc[band["time"] == hours[0], "lane"]) == [
+        "Observed",
+        "Predicted",
+    ]
+    assert band.loc[band["time"] == hours[1], "lane"].tolist() == ["Predicted"]
+    assert band["predicted_spots"].max() == 2
+    # The counts ride along for the tooltip, on every lane of the hour.
+    assert set(band.loc[band["time"] == hours[0], "observed_spots"]) == {1}
+    # Each rect spans the hour it describes.
+    assert (band["time_end"] - band["time"]).unique() == pd.Timedelta(hours=1)
+    # Nothing grades a forecast here any more.
+    assert "shade" not in band.columns and "coverage" not in band.columns
+
+
+def test_the_coverage_strip_sits_between_the_plots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two lanes between the plots, each named inside its own segments."""
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    spec, _ = _build_panel(None)
+    views = spec["vconcat"]
+    strip = _panel_views(spec)["coverage"]
+
+    assert views.index(strip) == views.index(_panel_views(spec)["board"]) + 1
+    assert views.index(strip) == views.index(_panel_views(spec)["wind"]) - 1
+    assert strip["height"] == rc._COVERAGE_HEIGHT_PX
+
+    lanes = strip["layer"][:2]
+    # One layer per lane at a constant colour: orange is the forecast
+    # everywhere in this console, and the record takes the neutral slate,
+    # never the violet that already means night.
+    assert [layer["mark"]["color"] for layer in lanes] == [LIGHT.reading, LIGHT.idle]
+    assert LIGHT.night not in [layer["mark"]["color"] for layer in lanes]
+    for layer in lanes:
+        assert layer["encoding"]["y"]["field"] == "lane"
+        assert layer["encoding"]["y"]["scale"]["domain"] == ["Predicted", "Observed"]
+        # The lane names live inside the strip, so there is no spine axis.
+        assert layer["encoding"]["y"]["axis"] is None
+        assert layer["encoding"]["x2"]["field"] == "time_end"
+        # No shade, and no verdict words.
+        assert "opacity" not in layer["encoding"]
+        assert "color" not in layer["encoding"]
+    # The label layer: one text mark per lane, drawn on the segment itself.
+    label = strip["layer"][2]
+    assert label["mark"]["type"] == "text"
+    assert label["mark"]["color"] == LIGHT.surface
+    assert label["encoding"]["text"]["field"] == "lane"
+    assert label["encoding"]["y"]["field"] == "lane"
+    titles = [tip["title"] for tip in lanes[0]["encoding"]["tooltip"]]
+    assert titles == ["Hour", "Spots predicted", "Spots observed"]
+
+
+def test_the_rideable_line_is_a_light_green_not_a_selection_colour() -> None:
+    # Orange and red both read as selection marks next to the pinned hour, so
+    # the threshold takes a light green -- and not the saturated one the NOW
+    # rule wears, or the two would trade places at a glance.
+    spec, _ = _build_panel(None)
+    wind = _panel_views(spec)["wind"]
+
+    line = next(
+        layer
+        for layer in wind["layer"]
+        if layer["mark"].get("type") == "rule"
+        and layer["mark"].get("strokeDash") == [4, 4]
+    )
+    assert line["mark"]["color"] == rc._light_green(LIGHT)
+    assert line["mark"]["color"] not in (LIGHT.reading, LIGHT.danger, LIGHT.band)
+    # The ramp's anchor flips between modes, so the lightest step does too.
+    assert rc._light_green(LIGHT) == LIGHT.quality[0]
+    assert rc._light_green(DARK) == DARK.quality[3]
+
+
+def test_the_wind_hover_names_the_day_the_hour_and_the_readings() -> None:
+    # The bubble used to carry the date alone. It now names the day and the
+    # hour and prints every series drawn there, with the measured quality
+    # beside the predicted one where the record holds it.
+    spec, _ = _build_panel(None, focus_spot="Sils")
+    wind = _panel_views(spec)["wind"]
+
+    hits = wind["layer"][-1]
+    assert hits["mark"]["type"] == "rect" and hits["mark"]["opacity"] == 0
+    titles = [tip["title"] for tip in hits["encoding"]["tooltip"]]
+    assert titles[:2] == ["Date", "Time"]
+    assert "Wind 10 m (km/h)" in titles
+    assert "Gusts 10 m (km/h)" in titles
+    assert "Observed quality (1-5)" in titles
+
+    hours = _panel_frames()[3]
+    first = spec["datasets"][hits["data"]["name"]][0]
+    assert first["day"] == hours[0].strftime("%a %d %b")
+    assert first["clock"] == hours[0].strftime("%H:%M")
+    assert first["10m"] == 20.0
+
+
+def test_dial_tiles_can_be_picked_and_hovered() -> None:
+    summary = rc._dial_summary(23.0, 31.0, 220.0)
+    assert "23 km/h" in summary and "gusting 31" in summary and "220" in summary
+
+    tile = rc._dial_tile_html("Silvaplana", "<svg/>", True, summary)
+    # The tile is a plain block: a link would have navigated, reloading the
+    # page and losing the session, so the control is a button stretched over it.
+    assert "<a " not in tile and "href" not in tile
+    # The styles hang the hover effect and the bubble on these two classes, and
+    # the bubble carries the summary, since the overlay takes the pointer and
+    # the title can never open.
+    assert 'class="fc-dialtile"' in tile
+    assert f'<div class="fc-dialtip">{summary}</div>' in tile
+    assert f'title="Silvaplana — {summary}"' in tile
+    # No summary, no bubble to open.
+    assert "fc-dialtip" not in rc._dial_tile_html("Sils", "<svg/>", False)
+    # A gustless reading says nothing about gusts rather than printing a zero.
+    assert "gusting" not in rc._dial_summary(23.0, None, 220.0)
+
+
+def test_the_details_follow_the_focused_spot_not_a_stale_click() -> None:
+    # Picking a spot from the comparison dials moves the focus while the board
+    # goes on reporting its last click, so the panel has to follow the newer of
+    # the two or it would describe a spot the console no longer shows.
+    grid, _, _, hours = _panel_frames()
+    clicked = grid[(grid["spot"] == "Silvaplana") & (grid["time"] == hours[2])].iloc[0]
+
+    kept = rc._detail_row(clicked, grid, "silvaplana", hours[2])
+    assert kept["spot_id"] == "silvaplana"
+
+    # Focus moved elsewhere: the stale pick gives way to the pinned hour at the
+    # spot now in focus.
+    followed = rc._detail_row(clicked, grid, "sils", hours[2])
+    assert followed["spot_id"] == "sils"
+    assert followed["time"] == hours[2]
+
+    # Nothing picked and nothing pinned leaves the panel on its hint.
+    assert rc._detail_row(None, grid, "sils", None) is None
+
+
+def test_the_now_label_leaves_the_rulers_to_their_dates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A forecast window opens near the present, so a NOW printed on a ruler
+    # landed on the day label every time. It prints in the wind plot instead,
+    # where nothing else does, still beside its own green rule.
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+    hours = _panel_frames()[3]
+    spec, _ = _build_panel(hours[4])
+    views = _panel_views(spec)
+
+    def labels(view: dict) -> list[str]:
+        found: list[str] = []
+        for layer in view["layer"]:
+            if layer["mark"].get("type") != "text":
+                continue
+            rows = spec["datasets"].get(layer.get("data", {}).get("name"), [])
+            found += [row["label"] for row in rows if "label" in row]
+        return found
+
+    for role in ("top", "bottom"):
+        assert "NOW" not in labels(views[role])
+    assert "NOW" in labels(views["wind"])
+
+    # On the rulers the day label sits in the top half and the pinned hour's
+    # label in the bottom one, so two labels at the same edge stack.
+    for role in ("top", "bottom"):
+        offsets = sorted(
+            layer["mark"]["dy"]
+            for layer in views[role]["layer"]
+            if layer["mark"].get("type") == "text"
+        )
+        assert offsets == [-5, 6]
+
+
+class _Ctx:
+    """Minimal context manager standing in for a column or a container."""
+
+    def __enter__(self) -> "_Ctx":
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+
+def test_a_dial_click_switches_the_focused_spot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The tile is the control and the click is a widget event, so the script
+    # reruns in place: no navigation, no page load, no session thrown away.
+    picked: list[str] = []
+    buttons: list[dict] = []
+    drawn: list[str] = []
+
+    monkeypatch.setattr(
+        rc,
+        "get_spots",
+        lambda: [
+            {
+                "id": "sils",
+                "name": "Sils",
+                "lat": 46.43,
+                "lon": 9.75,
+                "shore_orientation_deg": 40.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(rc, "_spot_hour_wind", lambda *a: (23.0, 31.0, 220.0))
+    monkeypatch.setattr(rc, "wind_dial_svg", lambda **kw: "<svg/>")
+    monkeypatch.setattr(rc, "_focus_spot", picked.append)
+    monkeypatch.setattr(rc.st, "columns", lambda n: [_Ctx() for _ in range(n)])
+    monkeypatch.setattr(rc.st, "container", lambda **kw: _Ctx())
+    monkeypatch.setattr(rc.st, "markdown", lambda html, **kw: drawn.append(html))
+    monkeypatch.setattr(rc.st, "caption", lambda *a, **k: None)
+
+    def _button(label: str, **kwargs: object) -> bool:
+        buttons.append({"label": label, **kwargs})
+        return True
+
+    monkeypatch.setattr(rc.st, "button", _button)
+
+    hour = pd.Timestamp("2026-07-12T09:00:00", tz="Europe/Zurich")
+    rc._render_dial_grid(["sils"], "silvaplana", hour, 16.0)
+
+    assert picked == ["sils"]
+    # One stable key per spot, a real label under the transparent paint, and
+    # the spot's wind as the hover bubble.
+    assert buttons[0]["key"] == "dial_pick_sils"
+    assert buttons[0]["label"] == "Sils"
+    # Help text would wrap the button in a tooltip span that shrinks it inside
+    # the overlay and renders a second subtree over it; the tile's own bubble
+    # carries the summary instead.
+    assert "help" not in buttons[0]
+    assert "23 km/h" in next(html for html in drawn if "fc-dialtip" in html)
+    # Nothing of the link route survives.
+    tile = next(html for html in drawn if "<svg/>" in html)
+    assert "<a " not in tile and "href" not in tile
+    assert not hasattr(rc, "_apply_dial_query")
+    assert not hasattr(rc, "_DIAL_QUERY_KEY")
+
+
+def test_dial_overlay_css_hooks_the_tile_containers() -> None:
+    # The overlay is what makes the dial itself the button, and it hangs on the
+    # container keys the grid writes -- so the selectors and the keys have to
+    # agree.
+    css = _styles._CSS
+    assert "st-key-dialtile_" in css
+    assert "st-key-dial_pick_" in css
+    # The tile's own classes carry the hover lift and the wind bubble.
+    assert "fc-dialtile" in css and "fc-dialtip" in css
+    # Without this the element container keeps its fit-content width, and the
+    # hit area shrinks to a strip beside the dial.
+    assert "width: auto !important" in css.split("st-key-dial_pick_", 1)[1]
+
+
+def test_the_coverage_legend_names_the_two_lanes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Two chips a first-time viewer can parse, and a word when a lane is empty
+    # for the whole window, which is the ordinary state of a forecast.
+    monkeypatch.setattr(rc, "active", lambda: LIGHT)
+
+    both = rc._coverage_legend_html(pd.DataFrame({"lane": ["Predicted", "Observed"]}))
+    assert "Coverage" in both
+    assert "Predicted" in both and "Observed" in both
+    assert LIGHT.reading in both and LIGHT.idle in both
+    # No verdict vocabulary survives anywhere in the key.
+    for word in ("Matched", "Missed", "Record for each hour"):
+        assert word not in both
+    assert "nothing" not in both
+
+    only_forecast = rc._coverage_legend_html(pd.DataFrame({"lane": ["Predicted"]}))
+    assert "nothing observed in this window" in only_forecast
+    # An empty record draws no strip, so the key makes no claim about it.
+    assert "nothing" not in rc._coverage_legend_html(pd.DataFrame())
+
+
+def test_the_board_marks_the_stretch_before_the_forecast() -> None:
+    # The window opens before the forecast and every cell is a prediction, so
+    # that stretch has none: a wash says hindcast, and the light along the wind
+    # plot covers the whole window rather than only the series.
+    grid, timeline, accuracy, hours = _panel_frames()
+    domain = [hours[0] - pd.Timedelta(hours=6), hours[-1] + pd.Timedelta(hours=1)]
+    chart, _ = rc._time_panel(
+        grid,
+        _PANEL_SPOTS,
+        accuracy,
+        timeline,
+        46.45,
+        9.79,
+        domain,
+        hours[3],
+        None,
+        16.0,
+        focus_spot="Sils",
+    )
+    spec = chart.to_dict()
+    views = _panel_views(spec)
+
+    wash = [
+        layer
+        for layer in views["board"]["layer"]
+        if layer["mark"]["type"] == "rect"
+        and layer["encoding"].get("x", {}).get("field") == "x"
+    ]
+    assert len(wash) == 1
+    rows = spec["datasets"][wash[0]["data"]["name"]]
+    assert len(rows) == 1 and pd.Timestamp(rows[0]["x2"]) == hours[0]
+
+    solar = next(
+        layer for layer in views["wind"]["layer"] if layer["mark"]["type"] == "area"
+    )
+    lit = spec["datasets"][solar["data"]["name"]]
+    assert pd.Timestamp(lit[0]["time"]) <= domain[0]
+
+
+def test_a_dial_pick_survives_the_board_re_reporting_its_last_cell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The board reports its last click on every rerun. A pick made from the
+    # dials is newer, so the stale cell must not carry its spot back -- not
+    # even when the hour it clamps to has moved on with the window.
+    hours = list(pd.date_range("2026-07-12T06:00", periods=4, freq="h", tz="UTC"))
+    state = {
+        "heat_spot_applied": "silvaplana",
+        "heat_hour_applied": hours[0],
+        "rider_focus_spot": "sils",
+    }
+    monkeypatch.setattr(rc.st, "session_state", state)
+    monkeypatch.setattr(rc.st, "rerun", lambda scope=None: None)
+
+    rc._sync_slider_to_heatmap_click(hours[1], "silvaplana", hours)
+
+    assert state["rider_focus_spot"] == "sils"
+    # The hour half still applies: it is the board's own, and nothing else
+    # claimed it.
+    assert state["heat_hour_applied"] == hours[1]
+
+    # A cell naming a spot the board has not applied is a new intent, and moves
+    # the focus as it always did.
+    rc._sync_slider_to_heatmap_click(hours[2], "urnersee", hours)
+    assert state["rider_focus_spot"] == "urnersee"
+    assert state["heat_spot_applied"] == "urnersee"
+
+
+def test_a_dial_pick_moves_the_spot_and_leaves_the_hour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hour = pd.Timestamp("2026-07-12T09:00", tz="UTC")
+    state = {
+        "rider_focus_spot": "sils",
+        "wind_map_hour": hour,
+        "heat_spot_applied": "silvaplana",
+    }
+    reruns: list[str] = []
+    monkeypatch.setattr(rc.st, "session_state", state)
+    monkeypatch.setattr(rc.st, "rerun", lambda scope=None: reruns.append(scope))
+
+    rc._focus_spot("urnersee")
+
+    assert state["rider_focus_spot"] == "urnersee"
+    # A dial says which place, never which hour, so the pinned time stays put
+    # and only the row outline moves.
+    assert state["wind_map_hour"] == hour
+    # The board's own mirror is left alone, or its stale cell would fight this.
+    assert state["heat_spot_applied"] == "silvaplana"
+    assert reruns == ["app"]
+
+
+def test_earliest_observed_ignores_hours_with_no_measurement() -> None:
+    hours = pd.date_range("2026-07-12T06:00", periods=3, freq="h", tz="Europe/Zurich")
+    accuracy = pd.DataFrame(
+        {
+            "time": hours,
+            "observed": [float("nan"), 3.0, 4.0],
+        }
+    )
+
+    assert rc._earliest_observed(accuracy) == hours[1]
+    # Nothing measured at all, and an empty frame, both say so.
+    assert rc._earliest_observed(accuracy.assign(observed=float("nan"))) is None
+    assert rc._earliest_observed(pd.DataFrame()) is None
+
+
+def test_grid_fills_hindcast_from_prediction_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    forecast_times = pd.date_range(now, periods=3, freq="h")
+    past = [now - pd.Timedelta(hours=3), now - pd.Timedelta(hours=2)]
+
+    history = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"] * 3,
+            "forecast_time": [past[0], past[1], past[1]],
+            "quality_index": [2.4, 1.0, 3.6],
+            # Two runs spoke about the same hour; the later one must win.
+            "prediction_timestamp": [
+                now - pd.Timedelta(hours=4),
+                now - pd.Timedelta(hours=8),
+                now - pd.Timedelta(hours=2),
+            ],
+        }
+    )
+    monkeypatch.setattr(rc, "_prediction_history_cached", lambda: history)
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_observed_hindcast_cells", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": 1.5} for t in forecast_times
+            ],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",), json.dumps(predictions), "Europe/Zurich", json.dumps([]), False
+    )
+
+    hind = grid[grid["is_hindcast"]]
+    assert len(hind) == 2
+    # The later run's word stands for the duplicated hour.
+    dup = hind[hind["time"] == past[1].tz_convert("Europe/Zurich")]
+    assert dup["hour_quality"].iloc[0] == 3.6
+    # Forecast cells keep their provenance too.
+    assert not grid.loc[~grid["is_hindcast"]].empty
+    # The panel window is anchored on the forecast start, not the hindcast.
+    domain = rc._panel_x_domain(grid, pd.DataFrame())
+    assert domain[0] == forecast_times[0].tz_convert("Europe/Zurich")
+
+
+def test_initial_pinned_falls_back_to_now_on_first_load() -> None:
+    # No stored pick yet: the panel opens on the current hour, so the details
+    # panel shows the focused spot's cell instead of the empty hint.
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    options = list(pd.date_range(now - pd.Timedelta(hours=1), periods=4, freq="h"))
+    domain = [options[0], options[-1]]
+
+    pinned = rc._initial_pinned(None, domain, now, options)
+    assert pinned == min(options, key=lambda o: abs((o - now).total_seconds()))
+
+
+def test_initial_pinned_keeps_a_stored_pick() -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    options = list(pd.date_range(now, periods=4, freq="h"))
+    domain = [options[0], options[-1]]
+
+    assert rc._initial_pinned(options[2], domain, now, options) == options[2]
+
+
+def test_fresh_panel_click_unmasks_a_wind_click_after_a_cell_pick() -> None:
+    # The sticky cell param re-reports its pick on every rerun; a later
+    # wind-plot click must still route as a time-only pin.
+    cell = ("silvaplana", "2026-08-06 10:00:00+00:00")
+    pin = pd.Timestamp("2026-08-06T11:00:00Z")
+
+    assert rc._fresh_panel_click(cell, None, None, None) == "cell"
+    assert rc._fresh_panel_click(cell, pin, cell, None) == "pin"
+    assert rc._fresh_panel_click(cell, pin, cell, pin) is None
+    # A tie means restored state, not one click: the richer pick wins.
+    assert rc._fresh_panel_click(cell, pin, None, None) == "cell"
+
+
+def test_observed_hindcast_cells_clamps_to_the_reach(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    inside = now - pd.Timedelta(hours=5)
+    outside = now - pd.Timedelta(hours=48)
+    timeline = pd.DataFrame(
+        {
+            "time": [inside, outside, now + pd.Timedelta(hours=6)],
+            "quality_index": [3.4, 4.9, 2.0],
+            "series": ["Observed"] * 3,
+        }
+    )
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: timeline)
+
+    cells = rc._observed_hindcast_cells("silvaplana", now, "[]")
+    assert cells["time"].tolist() == [inside]
+    assert cells["is_hindcast"].all()
+    assert cells["hour_quality"].iloc[0] == 3.4
+
+    empty = pd.DataFrame(columns=["time", "quality_index", "series"])
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: empty)
+    assert rc._observed_hindcast_cells("silvaplana", now, "[]").empty
+
+
+def test_grid_prefers_observed_hours_over_logged_predictions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    forecast_times = pd.date_range(now, periods=3, freq="h")
+    shared = now - pd.Timedelta(hours=2)
+    pred_only = now - pd.Timedelta(hours=3)
+
+    history = pd.DataFrame(
+        {
+            "spot_id": ["silvaplana"] * 2,
+            "forecast_time": [shared, pred_only],
+            "quality_index": [1.2, 2.8],
+            "prediction_timestamp": [now - pd.Timedelta(hours=3)] * 2,
+        }
+    )
+    timeline = pd.DataFrame(
+        {
+            "time": [shared],
+            "quality_index": [4.6],
+            "series": ["Observed"],
+        }
+    )
+    monkeypatch.setattr(rc, "_prediction_history_cached", lambda: history)
+    monkeypatch.setattr(rc, "spot_quality_timeline", lambda *a, **k: timeline)
+    monkeypatch.setattr(rc, "focus_spot_timeline", lambda *a, **k: pd.DataFrame())
+    monkeypatch.setattr(rc, "_spot_wind_frame", lambda *a, **k: pd.DataFrame())
+
+    predictions = [
+        {
+            "spot_id": "silvaplana",
+            "forecast": [
+                {"time": t.isoformat(), "quality_index": 1.5} for t in forecast_times
+            ],
+        }
+    ]
+    grid = rc.all_spots_quality_grid.__wrapped__(
+        ("silvaplana",), json.dumps(predictions), "Europe/Zurich", json.dumps([]), False
+    )
+
+    hind = grid[grid["is_hindcast"]]
+    assert len(hind) == 2
+    # Measured beats called for the hour both sources cover.
+    winner = hind[hind["time"] == shared.tz_convert("Europe/Zurich")]
+    assert winner["hour_quality"].iloc[0] == 4.6
+    # A predicted-only hour still fills from the log.
+    filler = hind[hind["time"] == pred_only.tz_convert("Europe/Zurich")]
+    assert filler["hour_quality"].iloc[0] == 2.8
+
+
+def test_coverage_label_anchors_sit_on_covered_hours() -> None:
+    coverage = pd.DataFrame(
+        {
+            "lane": ["Predicted", "Predicted", "Observed"],
+            "time": pd.to_datetime(
+                ["2026-08-06T08:00:00Z", "2026-08-06T12:00:00Z", "2026-08-06T06:00:00Z"]
+            ),
+        }
+    )
+    anchors = rc._coverage_label_anchors(coverage)
+    assert set(anchors["lane"]) == {"Predicted", "Observed"}
+    at = dict(zip(anchors["lane"], anchors["at"]))
+    # The anchor is one of the lane's own covered hours, never a gap.
+    assert at["Predicted"] in set(coverage[coverage["lane"] == "Predicted"]["time"])
+    assert at["Observed"] == pd.Timestamp("2026-08-06T06:00:00Z")
+
+    assert rc._coverage_label_anchors(pd.DataFrame()).empty
+
+
+def test_flat_week_ignores_windy_hindcast() -> None:
+    grid = pd.DataFrame(
+        {
+            "quality": [4, 1, 1],
+            "is_day": [True, True, True],
+            "is_hindcast": [True, False, False],
+        }
+    )
+    assert rc._flat_week(grid)

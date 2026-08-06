@@ -7,12 +7,15 @@ from typing import Any
 
 import streamlit as st
 
+from foehncast.config import get_rider_config
 from foehncast.inference_pipeline.dashboard import (
     list_dashboard_spots,
     load_dashboard_data,
 )
 
+from _logo import current_sky, logo_svg
 from _styles import inject_styles
+from _theme import is_dark
 from _sidebar import render_freshness_bar, render_sidebar_ml_panels
 from _rider_console import prewarm_spot_caches, profile_card, render_rider_console
 from _system_tab import render_system_tab
@@ -37,6 +40,28 @@ def _live_dashboard_data(selected_spot_ids: tuple[str, ...]) -> dict[str, Any]:
     return load_dashboard_data(list(selected_spot_ids) if selected_spot_ids else None)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _brand_mark(dark: bool) -> str:
+    """The pixel mark, with its sun or moon set to the rider's local sky.
+
+    dark is an argument rather than read inside, so the cache keys on it and a
+    theme switch cannot serve the other mode's mark.
+    """
+    rider = get_rider_config()
+    fraction, is_day = current_sky(float(rider["home_lat"]), float(rider["home_lon"]))
+    return (
+        '<div style="margin:0 0 0.7rem">'
+        + logo_svg(
+            size_px=196,
+            animate=True,
+            sky_fraction=fraction,
+            is_day=is_day,
+            dark=dark,
+        )
+        + "</div>"
+    )
+
+
 # Main
 
 
@@ -49,13 +74,15 @@ def main() -> None:
 
     # Render sidebar immediately (PromQL calls are fast / cached).
     with st.sidebar:
+        st.markdown(_brand_mark(is_dark()), unsafe_allow_html=True)
         st.markdown(
             """
             <p class="eyebrow" style="margin-top:0">FoehnCast</p>
             <p class="hero-lede">
               One rider profile, six Swiss spots, one served model. Ranked recommendations
               combine live Open-Meteo forecasts, engineered wind features, drive-time estimates,
-              and the current champion model through the same inference path the API serves.
+              and the current champion model. Forecasts come from the most recent stored
+              prediction batch, not recomputed per visit.
             </p>
             """,
             unsafe_allow_html=True,
@@ -86,6 +113,17 @@ def main() -> None:
             )
             st.exception(dashboard_error)
         elif dashboard_data is not None:
+            # scripts/ui_fixture.py marks its snapshot in model_version. The
+            # numbers below are then synthetic or time-shifted, so say so before
+            # anything else renders: a fixture board is indistinguishable from a
+            # real one in a screenshot.
+            if str(dashboard_data.get("model_version", "")).startswith("fixture"):
+                st.warning(
+                    "Fixture data — not a forecast. This console is running on a "
+                    "stored snapshot from scripts/ui_fixture.py for UI work. "
+                    "Nothing here reflects real conditions.",
+                    icon=None,
+                )
             # Pre-warm timeline caches for all spots in parallel so
             # switching spots via buttons is instant.
             prewarm_spot_caches(
@@ -103,6 +141,7 @@ def main() -> None:
                     "and live OSRM route estimates."
                 )
             render_rider_console(dashboard_data, all_spot_ids, spot_lookup)
+            st.caption(f"Forecasts from model v{dashboard_data['model_version']}")
 
     with system_tab:
         render_system_tab()

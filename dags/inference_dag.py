@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 try:
     from airflow.providers.standard.operators.python import PythonOperator
@@ -37,6 +37,9 @@ else:
         catchup=False,
         is_paused_upon_creation=False,
         tags=["foehncast", "inference"],
+        # The task loads the champion model over HTTP from the registry, so a
+        # restarting registry fails the whole run on the first call. Retry it.
+        default_args={"retries": 2, "retry_delay": timedelta(minutes=1)},
     ) as dag:
         run_inference = PythonOperator(
             task_id="run_inference",
