@@ -117,6 +117,25 @@ class TestFetchForecast:
         assert params["longitude"] == 9.79
         assert params["wind_speed_unit"] == "kmh"
 
+    @patch("foehncast.feature_pipeline.ingest._get")
+    def test_forecast_hours_translates_past_days_to_past_hours(self, mock_get) -> None:
+        # The API silently ignores past_days next to forecast_hours, so the
+        # console's hindcast stretch must ask in the granular form.
+        mock_get.return_value = MOCK_HOURLY_RESPONSE
+        fetch_forecast(46.45, 9.79, past_days=2, forecast_hours=48)
+        params = mock_get.call_args[0][1]
+        assert params["forecast_hours"] == 48
+        assert params["past_hours"] == 48
+        assert "past_days" not in params
+
+    @patch("foehncast.feature_pipeline.ingest._get")
+    def test_past_days_without_forecast_hours_stays_past_days(self, mock_get) -> None:
+        mock_get.return_value = MOCK_HOURLY_RESPONSE
+        fetch_forecast(46.45, 9.79, past_days=2)
+        params = mock_get.call_args[0][1]
+        assert params["past_days"] == 2
+        assert "past_hours" not in params
+
 
 class TestFetchArchive:
     @patch("foehncast.feature_pipeline.ingest._get")
