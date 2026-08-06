@@ -732,12 +732,18 @@ resource "google_cloud_run_v2_service" "app" {
         timeout_seconds       = 5
       }
 
+      # /metrics can answer slowly while a long request saturates the worker;
+      # the default 4s timeout with 3 strikes killed healthy instances roughly
+      # once a minute (2026-08-06). Tolerate slow scrapes, still kill a wedged
+      # process after ~2.5 min of sustained failure.
       liveness_probe {
         http_get {
           path = "/metrics"
           port = var.cloud_run_container_port
         }
-        period_seconds = 30
+        period_seconds    = 30
+        timeout_seconds   = 15
+        failure_threshold = 5
       }
     }
   }
