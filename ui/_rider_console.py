@@ -758,7 +758,9 @@ def _hindcast_cells(spot_id: str, forecast_start: pd.Timestamp) -> pd.DataFrame:
         return pd.DataFrame()
     rows["forecast_time"] = pd.to_datetime(rows["forecast_time"], utc=True)
     reach = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=_HINDCAST_HOURS)
-    rows = rows[(rows["forecast_time"] >= reach) & (rows["forecast_time"] < forecast_start)]
+    rows = rows[
+        (rows["forecast_time"] >= reach) & (rows["forecast_time"] < forecast_start)
+    ]
     if rows.empty:
         return pd.DataFrame()
     rows = rows.sort_values("prediction_timestamp").drop_duplicates(

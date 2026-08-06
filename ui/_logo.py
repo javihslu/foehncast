@@ -197,9 +197,7 @@ def _sky_body(fraction: float, is_day: bool, pal: Palette) -> str:
         cells = sorted(disc - _disc(_SKY_SIZE, shift=1.7))
         colour = pal.moon
     return "".join(
-        _rect(col + dx, row + dy, colour)
-        for dx, dy in cells
-        if 0 <= col + dx < _COLS
+        _rect(col + dx, row + dy, colour) for dx, dy in cells if 0 <= col + dx < _COLS
     )
 
 
