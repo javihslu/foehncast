@@ -13,6 +13,8 @@ Full docs: <https://javihslu.github.io/foehncast/>
 
 > **Educational project — not a forecasting service.** FoehnCast was built for the HSLU MLOps module. Its session-quality labels are rule-based and have not been validated against real sessions, so the rankings are a modelling exercise rather than a reliable forecast. Do not rely on it for kiteboarding, water-safety, or any other real-world decision; check current conditions and official forecasts instead. Provided as is, without warranty, under the [MIT License](LICENSE).
 
+**Status: complete.** This project is no longer actively developed. Everything runs locally through the setup below; the hosted demo has been retired. The cloud configuration under [terraform/](terraform/) is kept as reference for how the system deploys to GCP.
+
 ## How It Works
 
 ```mermaid

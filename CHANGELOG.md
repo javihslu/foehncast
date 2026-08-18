@@ -4,6 +4,23 @@ Notable changes since the MLOPS FS26 course code freeze. The graded state is
 tagged `course-freeze`; the post-course release is `v1.1.0`. The rider console
 and the media kit are unchanged since `v1.1.0`.
 
+## [v2.1.0] — 2026-08-18
+
+Final release. The project is complete and frozen; development has ended.
+Compare: <https://github.com/javihslu/foehncast/compare/v2.0.0...v2.1.0>
+
+- Land the full demo-integrity integration line on `main`: rider console selection and coverage fixes, past-selection dials, deploy-image pinning, and backfill hardening.
+- Build the shared Airflow image once in the compose stack.
+- Describe the hosted demo conditionally so the docs site survives teardown; the hosted demo has been retired.
+- Mark the project frozen in the README.
+
+## [v2.0.0] — 2026-08-06
+
+The FoehnCast v2 release, verified end to end before tagging.
+Compare: <https://github.com/javihslu/foehncast/compare/v1.2.0...v2.0.0>
+
+- Consolidate the v2 line: rider console rewrite, demo-integrity hardening, deployment image pinning, and an end-to-end verified release flow.
+
 ## [v1.2.0] — 2026-07-19
 
 Hardening, reproducibility, and documentation since the post-course release.
