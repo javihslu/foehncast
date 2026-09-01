@@ -1,4 +1,4 @@
-FROM ghcr.io/mlflow/mlflow:v3.14.0
+FROM ghcr.io/mlflow/mlflow:v3.15.2
 
 COPY start-model-registry.sh /usr/local/bin/start-model-registry.sh
 
